@@ -1193,9 +1193,9 @@ async function pageDevices() {
 
   // Bảng danh sách máy
   const tbl = el('table', { class: 'data' });
-  tbl.innerHTML = `<thead><tr><th>Serial</th><th>Tên máy</th><th>Trạng thái</th><th>IP</th><th>Lần cuối</th><th>Số quẹt</th><th></th></tr></thead>`;
+  tbl.innerHTML = `<thead><tr><th>Serial</th><th>Tên máy</th><th>Trạng thái</th><th>👥 NV</th><th>👉 Vân tay</th><th>😊 Mặt</th><th>💳 Thẻ</th><th>IP</th><th>Lần cuối</th><th>Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
-  if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
+  if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
   for (const m of d.rows) {
     const approve = m.active
       ? btnSm('Tạm dừng', async () => { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: false } }); pageDevices(); }, 'ghost')
@@ -1208,6 +1208,10 @@ async function pageDevices() {
       el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, m.serial)),
       el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : ''),
       el('td', {}, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
+      el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0)),
+      el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.fp_count ?? 0)),
+      el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.face_count ?? 0)),
+      el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.card_count ?? 0)),
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),

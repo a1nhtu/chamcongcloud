@@ -220,6 +220,15 @@ export function initSchema() {
       privilege   INTEGER DEFAULT 0,
       updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
     );
+    -- Đăng ký user theo TỪNG máy (để đếm số NV/thẻ mỗi máy, so sánh đồng bộ)
+    CREATE TABLE IF NOT EXISTS device_users_serial (
+      serial      TEXT NOT NULL,
+      pin         TEXT NOT NULL,
+      name        TEXT DEFAULT '',
+      card        TEXT DEFAULT '',
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (serial, pin)
+    );
     -- Hàng đợi lệnh gửi xuống máy (đồng bộ / cập nhật). Máy lấy qua /getrequest, báo kết quả qua /devicecmd.
     CREATE TABLE IF NOT EXISTS push_device_commands (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

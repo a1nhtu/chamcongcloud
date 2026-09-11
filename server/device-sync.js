@@ -76,6 +76,7 @@ export function ingestUserData(serial, table, rawBody) {
     const passwd = kv.passwd && kv.passwd !== '0' ? kv.passwd : '';
     const pri = parseInt(kv.pri || '0', 10) || 0;
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
+    upsertDeviceUserSerial(serial, pin, name, card);  // ghi theo từng máy (đếm NV/thẻ)
     const id = upsertEmployeeFromDevice(pin, name);
     if (id) seen.add(pin);
   }
@@ -97,6 +98,25 @@ function upsertDeviceUser(pin, name, card, passwd, pri) {
     db.prepare('INSERT INTO device_users(pin,name,card,passwd,privilege) VALUES(?,?,?,?,?)')
       .run(pin, name || '', card || '', passwd || '', pri || 0);
   }
+}
+
+// Ghi/nhật ký user theo TỪNG máy (đếm số NV/thẻ mỗi máy). Chỉ cập nhật name/card khi có giá trị mới.
+function upsertDeviceUserSerial(serial, pin, name, card) {
+  db.prepare(`INSERT INTO device_users_serial(serial,pin,name,card) VALUES(?,?,?,?)
+    ON CONFLICT(serial,pin) DO UPDATE SET
+      name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE device_users_serial.name END,
+      card=CASE WHEN excluded.card<>'' THEN excluded.card ELSE device_users_serial.card END,
+      updated_at=datetime('now')`)
+    .run(serial, pin, name || '', card || '');
+}
+
+// Ghi nhận máy đích ĐÃ có template này (mirror) để bảng đếm phản ánh đúng ngay sau khi đồng bộ.
+function mirrorTemplateTo(targetSerial, tp) {
+  db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
+    VALUES(?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(serial,pin,bio_type,idx) DO UPDATE SET valid=excluded.valid,duress=excluded.duress,
+      major_ver=excluded.major_ver,minor_ver=excluded.minor_ver,tmp=excluded.tmp,received_at=datetime('now')`)
+    .run(targetSerial, tp.pin, tp.bio_type, tp.idx, tp.valid, tp.duress, tp.major_ver, tp.minor_ver, tp.tmp);
 }
 
 const kvOf = (line) => {
@@ -130,6 +150,7 @@ export function storeTemplates(serial, table, rawBody) {
     const valid = parseInt(kv.valid ?? '1', 10); const duress = parseInt(kv.duress || '0', 10) || 0;
     const minor = parseInt(kv.minorver || '0', 10) || 0;
     try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
+    upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
     upsertEmployeeFromDevice(pin, '');   // đăng ký vân tay-only vẫn tạo NV nháp
     pins.add(pin);
   }
@@ -167,8 +188,10 @@ export function syncPinsToGroup(sourceSerial, pins) {
   for (const t of targets) {
     for (const pin of pins) {
       queueCmd(t.serial, buildUserCommand(pin));
+      const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(pin) || {};
+      upsertDeviceUserSerial(t.serial, pin, u.name, u.card);
       const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
-      for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp)); n++; }
+      for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp)); mirrorTemplateTo(t.serial, tp); n++; }
     }
   }
   return n;
@@ -191,8 +214,14 @@ export function syncFillDevice(serial) {
   for (const t of others) {
     const key = `${t.pin}|${t.bio_type}|${t.idx}`;
     if (mine.has(key)) continue;
-    if (!pushedPins.has(t.pin)) { queueCmd(serial, buildUserCommand(t.pin)); pushedPins.add(t.pin); }
+    if (!pushedPins.has(t.pin)) {
+      queueCmd(serial, buildUserCommand(t.pin));
+      const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(t.pin) || {};
+      upsertDeviceUserSerial(serial, t.pin, u.name, u.card);
+      pushedPins.add(t.pin);
+    }
     queueCmd(serial, buildBioCommand(t));
+    mirrorTemplateTo(serial, t);
   }
 }
 
