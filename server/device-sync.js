@@ -196,6 +196,24 @@ export function syncFillDevice(serial) {
   }
 }
 
+// Đồng bộ NGAY (bấm nút): mỗi máy trong nhóm (>=2 máy) học template sẵn có + nhận template nhóm còn thiếu.
+// Không cần khởi động lại máy. Trả số nhóm/máy/lệnh đã xếp.
+export function resyncNow() {
+  const rows = db.prepare("SELECT serial, sync_group FROM push_devices WHERE sync_group<>'' AND active=1").all();
+  const groups = new Set();
+  let devices = 0;
+  const before = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE trans_time IS NULL').get().c;
+  for (const r of rows) {
+    const cnt = db.prepare("SELECT COUNT(*) c FROM push_devices WHERE sync_group=? AND active=1").get(r.sync_group).c;
+    if (cnt < 2) continue;              // nhóm chỉ 1 máy thì không cần đồng bộ
+    groups.add(r.sync_group);
+    syncFillDevice(r.serial);
+    devices++;
+  }
+  const queued = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE trans_time IS NULL').get().c - before;
+  return { groups: groups.size, devices, queued };
+}
+
 // /getrequest: lấy lệnh kế tiếp cho máy (đánh dấu đã gửi). Trả 'C:<id>:<content>' hoặc ''.
 export function nextCommand(serial) {
   const cmd = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL ORDER BY id LIMIT 1').get(serial);

@@ -1222,7 +1222,18 @@ async function pageDevices() {
     catch (e) { toast(e.message, 'err'); }
     finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Đồng bộ lại (khớp mã NV)'; }
   };
-  setMain(head('Máy chấm công', rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+  const resyncBtn = el('button', { class: 'btn' }, '🔁 Đồng bộ vân tay các máy');
+  resyncBtn.onclick = async () => {
+    if (!confirm('Đẩy toàn bộ nhân viên/vân tay/thẻ/khuôn mặt của mỗi nhóm sang tất cả máy trong nhóm ngay bây giờ?\n(Dùng khi vân tay đăng ký trước lúc ghép nhóm, hoặc máy vừa bật lại — không cần khởi động lại máy.)')) return;
+    resyncBtn.disabled = true; resyncBtn.textContent = 'Đang đồng bộ…';
+    try {
+      const r = await api('/admin/devices/resync', { method: 'POST' });
+      if (!r.devices) toast('Chưa có nhóm nào ≥2 máy để đồng bộ. Hãy đặt "Nhóm ĐB" giống nhau cho các máy.', 'err');
+      else toast(`Đã xếp ${r.queued} lệnh đồng bộ cho ${r.devices} máy (${r.groups} nhóm). Máy sẽ nhận trong ít giây.`, 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    finally { resyncBtn.disabled = false; resyncBtn.textContent = '🔁 Đồng bộ vân tay các máy'; }
+  };
+  setMain(head('Máy chấm công', resyncBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 function devicePunchesModal(m) {
   const box = el('div', {}, loading());

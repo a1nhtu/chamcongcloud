@@ -5,7 +5,7 @@ import { authRequired, roleRequired, hashPassword, permRequired, PERMISSIONS, ef
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attendance-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore } from '../backup.js';
-import { rebuildDay } from '../device-sync.js';
+import { rebuildDay, resyncNow } from '../device-sync.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
 import { networkInterfaces } from 'node:os';
 function lanIPs() {
@@ -741,6 +741,11 @@ r.get('/devices', need('devices'), (req, res) => {
 // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
 r.get('/server-ips', need('devices'), (req, res) => {
   res.json({ ips: lanIPs(), port: Number(process.env.PORT || 8080) });
+});
+// Đồng bộ NGAY: đẩy toàn bộ vân tay/user của nhóm sang mọi máy trong nhóm (khỏi cần restart máy)
+r.post('/devices/resync', need('devices'), (req, res) => {
+  try { res.json(resyncNow()); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 r.put('/devices/:id', need('devices'), (req, res) => {
   const b = req.body || {};
