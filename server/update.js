@@ -80,9 +80,13 @@ function buildBat({ appDir, staged, prev, workRoot, node, config, serverJs }) {
 chcp 65001 >nul
 title Digiplus - Dang cap nhat phan mem
 cd /d "${INSTALL_ROOT}"
+rem --- Doc PORT tu config.txt (can cho ca buoc kill dung cong + khoi dong lai) ---
+set "PORT=8686"
+if exist "${config}" for /f "usebackq tokens=1,* delims==" %%a in ("${config}") do set "%%a=%%b"
 echo Dang cap nhat phan mem, vui long doi (khong tat may)...
 timeout /t 3 /nobreak >nul
-taskkill /f /im node.exe >nul 2>&1
+rem --- Dung app cu: CHI kill tien trinh Node dang giu dung PORT (khong dung Node khac) ---
+for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
 timeout /t 2 /nobreak >nul
 rem --- Sao luu ban dang chay de co the khoi phuc ---
 robocopy "${appDir}\\server" "${prev}\\server" /MIR /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
@@ -93,9 +97,6 @@ robocopy "${staged}\\server" "${appDir}\\server" /MIR /NFL /NDL /NJH /NJS /R:2 /
 robocopy "${staged}\\public" "${appDir}\\public" /MIR /NFL /NDL /NJH /NJS /R:2 /W:1 >nul
 copy /y "${staged}\\package.json" "${appDir}\\package.json" >nul
 if exist "${staged}\\node_modules" robocopy "${staged}\\node_modules" "${appDir}\\node_modules" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
-rem --- Doc PORT tu config.txt (bat buoc de cloudflared tro dung cong) ---
-set "PORT=8686"
-if exist "${config}" for /f "usebackq tokens=1,* delims==" %%a in ("${config}") do set "%%a=%%b"
 rem --- Khoi dong lai app (cloudflared van chay, khong dung lai) ---
 start "" /b "${node}" --no-warnings "${serverJs}"
 rem --- Don dep + tu xoa an toan ---

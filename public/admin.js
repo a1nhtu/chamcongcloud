@@ -37,7 +37,9 @@ async function init() {
   try {
     const c = await api('/config');
     $('#brand-mark').textContent = c.company_name;
-    $('#side-brand').innerHTML = `${c.company_name}<small>Chấm công</small>`;
+    let ver = '';
+    try { ver = (await fetch('/api/version').then(r => r.json())).version; } catch {}
+    $('#side-brand').innerHTML = `${c.company_name}<small>Chấm công${ver ? ' · v' + ver : ''}</small>`;
   } catch {}
   if (getToken()) { try { const r = await api('/auth/me'); ME = r.user; return afterLogin(); } catch { clearToken(); } }
 }
