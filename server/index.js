@@ -83,13 +83,17 @@ const HTTPS_PORT = Number(process.env.HTTPS_PORT || 8444);
 const CERT_DIR = join(__dirname, '..', 'certs');
 
 function lanIPs() {
-  const out = [];
-  for (const list of Object.values(networkInterfaces())) {
+  const real = [], virt = [];
+  const isVirtual = (name) => /vethernet|virtual|vmware|virtualbox|hyper-?v|wsl|loopback|default switch|docker|tap-|tailscale|zerotier|bluetooth|npcap/i.test(name);
+  for (const [name, list] of Object.entries(networkInterfaces())) {
     for (const ni of list || []) {
-      if (ni.family === 'IPv4' && !ni.internal && !/^169\.254\./.test(ni.address)) out.push(ni.address);
+      if (ni.family !== 'IPv4' || ni.internal || /^169\.254\./.test(ni.address)) continue;
+      (isVirtual(name) ? virt : real).push(ni.address);
     }
   }
-  return out;
+  const rank = (ip) => (ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : 2);
+  real.sort((a, b) => rank(a) - rank(b));
+  return [...real, ...virt];
 }
 
 // HTTP (dùng cho localhost trên chính máy này)

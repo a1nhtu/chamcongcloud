@@ -39,6 +39,61 @@ export function currentVersion() {
   catch { return '0.0.0'; }
 }
 
+// Đọc config.txt (PORT, TUNNEL_TOKEN...) ở thư mục cài
+export function readConfig() {
+  const out = {};
+  const p = join(INSTALL_ROOT, 'config.txt');
+  if (existsSync(p)) {
+    for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
+      const i = line.indexOf('=');
+      if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1);
+    }
+  }
+  return out;
+}
+export function currentPort() {
+  return Number(process.env.PORT || readConfig().PORT || 8080);
+}
+
+// Đổi cổng phần mềm: ghi config.txt + khởi động lại ở cổng mới (bản cài cho khách)
+export function changePort(newPort) {
+  newPort = parseInt(newPort, 10);
+  if (!Number.isInteger(newPort) || newPort < 1 || newPort > 65535)
+    throw new Error('Cổng không hợp lệ (nhập số 1–65535, nên dùng 1024–65535).');
+  if (!isPackaged())
+    throw new Error('Đổi cổng chỉ chạy trên bản cài cho khách (có runtime\\node.exe). Máy dev đổi bằng biến môi trường PORT.');
+  const oldPort = currentPort();
+  if (newPort === oldPort) return { ok: false, reason: 'same', port: oldPort };
+
+  const cfgPath = join(INSTALL_ROOT, 'config.txt');
+  const cfg = readConfig();
+  cfg.PORT = String(newPort);
+  if (cfg.TUNNEL_TOKEN == null) cfg.TUNNEL_TOKEN = '';
+  const order = ['PORT', 'TUNNEL_TOKEN', ...Object.keys(cfg).filter((k) => k !== 'PORT' && k !== 'TUNNEL_TOKEN')];
+  writeFileSync(cfgPath, order.map((k) => `${k}=${cfg[k]}`).join('\r\n') + '\r\n', 'latin1');
+
+  const bat = `@echo off
+chcp 65001 >nul
+title Digiplus - Doi cong phan mem
+cd /d "${INSTALL_ROOT}"
+echo Dang doi cong sang ${newPort}, khoi dong lai (khong tat may)...
+timeout /t 2 /nobreak >nul
+rem --- Tat app o cong cu (chi kill node giu dung cong do) ---
+for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort ${oldPort} -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
+timeout /t 2 /nobreak >nul
+rem --- Khoi dong lai o cong moi (doc tu config.txt) ---
+set "PORT=${newPort}"
+if exist "${cfgPath}" for /f "usebackq tokens=1,* delims==" %%a in ("${cfgPath}") do set "%%a=%%b"
+start "" /b "${nodeExe()}" --no-warnings "${join(APP_DIR, 'server', 'index.js')}"
+(goto) 2>nul & del "%~f0"
+`;
+  const batPath = join(INSTALL_ROOT, 'DoiCong.bat');
+  writeFileSync(batPath, bat, 'latin1');
+  const child = spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore', windowsHide: true, cwd: INSTALL_ROOT });
+  child.unref();
+  return { ok: true, restarting: true, oldPort, newPort, hasTunnel: !!(cfg.TUNNEL_TOKEN && cfg.TUNNEL_TOKEN.trim()) };
+}
+
 // So sánh phiên bản kiểu 1.2.3 (số). >0 nếu a mới hơn b.
 function cmpVer(a, b) {
   const pa = String(a).split('.').map((n) => parseInt(n, 10) || 0);

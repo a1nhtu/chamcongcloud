@@ -6,13 +6,22 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore } from '../backup.js';
 import { rebuildDay } from '../device-sync.js';
-import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
+import { checkUpdate, applyUpdate, currentVersion, updateConfig, currentPort, changePort } from '../update.js';
 import { networkInterfaces } from 'node:os';
 function lanIPs() {
-  const out = [];
-  for (const list of Object.values(networkInterfaces())) for (const ni of list || [])
-    if (ni.family === 'IPv4' && !ni.internal && !/^169\.254\./.test(ni.address)) out.push(ni.address);
-  return out;
+  const real = [], virt = [];
+  // Adapter ảo (Hyper-V/WSL/VMware/VirtualBox/Docker/Bluetooth...) → xếp xuống cuối, không lấy làm IP chính
+  const isVirtual = (name) => /vethernet|virtual|vmware|virtualbox|hyper-?v|wsl|loopback|default switch|docker|tap-|tailscale|zerotier|bluetooth|npcap/i.test(name);
+  for (const [name, list] of Object.entries(networkInterfaces())) {
+    for (const ni of list || []) {
+      if (ni.family !== 'IPv4' || ni.internal || /^169\.254\./.test(ni.address)) continue;
+      (isVirtual(name) ? virt : real).push(ni.address);
+    }
+  }
+  // Trong nhóm mạng thật, ưu tiên dải LAN phổ biến: 192.168.* → 10.* → còn lại
+  const rank = (ip) => (ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : 2);
+  real.sort((a, b) => rank(a) - rank(b));
+  return [...real, ...virt];
 }
 
 const r = Router();
@@ -270,6 +279,7 @@ r.get('/settings', (req, res) => {
     self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
     setup_done: getSetting('setup_done', '0'),
     app_version: currentVersion(),
+    app_port: currentPort(),
     update_repo: updateConfig().repo,
     update_branch: updateConfig().branch,
   });
@@ -302,6 +312,11 @@ r.get('/update/check', adminOnly, async (req, res) => {
 // Tải & áp dụng bản mới rồi khởi động lại (chỉ admin)
 r.post('/update/apply', adminOnly, async (req, res) => {
   try { res.json(await applyUpdate()); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Đổi cổng phần mềm (dùng chung cho web + máy chấm công) rồi tự khởi động lại (chỉ admin)
+r.post('/port', adminOnly, (req, res) => {
+  try { res.json(changePort(req.body?.port)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -728,6 +743,10 @@ r.get('/devices', need('devices'), (req, res) => {
     d.unmatched = db.prepare('SELECT COUNT(DISTINCT pin) c FROM device_punches WHERE serial=? AND employee_id IS NULL').get(d.serial).c;
   }
   res.json({ rows, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080) });
+});
+// Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
+r.get('/server-ips', need('devices'), (req, res) => {
+  res.json({ ips: lanIPs(), port: Number(process.env.PORT || 8080) });
 });
 r.put('/devices/:id', need('devices'), (req, res) => {
   const b = req.body || {};

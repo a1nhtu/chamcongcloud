@@ -1157,17 +1157,39 @@ async function pageDevices() {
         el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: đăng ký vân tay/khuôn mặt cho Số ID mới trên máy → phần mềm tự tạo NV nháp (Số ID + tên máy gửi về), admin bổ sung sau. Tắt: chỉ ghi nhận, chờ admin gán tay.'))),
     el('div', { style: 'margin-top:12px' }, saveEn));
 
-  // Hướng dẫn cấu hình máy
-  const ip = d.server_ips[0] || '(IP máy chủ)';
+  // Hướng dẫn cấu hình máy + nút Refresh mạng (đổi mạng xong bấm để lấy IP mới)
+  const ipVal = el('b', { style: 'color:var(--brand-ink,#c0392b);font-size:16px;font-family:monospace' }, d.server_ips[0] || '(IP máy chủ)');
+  const portVal = el('b', {}, String(d.port));
+  const ipsHint = el('div', { class: 'map-hint', style: 'margin-top:8px' });
+  const renderIPs = (ips, port) => {
+    ipVal.textContent = ips[0] || '(IP máy chủ)';
+    if (port != null) portVal.textContent = String(port);
+    ipsHint.innerHTML = '';
+    if (ips.length > 1) {
+      ipsHint.append('⚠️ Máy tính có nhiều mạng — chọn IP CÙNG lớp mạng với máy chấm công: ');
+      ips.forEach((x, i) => ipsHint.append(i ? '  ·  ' : '', el('b', { style: 'font-family:monospace' }, x)));
+    } else if (!ips.length) {
+      ipsHint.textContent = 'Chưa thấy IP LAN — kiểm tra dây mạng / Wi-Fi rồi bấm Refresh mạng.';
+    }
+  };
+  const refreshNet = el('button', { class: 'btn sm ghost' }, '🔄 Refresh mạng');
+  refreshNet.onclick = async () => {
+    refreshNet.disabled = true; const t = refreshNet.textContent; refreshNet.textContent = 'Đang kiểm tra…';
+    try { const r = await api('/admin/server-ips'); renderIPs(r.ips, r.port); toast('IP máy chủ hiện tại: ' + (r.ips[0] || 'không thấy'), 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+    finally { refreshNet.disabled = false; refreshNet.textContent = t; }
+  };
+  renderIPs(d.server_ips, d.port);
   const guide = el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
-    el('h3', { style: 'margin-top:0;font-size:15px' }, '🔧 Cách kết nối máy chấm công'),
-    el('ol', { style: 'margin:0;padding-left:18px;font-size:14px;line-height:1.9' },
+    el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap' },
+      el('h3', { style: 'margin:0;font-size:15px' }, '🔧 Cách kết nối máy chấm công'), refreshNet),
+    el('ol', { style: 'margin:10px 0 0;padding-left:18px;font-size:14px;line-height:1.9' },
       el('li', { html: 'Trên máy: <b>Menu → Comm/Kết nối → Cloud Server (ADMS)</b>.' }),
-      el('li', { html: `Server IP: <b style="color:var(--brand-ink,#c0392b)">${ip}</b> &nbsp;·&nbsp; Port: <b>${d.port}</b>` }),
+      el('li', {}, 'Server IP: ', ipVal, '  ·  Port: ', portVal, '  ', el('span', { style: 'font-size:12px;color:var(--muted)' }, '(đổi mạng xong bấm “Refresh mạng”)')),
       el('li', { html: 'Chọn giao thức <b>HTTP</b> (KHÔNG bật SSL/HTTPS). Lưu & khởi động lại máy.' }),
       el('li', { html: 'Máy sẽ hiện bên dưới ở trạng thái <b>Chờ duyệt</b> → bấm <b>Duyệt</b>.' }),
       el('li', { html: 'Đăng ký vân tay trên máy → NV tự về phần mềm (bản nháp). Điền <b>Số ID máy</b> trong hồ sơ NV cho khớp <b>số ID trên máy</b> để tính công.' })),
-    d.server_ips.length > 1 ? el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Các IP khả dụng: ' + d.server_ips.join(', ')) : null);
+    ipsHint);
 
   // Bảng danh sách máy
   const tbl = el('table', { class: 'data' });
@@ -1564,10 +1586,40 @@ async function pageSettings() {
       updStatus,
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;
 
+  // ----- Đổi cổng phần mềm (dùng chung web + máy chấm công) -----
+  const portI = input('st-port', { type: 'number', min: 1, max: 65535, value: s.app_port || 8686 });
+  const savePort = el('button', { class: 'btn' }, 'Đổi cổng & khởi động lại');
+  const portMsg = el('div', { style: 'margin-top:6px;font-size:14px' });
+  savePort.onclick = async () => {
+    const np = parseInt(portI.value, 10);
+    if (!np || np < 1 || np > 65535) return toast('Cổng không hợp lệ', 'err');
+    if (!confirm(`Đổi cổng phần mềm sang ${np}?\n\n• App sẽ tự khởi động lại (~10 giây).\n• Máy chấm công ZKTeco phải đổi "Server port" sang ${np} cho khớp (dùng chung cổng).\n• Nếu đang dùng domain online (Cloudflare) phải sửa tunnel sang cổng mới.`)) return;
+    savePort.disabled = true;
+    try {
+      const r = await api('/admin/port', { method: 'POST', body: { port: np } });
+      if (r.reason === 'same') { toast('Cổng không thay đổi', 'ok'); savePort.disabled = false; return; }
+      const newUrl = `${location.protocol}//${location.hostname}:${r.newPort}/admin`;
+      portMsg.innerHTML = '';
+      portMsg.append(el('span', { style: 'color:var(--muted)' }, `Đang đổi sang cổng ${r.newPort} & khởi động lại… `), el('a', { href: newUrl }, newUrl));
+      for (let i = 0; i < 20; i++) {
+        await new Promise(res => setTimeout(res, 2000));
+        try { const v = await fetch(`${location.protocol}//${location.hostname}:${r.newPort}/api/version`).then(x => x.json()); if (v.version) { location.href = newUrl; return; } } catch { /* đang khởi động lại */ }
+      }
+      portMsg.append(el('div', { style: 'color:#b45309' }, 'Nếu trang chưa tự chuyển, hãy mở link ở trên.'));
+    } catch (e) { toast(e.message, 'err'); savePort.disabled = false; }
+  };
+  const panelPort = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, '🔌 Cổng phần mềm'),
+    el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
+      el('div', {}, el('span', { style: 'color:var(--muted)' }, 'Cổng hiện tại: '), el('b', {}, String(s.app_port || 8686))),
+      field('Cổng mới (nên dùng 1024–65535)', portI),
+      savePort, portMsg,
+      el('div', { class: 'map-hint' }, 'Cổng này DÙNG CHUNG cho web quản lý + app nhân viên + máy chấm công ZKTeco. Đổi xong nhớ đổi “Server port” trên máy chấm công cho khớp. Nếu dùng domain online (Cloudflare) phải sửa tunnel sang cổng mới.'))) : null;
+
   const panel2 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px' },
     el('h3', { style: 'margin-top:0' }, 'Đổi mật khẩu của tôi'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Mật khẩu hiện tại', oldP), field('Mật khẩu mới', newP), savePw));
-  setMain(head('Cài đặt'), panel1, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
+  setMain(head('Cài đặt'), panel1, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panelPort, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
 }
