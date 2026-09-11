@@ -1586,40 +1586,10 @@ async function pageSettings() {
       updStatus,
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;
 
-  // ----- Đổi cổng phần mềm (dùng chung web + máy chấm công) -----
-  const portI = input('st-port', { type: 'number', min: 1, max: 65535, value: s.app_port || 8686 });
-  const savePort = el('button', { class: 'btn' }, 'Đổi cổng & khởi động lại');
-  const portMsg = el('div', { style: 'margin-top:6px;font-size:14px' });
-  savePort.onclick = async () => {
-    const np = parseInt(portI.value, 10);
-    if (!np || np < 1 || np > 65535) return toast('Cổng không hợp lệ', 'err');
-    if (!confirm(`Đổi cổng phần mềm sang ${np}?\n\n• App sẽ tự khởi động lại (~10 giây).\n• Máy chấm công ZKTeco phải đổi "Server port" sang ${np} cho khớp (dùng chung cổng).\n• Nếu đang dùng domain online (Cloudflare) phải sửa tunnel sang cổng mới.`)) return;
-    savePort.disabled = true;
-    try {
-      const r = await api('/admin/port', { method: 'POST', body: { port: np } });
-      if (r.reason === 'same') { toast('Cổng không thay đổi', 'ok'); savePort.disabled = false; return; }
-      const newUrl = `${location.protocol}//${location.hostname}:${r.newPort}/admin`;
-      portMsg.innerHTML = '';
-      portMsg.append(el('span', { style: 'color:var(--muted)' }, `Đang đổi sang cổng ${r.newPort} & khởi động lại… `), el('a', { href: newUrl }, newUrl));
-      for (let i = 0; i < 20; i++) {
-        await new Promise(res => setTimeout(res, 2000));
-        try { const v = await fetch(`${location.protocol}//${location.hostname}:${r.newPort}/api/version`).then(x => x.json()); if (v.version) { location.href = newUrl; return; } } catch { /* đang khởi động lại */ }
-      }
-      portMsg.append(el('div', { style: 'color:#b45309' }, 'Nếu trang chưa tự chuyển, hãy mở link ở trên.'));
-    } catch (e) { toast(e.message, 'err'); savePort.disabled = false; }
-  };
-  const panelPort = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
-    el('h3', { style: 'margin-top:0' }, '🔌 Cổng phần mềm'),
-    el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
-      el('div', {}, el('span', { style: 'color:var(--muted)' }, 'Cổng hiện tại: '), el('b', {}, String(s.app_port || 8686))),
-      field('Cổng mới (nên dùng 1024–65535)', portI),
-      savePort, portMsg,
-      el('div', { class: 'map-hint' }, 'Cổng này DÙNG CHUNG cho web quản lý + app nhân viên + máy chấm công ZKTeco. Đổi xong nhớ đổi “Server port” trên máy chấm công cho khớp. Nếu dùng domain online (Cloudflare) phải sửa tunnel sang cổng mới.'))) : null;
-
   const panel2 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px' },
     el('h3', { style: 'margin-top:0' }, 'Đổi mật khẩu của tôi'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Mật khẩu hiện tại', oldP), field('Mật khẩu mới', newP), savePw));
-  setMain(head('Cài đặt'), panel1, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panelPort, panel2);
+  setMain(head('Cài đặt'), panel1, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
 }

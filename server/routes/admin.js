@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore } from '../backup.js';
 import { rebuildDay } from '../device-sync.js';
-import { checkUpdate, applyUpdate, currentVersion, updateConfig, currentPort, changePort } from '../update.js';
+import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
 import { networkInterfaces } from 'node:os';
 function lanIPs() {
   const real = [], virt = [];
@@ -279,7 +279,6 @@ r.get('/settings', (req, res) => {
     self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
     setup_done: getSetting('setup_done', '0'),
     app_version: currentVersion(),
-    app_port: currentPort(),
     update_repo: updateConfig().repo,
     update_branch: updateConfig().branch,
   });
@@ -312,11 +311,6 @@ r.get('/update/check', adminOnly, async (req, res) => {
 // Tải & áp dụng bản mới rồi khởi động lại (chỉ admin)
 r.post('/update/apply', adminOnly, async (req, res) => {
   try { res.json(await applyUpdate()); }
-  catch (e) { res.status(400).json({ error: e.message }); }
-});
-// Đổi cổng phần mềm (dùng chung cho web + máy chấm công) rồi tự khởi động lại (chỉ admin)
-r.post('/port', adminOnly, (req, res) => {
-  try { res.json(changePort(req.body?.port)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 

@@ -28,6 +28,19 @@ function nodeExe() {
   return existsSync(p) ? p : process.execPath;
 }
 
+// Tạo VBS khởi động lại app ẩn hoàn toàn (không hiện cửa sổ đen), giống start-hidden.vbs lúc cài.
+// Node phải được chạy qua đây (không dùng "start /b") để khi bat thoát không bị Windows cấp console mới.
+function writeHiddenLauncher() {
+  const vbsPath = join(INSTALL_ROOT, 'restart-app.vbs');
+  const serverJs = join(APP_DIR, 'server', 'index.js');
+  const vbs =
+    'Set sh = CreateObject("WScript.Shell")\r\n' +
+    `sh.CurrentDirectory = "${INSTALL_ROOT}"\r\n` +
+    `sh.Run """${nodeExe()}"" --no-warnings ""${serverJs}""", 0, False\r\n`;
+  writeFileSync(vbsPath, vbs, 'latin1');
+  return vbsPath;
+}
+
 export function updateConfig() {
   const repo = (getSetting('update_repo', DEFAULT_REPO) || DEFAULT_REPO).trim();
   const branch = (getSetting('update_branch', DEFAULT_BRANCH) || DEFAULT_BRANCH).trim();
@@ -37,61 +50,6 @@ export function updateConfig() {
 export function currentVersion() {
   try { return JSON.parse(readFileSync(join(APP_DIR, 'package.json'), 'utf8')).version || '0.0.0'; }
   catch { return '0.0.0'; }
-}
-
-// Đọc config.txt (PORT, TUNNEL_TOKEN...) ở thư mục cài
-export function readConfig() {
-  const out = {};
-  const p = join(INSTALL_ROOT, 'config.txt');
-  if (existsSync(p)) {
-    for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
-      const i = line.indexOf('=');
-      if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1);
-    }
-  }
-  return out;
-}
-export function currentPort() {
-  return Number(process.env.PORT || readConfig().PORT || 8080);
-}
-
-// Đổi cổng phần mềm: ghi config.txt + khởi động lại ở cổng mới (bản cài cho khách)
-export function changePort(newPort) {
-  newPort = parseInt(newPort, 10);
-  if (!Number.isInteger(newPort) || newPort < 1 || newPort > 65535)
-    throw new Error('Cổng không hợp lệ (nhập số 1–65535, nên dùng 1024–65535).');
-  if (!isPackaged())
-    throw new Error('Đổi cổng chỉ chạy trên bản cài cho khách (có runtime\\node.exe). Máy dev đổi bằng biến môi trường PORT.');
-  const oldPort = currentPort();
-  if (newPort === oldPort) return { ok: false, reason: 'same', port: oldPort };
-
-  const cfgPath = join(INSTALL_ROOT, 'config.txt');
-  const cfg = readConfig();
-  cfg.PORT = String(newPort);
-  if (cfg.TUNNEL_TOKEN == null) cfg.TUNNEL_TOKEN = '';
-  const order = ['PORT', 'TUNNEL_TOKEN', ...Object.keys(cfg).filter((k) => k !== 'PORT' && k !== 'TUNNEL_TOKEN')];
-  writeFileSync(cfgPath, order.map((k) => `${k}=${cfg[k]}`).join('\r\n') + '\r\n', 'latin1');
-
-  const bat = `@echo off
-chcp 65001 >nul
-title Digiplus - Doi cong phan mem
-cd /d "${INSTALL_ROOT}"
-echo Dang doi cong sang ${newPort}, khoi dong lai (khong tat may)...
-timeout /t 2 /nobreak >nul
-rem --- Tat app o cong cu (chi kill node giu dung cong do) ---
-for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort ${oldPort} -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
-timeout /t 2 /nobreak >nul
-rem --- Khoi dong lai o cong moi (doc tu config.txt) ---
-set "PORT=${newPort}"
-if exist "${cfgPath}" for /f "usebackq tokens=1,* delims==" %%a in ("${cfgPath}") do set "%%a=%%b"
-start "" /b "${nodeExe()}" --no-warnings "${join(APP_DIR, 'server', 'index.js')}"
-(goto) 2>nul & del "%~f0"
-`;
-  const batPath = join(INSTALL_ROOT, 'DoiCong.bat');
-  writeFileSync(batPath, bat, 'latin1');
-  const child = spawn('cmd.exe', ['/c', batPath], { detached: true, stdio: 'ignore', windowsHide: true, cwd: INSTALL_ROOT });
-  child.unref();
-  return { ok: true, restarting: true, oldPort, newPort, hasTunnel: !!(cfg.TUNNEL_TOKEN && cfg.TUNNEL_TOKEN.trim()) };
 }
 
 // So sánh phiên bản kiểu 1.2.3 (số). >0 nếu a mới hơn b.
@@ -130,7 +88,7 @@ export async function checkUpdate() {
 }
 
 // Sinh nội dung CapNhat.bat (khởi động lại app với code mới). Toàn bộ dùng đường dẫn tuyệt đối.
-function buildBat({ appDir, staged, prev, workRoot, node, config, serverJs }) {
+function buildBat({ appDir, staged, prev, workRoot, config, vbsPath }) {
   return `@echo off
 chcp 65001 >nul
 title Digiplus - Dang cap nhat phan mem
@@ -152,8 +110,8 @@ robocopy "${staged}\\server" "${appDir}\\server" /MIR /NFL /NDL /NJH /NJS /R:2 /
 robocopy "${staged}\\public" "${appDir}\\public" /MIR /NFL /NDL /NJH /NJS /R:2 /W:1 >nul
 copy /y "${staged}\\package.json" "${appDir}\\package.json" >nul
 if exist "${staged}\\node_modules" robocopy "${staged}\\node_modules" "${appDir}\\node_modules" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
-rem --- Khoi dong lai app (cloudflared van chay, khong dung lai) ---
-start "" /b "${node}" --no-warnings "${serverJs}"
+rem --- Khoi dong lai app AN (qua VBS, khong hien cua so den) ---
+wscript "${vbsPath}"
 rem --- Don dep + tu xoa an toan ---
 rmdir /s /q "${workRoot}" >nul 2>&1
 (goto) 2>nul & del "%~f0"
@@ -219,14 +177,14 @@ export async function applyUpdate() {
   try { doBackup('preupdate'); } catch {}
 
   // 6) Ghi CapNhat.bat và chạy nền → app tự khởi động lại với code mới
+  const vbsPath = writeHiddenLauncher();
   const bat = buildBat({
     appDir: APP_DIR,
     staged,
     prev: join(INSTALL_ROOT, '_prev'),
     workRoot,
-    node: nodeExe(),
     config: join(INSTALL_ROOT, 'config.txt'),
-    serverJs: join(APP_DIR, 'server', 'index.js'),
+    vbsPath,
   });
   const batPath = join(INSTALL_ROOT, 'CapNhat.bat');
   writeFileSync(batPath, bat, 'latin1');
