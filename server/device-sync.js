@@ -1,0 +1,281 @@
+// Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
+// Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
+import { db, getSetting, resolveEffectiveShift } from './db.js';
+import { computeLate, computeCheckout, isWeekendDay } from './attendance-calc.js';
+import { hashPassword } from './auth.js';
+
+// Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
+function findEmpByPin(pin) {
+  return db.prepare("SELECT id, from_device FROM employees WHERE device_pin=? AND device_pin!='' AND active=1").get(pin)
+      || db.prepare('SELECT id, from_device FROM employees WHERE code=? AND active=1').get(pin);
+}
+
+// Sinh giá trị chưa trùng cho cột UNIQUE (code / username)
+function uniqueValue(column, base) {
+  let v = base, i = 1;
+  const q = db.prepare(`SELECT 1 FROM employees WHERE ${column}=?`);
+  while (q.get(v)) v = `${base}_${i++}`;
+  return v;
+}
+
+// Tự tạo / cập nhật NV từ dữ liệu máy đẩy về (đăng ký vân tay hoặc USERINFO).
+// Trả về id NV (hoặc null nếu tắt auto-create và chưa có NV).
+export function upsertEmployeeFromDevice(pin, name) {
+  pin = String(pin || '').trim();
+  if (!pin) return null;
+  name = (name || '').trim();
+
+  // Đã có NV khớp Số ID
+  let emp = db.prepare("SELECT id, full_name, from_device FROM employees WHERE device_pin=? AND device_pin!=''").get(pin);
+  if (emp) {
+    // Chỉ cập nhật tên nếu là NV nháp từ máy và máy gửi tên thật khác placeholder
+    if (emp.from_device && name && name !== `NV ${pin}` && emp.full_name === `NV ${pin}`)
+      db.prepare('UPDATE employees SET full_name=? WHERE id=?').run(name, emp.id);
+    return emp.id;
+  }
+
+  // NV cũ trùng mã (code) nhưng chưa gán Số ID → gán liên kết
+  const byCode = db.prepare("SELECT id FROM employees WHERE code=? AND (device_pin IS NULL OR device_pin='')").get(pin);
+  if (byCode) {
+    db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin, byCode.id);
+    return byCode.id;
+  }
+
+  // Tự tạo NV nháp
+  if (getSetting('device_autocreate', '1') !== '1') return null;
+  const code = uniqueValue('code', pin);
+  const username = uniqueValue('username', `nv${pin}`);
+  const fullName = name || `NV ${pin}`;
+  const info = db.prepare(`INSERT INTO employees
+    (code, full_name, department, position, phone, role, username, password_hash, device_pin, from_device, active)
+    VALUES (?,?, '', '', '', 'employee', ?, ?, ?, 1, 1)`)
+    .run(code, fullName, username, hashPassword('123456'), pin);
+  return Number(info.lastInsertRowid);
+}
+
+// Parse khối dữ liệu USER/USERINFO/FP (đăng ký vân tay real-time) → tạo/cập nhật NV.
+// Máy gửi các dòng: "USER PIN=1\tName=..\tPri=0\t..", "FP PIN=1\tFID=0\t..\tTMP=..", hoặc "PIN=1\tName=.." (bảng USERINFO).
+// Trả về số NV đã đụng tới.
+export function ingestUserData(serial, table, rawBody) {
+  const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const seen = new Set();
+  for (let line of lines) {
+    // Bỏ tiền tố loại dòng nếu có (USER / FP / USERINFO)
+    const m = line.match(/^(USER|FP|USERINFO|FACE|BIODATA)\b\s*/i);
+    if (m) line = line.slice(m[0].length);
+    const kv = {};
+    for (const part of line.split('\t')) {
+      const eq = part.indexOf('=');
+      if (eq > 0) kv[part.slice(0, eq).trim().toLowerCase()] = part.slice(eq + 1).trim();
+    }
+    const pin = (kv.pin || '').trim();
+    if (!pin || pin.includes(' ') || pin.length > 20) continue; // bỏ dòng rác
+    let name = kv.name || '';
+    if (name.includes('=') || name.length > 80) name = ''; // tên rác (firmware nhét FileName=/Content=)
+    const card = kv.card && kv.card !== '0' ? kv.card : '';
+    const passwd = kv.passwd && kv.passwd !== '0' ? kv.passwd : '';
+    const pri = parseInt(kv.pri || '0', 10) || 0;
+    upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
+    const id = upsertEmployeeFromDevice(pin, name);
+    if (id) seen.add(pin);
+  }
+  return seen;   // Set các PIN đã đụng tới (dùng để đồng bộ nhóm)
+}
+
+/* ============================ ĐỒNG BỘ MÁY ↔ MÁY ============================ */
+// Lưu thông tin user trên máy (tên/thẻ/mật mã/quyền) để đẩy kèm khi đồng bộ
+function upsertDeviceUser(pin, name, card, passwd, pri) {
+  const u = db.prepare('SELECT pin FROM device_users WHERE pin=?').get(pin);
+  if (u) {
+    db.prepare(`UPDATE device_users SET
+      name=CASE WHEN ?<>'' THEN ? ELSE name END,
+      card=CASE WHEN ?<>'' THEN ? ELSE card END,
+      passwd=CASE WHEN ?<>'' THEN ? ELSE passwd END,
+      privilege=?, updated_at=datetime('now') WHERE pin=?`)
+      .run(name, name, card, card, passwd, passwd, pri, pin);
+  } else {
+    db.prepare('INSERT INTO device_users(pin,name,card,passwd,privilege) VALUES(?,?,?,?,?)')
+      .run(pin, name || '', card || '', passwd || '', pri || 0);
+  }
+}
+
+const kvOf = (line) => {
+  const kv = {};
+  for (const part of String(line).split('\t')) {
+    const eq = part.indexOf('=');
+    if (eq > 0) kv[part.slice(0, eq).trim().toLowerCase()] = part.slice(eq + 1).trim();
+  }
+  return kv;
+};
+
+// Nạp template sinh trắc từ máy đẩy về (bảng BIODATA / FINGERTMP / FP) → lưu + tạo NV nếu chưa có.
+// Trả về Set các PIN vừa đụng tới (để đồng bộ sang máy khác).
+export function storeTemplates(serial, table, rawBody) {
+  const isFinger9 = /FINGERTMP|FP/i.test(table);
+  const pins = new Set();
+  const up = db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
+    VALUES(?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(serial,pin,bio_type,idx) DO UPDATE SET valid=excluded.valid,duress=excluded.duress,
+      major_ver=excluded.major_ver,minor_ver=excluded.minor_ver,tmp=excluded.tmp,received_at=datetime('now')`);
+  for (let line of String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const m = line.match(/^(BIODATA|FINGERTMP|FP)\b\s*/i);
+    if (m) line = line.slice(m[0].length);
+    const kv = kvOf(line);
+    const pin = (kv.pin || '').trim();
+    const tmp = kv.tmp || '';
+    if (!pin || !tmp || pin.includes(' ') || pin.length > 20) continue;
+    let bioType, idx, major;
+    if (isFinger9) { bioType = 1; idx = parseInt(kv.fid || kv.no || kv.index || '0', 10) || 0; major = parseInt(kv.majorver || '9', 10) || 9; }
+    else { bioType = parseInt(kv.type || '1', 10) || 1; idx = parseInt(kv.no || kv.index || kv.fid || '0', 10) || 0; major = parseInt(kv.majorver || '10', 10) || 10; }
+    const valid = parseInt(kv.valid ?? '1', 10); const duress = parseInt(kv.duress || '0', 10) || 0;
+    const minor = parseInt(kv.minorver || '0', 10) || 0;
+    try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
+    upsertEmployeeFromDevice(pin, '');   // đăng ký vân tay-only vẫn tạo NV nháp
+    pins.add(pin);
+  }
+  return pins;
+}
+
+// Xếp 1 lệnh xuống máy đích (chống trùng: bỏ qua nếu đã có lệnh y hệt đang chờ gửi)
+function queueCmd(serial, content) {
+  const dup = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND content=? AND trans_time IS NULL").get(serial, content);
+  if (dup) return;
+  db.prepare('INSERT INTO push_device_commands(serial,content) VALUES(?,?)').run(serial, content);
+}
+
+function buildUserCommand(pin) {
+  const u = db.prepare('SELECT * FROM device_users WHERE pin=?').get(pin) || {};
+  const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
+  return `DATA UPDATE USERINFO PIN=${pin}\tName=${u.name || pin}\tPasswd=${u.passwd || ''}${card}\tPri=${u.privilege || 0}\tGrp=1\tTZ=1\tVerify=0`;
+}
+function buildBioCommand(t) {
+  if (t.bio_type === 1 && (t.major_ver || 10) < 10) // vân tay ZKFinger 9.0
+    return `DATA UPDATE FINGERTMP PIN=${t.pin}\tFID=${t.idx}\tSize=${(t.tmp || '').length}\tValid=${t.valid}\tTMP=${t.tmp}`;
+  // vân tay ZKFinger 10.0 hoặc khuôn mặt (type 2/9)
+  return `DATA UPDATE BIODATA Pin=${t.pin}\tNo=${t.idx}\tIndex=${t.idx}\tValid=${t.valid}\tDuress=${t.duress}\tType=${t.bio_type}\tMajorVer=${t.major_ver}\tMinorVer=${t.minor_ver}\tFormat=0\tTmp=${t.tmp}`;
+}
+
+// Sau khi 1 máy đẩy user/template về → đẩy các PIN đó sang MỌI máy cùng nhóm (real-time).
+export function syncPinsToGroup(sourceSerial, pins) {
+  if (!pins || !pins.size) return 0;
+  const src = db.prepare('SELECT sync_group FROM push_devices WHERE serial=?').get(sourceSerial);
+  if (!src || !src.sync_group) return 0;
+  const targets = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>? AND active=1")
+    .all(src.sync_group, sourceSerial);
+  if (!targets.length) return 0;
+  let n = 0;
+  for (const t of targets) {
+    for (const pin of pins) {
+      queueCmd(t.serial, buildUserCommand(pin));
+      const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
+      for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp)); n++; }
+    }
+  }
+  return n;
+}
+
+// Khi 1 máy kết nối: kéo template hiện có của nó về (DATA QUERY) + đẩy những gì nhóm đã có mà máy này thiếu.
+export function syncFillDevice(serial) {
+  const dev = db.prepare('SELECT sync_group FROM push_devices WHERE serial=?').get(serial);
+  if (!dev || !dev.sync_group) return;
+  // 1) kéo template hiện có trên máy này về server (học dữ liệu sẵn có)
+  queueCmd(serial, 'DATA QUERY FINGERTMP');
+  queueCmd(serial, 'DATA QUERY BIODATA');
+  // 2) đẩy template của nhóm mà máy này CHƯA có
+  const mine = new Set(db.prepare('SELECT pin||"|"||bio_type||"|"||idx k FROM device_bio_templates WHERE serial=?').all(serial).map((r) => r.k));
+  const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>?").all(dev.sync_group, serial).map((r) => r.serial);
+  if (!groupSerials.length) return;
+  const ph = groupSerials.map(() => '?').join(',');
+  const others = db.prepare(`SELECT * FROM device_bio_templates WHERE serial IN (${ph})`).all(...groupSerials);
+  const pushedPins = new Set();
+  for (const t of others) {
+    const key = `${t.pin}|${t.bio_type}|${t.idx}`;
+    if (mine.has(key)) continue;
+    if (!pushedPins.has(t.pin)) { queueCmd(serial, buildUserCommand(t.pin)); pushedPins.add(t.pin); }
+    queueCmd(serial, buildBioCommand(t));
+  }
+}
+
+// /getrequest: lấy lệnh kế tiếp cho máy (đánh dấu đã gửi). Trả 'C:<id>:<content>' hoặc ''.
+export function nextCommand(serial) {
+  const cmd = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL ORDER BY id LIMIT 1').get(serial);
+  if (!cmd) return '';
+  db.prepare("UPDATE push_device_commands SET trans_time=datetime('now') WHERE id=?").run(cmd.id);
+  return `C:${cmd.id}:${cmd.content}`;
+}
+
+// /devicecmd: máy báo kết quả thực hiện lệnh
+export function ackCommand(id, ret) {
+  db.prepare("UPDATE push_device_commands SET return_value=?, response_at=datetime('now') WHERE id=?").run(String(ret), id);
+}
+
+// Tính chỉ số công cho 1 ngày (giống computeManual ở admin.js)
+function metrics(employeeId, workDate, inIso, outIso) {
+  const weekend = getSetting('weekend_days', '7');
+  const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
+  const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
+  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const eff = hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`);
+  const shift = eff.shift;
+  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals };
+  const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
+  const late = (!hourly && shift && inIso) ? computeLate(shift, inIso, workDate) : 0;
+  let c;
+  if (inIso && outIso) {
+    if (shift && !hourly) c = computeCheckout(shift, inIso, outIso, workDate, flags);
+    else { const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otType, day_status: 'lam_viec' }; }
+  } else {
+    c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: inIso ? 'thieu_ra' : 'vang' };
+  }
+  return { shiftId: shift?.id ?? null, late, ...c };
+}
+
+// Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay)
+export function rebuildDay(employeeId, workDate) {
+  const punches = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
+  if (!punches.length) return;
+  const inIso = punches[0].punch_at;
+  const outIso = punches.length > 1 ? punches[punches.length - 1].punch_at : null;
+  const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
+  if (existing && existing.manual) return; // tôn trọng sửa tay của admin
+  const m = metrics(employeeId, workDate, inIso, outIso);
+  if (existing) {
+    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
+      work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='device' WHERE id=?`)
+      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, existing.id);
+  } else {
+    db.prepare(`INSERT INTO attendance
+      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'device')`)
+      .run(employeeId, workDate, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId);
+  }
+}
+
+// Nạp khối ATTLOG (nhiều dòng), mỗi dòng: PIN \t Time \t Status \t Verify \t WorkCode
+// Trả số dòng hợp lệ đã nhận.
+export function ingestAttlog(serial, rawBody) {
+  const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  const touched = new Set();
+  let n = 0;
+  const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
+  for (const line of lines) {
+    const p = line.split('\t');
+    if (p.length < 2) continue;
+    const pin = (p[0] || '').trim();
+    const timeStr = (p[1] || '').trim();          // 'yyyy-MM-dd HH:mm:ss'
+    if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(timeStr)) continue;
+    const status = parseInt(p[2] || '0', 10) || 0;
+    const verify = parseInt(p[3] || '0', 10) || 0;
+    const d = new Date(timeStr.replace(' ', 'T') + '+07:00');   // giờ máy = giờ VN
+    if (isNaN(d)) continue;
+    const punchIso = d.toISOString();
+    const workDate = timeStr.slice(0, 10);
+    const emp = findEmpByPin(pin);
+    const empId = emp?.id ?? null;
+    try { ins.run(serial, pin, punchIso, workDate, status, verify, empId); } catch {}
+    n++;
+    if (empId) touched.add(empId + '|' + workDate);
+  }
+  for (const key of touched) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
+  return n;
+}

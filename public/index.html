@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#E8541E" />
+  <title>Digiplus Chấm công</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="icon" href="/favicon.png" />
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="/common.css" />
+  <link rel="stylesheet" href="/employee.css" />
+</head>
+<body>
+  <!-- ĐĂNG NHẬP -->
+  <div id="login-view" class="login-wrap">
+    <div class="login-logo">
+      <div class="logo-badge"><img src="/icons/logo.png" alt="Digiplus" /></div>
+      <div class="mark" id="brand-mark">Digiplus</div>
+      <div class="sub">Hệ thống chấm công thông minh</div>
+    </div>
+    <form class="login-card" id="login-form">
+      <h2>Đăng nhập</h2>
+      <div>
+        <label>Tài khoản</label>
+        <input id="li-user" autocomplete="username" placeholder="VD: nv001" required />
+      </div>
+      <div>
+        <label>Mật khẩu</label>
+        <input id="li-pass" type="password" autocomplete="current-password" placeholder="••••••" required />
+      </div>
+      <button class="btn block" id="li-btn" type="submit">Đăng nhập</button>
+      <div style="font-size:12.5px;color:var(--muted);text-align:center">
+        Nhân viên nhận tài khoản từ quản lý.<br/>Trang quản lý: <a href="/admin">mở tại đây</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- ỨNG DỤNG -->
+  <div id="app-view" class="hidden">
+    <header class="app-header">
+      <div class="row">
+        <div>
+          <div class="name" id="h-name">—</div>
+          <div class="pos" id="h-pos">—</div>
+        </div>
+        <button class="logout" id="btn-logout">Đăng xuất</button>
+      </div>
+      <div class="clock" id="h-clock">--:--:--</div>
+      <div class="clock-date" id="h-date">—</div>
+    </header>
+
+    <main class="content" id="content"></main>
+
+    <nav class="bottom-nav">
+      <button data-tab="cham" class="active"><span class="ic">🕐</span>Chấm công</button>
+      <button data-tab="chonca" id="nav-chonca" style="display:none"><span class="ic">🗓️</span>Chọn ca</button>
+      <button data-tab="baocao"><span class="ic">📊</span>Báo cáo</button>
+      <button data-tab="dontu"><span class="ic">📝</span>Đơn từ</button>
+      <button data-tab="bangcong"><span class="ic">📅</span>Bảng công</button>
+    </nav>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

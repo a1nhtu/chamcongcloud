@@ -1,0 +1,21 @@
+{
+  "name": "digiplus-chamcong",
+  "version": "1.0.0",
+  "description": "Digiplus - Hệ thống chấm công bằng điện thoại (ảnh + GPS) và quản lý web",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node --no-warnings server/index.js",
+    "dev": "node --no-warnings --watch server/index.js",
+    "seed": "node --no-warnings server/seed.js",
+    "cert": "node --no-warnings tools/gen-cert.mjs"
+  },
+  "author": "Digiplus",
+  "license": "UNLICENSED",
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2"
+  }
+}

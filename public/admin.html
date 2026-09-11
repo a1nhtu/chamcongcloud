@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#E8541E" />
+  <title>Digiplus — Quản lý chấm công</title>
+  <link rel="icon" href="/favicon.png" />
+  <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+  <link rel="stylesheet" href="/common.css" />
+  <link rel="stylesheet" href="/admin.css" />
+  <script src="/vendor/leaflet/leaflet.js"></script>
+</head>
+<body>
+  <!-- ĐĂNG NHẬP -->
+  <div id="login-view" class="admin-login">
+    <form class="box" id="login-form">
+      <img class="login-logo-img" src="/icons/logo.png" alt="Digiplus" />
+      <h1 id="brand-mark">Digiplus</h1>
+      <p>Trang quản lý chấm công</p>
+      <div class="form-grid">
+        <div><label>Tài khoản</label><input id="li-user" placeholder="admin" autocomplete="username" required /></div>
+        <div><label>Mật khẩu</label><input id="li-pass" type="password" autocomplete="current-password" required /></div>
+        <button class="btn block" id="li-btn" type="submit">Đăng nhập</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- LAYOUT -->
+  <div id="app-view" class="layout hidden">
+    <aside class="sidebar">
+      <div class="brand" id="side-brand">Digiplus<small>Chấm công</small></div>
+      <nav id="nav"></nav>
+      <div class="foot">
+        <div class="me" id="me-name">—</div>
+        <div id="me-role" style="color:#8a90a0;font-size:12px"></div>
+        <button class="btn ghost sm block" id="btn-logout" style="background:#2a3040;color:#fff;border:none">Đăng xuất</button>
+      </div>
+    </aside>
+    <main class="main" id="main"></main>
+  </div>
+
+  <!-- Modal + Lightbox -->
+  <div class="modal-bg" id="modal-bg"><div class="modal" id="modal"></div></div>
+  <div class="lightbox" id="lightbox"><img id="lightbox-img" alt="" /></div>
+
+  <script type="module" src="/admin.js"></script>
+</body>
+</html>

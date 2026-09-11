@@ -1,0 +1,486 @@
+<title>Digiplus Chấm Công</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --paper:#FBF4EF; --surface:#FFFFFF; --surface-2:#FDF7F3;
+  --ink:#2A1D16; --muted:#8C7B71; --line:#ECE0D8;
+  --brand:#E8541E; --brand-2:#E11D23; --brand-ink:#A8380F; --brand-wash:#FCEBE2;
+  --green:#15803D; --green-bg:#DCFCE7; --amber:#B45309; --amber-bg:#FDECCB;
+  --blue:#1D4ED8; --blue-bg:#DBEAFE; --purple:#6D28D9; --purple-bg:#EDE9FE;
+  --red:#DC2626; --red-bg:#FCE1E1;
+  --shadow:0 10px 34px rgba(80,30,10,.10); --shadow-sm:0 4px 14px rgba(80,30,10,.08);
+  --radius:18px;
+  --maxw:1080px;
+}
+:root:not([data-theme="light"]) { }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#191210; --surface:#241A15; --surface-2:#2C1F19;
+    --ink:#F4EAE3; --muted:#AC9C92; --line:#3A2A22;
+    --brand:#FF6A38; --brand-2:#FF5A52; --brand-ink:#FFB596; --brand-wash:#3A231A;
+    --green:#4ADE80; --green-bg:#123222; --amber:#FBBF24; --amber-bg:#3A2A12;
+    --blue:#93B4FF; --blue-bg:#182647; --purple:#C4B5FD; --purple-bg:#2A2148;
+    --red:#F87171; --red-bg:#3A1B1B;
+    --shadow:0 12px 40px rgba(0,0,0,.5); --shadow-sm:0 4px 16px rgba(0,0,0,.4);
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#191210; --surface:#241A15; --surface-2:#2C1F19;
+  --ink:#F4EAE3; --muted:#AC9C92; --line:#3A2A22;
+  --brand:#FF6A38; --brand-2:#FF5A52; --brand-ink:#FFB596; --brand-wash:#3A231A;
+  --green:#4ADE80; --green-bg:#123222; --amber:#FBBF24; --amber-bg:#3A2A12;
+  --blue:#93B4FF; --blue-bg:#182647; --purple:#C4B5FD; --purple-bg:#2A2148;
+  --red:#F87171; --red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5); --shadow-sm:0 4px 16px rgba(0,0,0,.4);
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font-size:16px; line-height:1.6; -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:var(--maxw); margin:0 auto; padding:0 22px}
+h1,h2,h3{text-wrap:balance; line-height:1.15; margin:0}
+a{color:var(--brand-ink); text-decoration:none}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+
+/* ---- Header ---- */
+header.top{
+  background:
+    radial-gradient(120% 140% at 90% -20%, rgba(225,29,35,.28), transparent 60%),
+    linear-gradient(150deg,var(--brand) 0%, var(--brand-2) 100%);
+  color:#fff; padding:54px 0 60px; position:relative; overflow:hidden;
+}
+header.top::after{content:"";position:absolute;inset:0;
+  background:radial-gradient(60% 80% at 15% 120%, rgba(255,255,255,.14), transparent 60%);pointer-events:none}
+.brandrow{display:flex;align-items:center;gap:14px;margin-bottom:26px;position:relative}
+.mark{width:48px;height:52px;flex:0 0 auto}
+.brandname{font-weight:800;font-size:20px;letter-spacing:.3px}
+.brandname small{display:block;font-weight:500;font-size:12px;opacity:.85;letter-spacing:2px;text-transform:uppercase}
+.hero h1{font-size:clamp(30px,5.4vw,52px);font-weight:800;letter-spacing:-.5px;max-width:16ch}
+.hero p{font-size:clamp(16px,2.2vw,20px);opacity:.94;max-width:52ch;margin-top:16px}
+.chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:28px}
+.chip{background:rgba(255,255,255,.16);border:1px solid rgba(255,255,255,.24);
+  padding:8px 14px;border-radius:999px;font-size:13.5px;font-weight:600;backdrop-filter:blur(4px)}
+
+/* ---- Sections ---- */
+main{padding:8px 0 60px}
+section{padding:46px 0;border-bottom:1px solid var(--line)}
+section:last-of-type{border-bottom:none}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:12.5px;font-weight:700;
+  letter-spacing:1.5px;text-transform:uppercase;color:var(--brand-ink);margin-bottom:12px}
+.eyebrow .num{background:var(--brand-wash);color:var(--brand-ink);width:26px;height:26px;border-radius:8px;
+  display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:13px}
+h2.sec{font-size:clamp(24px,3.4vw,34px);font-weight:800;letter-spacing:-.4px}
+.lead{color:var(--muted);font-size:17px;margin-top:10px;max-width:60ch}
+
+.split{display:grid;grid-template-columns:1.05fr .95fr;gap:44px;align-items:center;margin-top:34px}
+.split.rev{grid-template-columns:.95fr 1.05fr}
+.split.rev .shot{order:-1}
+@media(max-width:820px){.split,.split.rev{grid-template-columns:1fr;gap:30px}.split.rev .shot{order:0}}
+
+/* steps */
+ol.steps{list-style:none;margin:0;padding:0;counter-reset:s;display:flex;flex-direction:column;gap:16px}
+ol.steps li{position:relative;padding-left:46px;counter-increment:s}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:32px;height:32px;border-radius:10px;
+  background:var(--brand);color:#fff;font-weight:700;display:grid;place-items:center;font-size:15px;box-shadow:var(--shadow-sm)}
+ol.steps li b{color:var(--ink)}
+ol.steps li span{color:var(--muted);display:block;font-size:14.5px;margin-top:1px}
+
+.note{display:flex;gap:12px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);
+  border-radius:12px;padding:14px 16px;margin-top:22px;font-size:14.5px;color:var(--ink)}
+.note .ic{flex:0 0 auto;font-size:18px}
+
+/* ---- Device frames ---- */
+.shot{display:flex;justify-content:center}
+.phone{width:300px;max-width:100%;background:#0c0c0e;border-radius:38px;padding:11px;box-shadow:var(--shadow);
+  border:1px solid rgba(0,0,0,.2)}
+.phone .screen{background:var(--paper);border-radius:28px;overflow:hidden;position:relative}
+.notch{position:absolute;top:8px;left:50%;transform:translateX(-50%);width:90px;height:20px;background:#0c0c0e;border-radius:0 0 14px 14px;z-index:5}
+
+.browser{width:100%;background:var(--surface);border-radius:14px;box-shadow:var(--shadow);border:1px solid var(--line);overflow:hidden}
+.bbar{display:flex;align-items:center;gap:10px;padding:11px 14px;background:var(--surface-2);border-bottom:1px solid var(--line)}
+.dots{display:flex;gap:6px}.dots i{width:11px;height:11px;border-radius:50%;display:block}
+.dots i:nth-child(1){background:#ff5f57}.dots i:nth-child(2){background:#febc2e}.dots i:nth-child(3){background:#28c840}
+.addr{flex:1;background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:5px 12px;font-size:12.5px;color:var(--muted);
+  font-family:'JetBrains Mono',monospace;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+
+/* app UI mock */
+.appHead{background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:30px 16px 18px}
+.appHead .nm{font-weight:800;font-size:15px}.appHead .po{font-size:11.5px;opacity:.9}
+.appHead .clock{font-size:34px;font-weight:800;letter-spacing:1px;margin-top:8px;font-variant-numeric:tabular-nums}
+.appHead .dt{font-size:11.5px;opacity:.92;margin-top:2px}
+.io{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 14px;margin-top:-22px}
+.io .c{background:var(--surface);border-radius:14px;box-shadow:var(--shadow-sm);padding:12px;text-align:center}
+.io .c .l{font-size:10px;font-weight:700;color:var(--muted);letter-spacing:.5px}
+.io .c .v{font-size:22px;font-weight:800;margin-top:4px;font-variant-numeric:tabular-nums}
+.autoban{margin:12px 14px 0;background:var(--blue-bg);color:var(--blue);border-radius:11px;padding:10px 12px;font-size:12px;font-weight:600}
+.bigbtn{margin:12px 14px 0;border-radius:16px;padding:22px;text-align:center;color:#fff;box-shadow:var(--shadow-sm)}
+.bigbtn.in{background:linear-gradient(150deg,#22c55e,#15803d)}
+.bigbtn .ic{font-size:30px}.bigbtn .t{font-size:20px;font-weight:800;margin-top:4px;letter-spacing:1px}
+.bigbtn .s{font-size:11.5px;opacity:.95;margin-top:2px}
+.gpsline{text-align:center;font-size:11px;color:var(--muted);padding:12px 0 8px}
+.tabbar{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);background:var(--surface)}
+.tabbar div{padding:8px 0 10px;text-align:center;font-size:10px;font-weight:700;color:var(--muted)}
+.tabbar div.on{color:var(--brand)}.tabbar div .i{font-size:17px;display:block}
+
+/* calendar mock */
+.calwrap{padding:14px}
+.cal{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal .hd{text-align:center;font-size:9.5px;font-weight:700;color:var(--muted);padding:2px 0}
+.cal .d{border-radius:8px;min-height:38px;padding:4px 2px;text-align:center;font-size:11px}
+.cal .d .n{font-weight:700;font-size:11px}.cal .d .i{font-size:12px}
+.dg{background:var(--green-bg);color:var(--green)} .da{background:var(--amber-bg);color:var(--amber)}
+.dr{background:var(--red-bg);color:var(--red)} .dp{background:var(--blue-bg);color:var(--blue)}
+.dl{background:var(--purple-bg);color:var(--purple)} .dz{background:var(--surface-2);color:var(--muted)}
+.callegend{display:flex;flex-wrap:wrap;gap:7px;padding:12px 14px 0}
+.callegend span{display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--muted)}
+.callegend i{width:14px;height:14px;border-radius:4px;display:inline-grid;place-items:center;font-size:9px;font-style:normal}
+
+/* admin mock */
+.admin{display:grid;grid-template-columns:150px 1fr;min-height:340px;font-size:12px}
+.side{background:#241f2b;color:#cfd3db;padding:12px 8px}
+.side .b{color:#fff;font-weight:800;font-size:14px;padding:6px 8px 12px}
+.side .b small{display:block;font-weight:500;font-size:9px;color:#8a90a0}
+.side a{display:flex;gap:8px;align-items:center;color:#cfd3db;padding:8px 10px;border-radius:8px;font-weight:600;font-size:11.5px;margin-bottom:2px}
+.side a.on{background:var(--brand);color:#fff}
+.body{padding:16px;background:var(--surface)}
+.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:14px}
+.card{background:var(--surface-2);border:1px solid var(--line);border-radius:12px;padding:12px}
+.card .n{font-size:24px;font-weight:800}.card .l{font-size:10.5px;color:var(--muted);font-weight:600}
+.card.g .n{color:var(--green)}.card.a .n{color:var(--amber)}.card.r .n{color:var(--red)}.card.b .n{color:var(--brand)}
+table.mock{width:100%;border-collapse:collapse;font-size:11px}
+table.mock th{text-align:left;background:var(--surface-2);color:var(--muted);font-size:10px;font-weight:700;padding:8px 9px;border-bottom:1px solid var(--line)}
+table.mock td{padding:8px 9px;border-bottom:1px solid var(--line)}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700}
+.pill.ok{background:var(--green-bg);color:var(--green)}.pill.wa{background:var(--amber-bg);color:var(--amber)}
+.pill.bd{background:var(--red-bg);color:var(--red)}.pill.mu{background:var(--surface-2);color:var(--muted)}
+.av{width:26px;height:26px;border-radius:6px;background:linear-gradient(135deg,#f5c6a5,#e88a5a);display:inline-block}
+
+/* value grid */
+.vgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:34px}
+@media(max-width:760px){.vgrid{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.vgrid{grid-template-columns:1fr}}
+.vcard{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:20px;box-shadow:var(--shadow-sm)}
+.vcard .vi{width:40px;height:40px;border-radius:11px;background:var(--brand-wash);color:var(--brand-ink);display:grid;place-items:center;font-size:20px;margin-bottom:12px}
+.vcard h3{font-size:16px;font-weight:700}
+.vcard p{color:var(--muted);font-size:14px;margin:6px 0 0}
+
+/* faq */
+.faq{display:flex;flex-direction:column;gap:12px;margin-top:26px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:2px 18px;box-shadow:var(--shadow-sm)}
+details summary{cursor:pointer;font-weight:700;padding:15px 0;list-style:none;display:flex;justify-content:space-between;align-items:center;gap:12px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";color:var(--brand);font-weight:800;font-size:20px}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:0 0 16px;font-size:14.5px}
+
+/* flow band */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:0;margin-top:32px;background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow-sm)}
+@media(max-width:760px){.flow{grid-template-columns:1fr 1fr}}
+.flow .st{padding:20px 18px;border-right:1px solid var(--line);position:relative}
+.flow .st:last-child{border-right:none}
+.flow .st .k{font-family:'JetBrains Mono',monospace;color:var(--brand);font-size:13px;font-weight:700}
+.flow .st h4{margin:8px 0 4px;font-size:15px;font-weight:700}
+.flow .st p{margin:0;color:var(--muted);font-size:13px}
+
+footer{background:var(--surface-2);border-top:1px solid var(--line);padding:36px 0;color:var(--muted);font-size:13.5px}
+footer .fx{display:flex;justify-content:space-between;flex-wrap:wrap;gap:14px;align-items:center}
+footer b{color:var(--ink)}
+.themebtn{position:fixed;right:16px;bottom:16px;z-index:50;background:var(--surface);border:1px solid var(--line);
+  color:var(--ink);border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);font-family:inherit}
+@media(prefers-reduced-motion:no-preference){.vcard,.card,details{transition:transform .15s ease}.vcard:hover{transform:translateY(-2px)}}
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brandrow">
+      <svg class="mark" viewBox="0 0 44 48" fill="none" aria-hidden="true">
+        <path d="M4 24C4 12 12 4 22 4s18 8 18 20" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>
+        <path d="M9 24c0-8 6-13 13-13s13 5 13 13" stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".8"/>
+        <path d="M15 24c0-4 3-7 7-7s7 3 7 7" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".6"/>
+        <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+        <path d="M9 40c0-6 5-11 13-11" stroke="#fff" stroke-width="3.2" stroke-linecap="round" opacity=".55"/>
+      </svg>
+      <div class="brandname">Digiplus<small>Chấm Công Thông Minh</small></div>
+    </div>
+    <div class="hero">
+      <h1>Chấm công bằng điện thoại. Quản lý trên máy tính.</h1>
+      <p>Nhân viên chấm công bằng ảnh selfie + định vị GPS. Hệ thống tự tính công, tự nhận ca, xuất báo cáo và bảng lương — dữ liệu đặt ngay trên máy chủ của doanh nghiệp bạn.</p>
+      <div class="chips">
+        <span class="chip">📸 Ảnh + GPS chống gian lận</span>
+        <span class="chip">⚙ Tự động tìm ca</span>
+        <span class="chip">📊 12 mẫu báo cáo + bảng lương</span>
+        <span class="chip">🔒 Bản quyền riêng từng máy</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+
+  <!-- Value -->
+  <section id="gioi-thieu">
+    <div class="eyebrow"><span>Vì sao chọn Digiplus</span></div>
+    <h2 class="sec">Bỏ máy chấm công cứng — chấm bằng điện thoại</h2>
+    <p class="lead">Không cần đầu tư máy quẹt vân tay đắt tiền hay dây mạng. Nhân viên dùng chính điện thoại của mình; mỗi lần chấm đều có ảnh và vị trí để đối chiếu.</p>
+    <div class="vgrid">
+      <div class="vcard"><div class="vi">📸</div><h3>Ảnh selfie + GPS</h3><p>Mỗi lần vào/ra ca đều chụp ảnh và ghi vị trí. Cảnh báo ngay khi chấm ngoài văn phòng hoặc đi muộn.</p></div>
+      <div class="vcard"><div class="vi">⚙</div><h3>Tự động tìm ca</h3><p>Nhân viên làm ca xoay (sáng/chiều/đêm) — hệ thống tự nhận đúng ca theo giờ chấm, kể cả ca qua đêm.</p></div>
+      <div class="vcard"><div class="vi">🧮</div><h3>Tính công tự động</h3><p>Số công, giờ làm, đi muộn, về sớm, tăng ca — tính sẵn theo cấu hình ca của bạn.</p></div>
+      <div class="vcard"><div class="vi">📊</div><h3>Báo cáo & bảng lương</h3><p>Bảng công ngang, chi tiết, ký hiệu, tăng ca, bảng lương… xuất Excel một cú bấm.</p></div>
+      <div class="vcard"><div class="vi">🗓️</div><h3>Phân ca linh hoạt</h3><p>Gán ca theo lịch trình, hoặc phân ca cả tháng bằng Excel khi cần điều chỉnh.</p></div>
+      <div class="vcard"><div class="vi">🔒</div><h3>Dữ liệu của bạn</h3><p>Cài trên máy chủ của doanh nghiệp — dữ liệu nằm trong tầm kiểm soát của bạn, có bản quyền riêng.</p></div>
+    </div>
+  </section>
+
+  <!-- 1. Employee check-in -->
+  <section id="cham-cong">
+    <div class="eyebrow"><span class="num">1</span><span>Dành cho nhân viên</span></div>
+    <div class="split">
+      <div>
+        <h2 class="sec">Chấm công chỉ với một chạm</h2>
+        <p class="lead">Nhân viên mở đường link công ty cấp (hoặc cài về màn hình như một app), đăng nhập bằng tài khoản của mình.</p>
+        <ol class="steps">
+          <li><b>Mở app, đăng nhập</b><span>Tài khoản do quản lý cấp cho từng người.</span></li>
+          <li><b>Bấm “Vào ca”</b><span>App mở camera — chụp một ảnh selfie xác nhận có mặt.</span></li>
+          <li><b>Cho phép Vị trí</b><span>Hệ thống ghi GPS, tính khoảng cách tới văn phòng và cảnh báo nếu ngoài vùng hoặc đi muộn.</span></li>
+          <li><b>Hết ca bấm “Ra ca”</b><span>Chụp ảnh lần hai — hệ thống tự tính số giờ và số công.</span></li>
+        </ol>
+        <div class="note"><span class="ic">💡</span><div>Nhân viên làm ca xoay sẽ thấy dòng <b>“Ca hôm nay: tự động”</b> — hệ thống tự chọn đúng ca theo giờ chấm vào.</div></div>
+      </div>
+      <div class="shot">
+        <div class="phone"><div class="screen"><div class="notch"></div>
+          <div class="appHead">
+            <div class="nm">Nguyễn Việt Hoàng</div><div class="po">Nhân viên · Kinh doanh</div>
+            <div class="clock">08:02:14</div><div class="dt">Thứ Năm, ngày 27/08/2026</div>
+          </div>
+          <div class="io"><div class="c"><div class="l">VÀO CA</div><div class="v">--:--</div></div><div class="c"><div class="l">RA CA</div><div class="v">--:--</div></div></div>
+          <div class="autoban">⚙ Ca hôm nay: <b>tự động</b> — xác định theo giờ chấm vào</div>
+          <div class="bigbtn in"><div class="ic">📸</div><div class="t">VÀO CA</div><div class="s">Chụp ảnh xác nhận có mặt</div></div>
+          <div class="gpsline">📍 Đã xác định vị trí · sai số ~15m</div>
+          <div class="tabbar"><div class="on"><span class="i">🕐</span>Chấm công</div><div><span class="i">📊</span>Báo cáo</div><div><span class="i">📝</span>Đơn từ</div><div><span class="i">📅</span>Bảng công</div></div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 2. Employee calendar -->
+  <section id="xem-cong">
+    <div class="eyebrow"><span class="num">2</span><span>Dành cho nhân viên</span></div>
+    <div class="split rev">
+      <div>
+        <h2 class="sec">Xem lại công của mình, cả tháng</h2>
+        <p class="lead">Tab <b>Bảng công</b> hiện lịch đủ cả tháng, mỗi ngày đánh dấu rõ trạng thái. Bấm vào một ngày để xem giờ vào/ra, số giờ, số công chi tiết. Mỗi người chỉ thấy dữ liệu của chính mình.</p>
+        <div class="callegend">
+          <span><i class="dg">✓</i> Đủ công</span>
+          <span><i class="da">⏰</i> Muộn/Sớm</span>
+          <span><i class="dr">✕</i> Vắng</span>
+          <span><i class="dp">P</i> Phép</span>
+          <span><i class="dl">L</i> Lễ</span>
+          <span><i class="dz"></i> Nghỉ/chưa tới</span>
+        </div>
+        <div class="note"><span class="ic">🔒</span><div>Nhân viên <b>không xem được</b> dữ liệu người khác. Toàn công ty chỉ Admin/Quản lý mới thấy.</div></div>
+      </div>
+      <div class="shot">
+        <div class="phone"><div class="screen"><div class="notch"></div>
+          <div class="appHead" style="padding-bottom:14px"><div class="nm" style="font-size:13px">Bảng công · Tháng 08/2026</div></div>
+          <div class="calwrap">
+            <div class="cal">
+              <div class="hd">T2</div><div class="hd">T3</div><div class="hd">T4</div><div class="hd">T5</div><div class="hd">T6</div><div class="hd">T7</div><div class="hd">CN</div>
+              <div class="d dz"></div><div class="d dz"></div><div class="d dz"></div><div class="d dz"></div><div class="d dg"><div class="n">1</div><div class="i">✓</div></div><div class="d dz"><div class="n">2</div></div><div class="d dz"><div class="n">3</div></div>
+              <div class="d dg"><div class="n">4</div><div class="i">✓</div></div><div class="d da"><div class="n">5</div><div class="i">⏰</div></div><div class="d dg"><div class="n">6</div><div class="i">✓</div></div><div class="d dg"><div class="n">7</div><div class="i">✓</div></div><div class="d dg"><div class="n">8</div><div class="i">✓</div></div><div class="d dz"><div class="n">9</div></div><div class="d dz"><div class="n">10</div></div>
+              <div class="d dg"><div class="n">11</div><div class="i">✓</div></div><div class="d dp"><div class="n">12</div><div class="i">P</div></div><div class="d dg"><div class="n">13</div><div class="i">✓</div></div><div class="d dr"><div class="n">14</div><div class="i">✕</div></div><div class="d dg"><div class="n">15</div><div class="i">✓</div></div><div class="d dz"><div class="n">16</div></div><div class="d dz"><div class="n">17</div></div>
+              <div class="d dg"><div class="n">18</div><div class="i">✓</div></div><div class="d dg"><div class="n">19</div><div class="i">✓</div></div><div class="d dl"><div class="n">20</div><div class="i">L</div></div><div class="d dg"><div class="n">21</div><div class="i">✓</div></div><div class="d da"><div class="n">22</div><div class="i">⏰</div></div><div class="d dz"><div class="n">23</div></div><div class="d dz"><div class="n">24</div></div>
+              <div class="d dg"><div class="n">25</div><div class="i">✓</div></div><div class="d dg"><div class="n">26</div><div class="i">✓</div></div><div class="d" style="outline:2px solid var(--brand);outline-offset:-2px"><div class="n">27</div></div><div class="d dz"><div class="n">28</div></div><div class="d dz"><div class="n">29</div></div><div class="d dz"><div class="n">30</div></div><div class="d dz"><div class="n">31</div></div>
+            </div>
+          </div>
+          <div class="tabbar"><div><span class="i">🕐</span>Chấm công</div><div><span class="i">📊</span>Báo cáo</div><div><span class="i">📝</span>Đơn từ</div><div class="on"><span class="i">📅</span>Bảng công</div></div>
+        </div></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 3. Admin overview -->
+  <section id="tong-quan">
+    <div class="eyebrow"><span class="num">3</span><span>Dành cho quản lý</span></div>
+    <div class="split">
+      <div>
+        <h2 class="sec">Nhìn toàn công ty trong một màn hình</h2>
+        <p class="lead">Quản lý mở trang <b>/admin</b> trên máy tính. Tab Tổng quan hiển thị ai đã chấm, ai đi muộn, ai chấm ngoài văn phòng — kèm <b>ảnh thật</b> lúc chấm. Tự làm mới mỗi 20 giây.</p>
+        <ol class="steps">
+          <li><b>Đăng nhập quản lý</b><span>Tài khoản admin do bạn quản trị.</span></li>
+          <li><b>Xem bảng hôm nay</b><span>Ảnh vào/ra, giờ, vị trí, đi muộn — cập nhật trực tiếp.</span></li>
+          <li><b>Bấm vào ảnh để phóng to</b><span>Đối chiếu khuôn mặt, chống chấm hộ.</span></li>
+        </ol>
+      </div>
+      <div class="shot">
+        <div class="browser">
+          <div class="bbar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">congty.maychamcongcloud.com/admin</div></div>
+          <div class="admin">
+            <div class="side">
+              <div class="b">Digiplus<small>Chấm công</small></div>
+              <a class="on"><span>📊</span>Tổng quan</a><a><span>👥</span>Nhân viên</a><a><span>🕐</span>Ca làm</a><a><span>🗓️</span>Phân ca</a><a><span>📅</span>Báo cáo</a><a><span>💰</span>Lương</a>
+            </div>
+            <div class="body">
+              <div class="cards">
+                <div class="card b"><div class="n">24</div><div class="l">Nhân viên</div></div>
+                <div class="card g"><div class="n">21</div><div class="l">Đã chấm vào</div></div>
+                <div class="card a"><div class="n">3</div><div class="l">Đi muộn</div></div>
+              </div>
+              <table class="mock">
+                <tr><th>Ảnh</th><th>Nhân viên</th><th>Vào</th><th>Vị trí</th><th>Ra</th></tr>
+                <tr><td><span class="av"></span></td><td>Nguyễn Việt Hoàng</td><td>07:58</td><td><span class="pill ok">Trong VP</span></td><td>17:02</td></tr>
+                <tr><td><span class="av"></span></td><td>Trần Thu Hà</td><td>08:12 <span class="pill wa">muộn</span></td><td><span class="pill bd">Ngoài 2.1km</span></td><td><span class="pill mu">chưa ra</span></td></tr>
+                <tr><td><span class="av"></span></td><td>Lê Minh Quân</td><td>07:45</td><td><span class="pill ok">Trong VP</span></td><td>17:10</td></tr>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 4. Shifts & schedule -->
+  <section id="ca-lich-trinh">
+    <div class="eyebrow"><span class="num">4</span><span>Dành cho quản lý</span></div>
+    <h2 class="sec">Cấu hình ca &amp; lịch trình xoay ca</h2>
+    <p class="lead">Khai báo ca một lần: giờ vào/ra, cho phép muộn/sớm, nghỉ giữa ca, tăng ca, ca qua đêm. Với nhân viên làm nhiều ca, gom các ca vào một <b>lịch trình</b> rồi gán cho họ — hệ thống tự chọn ca theo giờ.</p>
+    <div class="flow">
+      <div class="st"><div class="k">B1</div><h4>Tạo ca</h4><p>VD Ca sáng 06:00–11:30, Ca chiều 13:00–17:30, Ca đêm 22:00–06:00.</p></div>
+      <div class="st"><div class="k">B2</div><h4>Đặt cửa sổ nhận diện</h4><p>Sáng nhận 05:00–10:00, chiều 12:00–15:00 — để tự tìm ca.</p></div>
+      <div class="st"><div class="k">B3</div><h4>Tạo lịch trình</h4><p>Gom sáng + chiều + đêm thành “Ca xoay 3 kíp”.</p></div>
+      <div class="st"><div class="k">B4</div><h4>Gán cho nhân viên</h4><p>Chọn lịch trình trong hồ sơ NV. Xong.</p></div>
+    </div>
+    <div class="note"><span class="ic">🌙</span><div><b>Ca qua đêm:</b> chỉ cần đặt giờ ra nhỏ hơn giờ vào (VD 22:00 → 06:00), hệ thống tự hiểu là qua ngày hôm sau và tính công đúng.</div></div>
+  </section>
+
+  <!-- 5. Assignment / Excel -->
+  <section id="phan-ca">
+    <div class="eyebrow"><span class="num">5</span><span>Dành cho quản lý</span></div>
+    <h2 class="sec">Phân ca: tự động là chính, Excel để chỉnh</h2>
+    <p class="lead">Mặc định hệ thống tự tìm ca theo giờ chấm. Khi nhân viên quên chấm hoặc cần đổi ca, dùng <b>bảng phân ca</b> (lưới tuần) hoặc <b>xuất/nhập Excel</b> cả tháng — Excel luôn được ưu tiên đè lên kết quả tự động.</p>
+    <div class="split" style="margin-top:26px">
+      <div class="shot">
+        <div class="browser">
+          <div class="bbar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">Phân ca · Tháng 08 · Excel</div></div>
+          <div class="body" style="padding:14px">
+            <table class="mock">
+              <tr><th>Mã NV</th><th>Họ tên</th><th>28</th><th>29</th><th>30</th><th>31</th></tr>
+              <tr><td>NV001</td><td>Nguyễn Việt Hoàng</td><td><span class="pill mu">S</span></td><td><span class="pill bd">NGHỈ</span></td><td><span class="pill mu">DEM</span></td><td></td></tr>
+              <tr><td>NV002</td><td>Trần Thu Hà</td><td><span class="pill mu">C</span></td><td><span class="pill mu">C</span></td><td></td><td><span class="pill mu">HC</span></td></tr>
+            </table>
+            <p style="font-size:11.5px;color:var(--muted);margin:12px 2px 0">Ô trống = tự động · Mã ca = gán cứng · NGHỈ = ngày nghỉ</p>
+          </div>
+        </div>
+      </div>
+      <div>
+        <ol class="steps">
+          <li><b>Xuất Excel mẫu</b><span>Lưới nhân viên × ngày, có sẵn ca đang phân + bảng chú thích mã ca.</span></li>
+          <li><b>Điền mã ca vào ô cần đổi</b><span>Để trống nghĩa là “tự động theo giờ chấm”.</span></li>
+          <li><b>Nhập Excel lên</b><span>Hệ thống áp phân ca cả tháng, đè lên kết quả tự động.</span></li>
+          <li><b>Bấm “Tính lại công”</b><span>Cập nhật số công theo phân ca mới.</span></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <!-- 6. Reports & payroll -->
+  <section id="bao-cao">
+    <div class="eyebrow"><span class="num">6</span><span>Dành cho quản lý</span></div>
+    <div class="split rev">
+      <div>
+        <h2 class="sec">Báo cáo &amp; bảng lương — xuất Excel</h2>
+        <p class="lead">Chọn loại báo cáo + tháng + phòng ban, xem trước rồi bấm <b>Xuất Excel</b>. Cấu hình lương cơ bản, phụ cấp, hệ số tăng ca cho từng người — bảng lương tự tính từ số công.</p>
+        <div class="callegend" style="padding-top:4px">
+          <span>• Bảng công ngang</span><span>• Chi tiết</span><span>• Đi muộn/về sớm</span><span>• Tăng ca</span><span>• Ký hiệu công</span><span>• Bảng lương</span>
+        </div>
+        <div class="note"><span class="ic">🧾</span><div><b>Bảng lương</b> = Số công × đơn giá ngày + tăng ca (giờ × giá giờ × hệ số) + phụ cấp — theo kỳ lương bạn đặt (VD chốt ngày 26).</div></div>
+      </div>
+      <div class="shot">
+        <div class="browser">
+          <div class="bbar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">Báo cáo · Bảng lương · Tháng 08/2026</div></div>
+          <div class="body" style="padding:14px">
+            <table class="mock">
+              <tr><th>Nhân viên</th><th>Ngày công</th><th>Tăng ca</th><th>Lương công</th><th>Thực lĩnh</th></tr>
+              <tr><td>Nguyễn Việt Hoàng</td><td>26.0</td><td>8g</td><td>10.000.000</td><td><b>11.230.000</b></td></tr>
+              <tr><td>Trần Thu Hà</td><td>24.5</td><td>2g</td><td>8.480.000</td><td><b>9.010.000</b></td></tr>
+              <tr><td>Lê Minh Quân</td><td>26.0</td><td>0g</td><td>9.500.000</td><td><b>9.500.000</b></td></tr>
+            </table>
+            <div style="text-align:right;margin-top:12px"><span class="pill" style="background:var(--green-bg);color:var(--green)">⬇ Xuất Excel</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 7. Install & license -->
+  <section id="cai-dat">
+    <div class="eyebrow"><span class="num">7</span><span>Cài đặt &amp; bản quyền</span></div>
+    <div class="split">
+      <div>
+        <h2 class="sec">Cài trên máy của bạn, kích hoạt bằng license</h2>
+        <p class="lead">Phần mềm chạy trên máy chủ/máy tính của doanh nghiệp — dữ liệu là của bạn. Cài đặt một chạm, không cần cài thêm gì.</p>
+        <ol class="steps">
+          <li><b>Giải nén &amp; chạy “CaiDat”</b><span>App tự chạy và tự bật mỗi khi mở máy.</span></li>
+          <li><b>Lấy Mã máy</b><span>Màn hình hiện Mã máy của bạn.</span></li>
+          <li><b>Gửi Mã máy cho Digiplus</b><span>Digiplus cấp license khớp đúng máy đó.</span></li>
+          <li><b>Dán license → dùng ngay</b><span>Truy cập qua đường link riêng của công ty bạn.</span></li>
+        </ol>
+        <div class="note"><span class="ic">🔒</span><div>License <b>gắn theo máy</b> — không thể copy sang máy khác. Bảo vệ bản quyền và dữ liệu doanh nghiệp.</div></div>
+      </div>
+      <div class="shot">
+        <div class="browser" style="max-width:420px;margin:0 auto">
+          <div class="bbar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">Kích hoạt bản quyền</div></div>
+          <div class="body" style="padding:22px">
+            <h3 style="color:var(--brand-ink);font-size:18px">Kích hoạt bản quyền</h3>
+            <p style="color:var(--muted);font-size:13px;margin:4px 0 16px">Gửi Mã máy cho Digiplus để nhận license.</p>
+            <div style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:6px">MÃ MÁY</div>
+            <div class="mono" style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-weight:600;letter-spacing:1px">103B-E555-114A-6CD3</div>
+            <div style="font-size:11px;color:var(--muted);font-weight:700;margin:14px 0 6px">LICENSE</div>
+            <div style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;color:var(--muted);font-size:12px">Dán chuỗi license…</div>
+            <div style="margin-top:14px;background:var(--brand);color:#fff;text-align:center;border-radius:11px;padding:11px;font-weight:700">Kích hoạt</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section id="faq">
+    <div class="eyebrow"><span>Hỏi &amp; đáp</span></div>
+    <h2 class="sec">Những câu khách hay hỏi</h2>
+    <div class="faq">
+      <details><summary>Nhân viên gian lận chấm hộ được không?</summary><p>Mỗi lần chấm đều có ảnh selfie và vị trí GPS. Quản lý xem được ảnh thật để đối chiếu, và hệ thống cảnh báo khi chấm ngoài phạm vi văn phòng.</p></details>
+      <details><summary>Điện thoại nhân viên có cần cài app không?</summary><p>Không bắt buộc. Chỉ cần mở đường link công ty cấp trên trình duyệt; có thể “thêm vào màn hình chính” để dùng như một app.</p></details>
+      <details><summary>Làm ca xoay, ca đêm thì tính công thế nào?</summary><p>Bạn gom các ca vào một lịch trình và gán cho nhân viên. Hệ thống tự chọn đúng ca theo giờ chấm, kể cả ca qua đêm (VD 22:00–06:00).</p></details>
+      <details><summary>Dữ liệu đặt ở đâu?</summary><p>Trên máy chủ/máy tính của chính doanh nghiệp bạn. Sao lưu chỉ cần copy hai thư mục dữ liệu và ảnh.</p></details>
+      <details><summary>Có xuất được bảng lương không?</summary><p>Có. Khai báo lương cơ bản, phụ cấp và hệ số tăng ca cho từng người; bảng lương tự tính theo số công và xuất Excel.</p></details>
+    </div>
+  </section>
+
+</main>
+
+<footer>
+  <div class="wrap fx">
+    <div><b>Digiplus — Chấm công thông minh.</b> Tài liệu hướng dẫn sử dụng &amp; giới thiệu sản phẩm.</div>
+    <div>Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
+  </div>
+</footer>
+
+<button class="themebtn" id="tt">🌗 Giao diện</button>
+<script>
+  (function(){
+    var b=document.getElementById('tt');
+    b.addEventListener('click',function(){
+      var r=document.documentElement;
+      var cur=r.getAttribute('data-theme');
+      if(!cur){cur=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}
+      r.setAttribute('data-theme', cur==='dark'?'light':'dark');
+    });
+  })();
+</script>

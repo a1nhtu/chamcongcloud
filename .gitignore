@@ -1,0 +1,25 @@
+node_modules/
+data/
+uploads/
+certs/
+tools/keys/
+tools/cf.env
+tools/customers/
+*.pem
+dist-khach/
+*.log
+.env
+.DS_Store
+
+# Bảo mật thêm (KHÔNG đẩy khóa/token lên GitHub)
+tools/*.env
+*.key
+
+# Artifact do cơ chế tự cập nhật tạo ra trên máy khách
+runtime/
+_update/
+_prev/
+CapNhat.bat
+
+# Binary nang - khong can trong repo (auto-update chi can code)
+tools/*.exe
