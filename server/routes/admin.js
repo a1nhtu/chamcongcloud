@@ -6,6 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore } from '../backup.js';
 import { rebuildDay, resyncNow } from '../device-sync.js';
+import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
 import { networkInterfaces } from 'node:os';
 function lanIPs() {
@@ -278,6 +279,7 @@ r.get('/settings', (req, res) => {
     self_shift_enabled: getSetting('self_shift_enabled', '0'), // NV tự chọn ca
     self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
     setup_done: getSetting('setup_done', '0'),
+    company_logo: getSetting('company_logo', ''),
     app_version: currentVersion(),
     update_repo: updateConfig().repo,
     update_branch: updateConfig().branch,
@@ -300,6 +302,17 @@ r.put('/settings', need('settings'), (req, res) => {
   if (b.update_repo != null) setSetting('update_repo', String(b.update_repo).trim());
   if (b.update_branch != null) setSetting('update_branch', String(b.update_branch).trim() || 'main');
   res.json({ ok: true });
+});
+
+// Logo công ty: upload (dataURL base64) hoặc xoá → hiện ở màn đăng nhập + app nhân viên
+r.post('/branding', need('settings'), (req, res) => {
+  const b = req.body || {};
+  try {
+    if (b.remove) { removeBrandLogo(); setSetting('company_logo', ''); return res.json({ ok: true, logo: '' }); }
+    const url = saveBrandLogo(b.logo);
+    setSetting('company_logo', url);
+    res.json({ ok: true, logo: url });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 /* ----------------------------- CẬP NHẬT PHẦN MỀM ----------------------------- */

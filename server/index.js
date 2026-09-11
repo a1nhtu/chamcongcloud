@@ -44,6 +44,12 @@ app.use('/api/license', licenseRoutes);
 // Phiên bản hiện tại (công khai — để giao diện kiểm tra sau khi cập nhật/khởi động lại)
 app.get('/api/version', (req, res) => res.json({ version: currentVersion() }));
 
+// Thương hiệu (công khai — để màn đăng nhập/kích hoạt hiện logo + tên công ty của khách)
+app.get('/api/brand', (req, res) => res.json({
+  company_name: getSetting('company_name', 'Digiplus'),
+  logo: getSetting('company_logo', ''),
+}));
+
 // Cổng bản quyền: chưa kích hoạt → khoá mọi API khác
 app.use('/api', (req, res, next) => {
   if (isActivated()) return next();

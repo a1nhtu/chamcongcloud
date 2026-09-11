@@ -1,5 +1,5 @@
 // Lưu ảnh selfie (data URL base64) xuống thư mục uploads, trả về đường dẫn public
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -22,3 +22,21 @@ export function savePhoto(dataUrl, prefix = 'img') {
   writeFileSync(join(UPLOAD_DIR, name), buf);
   return `/uploads/${name}`;
 }
+
+const LOGO_EXTS = ['png', 'jpg', 'webp', 'svg'];
+function clearLogoFiles() {
+  for (const e of LOGO_EXTS) { const f = join(UPLOAD_DIR, `brand-logo.${e}`); if (existsSync(f)) { try { rmSync(f); } catch {} } }
+}
+// Lưu logo công ty (data URL base64) → trả về URL public kèm cache-bust để đổi hiện ngay
+export function saveBrandLogo(dataUrl) {
+  const m = /^data:image\/(png|jpe?g|webp|svg\+xml);base64,(.+)$/i.exec(dataUrl || '');
+  if (!m) throw new Error('Logo không hợp lệ (chỉ nhận PNG, JPG, WebP hoặc SVG).');
+  const t = m[1].toLowerCase();
+  const ext = t === 'jpeg' || t === 'jpg' ? 'jpg' : t === 'svg+xml' ? 'svg' : t;
+  const buf = Buffer.from(m[2], 'base64');
+  if (buf.length > 2 * 1024 * 1024) throw new Error('Logo quá lớn (tối đa 2MB).');
+  clearLogoFiles();                       // xoá logo cũ (mọi đuôi) tránh sót
+  writeFileSync(join(UPLOAD_DIR, `brand-logo.${ext}`), buf);
+  return `/uploads/brand-logo.${ext}?v=${Date.now()}`;
+}
+export function removeBrandLogo() { clearLogoFiles(); }

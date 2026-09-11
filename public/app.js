@@ -11,7 +11,18 @@ let SELF_APPROVE = true;  // chọn ca cần admin duyệt
 
 /* ---------------- Khởi động ---------------- */
 init();
+// Logo + tên công ty của khách (công khai, hiện được cả trước khi đăng nhập/kích hoạt)
+async function applyBrand() {
+  try {
+    const b = await fetch('/api/brand').then((r) => r.json());
+    const name = b.company_name || 'Digiplus';
+    document.querySelectorAll('#brand-mark').forEach((e) => { e.textContent = name; });
+    document.title = name + ' Chấm công';
+    if (b.logo) document.querySelectorAll('.logo-badge img').forEach((img) => { img.src = b.logo; });
+  } catch {}
+}
 async function init() {
+  await applyBrand();
   if (!(await ensureLicensed())) return; // chưa kích hoạt bản quyền → hiện màn kích hoạt
   // Thương hiệu
   try {

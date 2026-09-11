@@ -32,7 +32,18 @@ const MANAGER_DEFAULT = ['reports', 'employees', 'shifts', 'assignments', 'shift
 
 /* ---------- Init ---------- */
 init();
+// Logo + tên công ty của khách (công khai, hiện được cả trước khi đăng nhập/kích hoạt)
+async function applyBrand() {
+  try {
+    const b = await fetch('/api/brand').then((r) => r.json());
+    const name = b.company_name || 'Digiplus';
+    document.querySelectorAll('#brand-mark').forEach((e) => { e.textContent = name; });
+    document.title = name + ' — Quản lý chấm công';
+    if (b.logo) document.querySelectorAll('.login-logo-img').forEach((img) => { img.src = b.logo; });
+  } catch {}
+}
 async function init() {
+  await applyBrand();
   if (!(await ensureLicensed())) return; // chưa kích hoạt bản quyền → hiện màn kích hoạt
   try {
     const c = await api('/config');
@@ -1378,7 +1389,30 @@ async function pageSettings() {
   const s = await api('/admin/settings');
   const nameI = input('st-name', { value: s.company_name });
   const saveName = el('button', { class: 'btn' }, 'Lưu tên công ty');
-  saveName.onclick = async () => { try { await api('/admin/settings', { method: 'PUT', body: { company_name: nameI.value } }); toast('Đã lưu', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+  saveName.onclick = async () => { try { await api('/admin/settings', { method: 'PUT', body: { company_name: nameI.value } }); toast('Đã lưu', 'ok'); applyBrand(); } catch (e) { toast(e.message, 'err'); } };
+
+  // Logo công ty
+  const logoImg = el('img', { src: s.company_logo || '/icons/logo.png', alt: 'logo', style: 'height:56px;max-width:220px;object-fit:contain;background:#fff;border:1px solid var(--line,#eee);border-radius:10px;padding:6px' });
+  const logoFile = el('input', { type: 'file', accept: 'image/png,image/jpeg,image/webp,image/svg+xml', style: 'font-size:13px' });
+  const upLogo = el('button', { class: 'btn sm' }, 'Tải logo lên');
+  const rmLogo = el('button', { class: 'btn sm ghost' }, 'Dùng logo mặc định');
+  upLogo.onclick = async () => {
+    const f = logoFile.files?.[0];
+    if (!f) return toast('Chọn file ảnh logo (PNG/JPG/WebP/SVG)', 'err');
+    if (f.size > 2 * 1024 * 1024) return toast('Logo tối đa 2MB', 'err');
+    upLogo.disabled = true;
+    try {
+      const dataUrl = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsDataURL(f); });
+      const r = await api('/admin/branding', { method: 'POST', body: { logo: dataUrl } });
+      logoImg.src = r.logo; toast('Đã cập nhật logo', 'ok'); applyBrand();
+    } catch (e) { toast(e.message, 'err'); }
+    finally { upLogo.disabled = false; }
+  };
+  rmLogo.onclick = async () => {
+    if (!confirm('Xoá logo, dùng lại logo mặc định?')) return;
+    try { await api('/admin/branding', { method: 'POST', body: { remove: true } }); logoImg.src = '/icons/logo.png'; toast('Đã xoá logo', 'ok'); applyBrand(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
 
   const oldP = input('st-old', { type: 'password' });
   const newP = input('st-new', { type: 'password' });
@@ -1390,7 +1424,15 @@ async function pageSettings() {
 
   const panel1 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Thông tin công ty'),
-    hasPerm('settings') ? el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Tên công ty (hiển thị trên app)', nameI), saveName)
+    hasPerm('settings') ? el('div', { style: 'display:flex;flex-direction:column;gap:14px' },
+      field('Tên công ty (hiển thị trên app)', nameI), saveName,
+      el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:2px 0' }),
+      el('div', {},
+        el('label', {}, 'Logo công ty (hiện ở màn đăng nhập & app nhân viên)'),
+        el('div', { style: 'display:flex;align-items:center;gap:14px;margin-top:8px;flex-wrap:wrap' },
+          logoImg,
+          el('div', { style: 'display:flex;flex-direction:column;gap:8px' }, logoFile, el('div', { style: 'display:flex;gap:8px' }, upLogo, rmLogo)))),
+      el('div', { class: 'map-hint' }, 'PNG / JPG / WebP / SVG, tối đa 2MB. Đổi xong tải lại trang (F5) để thấy ở màn đăng nhập.'))
       : el('p', { style: 'color:var(--muted)' }, 'Bạn không có quyền sửa mục này.'));
 
   // ----- Kiểu chấm công + Phạm vi chấm công -----
