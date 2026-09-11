@@ -205,7 +205,7 @@ export function syncFillDevice(serial) {
   queueCmd(serial, 'DATA QUERY FINGERTMP');
   queueCmd(serial, 'DATA QUERY BIODATA');
   // 2) đẩy template của nhóm mà máy này CHƯA có
-  const mine = new Set(db.prepare('SELECT pin||"|"||bio_type||"|"||idx k FROM device_bio_templates WHERE serial=?').all(serial).map((r) => r.k));
+  const mine = new Set(db.prepare("SELECT pin||'|'||bio_type||'|'||idx k FROM device_bio_templates WHERE serial=?").all(serial).map((r) => r.k));
   const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>?").all(dev.sync_group, serial).map((r) => r.serial);
   if (!groupSerials.length) return;
   const ph = groupSerials.map(() => '?').join(',');
