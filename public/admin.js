@@ -1195,6 +1195,7 @@ async function pageDevices() {
   const tbl = el('table', { class: 'data' });
   tbl.innerHTML = `<thead><tr><th>Serial</th><th>Tên máy</th><th>Trạng thái</th><th>👥 NV</th><th>👉 Vân tay</th><th>😊 Mặt</th><th>💳 Thẻ</th><th>IP</th><th>Lần cuối</th><th>Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
+  const countCells = {};   // serial -> {nv,fp,face,card} để tự làm mới số liệu
   if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
   for (const m of d.rows) {
     const approve = m.active
@@ -1204,14 +1205,16 @@ async function pageDevices() {
     const groupBtn = btnSm('Nhóm ĐB', async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { sync_group: g } }); toast('Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } }, 'ghost');
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m));
     const del = btnSm('Xoá', async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } }, 'ghost');
+    const cNV = el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0));
+    const cFP = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.fp_count ?? 0));
+    const cFace = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.face_count ?? 0));
+    const cCard = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.card_count ?? 0));
+    countCells[m.serial] = { cNV, cFP, cFace, cCard };
     tb.append(el('tr', {},
       el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, m.serial)),
       el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : ''),
       el('td', {}, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
-      el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0)),
-      el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.fp_count ?? 0)),
-      el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.face_count ?? 0)),
-      el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.card_count ?? 0)),
+      cNV, cFP, cFace, cCard,
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
@@ -1219,6 +1222,22 @@ async function pageDevices() {
     ));
   }
   tbl.append(tb);
+  // Tự làm mới số NV/vân tay/mặt/thẻ mỗi 10s (tự dừng khi rời trang Máy chấm công)
+  const tickCounts = async () => {
+    if (!document.body.contains(tbl)) return;          // đã rời trang → dừng hẳn
+    try {
+      const dd = await api('/admin/devices');
+      for (const m of dd.rows) {
+        const cc = countCells[m.serial]; if (!cc) continue;
+        cc.cNV.textContent = String(m.emp_count ?? 0);
+        cc.cFP.textContent = String(m.fp_count ?? 0);
+        cc.cFace.textContent = String(m.face_count ?? 0);
+        cc.cCard.textContent = String(m.card_count ?? 0);
+      }
+    } catch { /* bỏ qua, thử lại lần sau */ }
+    if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
+  };
+  setTimeout(tickCounts, 10000);
   const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Đồng bộ lại (khớp mã NV)');
   rebuildBtn.onclick = async () => {
     rebuildBtn.disabled = true; rebuildBtn.textContent = 'Đang xử lý…';
