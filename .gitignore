@@ -23,3 +23,7 @@ CapNhat.bat
 
 # Binary nang - khong can trong repo (auto-update chi can code)
 tools/*.exe
+
+# Tai lieu NOI BO cua Anh - KHONG dua len GitHub
+QUY-TRINH-BAN-KHACH.txt
+DOC-CHO-ANH.txt

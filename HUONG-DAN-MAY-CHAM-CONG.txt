@@ -1,0 +1,66 @@
+========================================================
+   HƯỚNG DẪN KẾT NỐI MÁY CHẤM CÔNG (VÂN TAY / KHUÔN MẶT)
+   Digiplus Chấm Công
+========================================================
+
+Máy chấm công sẽ TỰ GỬI dữ liệu về phần mềm (vân tay, khuôn mặt, lượt
+chấm công). Chỉ cần khai báo "địa chỉ máy chủ" trên máy một lần.
+
+--------------------------------------------------------
+BƯỚC 1. BẬT NHẬN DỮ LIỆU TRONG PHẦN MỀM
+--------------------------------------------------------
+• Đăng nhập trang quản lý → menu "Máy chấm công".
+• Bật công tắc "Dùng máy chấm công".
+• Xem ở đó dòng "Server IP" và "Port" (bấm nút "Refresh mạng" để lấy IP mới
+  nhất). Ghi lại 2 thông số này để nhập vào máy ở Bước 2.
+  (Nếu bên cung cấp cài trên máy chủ đám mây thì sẽ đưa bạn Địa chỉ + Cổng riêng.)
+
+--------------------------------------------------------
+BƯỚC 2. KHAI BÁO TRÊN MÁY CHẤM CÔNG (máy ZKTeco)
+--------------------------------------------------------
+Trên máy: Menu  →  Comm/Kết nối  →  Cloud Server / ADMS (Đám mây), rồi nhập:
+
+  ● TRƯỜNG HỢP A — Phần mềm cài tại văn phòng (cùng mạng với máy):
+      - Server / Address = IP máy chủ (VD: 192.168.0.107)
+      - Port            = Cổng phần mềm (VD: 8686)
+      - Giao thức       = HTTP   (KHÔNG bật SSL/HTTPS)
+      → Máy chấm công và máy tính cài phần mềm phải CÙNG MẠNG (chung modem/wifi).
+
+  ● TRƯỜNG HỢP B — Phần mềm chạy trên máy chủ đám mây (bên cung cấp lo):
+      Bên cung cấp sẽ đưa bạn 1 trong 2 kiểu, nhập đúng như được cấp:
+      - Kiểu tên miền:  Address = ten-cong-ty.maychamcongcloud.com
+                        Port = 443,  BẬT SSL/HTTPS
+      - Hoặc kiểu IP:   Address = (IP máy chủ được cấp)
+                        Port = (cổng được cấp),  HTTP
+      → Máy chỉ cần có INTERNET tại văn phòng (dùng mạng bình thường là được).
+
+• Lưu lại và KHỞI ĐỘNG LẠI máy chấm công.
+
+--------------------------------------------------------
+BƯỚC 3. DUYỆT MÁY + ĐĂNG KÝ NHÂN VIÊN
+--------------------------------------------------------
+• Sau 10–30 giây, máy sẽ hiện trong phần mềm ở mục "Máy chấm công" với trạng
+  thái "Chờ duyệt" → bấm "Duyệt".
+• Đăng ký vân tay/khuôn mặt cho nhân viên trên máy → nhân viên tự hiện về phần mềm.
+• Trong hồ sơ nhân viên, điền "Số ID máy" cho khớp với số ID trên máy chấm công
+  (để tính công đúng người).
+
+--------------------------------------------------------
+NHIỀU MÁY CHẤM CÔNG (2 máy trở lên)
+--------------------------------------------------------
+• Muốn 2 máy tự chia sẻ nhân viên/vân tay cho nhau: vào "Máy chấm công", bấm
+  "Nhóm ĐB" ở TỪNG máy và đặt CÙNG một tên nhóm (VD: nhom1).
+• Từ đó, đăng ký trên 1 máy sẽ tự đồng bộ sang máy kia.
+• Nếu thấy lệch, bấm nút "🔁 Đồng bộ vân tay các máy". Bảng có các cột
+  NV / Vân tay / Mặt / Thẻ để bạn đối chiếu 2 máy đã giống nhau chưa.
+
+--------------------------------------------------------
+KHÔNG THẤY MÁY HIỆN LÊN? KIỂM TRA NHANH
+--------------------------------------------------------
+1. Máy chấm công đã có mạng (Internet hoặc cùng LAN với máy chủ) chưa?
+2. Nhập ĐÚNG Address + Port chưa? Đúng HTTP/HTTPS như hướng dẫn chưa?
+3. Đã BẬT "Dùng máy chấm công" trong phần mềm chưa?
+4. Đã khởi động lại máy chấm công sau khi lưu cấu hình chưa?
+5. Vẫn không được → chụp màn hình cấu hình trên máy gửi bên hỗ trợ.
+
+Hỗ trợ: Digiplus.
