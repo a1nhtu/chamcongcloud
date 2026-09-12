@@ -1689,10 +1689,47 @@ async function pageSettings() {
       updStatus,
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;
 
+  // ----- Bản quyền / Gia hạn -----
+  const licBox = el('div', {}, loading());
+  const loadLic = async () => {
+    let s2; try { s2 = await fetch('/api/license/status').then((r) => r.json()); }
+    catch { licBox.innerHTML = ''; licBox.append(el('div', { class: 'map-hint' }, 'Không đọc được trạng thái bản quyền.')); return; }
+    licBox.innerHTML = '';
+    const row = (k, v, color) => el('div', { style: 'display:flex;gap:8px;padding:3px 0' }, el('span', { style: 'color:var(--muted);min-width:130px' }, k), el('b', color ? { style: 'color:' + color } : {}, v));
+    const days = s2.exp ? (s2.daysLeft > 0 ? `còn ${s2.daysLeft} ngày` : 'ĐÃ HẾT HẠN') : '';
+    licBox.append(
+      row('Trạng thái:', s2.activated ? '✅ Đã kích hoạt' : '❌ Chưa kích hoạt / hết hạn', s2.activated ? '#1a7f37' : '#c0392b'),
+      s2.company ? row('Công ty:', s2.company) : '',
+      row('Hạn dùng:', s2.exp ? s2.exp + '  (' + days + ')' : 'Vĩnh viễn', s2.exp && s2.daysLeft <= 0 ? '#c0392b' : (s2.exp && s2.daysLeft <= 15 ? '#b45309' : '')),
+      row('Số NV tối đa:', s2.maxEmp || 'Không giới hạn'),
+      row('Mã máy:', s2.machineIdFmt || '—'));
+    const copyBtn = el('button', { class: 'btn sm ghost' }, '📋 Copy Mã máy');
+    copyBtn.onclick = () => { try { navigator.clipboard.writeText(s2.machineIdFmt || ''); toast('Đã copy Mã máy', 'ok'); } catch { toast('Copy thủ công giúp em', 'err'); } };
+    licBox.append(el('div', { style: 'margin-top:8px' }, copyBtn));
+    const licI = el('textarea', { rows: 3, placeholder: 'Dán license mới (gia hạn) do Digiplus cấp...', style: 'width:100%;font-family:monospace;font-size:12px;padding:10px;border:1px solid var(--line,#e7e3df);border-radius:10px' });
+    const actBtn = el('button', { class: 'btn' }, '🔑 Gia hạn / Kích hoạt');
+    actBtn.onclick = async () => {
+      const key = licI.value.trim(); if (!key) return toast('Dán license vào ô', 'err');
+      actBtn.disabled = true;
+      try {
+        const res = await fetch('/api/license/activate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) });
+        const d = await res.json(); if (!res.ok) throw new Error(d.error || 'Lỗi kích hoạt');
+        toast('✅ Đã cập nhật bản quyền', 'ok'); licI.value = ''; loadLic();
+      } catch (e) { toast(e.message, 'err'); } finally { actBtn.disabled = false; }
+    };
+    licBox.append(el('div', { style: 'margin-top:14px;padding-top:12px;border-top:1px solid #eee' },
+      el('div', { style: 'font-weight:700;margin-bottom:6px' }, 'Gia hạn / nhập license mới'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, 'Gửi Mã máy ở trên cho Digiplus để lấy license, rồi dán vào đây và bấm. Dùng được cả khi CHƯA hết hạn (gia hạn sớm) — hạn mới sẽ thay hạn cũ.'),
+      licI, el('div', { style: 'margin-top:8px' }, actBtn)));
+  };
+  const panelLicense = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, '🔑 Bản quyền'), licBox);
+
   const panel2 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px' },
     el('h3', { style: 'margin-top:0' }, 'Đổi mật khẩu của tôi'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Mật khẩu hiện tại', oldP), field('Mật khẩu mới', newP), savePw));
-  setMain(head('Cài đặt'), panel1, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
+  setMain(head('Cài đặt'), panel1, panelLicense, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
+  loadLic();
 }
