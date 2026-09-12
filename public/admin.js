@@ -21,7 +21,8 @@ const NAV = [
   ['report', '📅', 'Báo cáo', 'reports'],
   ['settings', '⚙️', 'Cài đặt', 'settings'],
 ];
-const isAdmin = () => ME?.role === 'admin';
+const isMaster = () => ME?.role === 'master';                 // tài khoản tổng (Anh)
+const isAdmin = () => ME?.role === 'admin' || isMaster();     // master có mọi quyền admin
 const hasPerm = (key) => isAdmin() || (ME?.permissions || []).includes(key);
 const hourlyMode = () => SETTINGS.attendance_mode === 'hourly';
 const deviceEnabled = () => SETTINGS.device_enabled === '1';
@@ -1148,7 +1149,7 @@ async function pageDevices() {
   let d;
   try { d = await api('/admin/devices'); } catch (e) { setMain(head('Máy chấm công'), el('div', { class: 'empty' }, e.message)); return; }
 
-  // Bật/tắt dùng máy chấm công + tự tạo NV khi đăng ký vân tay
+  // Bật/tắt dùng máy chấm công + tự tạo NV — CHỈ tài khoản tổng đổi được
   const enChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.enabled ? { checked: '' } : {}) });
   const autoChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.autocreate ? { checked: '' } : {}) });
   const saveEn = el('button', { class: 'btn sm' }, 'Lưu');
@@ -1159,14 +1160,20 @@ async function pageDevices() {
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 600);
     } catch (e) { toast(e.message, 'err'); }
   };
-  const togglePanel = el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
-    el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, enChk,
-      el('div', {}, el('b', {}, 'Dùng máy chấm công (kết nối máy ZKTeco)'),
-        el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật để nhận dữ liệu chấm công máy tự đẩy về. Tắt = chỉ chấm bằng điện thoại. Có thể dùng song song.'))),
-    el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, autoChk,
-      el('div', {}, el('b', {}, 'Tự tạo nhân viên khi đăng ký vân tay trên máy'),
-        el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: đăng ký vân tay/khuôn mặt cho Số ID mới trên máy → phần mềm tự tạo NV nháp (Số ID + tên máy gửi về), admin bổ sung sau. Tắt: chỉ ghi nhận, chờ admin gán tay.'))),
-    el('div', { style: 'margin-top:12px' }, saveEn));
+  const stPill = (on) => el('span', { class: 'pill ' + (on ? 'ok' : 'warn'), style: 'margin-left:6px' }, on ? 'ĐANG BẬT' : 'ĐANG TẮT');
+  const togglePanel = isMaster()
+    ? el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
+        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, enChk,
+          el('div', {}, el('b', {}, 'Dùng máy chấm công (kết nối máy ZKTeco)'),
+            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật để nhận dữ liệu chấm công máy tự đẩy về. Tắt = chỉ chấm bằng điện thoại. Có thể dùng song song.'))),
+        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, autoChk,
+          el('div', {}, el('b', {}, 'Tự tạo nhân viên khi đăng ký vân tay trên máy'),
+            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: đăng ký vân tay/khuôn mặt cho Số ID mới trên máy → phần mềm tự tạo NV nháp (Số ID + tên máy gửi về), admin bổ sung sau. Tắt: chỉ ghi nhận, chờ admin gán tay.'))),
+        el('div', { style: 'margin-top:12px' }, saveEn))
+    : el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
+        el('div', {}, el('b', {}, 'Tính năng máy chấm công:'), stPill(d.enabled)),
+        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Tự tạo NV khi đăng ký vân tay:'), stPill(d.autocreate)),
+        el('div', { class: 'map-hint', style: 'margin-top:8px' }, '🔒 Chỉ tài khoản tổng (Digiplus) mới bật/tắt được tính năng máy chấm công.'));
 
   // Hướng dẫn cấu hình máy + nút Refresh mạng (đổi mạng xong bấm để lấy IP mới)
   const ipVal = el('b', { style: 'color:var(--brand-ink,#c0392b);font-size:16px;font-family:monospace' }, d.server_ips[0] || '(IP máy chủ)');
@@ -1382,6 +1389,13 @@ async function restoreBackup(file) {
   if (!res.ok) { toast(j.error || 'Lỗi phục hồi', 'err'); return; }
   alert('✅ Đã nạp bản sao lưu.\n\nBây giờ hãy KHỞI ĐỘNG LẠI phần mềm (tắt rồi mở lại) để hoàn tất phục hồi dữ liệu.');
 }
+async function restoreFullBackup(file) {
+  const buf = await file.arrayBuffer();
+  const res = await fetch('/api/admin/backup/full-restore', { method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'Content-Type': 'application/octet-stream' }, body: buf });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok) { toast(j.error || 'Lỗi phục hồi', 'err'); return; }
+  alert('✅ Đã nạp bản sao lưu TOÀN BỘ (dữ liệu + ảnh + logo).\n\nBây giờ hãy KHỞI ĐỘNG LẠI phần mềm (tắt rồi mở lại) để hoàn tất.');
+}
 const fmtSize = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 
 async function pageSettings() {
@@ -1447,7 +1461,9 @@ async function pageSettings() {
   saveMode.onclick = async () => {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value || 'shift';
     try {
-      await api('/admin/settings', { method: 'PUT', body: { attendance_mode, geofence_enforce: geoChk.checked, device_enabled: devChk.checked, device_lock_enabled: lockChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked } });
+      const body = { attendance_mode, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked };
+      if (isMaster()) body.device_enabled = devChk.checked;   // chỉ tài khoản tổng đổi được máy chấm công
+      await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -1470,9 +1486,11 @@ async function pageSettings() {
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: điện thoại đầu tiên nhân viên chấm sẽ được gắn cho tài khoản; đăng nhập máy khác sẽ KHÔNG chấm được (chống mượn tài khoản, chấm hộ). Đổi điện thoại phải admin duyệt ở menu “Duyệt đổi thiết bị”. Ảnh chấm công luôn được đóng dấu giờ + tên + GPS.'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Máy chấm công (ZKTeco)'),
-      el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, devChk,
-        el('div', {}, el('b', {}, 'Dùng máy chấm công'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật để nhận dữ liệu chấm công đẩy về từ máy ZKTeco (vân tay/khuôn mặt/thẻ). Cấu hình & duyệt máy ở menu “Máy chấm công”. Có thể dùng song song với chấm điện thoại.'))),
+      isMaster()
+        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, devChk,
+            el('div', {}, el('b', {}, 'Dùng máy chấm công'),
+              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật để nhận dữ liệu chấm công đẩy về từ máy ZKTeco (vân tay/khuôn mặt/thẻ). Cấu hình & duyệt máy ở menu “Máy chấm công”. Có thể dùng song song với chấm điện thoại.')))
+        : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.device_enabled === '1' ? 'Đang BẬT. ' : 'Đang TẮT. '), '🔒 Chỉ tài khoản tổng (Digiplus) bật/tắt được tính năng máy chấm công.'),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Nhân viên tự chọn ca'),
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, selfChk,
@@ -1567,7 +1585,15 @@ async function pageSettings() {
       catch (e) { toast(e.message, 'err'); }
       finally { nowBtn.disabled = false; nowBtn.textContent = '⬇ Sao lưu ngay & tải về'; }
     };
-    bkBox.append(el('div', { style: 'margin-top:14px' }, nowBtn));
+    const fullBtn = el('button', { class: 'btn' }, '⬇ Sao lưu TOÀN BỘ (.zip)');
+    fullBtn.onclick = async () => {
+      fullBtn.disabled = true; fullBtn.textContent = 'Đang nén…';
+      try { const r = await api('/admin/backup/full', { method: 'POST' }); toast('Đã tạo bản sao lưu toàn bộ', 'ok'); await downloadBackup(r.name); loadBackups(); }
+      catch (e) { toast(e.message, 'err'); }
+      finally { fullBtn.disabled = false; fullBtn.textContent = '⬇ Sao lưu TOÀN BỘ (.zip)'; }
+    };
+    bkBox.append(el('div', { style: 'margin-top:14px;display:flex;gap:8px;flex-wrap:wrap' }, nowBtn, fullBtn));
+    bkBox.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, '"Sao lưu ngày" (.db) = chỉ dữ liệu. "Sao lưu TOÀN BỘ" (.zip) = dữ liệu + ảnh chấm công + logo — dùng khi chuyển máy / lên VPS.'));
 
     // Danh sách bản sao lưu
     bkBox.append(el('div', { class: 'sec-title', style: 'font-weight:700;margin:16px 0 6px' }, `Các bản sao lưu (${d.list.length})`));
@@ -1576,24 +1602,25 @@ async function pageSettings() {
       const dl = btnSm('Tải', () => downloadBackup(b.name));
       const del = btnSm('Xoá', async () => { if (confirm('Xoá bản sao lưu này?')) { await api('/admin/backup?name=' + encodeURIComponent(b.name), { method: 'DELETE' }); loadBackups(); } }, 'ghost');
       bkBox.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1efec' },
-        el('span', { style: 'flex:1;font-family:monospace;font-size:13px' }, b.name),
-        el('span', { style: 'color:var(--muted);font-size:12px' }, fmtSize(b.size)), dl, del));
+        el('span', { style: 'flex:1;font-family:monospace;font-size:13px' }, (b.full ? '📦 ' : '🗃 ') + b.name),
+        el('span', { style: 'color:var(--muted);font-size:12px' }, (b.full ? 'toàn bộ · ' : '') + fmtSize(b.size)), dl, del));
     }
 
-    // Phục hồi
-    const fileI = el('input', { type: 'file', accept: '.db', style: 'font-size:13px' });
-    const restoreBtn = el('button', { class: 'btn ghost' }, '⬆ Phục hồi từ file .db');
+    // Phục hồi (nhận cả .db lẫn .zip toàn bộ)
+    const fileI = el('input', { type: 'file', accept: '.db,.zip', style: 'font-size:13px' });
+    const restoreBtn = el('button', { class: 'btn ghost' }, '⬆ Phục hồi từ file (.db / .zip)');
     restoreBtn.onclick = async () => {
       const f = fileI.files?.[0];
-      if (!f) return toast('Chọn file .db bản sao lưu', 'err');
-      if (!confirm('PHỤC HỒI sẽ thay toàn bộ dữ liệu hiện tại bằng dữ liệu trong file này. Tiếp tục?')) return;
+      if (!f) return toast('Chọn file sao lưu (.db hoặc .zip)', 'err');
+      const isZip = /\.zip$/i.test(f.name);
+      if (!confirm((isZip ? 'PHỤC HỒI TOÀN BỘ (dữ liệu + ảnh + logo)' : 'PHỤC HỒI dữ liệu') + ' sẽ thay toàn bộ hiện tại bằng file này. Tiếp tục?')) return;
       restoreBtn.disabled = true; restoreBtn.textContent = 'Đang nạp…';
-      await restoreBackup(f);
-      restoreBtn.disabled = false; restoreBtn.textContent = '⬆ Phục hồi từ file .db';
+      try { await (isZip ? restoreFullBackup(f) : restoreBackup(f)); }
+      finally { restoreBtn.disabled = false; restoreBtn.textContent = '⬆ Phục hồi từ file (.db / .zip)'; }
     };
     bkBox.append(el('div', { style: 'margin-top:16px;padding-top:14px;border-top:1px solid #eee' },
-      el('div', { style: 'font-weight:700;margin-bottom:8px' }, 'Phục hồi dữ liệu (khi cài lại máy)'),
-      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, 'Chọn file .db đã sao lưu rồi bấm Phục hồi. Sau đó khởi động lại phần mềm.'),
+      el('div', { style: 'font-weight:700;margin-bottom:8px' }, 'Phục hồi dữ liệu (khi cài lại máy / chuyển VPS)'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, 'Chọn file .db (chỉ dữ liệu) hoặc .zip (toàn bộ: dữ liệu + ảnh + logo) rồi bấm Phục hồi. Sau đó khởi động lại phần mềm.'),
       el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, fileI, restoreBtn)));
   };
   const panelBackup = hasPerm('backup') ? el('div', { class: 'panel', style: 'padding:20px;max-width:560px;margin-bottom:16px' },

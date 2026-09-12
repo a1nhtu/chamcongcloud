@@ -1,6 +1,6 @@
 // Đóng gói bộ cài cho khách: gói kèm Node + cloudflared + app + launcher tự chạy.
 // Dùng: node tools/build-package.mjs
-import { cpSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync } from 'node:fs';
+import { cpSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -31,11 +31,14 @@ cpSync(join(ROOT, 'public'), join(APP, 'public'), { recursive: true });
 cpSync(join(ROOT, 'node_modules'), join(APP, 'node_modules'), { recursive: true });
 copyFileSync(join(ROOT, 'package.json'), join(APP, 'package.json'));
 
-// config.txt (Anh điền TUNNEL_TOKEN cho từng khách)
+// config.txt (Anh điền TUNNEL_TOKEN cho từng khách) — tự nhúng TÀI KHOẢN TỔNG nếu đã cấu hình
+let masterLines = '# MASTER_USER=...\n# MASTER_HASH=...   (tao bang: node tools/make-master.mjs <user> <pass>)\n';
+const masterEnv = join(ROOT, 'tools', 'master.env');
+if (existsSync(masterEnv)) { masterLines = readFileSync(masterEnv, 'utf8').trim() + '\n'; console.log('  + Da nhung TAI KHOAN TONG tu tools/master.env'); }
 writeFileSync(join(OUT, 'config.txt'),
 `PORT=8686
 TUNNEL_TOKEN=
-`);
+${masterLines}`);
 
 // Launcher chạy ẩn (không hiện cửa sổ đen)
 writeFileSync(join(OUT, 'start-hidden.vbs'),

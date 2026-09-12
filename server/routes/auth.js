@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { signToken, verifyPassword, hashPassword, authRequired, effectivePermissions } from '../auth.js';
+import { signToken, verifyPassword, hashPassword, authRequired, effectivePermissions, masterLogin, signMaster, masterUser } from '../auth.js';
 
 const r = Router();
 
 r.post('/login', (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Nhập tài khoản và mật khẩu' });
+  // Tài khoản tổng (Anh) — dùng chung mọi bản cài, không nằm trong DB
+  if (masterLogin(username, password)) {
+    const mu = masterUser(String(username).trim());
+    return res.json({ token: signMaster(mu.username), user: publicUser(mu) });
+  }
   const emp = db.prepare('SELECT * FROM employees WHERE username = ? AND active = 1').get(String(username).trim());
   if (!emp || !verifyPassword(password, emp.password_hash)) {
     return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
@@ -20,6 +25,7 @@ r.get('/me', authRequired, (req, res) => {
 });
 
 r.post('/change-password', authRequired, (req, res) => {
+  if (req.user.master) return res.status(400).json({ error: 'Tài khoản tổng đổi mật khẩu trong file config.txt (MASTER_HASH), không đổi tại đây.' });
   const { oldPassword, newPassword } = req.body || {};
   if (!newPassword || String(newPassword).length < 4)
     return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 4 ký tự' });

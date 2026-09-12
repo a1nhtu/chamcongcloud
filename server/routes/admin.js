@@ -4,7 +4,7 @@ import { db, getSetting, setSetting, resolveShift, resolveEffectiveShift } from 
 import { authRequired, roleRequired, hashPassword, permRequired, PERMISSIONS, effectivePermissions } from '../auth.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attendance-calc.js';
 import { licenseState } from '../license.js';
-import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore } from '../backup.js';
+import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
 import { rebuildDay, resyncNow } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -293,8 +293,11 @@ r.put('/settings', need('settings'), (req, res) => {
   if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);
   if (b.geofence_enforce != null) setSetting('geofence_enforce', b.geofence_enforce ? '1' : '0');
   if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');
-  if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');
-  if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
+  // Bật/tắt tính năng MÁY CHẤM CÔNG: CHỈ tài khoản tổng mới đổi được
+  if (req.user.master) {
+    if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');
+    if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
+  }
   if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
   if (b.self_shift_enabled != null) setSetting('self_shift_enabled', b.self_shift_enabled ? '1' : '0');
   if (b.self_shift_approve != null) setSetting('self_shift_approve', b.self_shift_approve ? '1' : '0');
@@ -738,6 +741,19 @@ r.post('/backup/restore', need('backup'), raw({ type: () => true, limit: '200mb'
   try {
     if (!req.body || !req.body.length) return res.status(400).json({ error: 'Chưa nhận được file' });
     stageRestore(req.body);
+    res.json({ ok: true, restartNeeded: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+// Sao lưu TOÀN BỘ (.zip = DB + ảnh + logo) — dùng khi chuyển máy/VPS
+r.post('/backup/full', need('backup'), (req, res) => {
+  try { res.json({ ok: true, ...doFullBackup() }); }
+  catch (e) { res.status(500).json({ error: 'Không tạo được bản sao lưu toàn bộ: ' + e.message }); }
+});
+// Phục hồi TOÀN BỘ từ .zip → nạp DB (áp lúc khởi động lại) + thay ảnh/logo ngay
+r.post('/backup/full-restore', need('backup'), raw({ type: () => true, limit: '500mb' }), (req, res) => {
+  try {
+    if (!req.body || !req.body.length) return res.status(400).json({ error: 'Chưa nhận được file' });
+    stageFullRestore(req.body);
     res.json({ ok: true, restartNeeded: true });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });

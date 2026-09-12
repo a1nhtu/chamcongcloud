@@ -28,12 +28,38 @@ export function signToken(employee) {
   );
 }
 
+/* ---------------- TÀI KHOẢN TỔNG (master) — dùng chung mọi bản cài ----------------
+   Không nằm trong DB. Cấu hình qua biến môi trường (đặt trong config.txt):
+     MASTER_USER=<tên đăng nhập>
+     MASTER_HASH=<bcrypt hash>   (ưu tiên; tạo bằng tools/make-master.mjs)
+   hoặc MASTER_PASS=<mật khẩu thô>  (kém an toàn hơn, chỉ nên dùng tạm).            */
+export function masterUsername() { return (process.env.MASTER_USER || '').trim(); }
+export function masterLogin(username, password) {
+  const u = masterUsername();
+  if (!u || String(username || '').trim() !== u) return false;
+  const hash = (process.env.MASTER_HASH || '').trim();
+  if (hash) { try { return bcrypt.compareSync(password || '', hash); } catch { return false; } }
+  const plain = process.env.MASTER_PASS;
+  return plain != null && plain !== '' && password === plain;
+}
+export function signMaster(username) {
+  return jwt.sign({ master: true, role: 'master', name: username }, getSecret(), { expiresIn: '30d' });
+}
+// Đối tượng user đại diện cho tài khoản tổng (không có trong DB)
+export function masterUser(username) {
+  return { id: 0, code: 'master', full_name: 'Tài khoản tổng', role: 'master', master: true, username: username || masterUsername() || 'master' };
+}
+
 export function authRequired(req, res, next) {
   const h = req.headers.authorization || '';
   const token = h.startsWith('Bearer ') ? h.slice(7) : null;
   if (!token) return res.status(401).json({ error: 'Chưa đăng nhập' });
   try {
     const payload = jwt.verify(token, getSecret());
+    if (payload.master) {           // tài khoản tổng — không tra DB
+      req.user = masterUser(payload.name);
+      return next();
+    }
     const emp = db.prepare('SELECT * FROM employees WHERE id = ? AND active = 1').get(payload.id);
     if (!emp) return res.status(401).json({ error: 'Tài khoản không hợp lệ' });
     req.user = emp;
@@ -45,6 +71,7 @@ export function authRequired(req, res, next) {
 
 export function roleRequired(...roles) {
   return (req, res, next) => {
+    if (req.user?.master) return next();     // tài khoản tổng qua mọi cửa
     if (!req.user || !roles.includes(req.user.role)) {
       return res.status(403).json({ error: 'Không có quyền truy cập' });
     }
@@ -78,7 +105,7 @@ const MANAGER_DEFAULT = ['reports', 'employees', 'shifts', 'assignments', 'shift
 // Quyền hiệu lực của một nhân viên. admin = toàn quyền.
 export function effectivePermissions(emp) {
   if (!emp) return [];
-  if (emp.role === 'admin') return ALL_PERMS.slice();
+  if (emp.master || emp.role === 'admin') return ALL_PERMS.slice();
   if (emp.permissions != null && emp.permissions !== '') {
     try { const p = JSON.parse(emp.permissions); if (Array.isArray(p)) return p.filter((k) => ALL_PERMS.includes(k)); } catch {}
   }
@@ -86,7 +113,7 @@ export function effectivePermissions(emp) {
 }
 
 export function hasPerm(emp, key) {
-  return emp?.role === 'admin' || effectivePermissions(emp).includes(key);
+  return emp?.master || emp?.role === 'admin' || effectivePermissions(emp).includes(key);
 }
 
 // Middleware: yêu cầu 1 quyền cụ thể (admin luôn qua).
