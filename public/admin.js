@@ -1428,6 +1428,12 @@ async function disablePush() {
   if (sub) { try { await api('/admin/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch {} try { await sub.unsubscribe(); } catch {} }
 }
 
+/* ---------- Cài app vào máy (PWA install) ---------- */
+let deferredPrompt = null;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; });
+const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+
 async function pageSettings() {
   setMain(head('Cài đặt'), loading());
   const s = await api('/admin/settings');
@@ -1755,6 +1761,32 @@ async function pageSettings() {
   const panelLicense = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, '🔑 Bản quyền'), licBox);
 
+  // ----- Cài app vào máy (PWA) -----
+  const installBox = el('div', {});
+  const renderInstall = () => {
+    installBox.innerHTML = '';
+    if (isStandalone()) { installBox.append(el('div', { style: 'color:#1a7f37;font-weight:600' }, '✅ App đã được cài trên thiết bị này.')); return; }
+    if (deferredPrompt) {
+      const b = el('button', { class: 'btn' }, '📲 Cài app vào máy');
+      b.onclick = async () => { try { deferredPrompt.prompt(); await deferredPrompt.userChoice; } catch {} deferredPrompt = null; setTimeout(renderInstall, 400); };
+      installBox.append(b, el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Bấm để cài như ứng dụng thật (mở nhanh + nhận thông báo).'));
+      return;
+    }
+    if (isIOS()) {
+      installBox.append(el('ol', { style: 'margin:0;padding-left:18px;font-size:14px;line-height:1.9' },
+        el('li', { html: 'Mở trang này bằng <b>Safari</b>.' }),
+        el('li', { html: 'Bấm nút <b>Chia sẻ</b> (ô vuông có mũi tên ↑ ở thanh dưới); nếu đang ở menu thì bấm dòng <b>“Chia sẻ”</b>.' }),
+        el('li', { html: 'Vuốt xuống → chọn <b>“Thêm vào Màn hình chính”</b> → <b>Thêm</b>.' }),
+        el('li', { html: 'Mở app từ <b>icon</b> vừa tạo, rồi bật 🔔 Thông báo bên dưới.' })));
+      return;
+    }
+    installBox.append(el('div', { class: 'map-hint' }, 'Mở menu trình duyệt (⋮) → chọn “Thêm vào Màn hình chính” / “Cài đặt ứng dụng”.'));
+  };
+  const panelInstall = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, '📲 Cài app vào máy'),
+    el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Cài để mở nhanh như ứng dụng thật và nhận thông báo chấm công (iPhone bắt buộc cài mới nhận được thông báo).'),
+    installBox);
+
   // ----- Thông báo đẩy khi có người chấm công -----
   const notifyBox = el('div', {}, loading());
   const renderNotify = async () => {
@@ -1783,9 +1815,10 @@ async function pageSettings() {
   const panel2 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px' },
     el('h3', { style: 'margin-top:0' }, 'Đổi mật khẩu của tôi'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Mật khẩu hiện tại', oldP), field('Mật khẩu mới', newP), savePw));
-  setMain(head('Cài đặt'), panel1, panelLicense, panelNotify, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
+  setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
   loadLic();
+  renderInstall();
   renderNotify();
 }
