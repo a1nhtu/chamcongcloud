@@ -200,11 +200,15 @@ function showActivation(s) {
 /* ---------- GPS ---------- */
 export function getGps() {
   return new Promise((resolve, reject) => {
+    if (!window.isSecureContext) return reject(new Error('Cần mở app bằng đường link HTTPS (an toàn) mới lấy được vị trí. Hãy mở bằng địa chỉ web (domain) công ty cấp — KHÔNG mở bằng địa chỉ IP dạng http.'));
     if (!navigator.geolocation) return reject(new Error('Thiết bị không hỗ trợ GPS'));
     navigator.geolocation.getCurrentPosition(
       (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude, accuracy: Math.round(pos.coords.accuracy) }),
-      (err) => reject(new Error(err.code === 1 ? 'Bạn chưa cấp quyền vị trí' : 'Không lấy được vị trí GPS')),
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+      (err) => reject(new Error(
+        err.code === 1 ? 'Chưa cho phép quyền Vị trí. Bấm “Cho phép/Allow” khi được hỏi; nếu lỡ chặn: bấm biểu tượng ổ khoá cạnh địa chỉ web → bật lại Vị trí, và bật Dịch vụ vị trí (Location) trên điện thoại.'
+          : err.code === 3 ? 'Lấy vị trí quá lâu — ra chỗ thoáng (gần cửa sổ/ngoài trời) rồi thử lại.'
+            : 'Không lấy được vị trí GPS. Kiểm tra đã bật Dịch vụ vị trí (GPS) trên điện thoại chưa.')),
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   });
 }
