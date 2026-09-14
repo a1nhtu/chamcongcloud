@@ -172,18 +172,23 @@ r.post('/check-out', (req, res) => {
   if (dchk.block) return res.status(403).json({ error: dchk.error, code: dchk.code });
 
   const date = vnDateStr();
-  const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?')
-    .get(req.user.id, date);
-  if (!row || !row.check_in_at) return res.status(400).json({ error: 'Chưa vào ca hôm nay' });
-  if (row.check_out_at) return res.status(400).json({ error: 'Bạn đã ra ca hôm nay rồi' });
+  let row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?').get(req.user.id, date);
+  // CA ĐÊM: nếu hôm nay chưa vào ca (hoặc bản ghi hôm nay đã đủ), tìm bản ghi HÔM QUA đã VÀO mà CHƯA RA
+  if (!row || !row.check_in_at || row.check_out_at) {
+    const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL").get(req.user.id, date);
+    if (yRow) row = yRow;
+  }
+  if (!row || !row.check_in_at) return res.status(400).json({ error: 'Chưa vào ca (hôm nay hoặc ca đêm hôm qua)' });
+  if (row.check_out_at) return res.status(400).json({ error: 'Bạn đã ra ca rồi' });
 
+  const wdate = row.work_date;   // ngày công của bản ghi (ca đêm = hôm qua)
+  const at = nowIso();
   const office = req.user.office_id
     ? db.prepare('SELECT * FROM offices WHERE id = ?').get(req.user.office_id) : null;
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  // Dùng đúng ca đã xác định lúc vào ca (chế độ theo giờ: không ca)
-  const shift = hourly ? null : (row.shift_id
-    ? db.prepare('SELECT * FROM shifts WHERE id = ?').get(row.shift_id)
-    : resolveEffectiveShift(req.user.id, date, row.check_in_at).shift);
+  // DÒ LẠI ca bằng CẢ giờ vào + giờ ra (phân biệt ca cùng giờ vào: Sáng/Hành chính; và ca đêm)
+  const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, wdate, row.check_in_at, at);
+  const shift = rs.shift;
 
   let distance = null;
   if (office) {
@@ -197,23 +202,24 @@ r.post('/check-out', (req, res) => {
   try { photoPath = savePhoto(photo, `out_${req.user.code}`); }
   catch (e) { return res.status(400).json({ error: e.message }); }
 
-  const at = nowIso();
-
-  // Tính đầy đủ chỉ số công
+  // Tính đầy đủ chỉ số công (theo ngày công của bản ghi — ca đêm dùng ngày hôm qua)
   let calc;
   if (shift) {
-    calc = computeCheckout(shift, row.check_in_at, at, date, dayFlags(date));
+    calc = computeCheckout(shift, row.check_in_at, at, wdate, dayFlags(wdate));
   } else {
-    // Không gán ca: chỉ tính giờ giữa 2 mốc, coi như đủ 1 công
     const wm = Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
-    calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otTypeOf(date), day_status: 'lam_viec' };
+    calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otTypeOf(wdate), day_status: 'lam_viec' };
   }
+  // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
+  const finalShiftId = shift ? shift.id : row.shift_id;
+  const finalSource = shift ? rs.source : (row.shift_source || '');
+  const finalLate = shift ? computeLate(shift, row.check_in_at, wdate) : row.late_min;
 
   db.prepare(`UPDATE attendance SET check_out_at=?, check_out_lat=?, check_out_lng=?,
     check_out_photo=?, check_out_distance_m=?, work_minutes=?, early_min=?, ot_min=?,
-    work_unit=?, day_status=?, ot_type=? WHERE id=?`)
+    work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=?, late_min=? WHERE id=?`)
     .run(at, lat, lng, photoPath, distance, calc.work_minutes, calc.early_min, calc.ot_min,
-         calc.work_unit, calc.day_status, calc.ot_type, row.id);
+         calc.work_unit, calc.day_status, calc.ot_type, finalShiftId, finalSource, finalLate, row.id);
 
   const updated = db.prepare('SELECT * FROM attendance WHERE id = ?').get(row.id);
   res.json({ ok: true, attendance: updated, meta: calc });

@@ -262,7 +262,7 @@ function metrics(employeeId, workDate, inIso, outIso) {
   const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  const eff = hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`);
+  const eff = hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
   const shift = eff.shift;
   const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';

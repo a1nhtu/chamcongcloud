@@ -272,8 +272,10 @@ function migrateColumns() {
 
   // GĐ5: mã ca + cửa sổ nhận diện giờ vào (để tự động tìm ca)
   add('shifts', 'code',            "TEXT DEFAULT ''");   // mã ca dùng trong Excel phân ca (S, C, HC, DEM...)
-  add('shifts', 'check_in_start',  'TEXT');               // 'HH:MM' đầu cửa sổ nhận vào
-  add('shifts', 'check_in_end',    'TEXT');               // 'HH:MM' cuối cửa sổ nhận vào
+  add('shifts', 'check_in_start',  'TEXT');               // 'HH:MM' đầu cửa sổ nhận VÀO
+  add('shifts', 'check_in_end',    'TEXT');               // 'HH:MM' cuối cửa sổ nhận VÀO
+  add('shifts', 'check_out_start', 'TEXT');               // 'HH:MM' đầu cửa sổ nhận RA (phân biệt ca cùng giờ vào)
+  add('shifts', 'check_out_end',   'TEXT');               // 'HH:MM' cuối cửa sổ nhận RA
   // GĐ5: ca thực tế (đã dò/đã phân) lưu trên bản ghi chấm công
   add('attendance', 'shift_id',    'INTEGER');            // ca áp dụng cho bản ghi này
   add('attendance', 'shift_source', "TEXT DEFAULT ''");   // manual | auto | schedule | default
@@ -368,21 +370,38 @@ export function scheduleShifts(scheduleId) {
     WHERE wss.work_schedule_id = ? AND s.active = 1 ORDER BY wss.sort_order`).all(scheduleId);
 }
 
-// Tự động tìm ca theo giờ chấm. candidates = danh sách ca ứng viên (VD của 1 lịch trình);
-// bỏ trống = xét mọi ca active có cửa sổ nhận diện.
-export function autoDetectShift(checkInIso, candidates) {
+// Cửa sổ nhận RA của 1 ca: dùng cửa sổ khai báo; nếu chưa khai → suy từ Giờ ra (end-1h .. end+8h).
+// (giống phần mềm mẫu). Trả [startMin, endMin]; inWindow tự xử lý ca đêm (wrap qua nửa đêm).
+function outWin(s) {
+  if (s.check_out_start && s.check_out_end) return [hhmm2min(s.check_out_start), hhmm2min(s.check_out_end)];
+  const e = hhmm2min(s.end_time);
+  return [((e - 60) % 1440 + 1440) % 1440, (e + 480) % 1440];
+}
+// Tự động tìm ca theo GIỜ VÀO (+ GIỜ RA nếu biết, để phân biệt các ca cùng giờ vào — VD Sáng vs Hành chính).
+// candidates = danh sách ca ứng viên (VD của 1 lịch trình); bỏ trống = mọi ca active có cửa sổ.
+export function autoDetectShift(checkInIso, candidates, checkOutIso) {
   if (!checkInIso) return null;
-  const min = checkinMinVN(checkInIso);
-  const shifts = candidates || db.prepare("SELECT * FROM shifts WHERE active = 1 AND check_in_start IS NOT NULL AND check_in_end IS NOT NULL AND check_in_start != '' AND check_in_end != ''").all();
-  if (!shifts.length) return null;
-  const withWin = shifts.filter((s) => s.check_in_start && s.check_in_end);
-  const matched = withWin.filter((s) => inWindow(min, hhmm2min(s.check_in_start), hhmm2min(s.check_in_end)));
-  let pool;
-  if (matched.length) pool = matched;
-  else if (candidates) pool = shifts;   // trong lịch trình: ngoài cửa sổ vẫn chọn ca gần nhất
-  else return null;                     // toàn cục: ngoài mọi cửa sổ → dùng ca mặc định
-  pool.sort((a, b) => Math.abs(hhmm2min(a.start_time) - min) - Math.abs(hhmm2min(b.start_time) - min));
-  return pool[0];
+  const inMin = checkinMinVN(checkInIso);
+  const outMin = checkOutIso ? checkinMinVN(checkOutIso) : null;
+  const all = candidates || db.prepare("SELECT * FROM shifts WHERE active = 1 AND check_in_start IS NOT NULL AND check_in_start != ''").all();
+  if (!all.length) return null;
+  const withWin = all.filter((s) => s.check_in_start && s.check_in_end);
+  // Khớp cửa sổ VÀO
+  const ciMatch = withWin.filter((s) => inWindow(inMin, hhmm2min(s.check_in_start), hhmm2min(s.check_in_end)));
+  const pool = ciMatch.length ? ciMatch : (candidates ? all : []);
+  if (!pool.length) return null;
+  const nearIn = (list) => [...list].sort((a, b) => Math.abs(hhmm2min(a.start_time) - inMin) - Math.abs(hhmm2min(b.start_time) - inMin))[0];
+  // Chưa biết giờ RA (lúc chấm VÀO) hoặc chỉ 1 ứng viên → chọn theo giờ vào gần nhất
+  if (outMin == null || pool.length === 1) return nearIn(pool);
+  // Có giờ RA + nhiều ca cùng khớp giờ vào → chấm điểm bằng cửa sổ RA (ưu tiên cửa sổ khai báo)
+  const scored = pool.map((s) => {
+    const explicit = !!(s.check_out_start && s.check_out_end);
+    const [coS, coE] = outWin(s);
+    const outOk = inWindow(outMin, coS, coE);
+    return { s, score: outOk ? (explicit ? 3 : 2) : 0, outDist: Math.abs(hhmm2min(s.end_time) - outMin), inDist: Math.abs(hhmm2min(s.start_time) - inMin) };
+  });
+  scored.sort((a, b) => b.score - a.score || a.outDist - b.outDist || a.inDist - b.inDist);
+  return scored[0].s;
 }
 
 // Ca hiển thị (chưa biết giờ chấm): phân ca thủ công → lịch trình (tự động) → ca mặc định.
@@ -402,7 +421,7 @@ export function resolveShift(employeeId, workDate) {
 }
 
 // Ca thực tế khi chấm: phân ca thủ công (đè) → lịch trình (auto theo giờ trong lịch trình) → ca mặc định → auto toàn cục.
-export function resolveEffectiveShift(employeeId, workDate, checkInIso) {
+export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOutIso = null) {
   const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
   if (a) {
     if (a.is_off) return { off: true, shift: null, source: 'manual' };
@@ -412,12 +431,12 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso) {
   if (emp?.work_schedule_id) {
     const cands = scheduleShifts(emp.work_schedule_id);
     if (cands.length) {
-      const s = autoDetectShift(checkInIso, cands) || cands[0];
+      const s = autoDetectShift(checkInIso, cands, checkOutIso) || cands[0];
       return { off: false, shift: s, source: 'schedule' };
     }
   }
   if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shift: s, source: 'default' }; }
-  const auto = autoDetectShift(checkInIso);
+  const auto = autoDetectShift(checkInIso, null, checkOutIso);
   if (auto) return { off: false, shift: auto, source: 'auto' };
   return { off: false, shift: null, source: 'none' };
 }

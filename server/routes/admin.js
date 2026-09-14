@@ -235,12 +235,12 @@ r.post('/shifts', need('shifts'), (req, res) => {
   const info = db.prepare(`INSERT INTO shifts
     (name,start_time,end_time,late_grace_min,work_days,active,
      break_minutes,early_grace_min,work_unit_value,allow_ot,ot_start_after_min,ot_rounding_unit,
-     code,check_in_start,check_in_end)
-    VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?)`).run(
+     code,check_in_start,check_in_end,check_out_start,check_out_end)
+    VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)`).run(
       b.name, b.start_time, b.end_time, b.late_grace_min || 0, b.work_days || '1,2,3,4,5,6',
       b.break_minutes || 0, b.early_grace_min ?? 15, b.work_unit_value ?? 1.0,
       b.allow_ot ? 1 : 0, b.ot_start_after_min ?? 30, b.ot_rounding_unit || 0,
-      (b.code || '').trim(), b.check_in_start || null, b.check_in_end || null);
+      (b.code || '').trim(), b.check_in_start || null, b.check_in_end || null, b.check_out_start || null, b.check_out_end || null);
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 r.put('/shifts/:id', need('shifts'), (req, res) => {
@@ -249,7 +249,7 @@ r.put('/shifts/:id', need('shifts'), (req, res) => {
   if (!s) return res.status(404).json({ error: 'Không tìm thấy ca' });
   db.prepare(`UPDATE shifts SET name=?, start_time=?, end_time=?, late_grace_min=?, work_days=?, active=?,
     break_minutes=?, early_grace_min=?, work_unit_value=?, allow_ot=?, ot_start_after_min=?, ot_rounding_unit=?,
-    code=?, check_in_start=?, check_in_end=? WHERE id=?`).run(
+    code=?, check_in_start=?, check_in_end=?, check_out_start=?, check_out_end=? WHERE id=?`).run(
     b.name ?? s.name, b.start_time ?? s.start_time, b.end_time ?? s.end_time,
     b.late_grace_min ?? s.late_grace_min, b.work_days ?? s.work_days,
     b.active != null ? (b.active ? 1 : 0) : s.active,
@@ -257,7 +257,9 @@ r.put('/shifts/:id', need('shifts'), (req, res) => {
     b.work_unit_value ?? s.work_unit_value, b.allow_ot != null ? (b.allow_ot ? 1 : 0) : s.allow_ot,
     b.ot_start_after_min ?? s.ot_start_after_min, b.ot_rounding_unit ?? s.ot_rounding_unit,
     b.code != null ? b.code.trim() : s.code, b.check_in_start !== undefined ? (b.check_in_start || null) : s.check_in_start,
-    b.check_in_end !== undefined ? (b.check_in_end || null) : s.check_in_end, s.id);
+    b.check_in_end !== undefined ? (b.check_in_end || null) : s.check_in_end,
+    b.check_out_start !== undefined ? (b.check_out_start || null) : s.check_out_start,
+    b.check_out_end !== undefined ? (b.check_out_end || null) : s.check_out_end, s.id);
   res.json({ ok: true });
 });
 r.delete('/shifts/:id', need('shifts'), (req, res) => {
@@ -591,7 +593,7 @@ r.post('/recompute', need('recompute'), (req, res) => {
   try {
     for (const row of rows) {
       // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định
-      const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at);
+      const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
       const shift = eff.shift;
       const flags = { isHoliday: isHol(row.work_date), isWeekend: isWeekendDay(row.work_date, weekend), roundingDecimals };
       const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
@@ -632,7 +634,7 @@ function computeManual(employeeId, workDate, inIso, outIso) {
   const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  const eff = hourly ? { shift: null, source: 'manual' } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`);
+  const eff = hourly ? { shift: null, source: 'manual' } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
   const shift = eff.shift;
   const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
