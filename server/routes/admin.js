@@ -537,9 +537,11 @@ r.get('/assignments/export.xlsx', async (req, res) => {
 
   const shifts = db.prepare('SELECT id, code, name FROM shifts WHERE active=1').all();
   const codeOf = new Map(shifts.map((s) => [s.id, (s.code || s.name || '').trim()]));
+  // 1 ngày có thể NHIỀU ca (ca gãy) → gom mảng theo emp|date
   const assigns = new Map();
-  for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date LIKE ?').all(month + '%'))
-    assigns.set(a.employee_id + '|' + a.work_date, a);
+  for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date LIKE ?').all(month + '%')) {
+    const k = a.employee_id + '|' + a.work_date; if (!assigns.has(k)) assigns.set(k, []); assigns.get(k).push(a);
+  }
 
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet('PhanCa ' + month);
@@ -555,8 +557,10 @@ r.get('/assignments/export.xlsx', async (req, res) => {
   for (const e of emps) {
     const cells = [e.code, e.full_name, e.department || ''];
     for (const d of days) {
-      const a = assigns.get(e.id + '|' + d);
-      cells.push(a ? (a.is_off ? 'NGHỈ' : (codeOf.get(a.shift_id) || '')) : '');
+      const arr = assigns.get(e.id + '|' + d) || [];
+      if (!arr.length) cells.push('');
+      else if (arr.some((x) => x.is_off)) cells.push('NGHỈ');
+      else cells.push(arr.map((x) => codeOf.get(x.shift_id)).filter(Boolean).join('+')); // "S+C" = 2 ca gãy
     }
     const row = ws.addRow(cells);
     row.eachCell((c, col) => { if (col > 3 && vnWd(days[col - 4]) >= 6) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } }; });
@@ -568,10 +572,11 @@ r.get('/assignments/export.xlsx', async (req, res) => {
   // Sheet chú thích mã ca
   const ws2 = wb.addWorksheet('Mã ca');
   ws2.addRow(['Mã ca', 'Tên ca', 'Giờ']).font = { bold: true };
-  for (const s of shifts) ws2.addRow([(s.code || '').trim(), s.name, '']);
+  for (const s of shifts) ws2.addRow([(s.code || '').trim(), s.name, `${s.start_time}-${s.end_time}`]);
   ws2.addRow(['NGHỈ', 'Ngày nghỉ', '']);
   ws2.addRow(['(trống)', 'Tự động tìm ca theo giờ chấm', '']);
-  ws2.getColumn(1).width = 12; ws2.getColumn(2).width = 30;
+  ws2.addRow(['VD: S+C', 'NHIỀU ca trong 1 ngày (ca gãy) — nối mã ca bằng dấu +', 'VD sáng + chiều']);
+  ws2.getColumn(1).width = 14; ws2.getColumn(2).width = 48; ws2.getColumn(3).width = 16;
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="phanca_${month}.xlsx"`);
@@ -626,9 +631,16 @@ r.post('/assignments/import', need('assignments'), async (req, res) => {
         const V = v.toUpperCase();
         if (['AUTO', 'TĐ', 'TU DONG', 'TỰ ĐỘNG', '-'].includes(V)) { del.run(empId, date); cleared++; continue; }
         if (['NGHỈ', 'NGHI', 'OFF', 'N', 'X'].includes(V)) { up(empId, date, null, 1); off++; continue; }
-        const sid = shiftByCode.get(V);
-        if (!sid) { errors.push(`Ngày ${date.slice(8)}: mã ca "${v}" (NV ${code}) không tồn tại`); continue; }
-        up(empId, date, sid, 0); updated++;
+        // Nhiều ca gãy trong 1 ngày: nối mã bằng + , / hoặc ; (VD "S+C")
+        const codes = V.split(/[+,/;]/).map((s) => s.trim()).filter(Boolean);
+        const sids = [];
+        let bad = null;
+        for (const cd of codes) { const sid = shiftByCode.get(cd); if (!sid) { bad = cd; break; } sids.push(sid); }
+        if (bad) { errors.push(`Ngày ${date.slice(8)}: mã ca "${bad}" (NV ${code}) không tồn tại`); continue; }
+        const uniq = [...new Set(sids)];
+        del.run(empId, date);                       // thay toàn bộ ca ngày đó
+        for (const sid of uniq) ins.run(empId, date, sid, 0);
+        updated += uniq.length;
       }
     }
     db.exec('COMMIT');
