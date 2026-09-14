@@ -154,6 +154,23 @@ function photoCell(src) {
 }
 function field(label, input) { return el('div', {}, el('label', {}, label), input); }
 function input(id, attrs = {}) { return el('input', { id, ...attrs }); }
+// Ô nhập GIỜ 24h (HH:mm) — không phụ thuộc chế độ 12/24 của máy (tránh hiện SA/CH)
+function time24(id, value = '') {
+  const i = input(id, { value: value || '', placeholder: 'VD 08:00', inputmode: 'numeric', maxlength: 5, autocomplete: 'off' });
+  i.addEventListener('input', () => {
+    let v = i.value.replace(/[^\d]/g, '').slice(0, 4);
+    if (v.length >= 3) v = v.slice(0, 2) + ':' + v.slice(2);
+    i.value = v;
+  });
+  i.addEventListener('blur', () => {
+    const t = i.value.trim(); if (!t) return;
+    const m = /^(\d{1,2}):?(\d{0,2})$/.exec(t);
+    const h = Math.min(23, parseInt((m && m[1]) || '0', 10) || 0);
+    const mm = Math.min(59, parseInt((m && m[2]) || '0', 10) || 0);
+    i.value = String(h).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+  });
+  return i;
+}
 
 /* ---------- 1) TỔNG QUAN ---------- */
 let dashTimer = null;
@@ -488,10 +505,10 @@ function shiftModal(s) {
   const otChk = el('input', { type: 'checkbox', id: 's-allowot', style: 'width:auto', ...(s?.allow_ot ? { checked: '' } : {}) });
   const body = [
     el('div', { class: 'two-col' }, field('Tên ca *', input('s-name', { value: s?.name || '', placeholder: 'Hành chính' })), field('Mã ca (cho Excel)', input('s-code', { value: s?.code || '', placeholder: 'VD: HC, S, C, DEM' }))),
-    el('div', { class: 'two-col' }, field('Giờ vào *', input('s-start', { type: 'time', value: s?.start_time || '08:00' })), field('Giờ ra *', input('s-end', { type: 'time', value: s?.end_time || '17:30' }))),
+    el('div', { class: 'two-col' }, field('Giờ vào * (24h, VD 08:00)', time24('s-start', s?.start_time || '08:00')), field('Giờ ra * (24h, VD 17:30)', time24('s-end', s?.end_time || '17:30'))),
     el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, '🌙 Ca qua đêm: đặt Giờ ra NHỎ HƠN Giờ vào (VD 22:00 → 06:00) — hệ thống tự hiểu là qua ngày hôm sau.'),
     el('div', {}, el('label', {}, 'Cửa sổ nhận diện giờ vào — bật TỰ ĐỘNG tìm ca (tuỳ chọn)'),
-      el('div', { class: 'two-col' }, input('s-ciStart', { type: 'time', value: s?.check_in_start || '' }), input('s-ciEnd', { type: 'time', value: s?.check_in_end || '' })),
+      el('div', { class: 'two-col' }, time24('s-ciStart', s?.check_in_start || ''), time24('s-ciEnd', s?.check_in_end || '')),
       el('div', { class: 'map-hint' }, 'VD ca sáng 06:00–10:00, ca chiều 12:00–15:00. Khi NV chấm, hệ thống tự chọn ca có giờ khớp.')),
     el('div', { class: 'two-col' },
       field('Cho phép đi muộn (phút)', input('s-grace', { type: 'number', value: s?.late_grace_min ?? 5, min: 0 })),
@@ -1095,8 +1112,8 @@ async function pageEditAtt() {
 function attEditModal(row, employeeId, reload) {
   const date0 = row ? row.work_date : new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
   const dateI = input('att-date', { type: 'date', value: date0, ...(row ? { disabled: '' } : {}) });
-  const inI = input('att-in', { type: 'time', value: row?.check_in_at ? isoToHM(row.check_in_at) : '' });
-  const outI = input('att-out', { type: 'time', value: row?.check_out_at ? isoToHM(row.check_out_at) : '' });
+  const inI = time24('att-in', row?.check_in_at ? isoToHM(row.check_in_at) : '');
+  const outI = time24('att-out', row?.check_out_at ? isoToHM(row.check_out_at) : '');
   const noteI = input('att-note', { placeholder: 'VD: Quên chấm, Đi công tác…', value: row?.note || '' });
   const body = [
     field('Ngày', dateI),
@@ -1672,13 +1689,6 @@ async function pageSettings() {
     el('h3', { style: 'margin-top:0' }, '💾 Sao lưu & phục hồi dữ liệu'), bkBox) : null;
 
   // ----- Cập nhật phần mềm (từ GitHub) -----
-  const repoI = input('st-repo', { value: s.update_repo || '', placeholder: 'owner/repo' });
-  const branchI = input('st-branch', { value: s.update_branch || 'main', placeholder: 'main' });
-  const saveRepo = el('button', { class: 'btn sm ghost' }, 'Lưu nguồn cập nhật');
-  saveRepo.onclick = async () => {
-    try { await api('/admin/settings', { method: 'PUT', body: { update_repo: repoI.value, update_branch: branchI.value } }); toast('Đã lưu nguồn cập nhật', 'ok'); }
-    catch (e) { toast(e.message, 'err'); }
-  };
   const updStatus = el('div', { style: 'margin-top:6px;font-size:14px' });
   const checkBtn = el('button', { class: 'btn' }, '🔎 Kiểm tra cập nhật');
   const applyBtn = el('button', { class: 'btn', style: 'display:none' }, '⬇ Cập nhật ngay');
@@ -1728,8 +1738,6 @@ async function pageSettings() {
     el('h3', { style: 'margin-top:0' }, '⬆ Cập nhật phần mềm'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', {}, el('span', { style: 'color:var(--muted)' }, 'Phiên bản đang dùng: '), el('b', {}, s.app_version || '—')),
-      el('div', { class: 'two-col' }, field('Nguồn GitHub (owner/repo)', repoI), field('Nhánh', branchI)),
-      saveRepo,
       el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, checkBtn, applyBtn),
       updStatus,
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;

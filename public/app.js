@@ -156,6 +156,25 @@ function makeBigBtn(kind, ic, t, s, onClick) {
   return b;
 }
 
+// Đổi toạ độ GPS → địa chỉ (OpenStreetMap Nominatim). Có timeout + dự phòng (trả '' nếu lỗi).
+async function reverseGeocode(lat, lng) {
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4500);
+    const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=vi&lat=${lat}&lon=${lng}`, { signal: ctrl.signal });
+    clearTimeout(t);
+    const d = await r.json();
+    const a = d && d.address ? d.address : null;
+    if (a) {
+      const parts = [a.house_number, a.road, a.quarter || a.suburb || a.hamlet || a.village, a.city_district || a.district || a.county, a.city || a.town || a.state].filter(Boolean);
+      const s = [...new Set(parts)].slice(0, 4).join(', ');
+      if (s) return s;
+    }
+    if (d && d.display_name) return d.display_name.split(',').slice(0, 4).join(',').trim();
+  } catch {}
+  return '';
+}
+
 async function doCheck(kind) {
   const btn = $('.big-btn.' + kind);
   const gpsLine = $('#gps-line');
@@ -163,10 +182,13 @@ async function doCheck(kind) {
     if (btn) { btn.style.opacity = .6; btn.style.pointerEvents = 'none'; }
     if (gpsLine) gpsLine.innerHTML = '<span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span> Đang lấy vị trí GPS…';
     const gps = await getGps();
-    if (gpsLine) gpsLine.innerHTML = `📍 Đã xác định vị trí · sai số ~${gps.accuracy}m`;
-    // Đóng dấu chống gian lận: giờ thật + tên NV + toạ độ GPS lên ảnh
+    if (gpsLine) gpsLine.innerHTML = '<span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span> Đang xác định địa chỉ…';
+    const addr = await reverseGeocode(gps.lat, gps.lng);   // đổi toạ độ → địa chỉ (có dự phòng)
+    if (gpsLine) gpsLine.innerHTML = `📍 ${addr || 'Đã xác định vị trí'} · sai số ~${gps.accuracy}m`;
+    // Đóng dấu chống gian lận: giờ thật + tên NV + ĐỊA CHỈ (kèm toạ độ) lên ảnh
     const stampTime = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
-    const stamp = [ME?.full_name || 'Nhân viên', stampTime, `GPS ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`];
+    const coords = `GPS ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`;
+    const stamp = addr ? [ME?.full_name || 'Nhân viên', stampTime, addr, coords] : [ME?.full_name || 'Nhân viên', stampTime, coords];
     const photo = await openCamera({ title: kind === 'in' ? 'Chụp ảnh vào ca' : 'Chụp ảnh ra ca', stamp });
     if (!photo) { if (btn) { btn.style.opacity = 1; btn.style.pointerEvents = 'auto'; } return; }
     const res = await api('/attendance/' + (kind === 'in' ? 'check-in' : 'check-out'),
