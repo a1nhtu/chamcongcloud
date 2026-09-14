@@ -142,7 +142,10 @@ function openModal(title, bodyNodes, footNodes) {
   $('#modal-bg').classList.add('show');
 }
 function closeModal() { $('#modal-bg').classList.remove('show'); }
-$('#modal-bg').addEventListener('click', (e) => { if (e.target.id === 'modal-bg') closeModal(); });
+// Chỉ đóng khi BẤM bắt đầu ngay trên nền tối (tránh: bôi đen trong ô rồi thả chuột ra nền → đóng nhầm)
+let _mdOnBg = false;
+$('#modal-bg').addEventListener('mousedown', (e) => { _mdOnBg = e.target.id === 'modal-bg'; });
+$('#modal-bg').addEventListener('click', (e) => { if (e.target.id === 'modal-bg' && _mdOnBg) closeModal(); _mdOnBg = false; });
 
 function showPhoto(src) { $('#lightbox-img').src = src; $('#lightbox').classList.add('show'); }
 $('#lightbox').addEventListener('click', () => $('#lightbox').classList.remove('show'));
