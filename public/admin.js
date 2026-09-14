@@ -13,7 +13,7 @@ const NAV = [
   ['assignments', '🗓️', 'Phân ca', 'assignments'],
   ['shiftreq', '🙋', 'Duyệt chọn ca', 'shift_requests'],
   ['devreq', '📱', 'Duyệt đổi thiết bị', 'employees'],
-  ['editatt', '✏️', 'Sửa công', 'attendance_edit'],
+  ['editatt', '🧮', 'Tính công', 'attendance_edit'],
   ['devices', '🔌', 'Máy chấm công', 'devices'],
   ['offices', '📍', 'Chi nhánh', 'offices'],
   ['leaves', '📝', 'Đơn từ', 'leaves'],
@@ -1198,11 +1198,11 @@ let EDITATT_EMP = null;
 const shiftName = (id) => { const s = SHIFTS.find(x => x.id === id); return s ? s.name : null; };
 const minCell = (v) => (v && v > 0) ? String(v) : '—';
 async function pageEditAtt() {
-  setMain(head('Sửa công'), loading());
+  setMain(head('Tính công'), loading());
   if (!SHIFTS.length) { try { await loadRefs(); } catch {} }
   let emps;
   try { emps = (await api('/admin/employees')).rows.filter(e => e.active); }
-  catch (e) { setMain(head('Sửa công'), el('div', { class: 'empty' }, e.message)); return; }
+  catch (e) { setMain(head('Tính công'), el('div', { class: 'empty' }, e.message)); return; }
   if (!EDITATT_EMP && emps[0]) EDITATT_EMP = emps[0].id;
   const empSel = el('select', { id: 'ea-emp', style: 'min-width:200px' },
     ...emps.map(e => el('option', { value: e.id, ...(e.id === EDITATT_EMP ? { selected: '' } : {}) }, `${e.full_name} (${e.code})`)));
@@ -1254,7 +1254,7 @@ async function pageEditAtt() {
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại'; }
   };
   roundBtn.onclick = () => roundingModal(monthI.value, load);
-  setMain(head('Sửa công', empSel, monthI, addBtn, recalcBtn, roundBtn), wrap);
+  setMain(head('Tính công', empSel, monthI, addBtn, recalcBtn, roundBtn), wrap);
   load();
 }
 
