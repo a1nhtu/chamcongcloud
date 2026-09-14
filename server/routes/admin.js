@@ -401,6 +401,16 @@ r.get('/assignments', (req, res) => {
   empSql += ' ORDER BY e.department, e.full_name';
   const employees = db.prepare(empSql).all(...args);
 
+  // Nhãn phân ca gốc của từng NV (lịch trình / ca mặc định / tự động) để hiện trên lịch tuần
+  for (const e of employees) {
+    const rs = resolveShift(e.id, from);
+    e.base = rs.off ? '🛌 Nghỉ'
+      : rs.source === 'schedule' ? ('📋 ' + (rs.scheduleName || 'Lịch trình'))
+      : (rs.source === 'assign' || rs.source === 'manual') && rs.shift ? ('📌 ' + rs.shift.name)
+      : rs.shift ? rs.shift.name
+      : '⚙ Tự động theo giờ';
+  }
+
   const assignments = db.prepare(
     'SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?'
   ).all(from, to);

@@ -879,7 +879,8 @@ async function pageAssignments() {
     for (const e of emps) {
       const tr = el('tr', {}, el('td', {},
         el('b', {}, e.full_name),
-        el('div', { style: 'color:#999;font-size:12px' }, `${e.code} · mặc định: ${e.shift_name || '—'}`)));
+        el('div', { style: 'color:#999;font-size:12px' }, `${e.code} · `,
+          el('span', { style: /📋|📌|🛌/.test(e.base || '') ? 'color:#0a7;font-weight:600' : 'color:#999' }, e.base || (e.shift_name || '⚙ Tự động')))));
       for (const d of days) {
         const arr = amap.get(e.id + '|' + d) || [];
         const a = arr[0];
@@ -908,9 +909,11 @@ async function pageAssignments() {
     }
     tbl.append(tb);
 
-    const range = el('div', { style: 'color:var(--muted);font-size:13px;margin-bottom:10px' },
+    const range = el('div', { style: 'color:var(--muted);font-size:13px;margin-bottom:6px' },
       `Tuần: ${from.slice(8)}/${from.slice(5, 7)} – ${to.slice(8)}/${to.slice(5, 7)}/${to.slice(0, 4)}`);
-    setMain(head('Phân ca', ...tools), range, bulkPanel, el('div', { class: 'panel tbl-scroll' }, tbl));
+    const hint = el('div', { class: 'map-hint', style: 'margin-bottom:10px' },
+      'Cột trái hiện lịch trình/ca gốc của NV (gán ở nút "📋 Phân ca làm việc"). Mỗi ô = ĐÈ ca cho riêng ngày đó; để "⚙ Tự động" là chấm theo lịch trình/ca gốc. Chỉ đổi ô khi muốn 1 ngày khác lịch (VD nghỉ, hoặc đổi ca đột xuất).');
+    setMain(head('Phân ca', ...tools), range, hint, bulkPanel, el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
   deptSel.onchange = render;
