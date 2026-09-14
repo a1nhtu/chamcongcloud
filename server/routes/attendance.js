@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, getSetting, resolveShift, resolveEffectiveShift } from '../db.js';
+import { db, getSetting, resolveShift, resolveEffectiveShift, resolveDayShifts } from '../db.js';
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
@@ -61,23 +61,37 @@ r.post('/request-device', (req, res) => {
   res.json({ ok: true });
 });
 
-// Bản ghi chấm công hôm nay
+// Bản ghi chấm công hôm nay (hỗ trợ nhiều ca/ngày)
 r.get('/today', (req, res) => {
   const date = vnDateStr();
-  const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?')
-    .get(req.user.id, date);
   const mode = getSetting('attendance_mode', 'shift');
-  // Ca hiển thị: nếu đã chấm vào → ca đã xác định; nếu phân thủ công → ca đó; còn lại → tự động
-  let shift = null, autoDetect = false, dayOff = false;
-  if (mode !== 'hourly') {
-    const rs = resolveShift(req.user.id, date);
-    let shiftRow = null;
-    if (row && row.shift_id) shiftRow = db.prepare('SELECT * FROM shifts WHERE id = ?').get(row.shift_id);
-    else if (rs.source === 'manual' && rs.shift) shiftRow = rs.shift;
-    else autoDetect = !rs.off; // mặc định = tự động tìm ca theo giờ chấm
-    dayOff = rs.off;
-    shift = shiftRow ? { id: shiftRow.id, name: shiftRow.name, start_time: shiftRow.start_time, end_time: shiftRow.end_time } : null;
+  const rows = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? ORDER BY check_in_at').all(req.user.id, date);
+  // Ca đang mở (đã vào, chưa ra) — hôm nay hoặc ca đêm hôm qua
+  let openRow = rows.find((r) => r.check_in_at && !r.check_out_at) || null;
+  if (!openRow) {
+    const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1").get(req.user.id, date);
+    if (yRow) openRow = yRow;
   }
+  const completed = rows.filter((r) => r.check_in_at && r.check_out_at).length;
+
+  // Ca dự kiến hôm nay (có thể nhiều ca)
+  let shift = null, autoDetect = false, dayOff = false, dayShiftNames = [], expected = 0;
+  if (mode !== 'hourly') {
+    const plan = resolveDayShifts(req.user.id, date);
+    dayOff = plan.off;
+    dayShiftNames = plan.shifts.map((s) => s.name);
+    expected = plan.shifts.length;
+    if (plan.shifts.length === 1) { const s = plan.shifts[0]; shift = { id: s.id, name: s.name, start_time: s.start_time, end_time: s.end_time }; }
+    else if (plan.shifts.length === 0 && !plan.off) autoDetect = true;
+  }
+  // Trạng thái nút cho app: off | can_out (đang mở ca) | done (xong hết ca dự kiến) | can_in
+  let state;
+  if (dayOff) state = 'off';
+  else if (openRow) state = 'can_out';
+  else if (expected > 0 && completed >= expected) state = 'done';
+  else state = 'can_in';
+  const row = openRow || (rows.length ? rows[rows.length - 1] : null);
+
   const office = req.user.office_id ? db.prepare('SELECT name, radius_m FROM offices WHERE id = ?').get(req.user.office_id) : null;
   const geofence = {
     enforce: getSetting('geofence_enforce', '0') === '1',
@@ -92,7 +106,8 @@ r.get('/today', (req, res) => {
     else if (emp.pending_device && emp.pending_device === devId) device.state = 'pending';
     else device.state = 'mismatch';
   }
-  res.json({ date, attendance: row || null, todayShift: shift, dayOff, autoDetect, mode, geofence, device });
+  res.json({ date, attendance: row || null, todayRows: rows, state, expected, completed, dayShiftNames,
+    todayShift: shift, dayOff, autoDetect, mode, geofence, device });
 });
 
 // Chấm VÀO CA
@@ -104,21 +119,24 @@ r.post('/check-in', (req, res) => {
   if (dchk.block) return res.status(403).json({ error: dchk.error, code: dchk.code });
 
   const date = vnDateStr();
-  const existing = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?')
-    .get(req.user.id, date);
-  if (existing && existing.check_in_at) {
-    return res.status(400).json({ error: 'Bạn đã vào ca hôm nay rồi' });
-  }
-
-  const office = req.user.office_id
-    ? db.prepare('SELECT * FROM offices WHERE id = ?').get(req.user.office_id) : null;
-
   const at = nowIso();
   // Chế độ chấm công: 'hourly' = chỉ tính giờ, không ca, không muộn/sớm
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  // Ưu tiên: phân ca thủ công (đè) → TỰ ĐỘNG tìm ca theo giờ chấm → ca mặc định
+  // TỰ ĐỘNG tìm ca theo giờ chấm (phân ca thủ công đè) → xác định ca đang VÀO (cho phép nhiều ca/ngày)
   const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, date, at);
   const shift = rs.shift;
+  const shiftKey = shift?.id ?? 0;
+  // Dòng công của ĐÚNG ca này hôm nay
+  const existing = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND COALESCE(shift_id,0) = ?')
+    .get(req.user.id, date, shiftKey);
+  const shiftLabel = shift ? `ca ${shift.name}` : 'ca';
+  if (existing && existing.check_in_at && !existing.check_out_at)
+    return res.status(400).json({ error: `Bạn đang trong ${shiftLabel}, chưa chấm ra. Hãy chấm RA trước.` });
+  if (existing && existing.check_in_at && existing.check_out_at)
+    return res.status(400).json({ error: `Bạn đã hoàn thành ${shiftLabel} hôm nay rồi` });
+
+  const office = req.user.office_id
+    ? db.prepare('SELECT * FROM offices WHERE id = ?').get(req.user.office_id) : null;
 
   let distance = null, outside = 0;
   if (office) {
@@ -153,8 +171,8 @@ r.post('/check-in', (req, res) => {
            shift?.id ?? null, rs.source);
   }
 
-  const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?')
-    .get(req.user.id, date);
+  const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND COALESCE(shift_id,0) = ?')
+    .get(req.user.id, date, shiftKey);
   res.json({ ok: true, attendance: row, meta: { distance, outside: !!outside, late } });
   // Thông báo cho quản lý (không chặn phản hồi)
   notifyManagers({
@@ -173,14 +191,14 @@ r.post('/check-out', (req, res) => {
   if (dchk.block) return res.status(403).json({ error: dchk.error, code: dchk.code });
 
   const date = vnDateStr();
-  let row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?').get(req.user.id, date);
-  // CA ĐÊM: nếu hôm nay chưa vào ca (hoặc bản ghi hôm nay đã đủ), tìm bản ghi HÔM QUA đã VÀO mà CHƯA RA
-  if (!row || !row.check_in_at || row.check_out_at) {
-    const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL").get(req.user.id, date);
+  // Tìm CA ĐANG MỞ hôm nay (đã vào, chưa ra) — mới nhất trước (hỗ trợ nhiều ca/ngày)
+  let row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1').get(req.user.id, date);
+  // CA ĐÊM: nếu hôm nay không có ca mở, tìm ca HÔM QUA đã VÀO mà CHƯA RA
+  if (!row) {
+    const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1").get(req.user.id, date);
     if (yRow) row = yRow;
   }
-  if (!row || !row.check_in_at) return res.status(400).json({ error: 'Chưa vào ca (hôm nay hoặc ca đêm hôm qua)' });
-  if (row.check_out_at) return res.status(400).json({ error: 'Bạn đã ra ca rồi' });
+  if (!row) return res.status(400).json({ error: 'Chưa có ca nào đang mở để chấm ra (hôm nay hoặc ca đêm hôm qua)' });
 
   const wdate = row.work_date;   // ngày công của bản ghi (ca đêm = hôm qua)
   const at = nowIso();

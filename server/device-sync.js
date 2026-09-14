@@ -1,6 +1,6 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
-import { db, getSetting, resolveEffectiveShift } from './db.js';
+import { db, getSetting, resolveEffectiveShift, resolveDayShifts } from './db.js';
 import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow } from './attendance-calc.js';
 import { hashPassword } from './auth.js';
 
@@ -256,14 +256,15 @@ export function ackCommand(id, ret) {
   db.prepare("UPDATE push_device_commands SET return_value=?, response_at=datetime('now') WHERE id=?").run(String(ret), id);
 }
 
-// Tính chỉ số công cho 1 ngày (giống computeManual ở admin.js)
-function metrics(employeeId, workDate, inIso, outIso) {
+// Tính chỉ số công cho 1 ngày (giống computeManual ở admin.js).
+// presetShift: nếu truyền (kể cả null) thì dùng luôn, không tự dò lại ca (dùng khi tách nhiều ca/ngày).
+function metrics(employeeId, workDate, inIso, outIso, presetShift) {
   const weekend = getSetting('weekend_days', '7');
   const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  const eff = hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
-  const shift = eff.shift;
+  const shift = presetShift !== undefined ? presetShift
+    : (hourly ? null : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
   const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
   const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals, roundingMode };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
@@ -285,22 +286,60 @@ function deviceMachineMap() {
   return map;
 }
 
-// Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay)
+// Ghi 1 dòng công (insert mới hoặc update dòng có sẵn theo existingId)
+function upsertRow(employeeId, workDate, shiftId, inIso, outIso, m, existingId) {
+  if (existingId) {
+    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
+      work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='device' WHERE id=?`)
+      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId, existingId);
+  } else {
+    db.prepare(`INSERT INTO attendance
+      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'device')`)
+      .run(employeeId, workDate, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId);
+  }
+}
+
+// Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay).
+// Nếu gán LỊCH TRÌNH nhiều ca → tách punch theo cửa sổ từng ca thành nhiều dòng công/ngày.
 export function rebuildDay(employeeId, workDate) {
-  // Punch tạm theo ngày (để dò ca) — có kèm serial cho quy tắc IDM
   const prov = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
   if (!prov.length) return;
-  // Dò ca thực tế + quy tắc ghép log áp dụng
-  const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at);
-  const shift = eff.shift;
+  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const machineMap = deviceMachineMap();
+  const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+    .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+
+  const plan = hourly ? { off: false, shifts: [], mergeRule: null, isSchedule: false } : resolveDayShifts(employeeId, workDate);
+  if (plan.off) return; // ngày nghỉ → không dựng
+
+  // NHIỀU ca/ngày (lịch trình ≥ 2 ca): tách punch theo cửa sổ từng ca → mỗi ca 1 dòng
+  if (plan.isSchedule && plan.shifts.length > 1) {
+    db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)").run(employeeId, workDate);
+    for (const shift of plan.shifts) {
+      const { winStart, winEnd } = ruleWindow(workDate, shift);
+      const punches = punchesInWin(winStart, winEnd);
+      if (!punches.length) continue;
+      // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
+      const rule = (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || shift.merge_rule || 'filo');
+      const { inIso, outIso } = mergeDayPunches(punches, shift, rule, machineMap, workDate);
+      if (!inIso) continue;
+      if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
+      upsertRow(employeeId, workDate, shift.id, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift));
+    }
+    return;
+  }
+
+  // 1 ca/ngày (gán ca / ca mặc định / tự dò): giữ 1 dòng/ngày
+  let shift = plan.shifts[0] || null;
+  let mergeRule = plan.mergeRule;
+  if (!shift && !hourly) { const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at); shift = eff.shift; mergeRule = eff.mergeRule; }
   let inIso, outIso;
   if (shift) {
-    // Lấy punch trong cửa sổ ca (rộng theo giờ, phủ cả ca đêm sang ngày hôm sau) rồi ghép theo quy tắc
     const { winStart, winEnd } = ruleWindow(workDate, shift);
-    let punches = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
-      .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+    let punches = punchesInWin(winStart, winEnd);
     if (!punches.length) punches = prov;
-    ({ inIso, outIso } = mergeDayPunches(punches, shift, eff.mergeRule, deviceMachineMap(), workDate));
+    ({ inIso, outIso } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate));
     if (!inIso) { inIso = prov[0].punch_at; outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null; }
   } else {
     inIso = prov[0].punch_at;
@@ -308,17 +347,7 @@ export function rebuildDay(employeeId, workDate) {
   }
   const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
   if (existing && existing.manual) return; // tôn trọng sửa tay của admin
-  const m = metrics(employeeId, workDate, inIso, outIso);
-  if (existing) {
-    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
-      work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='device' WHERE id=?`)
-      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, existing.id);
-  } else {
-    db.prepare(`INSERT INTO attendance
-      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'device')`)
-      .run(employeeId, workDate, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId);
-  }
+  upsertRow(employeeId, workDate, shift?.id ?? null, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift), existing?.id);
 }
 
 // Nạp khối ATTLOG (nhiều dòng), mỗi dòng: PIN \t Time \t Status \t Verify \t WorkCode

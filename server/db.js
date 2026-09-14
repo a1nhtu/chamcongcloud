@@ -280,12 +280,42 @@ export function initSchema() {
   migrateColumns();
 }
 
+// Dựng lại bảng attendance để BỎ ràng buộc UNIQUE(employee_id, work_date) → cho phép NHIỀU ca/ngày.
+// Giữ nguyên mọi cột + dữ liệu (copy động theo PRAGMA), thêm UNIQUE INDEX theo (NV, ngày, ca).
+function migrateAttendanceMultiShift() {
+  if (getSetting('att_multishift_migrated') === '1') return;
+  const cols = db.prepare('PRAGMA table_info(attendance)').all();
+  if (!cols.length) { setSetting('att_multishift_migrated', '1'); return; }
+  const colDefs = cols.map((c) => {
+    if (c.pk) return `${c.name} INTEGER PRIMARY KEY AUTOINCREMENT`;
+    let d = `${c.name} ${c.type || ''}`.trim();
+    if (c.notnull) d += ' NOT NULL';
+    if (c.dflt_value !== null && c.dflt_value !== undefined) d += ` DEFAULT (${c.dflt_value})`;
+    return d;
+  });
+  const colNames = cols.map((c) => c.name).join(', ');
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(`CREATE TABLE attendance_new (${colDefs.join(', ')})`);
+    db.exec(`INSERT INTO attendance_new (${colNames}) SELECT ${colNames} FROM attendance`);
+    db.exec('DROP TABLE attendance');
+    db.exec('ALTER TABLE attendance_new RENAME TO attendance');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_att_emp_date ON attendance(employee_id, work_date)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_att_emp_date_shift ON attendance(employee_id, work_date, COALESCE(shift_id, 0))');
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); db.exec('PRAGMA foreign_keys = ON'); throw e; }
+  db.exec('PRAGMA foreign_keys = ON');
+  setSetting('att_multishift_migrated', '1');
+}
+
 // Thêm cột mới cho DB đã tồn tại (an toàn, không mất dữ liệu)
 function migrateColumns() {
   const cols = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
   const add = (table, name, ddl) => {
     if (!cols(table).has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
   };
+  migrateAttendanceMultiShift();
 
   // GĐ5: mã ca + cửa sổ nhận diện giờ vào (để tự động tìm ca)
   add('shifts', 'code',            "TEXT DEFAULT ''");   // mã ca dùng trong Excel phân ca (S, C, HC, DEM...)
@@ -496,4 +526,30 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOut
   const auto = autoDetectShift(checkInIso, null, checkOutIso);
   if (auto) return { off: false, shift: auto, source: 'auto', mergeRule: effectiveMergeRule(auto, null) };
   return { off: false, shift: null, source: 'none', mergeRule: null };
+}
+
+// DANH SÁCH ca của 1 ngày (để tách nhiều ca/ngày khi gán lịch trình). Ưu tiên như resolveEffectiveShift.
+// Trả { off, shifts:[ca...], mergeRule, source, isSchedule }. shifts rỗng + source='auto' = để tự dò 1 ca theo giờ.
+export function resolveDayShifts(employeeId, workDate) {
+  const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
+  if (a) {
+    if (a.is_off) return { off: true, shifts: [], mergeRule: null, source: 'manual', isSchedule: false };
+    if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, null), source: 'manual', isSchedule: false }; }
+  }
+  const ra = rangedShiftAssignment(employeeId, workDate);
+  if (ra) {
+    const override = ra.merge_rule;
+    if (ra.mode === 'shift' && ra.shift_id) { const s = getShift(ra.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, override), source: 'assign', isSchedule: false }; }
+    if (ra.mode === 'schedule' && ra.work_schedule_id) {
+      const cands = scheduleShifts(ra.work_schedule_id);
+      if (cands.length) return { off: false, shifts: cands, mergeRule: (override && override !== 'default') ? override : null, source: 'schedule', isSchedule: true };
+    }
+  }
+  const emp = db.prepare('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
+  if (emp?.work_schedule_id) {
+    const cands = scheduleShifts(emp.work_schedule_id);
+    if (cands.length) return { off: false, shifts: cands, mergeRule: null, source: 'schedule', isSchedule: true };
+  }
+  if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, null), source: 'default', isSchedule: false }; }
+  return { off: false, shifts: [], mergeRule: null, source: 'auto', isSchedule: false };
 }

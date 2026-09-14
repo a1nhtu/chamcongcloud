@@ -120,6 +120,9 @@ async function renderCham() {
   // Ca hôm nay
   if (MODE !== 'hourly' && data.dayOff) {
     c.append(el('div', { class: 'status-banner done', html: '📅 Hôm nay là <b>ngày nghỉ</b> theo lịch phân ca' }));
+  } else if (MODE !== 'hourly' && data.dayShiftNames && data.dayShiftNames.length > 1) {
+    c.append(el('div', { class: 'status-banner', style: 'background:#eef2ff;color:#3730a3',
+      html: `📅 Ca hôm nay: <b>${data.dayShiftNames.join(' + ')}</b> · đã xong <b>${data.completed || 0}/${data.expected}</b> ca` }));
   } else if (data.todayShift) {
     const s = data.todayShift;
     c.append(el('div', { class: 'status-banner', style: 'background:#eef2ff;color:#3730a3', html: `📅 Ca hôm nay: <b>${s.name}</b> (${s.start_time}–${s.end_time})` }));
@@ -137,10 +140,13 @@ async function renderCham() {
     c.append(el('div', { class: 'status-banner' + (hasOut ? ' done' : ''), html: bits.join(' · ') }));
   }
 
-  // Nút lớn
+  // Nút lớn theo trạng thái (hỗ trợ nhiều ca/ngày)
   const card = el('div', { class: 'card' });
-  if (!hasIn) card.append(makeBigBtn('in', '📸', 'VÀO CA', 'Chụp ảnh xác nhận có mặt', () => doCheck('in')));
-  else if (!hasOut) card.append(makeBigBtn('out', '🏁', 'RA CA', 'Chụp ảnh xác nhận kết thúc ca', () => doCheck('out')));
+  const state = data.state || (!hasIn ? 'can_in' : (!hasOut ? 'can_out' : 'done'));
+  const moreShifts = data.expected > 1 && (data.completed || 0) < data.expected;
+  if (state === 'off') card.append(el('div', { class: 'big-btn done' }, el('div', { class: 'ic' }, '🛌'), el('div', { class: 't' }, 'NGÀY NGHỈ'), el('div', { class: 's' }, 'Hôm nay bạn không có ca')));
+  else if (state === 'can_out') card.append(makeBigBtn('out', '🏁', 'RA CA', 'Chụp ảnh xác nhận kết thúc ca', () => doCheck('out')));
+  else if (state === 'can_in') card.append(makeBigBtn('in', '📸', moreShifts ? 'VÀO CA TIẾP' : 'VÀO CA', moreShifts ? 'Chấm vào cho ca tiếp theo' : 'Chụp ảnh xác nhận có mặt', () => doCheck('in')));
   else card.append(el('div', { class: 'big-btn done' }, el('div', { class: 'ic' }, '✔'), el('div', { class: 't' }, 'HOÀN TẤT'), el('div', { class: 's' }, 'Bạn đã chấm công đủ hôm nay')));
 
   card.append(el('div', { class: 'gps-line', id: 'gps-line' }, 'Vị trí văn phòng: ', el('b', {}, ME.office?.name || 'Chưa gán')));

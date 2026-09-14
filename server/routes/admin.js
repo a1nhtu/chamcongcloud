@@ -735,7 +735,8 @@ r.post('/attendance', need('attendance_edit'), (req, res) => {
   let outIso = vnToIso(date, b.check_out);
   if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString(); // qua đêm
   const m = computeManual(eid, date, inIso, outIso);
-  const existing = db.prepare('SELECT id FROM attendance WHERE employee_id=? AND work_date=?').get(eid, date);
+  // Khoá theo (NV, ngày, CA) → cho phép thêm nhiều ca/ngày (VD ca gãy sáng + chiều)
+  const existing = db.prepare('SELECT id FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_id,0)=COALESCE(?,0)').get(eid, date, m.shiftId ?? null);
   if (existing) {
     db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
       work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=? WHERE id=?`)

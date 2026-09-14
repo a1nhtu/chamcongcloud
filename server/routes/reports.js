@@ -47,8 +47,27 @@ function loadMonth(month, dept) {
   const shiftsById = new Map(db.prepare('SELECT * FROM shifts').all().map((s) => [s.id, s]));
   const empById = new Map(employees.map((e) => [e.id, e]));
 
-  const cell = new Map(); // empId|date -> attendance row
-  for (const row of results) cell.set(row.employee_id + '|' + row.work_date, row);
+  // empId|date -> 1 ô gộp (có thể NHIỀU ca/ngày): cộng công/giờ/OT/muộn/sớm, vào sớm nhất, ra muộn nhất
+  const cell = new Map();
+  for (const row of results) {
+    const key = row.employee_id + '|' + row.work_date;
+    const ex = cell.get(key);
+    if (!ex) { cell.set(key, { ...row, _shiftNames: row.shift_name ? [row.shift_name] : [], _missingOut: (!row.check_out_at) ? 1 : 0 }); continue; }
+    ex.work_unit = (ex.work_unit || 0) + (row.work_unit || 0);
+    ex.work_minutes = (ex.work_minutes || 0) + (row.work_minutes || 0);
+    ex.ot_min = (ex.ot_min || 0) + (row.ot_min || 0);
+    ex.late_min = (ex.late_min || 0) + (row.late_min || 0);
+    ex.early_min = (ex.early_min || 0) + (row.early_min || 0);
+    if (row.check_in_at && (!ex.check_in_at || row.check_in_at < ex.check_in_at)) ex.check_in_at = row.check_in_at;
+    if (row.check_out_at && (!ex.check_out_at || row.check_out_at > ex.check_out_at)) ex.check_out_at = row.check_out_at;
+    if (!row.check_out_at) ex._missingOut = 1;
+    if (row.shift_name) ex._shiftNames.push(row.shift_name);
+    if (row.day_status === 'lam_viec') ex.day_status = 'lam_viec';
+  }
+  // Ca hiển thị: ghép tên các ca trong ngày (VD "Ca sáng + Ca chiều")
+  for (const c of cell.values()) {
+    if (c._shiftNames && c._shiftNames.length > 1) c.shift_name = c._shiftNames.join(' + ');
+  }
 
   const assigns = new Map(); // empId|date -> {shift_id,is_off}
   for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date LIKE ?').all(month + '%'))

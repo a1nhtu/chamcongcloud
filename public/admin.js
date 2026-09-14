@@ -518,7 +518,7 @@ function shiftModal(s) {
       field('Cho phép về sớm (phút)', input('s-early', { type: 'number', value: s?.early_grace_min ?? 15, min: 0 }))),
     el('div', { class: 'two-col' },
       field('Nghỉ giữa ca (phút)', input('s-break', { type: 'number', value: s?.break_minutes ?? 0, min: 0 })),
-      field('Giá trị công (1 ca=1.0, nửa ca=0.5)', input('s-unit', { type: 'number', step: '0.1', value: s?.work_unit_value ?? 1.0, min: 0 }))),
+      field('Số công của ca (cả ngày=1, nửa ngày=0.5)', input('s-unit', { type: 'number', step: '0.1', value: s?.work_unit_value ?? 1.0, min: 0 }))),
     el('div', {}, el('label', { style: 'display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:600' }, otChk, 'Cho phép tính tăng ca (OT) khi ở lại sau giờ tan ca')),
     el('div', { class: 'two-col' },
       field('OT: ở lại tối thiểu (phút)', input('s-otafter', { type: 'number', value: s?.ot_start_after_min ?? 30, min: 0 })),
