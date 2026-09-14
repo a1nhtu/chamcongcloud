@@ -340,7 +340,12 @@ export function rebuildDay(employeeId, workDate) {
     let punches = punchesInWin(winStart, winEnd);
     if (!punches.length) punches = prov;
     ({ inIso, outIso } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate));
-    if (!inIso) { inIso = prov[0].punch_at; outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null; }
+    if (!inIso) {
+      // Ca đêm: punch lẻ (thường là giờ RA sáng hôm sau) thuộc ca đêm NGÀY TRƯỚC → không tạo dòng rác ở ngày này
+      const night = shift.cross_midnight || shift.end_time <= shift.start_time;
+      if (night) return;
+      inIso = prov[0].punch_at; outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null;
+    }
   } else {
     inIso = prov[0].punch_at;
     outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null;
@@ -375,6 +380,14 @@ export function ingestAttlog(serial, rawBody) {
     n++;
     if (empId) touched.add(empId + '|' + workDate);
   }
-  for (const key of touched) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
+  // Dựng lại ngày có punch + NGÀY HÔM TRƯỚC (punch sáng sớm có thể là giờ RA của ca đêm hôm trước)
+  const toRebuild = new Set();
+  for (const key of touched) {
+    const [eid, date] = key.split('|');
+    toRebuild.add(key);
+    const prev = new Date(date + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
+    toRebuild.add(eid + '|' + prev.toISOString().slice(0, 10));
+  }
+  for (const key of toRebuild) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
   return n;
 }
