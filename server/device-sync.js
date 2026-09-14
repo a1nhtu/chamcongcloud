@@ -1,7 +1,7 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { db, getSetting, resolveEffectiveShift } from './db.js';
-import { computeLate, computeCheckout, isWeekendDay } from './attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow } from './attendance-calc.js';
 import { hashPassword } from './auth.js';
 
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
@@ -278,12 +278,34 @@ function metrics(employeeId, workDate, inIso, outIso) {
   return { shiftId: shift?.id ?? null, late, ...c };
 }
 
+// Map serial → số máy (IDM: máy lẻ VÀO / chẵn RA)
+function deviceMachineMap() {
+  const map = {};
+  for (const d of db.prepare('SELECT serial, machine_number FROM push_devices').all()) map[d.serial] = d.machine_number || 0;
+  return map;
+}
+
 // Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay)
 export function rebuildDay(employeeId, workDate) {
-  const punches = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
-  if (!punches.length) return;
-  const inIso = punches[0].punch_at;
-  const outIso = punches.length > 1 ? punches[punches.length - 1].punch_at : null;
+  // Punch tạm theo ngày (để dò ca) — có kèm serial cho quy tắc IDM
+  const prov = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
+  if (!prov.length) return;
+  // Dò ca thực tế + quy tắc ghép log áp dụng
+  const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at);
+  const shift = eff.shift;
+  let inIso, outIso;
+  if (shift) {
+    // Lấy punch trong cửa sổ ca (rộng theo giờ, phủ cả ca đêm sang ngày hôm sau) rồi ghép theo quy tắc
+    const { winStart, winEnd } = ruleWindow(workDate, shift);
+    let punches = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+      .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+    if (!punches.length) punches = prov;
+    ({ inIso, outIso } = mergeDayPunches(punches, shift, eff.mergeRule, deviceMachineMap(), workDate));
+    if (!inIso) { inIso = prov[0].punch_at; outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null; }
+  } else {
+    inIso = prov[0].punch_at;
+    outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null;
+  }
   const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
   if (existing && existing.manual) return; // tôn trọng sửa tay của admin
   const m = metrics(employeeId, workDate, inIso, outIso);

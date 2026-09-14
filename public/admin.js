@@ -523,6 +523,15 @@ function shiftModal(s) {
     el('div', { class: 'two-col' },
       field('OT: ở lại tối thiểu (phút)', input('s-otafter', { type: 'number', value: s?.ot_start_after_min ?? 30, min: 0 })),
       field('OT: làm tròn theo (phút, 0=không)', input('s-otround', { type: 'number', value: s?.ot_rounding_unit ?? 0, min: 0 }))),
+    el('div', { class: 'two-col' },
+      field('Quy tắc ghép log máy (mặc định của ca)',
+        el('select', { id: 's-rule' }, ...MERGE_RULES.filter(([v]) => v !== 'default').map(([v, t]) =>
+          el('option', { value: v, ...(String(s?.merge_rule || 'filo') === v ? { selected: '' } : {}) }, t)))),
+      field('TĐ-QĐ ghép theo',
+        el('select', { id: 's-tdqd' },
+          el('option', { value: 'pair', ...((s?.tdqd_mode || 'pair') === 'pair' ? { selected: '' } : {}) }, 'Thời gian (vào trước/ra sau)'),
+          el('option', { value: 'idm', ...(s?.tdqd_mode === 'idm' ? { selected: '' } : {}) }, 'Máy lẻ/chẵn (IDM)')))),
+    el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, 'Quy tắc ghép log = cách gộp nhiều lần quẹt máy thành giờ Vào/Ra. FILO hợp đa số. IDM cần đặt "số máy" cho từng máy (lẻ=Vào, chẵn=Ra). Có thể ghi đè khi phân ca.'),
     el('div', {}, el('label', {}, 'Ngày làm việc'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...dayBoxes)),
   ];
   const save = el('button', { class: 'btn' }, 'Lưu');
@@ -537,6 +546,7 @@ function shiftModal(s) {
       break_minutes: +$('#s-break').value || 0, work_unit_value: +$('#s-unit').value || 1,
       allow_ot: otChk.checked, ot_start_after_min: +$('#s-otafter').value || 0,
       ot_rounding_unit: +$('#s-otround').value || 0, work_days,
+      merge_rule: $('#s-rule').value || 'filo', tdqd_mode: $('#s-tdqd').value || 'pair',
     };
     try { if (s) await api('/admin/shifts/' + s.id, { method: 'PUT', body: b }); else await api('/admin/shifts', { method: 'POST', body: b }); toast('Đã lưu', 'ok'); closeModal(); pageShifts(); }
     catch (err) { toast(err.message, 'err'); }
@@ -793,7 +803,9 @@ async function pageAssignments() {
     reader.readAsDataURL(f);
     fileI.value = '';
   };
-  const tools = [prevBtn, todayBtn, nextBtn, deptSel, exBtn, imBtn, fileI].filter(Boolean);
+  const saBtn = hasPerm('assignments') ? el('button', { class: 'btn ghost sm' }, '📋 Phân ca làm việc') : null;
+  if (saBtn) saBtn.onclick = shiftAssignManageModal;
+  const tools = [prevBtn, todayBtn, nextBtn, deptSel, saBtn, exBtn, imBtn, fileI].filter(Boolean);
 
   setMain(head('Phân ca', ...tools), loading());
 
@@ -894,6 +906,108 @@ async function pageAssignments() {
 
   deptSel.onchange = render;
   render();
+}
+
+/* ---------- 4c) PHÂN CA LÀM VIỆC (gán ca/lịch trình theo khoảng ngày) ---------- */
+const MERGE_RULES = [
+  ['default', 'Mặc định (theo khai báo trong từng ca)'],
+  ['filo', 'FILO — Vào trước, ra sau'],
+  ['tdhc', 'TĐ-HC — Theo cửa sổ thời gian'],
+  ['idm', 'IDM — Máy lẻ vào / máy chẵn ra'],
+  ['tdqd', 'TĐ-QĐ — Qua đêm'],
+];
+const RULE_LABEL = Object.fromEntries(MERGE_RULES);
+
+async function shiftAssignManageModal() {
+  const listBox = el('div', {}, loading());
+  const addBtn = el('button', { class: 'btn' }, '+ Thêm phân ca');
+  addBtn.onclick = () => shiftAssignFormModal(reload);
+  const reload = async () => {
+    let rows = [];
+    try { rows = (await api('/admin/shift-assignments')).rows; }
+    catch (e) { listBox.innerHTML = ''; listBox.append(el('div', { class: 'empty' }, e.message)); return; }
+    listBox.innerHTML = '';
+    if (!rows.length) { listBox.append(el('div', { class: 'map-hint' }, 'Chưa có phân ca nào. Bấm "+ Thêm phân ca".')); return; }
+    for (const r of rows) {
+      const target = r.mode === 'schedule' ? ('📋 ' + (r.schedule_name || 'Lịch trình')) : ('🕐 ' + (r.shift_name || 'Ca'));
+      const range = r.from_date + (r.to_date ? ' → ' + r.to_date : ' → (mãi mãi)');
+      const rule = (r.merge_rule && r.merge_rule !== 'default') ? (' · ' + (RULE_LABEL[r.merge_rule] || r.merge_rule).split(' —')[0]) : '';
+      const del = btnSm('Xoá', async () => { try { await api('/admin/shift-assignments/' + r.id, { method: 'DELETE' }); reload(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'ghost');
+      listBox.append(el('div', { style: 'padding:10px 2px;border-bottom:1px solid #f1efec;display:flex;align-items:center;gap:10px' },
+        el('div', { style: 'flex:1' },
+          el('div', {}, el('b', {}, r.emp_name || ''), el('span', { style: 'color:#999' }, ` · ${r.emp_code || ''}${r.department ? ' · ' + r.department : ''}`)),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, `${target} · ${range}${r.shift_type === 'rotating' ? ' · xoay' : ''}${rule}`)),
+        del));
+    }
+  };
+  openModal('Phân ca làm việc', [
+    el('div', { class: 'map-hint' }, 'Gán ca hoặc lịch trình cho NV theo khoảng ngày. Áp được cho cả phòng ban / toàn bộ nhân viên (không cần chọn từng người). Phân ca theo ngày trên lịch tuần vẫn ưu tiên đè lên phân ca này.'),
+    addBtn, listBox,
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+  reload();
+}
+
+async function shiftAssignFormModal(onSaved) {
+  if (!SHIFTS.length || !DEPARTMENTS.length) { try { await loadRefs(); } catch {} }
+  let employees = [];
+  try { employees = (await api('/admin/employees')).rows || []; } catch {}
+  employees = employees.filter(e => e.role !== 'admin' && e.active !== 0);
+
+  // Áp dụng cho
+  const scopeSel = el('select', {},
+    el('option', { value: 'emp' }, 'Nhân viên cụ thể'),
+    el('option', { value: 'dept' }, 'Toàn phòng ban'),
+    el('option', { value: 'all' }, 'Toàn bộ nhân viên'));
+  const empSel = el('select', {}, el('option', { value: '' }, '— Chọn nhân viên —'),
+    ...employees.map(e => el('option', { value: String(e.id) }, `${e.full_name} (${e.code})`)));
+  const deptSel = el('select', {}, el('option', { value: '' }, '— Chọn phòng ban —'),
+    ...DEPARTMENTS.map(d => el('option', { value: d.name }, d.name)));
+  const empField = field('Nhân viên *', empSel);
+  const deptField = field('Phòng ban *', deptSel);
+
+  // Chế độ gán
+  const modeSel = el('select', {},
+    el('option', { value: 'shift' }, 'Gán ca trực tiếp'),
+    el('option', { value: 'schedule' }, 'Gán lịch trình'));
+  const shiftSel = el('select', {}, el('option', { value: '' }, '— Chọn ca —'),
+    ...SHIFTS.filter(s => s.active).map(s => el('option', { value: String(s.id) }, `${s.name} (${s.start_time}-${s.end_time})`)));
+  const schedSel = el('select', {}, el('option', { value: '' }, '— Chọn lịch trình —'),
+    ...SCHEDULES.map(w => el('option', { value: String(w.id) }, `📋 ${w.name}`)));
+  const shiftField = field('Ca làm việc *', shiftSel);
+  const schedField = field('Lịch trình *', schedSel);
+
+  const fromI = el('input', { type: 'date', value: todayVN() });
+  const toI = el('input', { type: 'date', value: '' });
+  const typeSel = el('select', {}, el('option', { value: 'fixed' }, 'Cố định (không xoay)'), el('option', { value: 'rotating' }, 'Xoay ca'));
+  const ruleSel = el('select', {}, ...MERGE_RULES.map(([v, t]) => el('option', { value: v }, t)));
+  const noteI = el('input', { placeholder: 'Ghi chú (tuỳ chọn)' });
+
+  const syncScope = () => { empField.style.display = scopeSel.value === 'emp' ? '' : 'none'; deptField.style.display = scopeSel.value === 'dept' ? '' : 'none'; };
+  const syncMode = () => { shiftField.style.display = modeSel.value === 'shift' ? '' : 'none'; schedField.style.display = modeSel.value === 'schedule' ? '' : 'none'; };
+  scopeSel.onchange = syncScope; modeSel.onchange = syncMode; syncScope(); syncMode();
+
+  const save = el('button', { class: 'btn' }, '💾 Lưu');
+  save.onclick = async () => {
+    const scope = scopeSel.value, mode = modeSel.value;
+    const body = { scope, mode, from_date: fromI.value, to_date: toI.value || null, shift_type: typeSel.value, merge_rule: ruleSel.value, note: noteI.value };
+    if (scope === 'emp') { if (!empSel.value) return toast('Chọn nhân viên', 'err'); body.employee_id = +empSel.value; }
+    else if (scope === 'dept') { if (!deptSel.value) return toast('Chọn phòng ban', 'err'); body.department = deptSel.value; }
+    if (mode === 'shift') { if (!shiftSel.value) return toast('Chọn ca làm việc', 'err'); body.shift_id = +shiftSel.value; }
+    else { if (!schedSel.value) return toast('Chọn lịch trình', 'err'); body.work_schedule_id = +schedSel.value; }
+    if (!fromI.value) return toast('Chọn ngày bắt đầu', 'err');
+    save.disabled = true;
+    try { const r = await api('/admin/shift-assignments', { method: 'POST', body }); toast(`Đã phân ca cho ${r.count} nhân viên`, 'ok'); closeModal(); if (onSaved) setTimeout(shiftAssignManageModal, 100); }
+    catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  };
+
+  openModal('Thêm phân ca', [
+    field('Áp dụng cho', scopeSel), empField, deptField,
+    field('Chế độ gán', modeSel), shiftField, schedField,
+    el('div', { class: 'two-col' }, field('Ngày bắt đầu *', fromI), field('Ngày kết thúc (trống = mãi mãi)', toI)),
+    el('div', { class: 'two-col' }, field('Loại ca', typeSel), field('Quy tắc ghép log', ruleSel)),
+    field('Ghi chú', noteI),
+    el('div', { class: 'map-hint' }, 'Quy tắc ghép log = cách máy chấm công gộp nhiều lần quẹt thành giờ Vào/Ra. "Mặc định" = dùng quy tắc khai báo trong từng ca. IDM cần đặt "số máy" cho từng máy (lẻ = Vào, chẵn = Ra) ở mục Máy chấm công.'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
 
 /* ---------- 5) ĐƠN TỪ ---------- */
@@ -1287,6 +1401,7 @@ async function pageDevices() {
       : btnSm('✅ Duyệt', async () => { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); pageDevices(); });
     const rename = btnSm('Đổi tên', async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { name } }); pageDevices(); } }, 'ghost');
     const groupBtn = btnSm('Nhóm ĐB', async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { sync_group: g } }); toast('Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } }, 'ghost');
+    const mnumBtn = btnSm('Số máy', async () => { const n = prompt('Số máy (dùng cho quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { machine_number: parseInt(n, 10) || 0 } }); toast('Đã đặt số máy', 'ok'); pageDevices(); } }, 'ghost');
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m));
     const del = btnSm('Xoá', async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } }, 'ghost');
     const cNV = el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0));
@@ -1296,13 +1411,13 @@ async function pageDevices() {
     countCells[m.serial] = { cNV, cFP, cFace, cCard };
     tb.append(el('tr', {},
       el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, m.serial)),
-      el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : ''),
+      el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : ''),
       el('td', {}, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
       cNV, cFP, cFace, cCard,
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
-      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, approve, rename, groupBtn, logBtn, del)),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, approve, rename, groupBtn, mnumBtn, logBtn, del)),
     ));
   }
   tbl.append(tb);

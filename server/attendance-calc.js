@@ -79,6 +79,79 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec' };
 }
 
+/* ===================== GHÉP LOG MÁY → GIỜ VÀO / RA (4 quy tắc) =====================
+ * Theo phần mềm mẫu ChamCongApp (Rules/*Processor.cs):
+ *   filo — Vào trước, ra sau: sớm nhất/muộn nhất trong cửa sổ ca.
+ *   tdhc — Theo cửa sổ thời gian: VÀO trong cửa sổ vào; RA = log kế tiếp, phải nằm trong cửa sổ ra.
+ *   idm  — Máy lẻ vào / máy chẵn ra: VÀO = log máy lẻ sớm nhất; RA = log máy chẵn muộn nhất.
+ *   tdqd — Qua đêm: cửa sổ xuyên đêm; con: pair (như filo) hoặc idm.
+ * punches: [{ punch_at: ISO, serial }] (đã lấy trong cửa sổ rộng). machineMap: { serial: số máy }.
+ */
+const HH = 3600000;
+
+// Cửa sổ nhận log của 1 ca: [start-2h, cửa-sổ-ra-kết-thúc hoặc end+4h]. Trả kèm mốc start/end ca.
+export function ruleWindow(workDate, shift) {
+  const { start, end } = shiftBounds(workDate, shift);
+  let winEnd;
+  if (shift.check_out_end) {
+    winEnd = vnInstant(workDate, shift.check_out_end);
+    if (winEnd < end) winEnd = new Date(winEnd.getTime() + 24 * HH); // cửa sổ ra qua đêm
+  } else {
+    winEnd = new Date(end.getTime() + 4 * HH);
+  }
+  return { winStart: new Date(start.getTime() - 2 * HH), winEnd, start, end };
+}
+
+export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate) {
+  if (!punches || !punches.length || !shift) {
+    const s = (punches || []).map((p) => p.punch_at).sort();
+    return { inIso: s[0] || null, outIso: s.length > 1 ? s[s.length - 1] : null };
+  }
+  rule = rule || 'filo';
+  const at = (p) => new Date(p.punch_at);
+  const all = [...punches].sort((a, b) => at(a) - at(b));
+  const { winStart, winEnd, start, end } = ruleWindow(workDate, shift);
+  const inWin = all.filter((p) => at(p) >= winStart && at(p) <= winEnd);
+  const iso = (p) => (p ? p.punch_at : null);
+
+  // IDM (hoặc TĐ-QĐ/idm): máy lẻ = VÀO sớm nhất, máy chẵn = RA muộn nhất
+  const useIdm = rule === 'idm' || (rule === 'tdqd' && (shift.tdqd_mode || 'pair') === 'idm');
+  if (useIdm) {
+    const mnum = (p) => machineMap[p.serial] || 0;
+    const ins = inWin.filter((p) => mnum(p) % 2 === 1);
+    const outs = inWin.filter((p) => mnum(p) % 2 === 0);
+    return { inIso: iso(ins[0] || null), outIso: iso(outs.length ? outs[outs.length - 1] : null) };
+  }
+
+  // TĐ-HC: VÀO trong cửa sổ vào; RA = log KẾ TIẾP, phải nằm trong cửa sổ ra (nếu lệch → bỏ RA)
+  if (rule === 'tdhc') {
+    let ci;
+    if (shift.check_in_start && shift.check_in_end) {
+      const cs = vnInstant(workDate, shift.check_in_start);
+      let ce = vnInstant(workDate, shift.check_in_end);
+      if (ce < cs) ce = new Date(ce.getTime() + 24 * HH);
+      ci = all.find((p) => at(p) >= cs && at(p) <= ce);
+    } else ci = inWin[0];
+    if (!ci) return { inIso: null, outIso: null };
+    const co = all.find((p) => at(p) > at(ci));
+    if (!co) return { inIso: iso(ci), outIso: null };
+    let cos, coe;
+    if (shift.check_out_start && shift.check_out_end) {
+      cos = vnInstant(workDate, shift.check_out_start);
+      coe = vnInstant(workDate, shift.check_out_end);
+      if (coe < cos) coe = new Date(coe.getTime() + 24 * HH);
+    } else { cos = new Date(end.getTime() - HH); coe = new Date(end.getTime() + 8 * HH); }
+    if (at(co) < cos || at(co) > coe) return { inIso: iso(ci), outIso: null };
+    return { inIso: iso(ci), outIso: iso(co) };
+  }
+
+  // FILO (mặc định) & TĐ-QĐ/pair: sớm nhất VÀO, muộn nhất RA trong cửa sổ
+  const ci = inWin[0];
+  if (!ci) return { inIso: null, outIso: null };
+  const co = inWin.length > 1 ? inWin[inWin.length - 1] : null;
+  return { inIso: iso(ci), outIso: iso(co && co !== ci ? co : null) };
+}
+
 // Thứ trong tuần của ngày lịch (workDate = 'YYYY-MM-DD'): 1=T2 .. 7=CN.
 // Dùng 12:00 UTC để tránh lệch ngày do múi giờ.
 export function vnWeekday(workDate) {

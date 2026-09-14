@@ -133,6 +133,23 @@ export function initSchema() {
       UNIQUE(work_schedule_id, shift_id)
     );
 
+    -- Phân ca theo KHOẢNG NGÀY (gán ca hoặc lịch trình cho NV, có ngày bắt đầu/kết thúc).
+    -- Khác daily_shift_assignments (theo từng ngày): bảng này áp cho cả một khoảng, gán hàng loạt được.
+    CREATE TABLE IF NOT EXISTS shift_assignments (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id      INTEGER NOT NULL REFERENCES employees(id),
+      mode             TEXT NOT NULL DEFAULT 'shift',   -- 'shift' = gán ca | 'schedule' = gán lịch trình
+      shift_id         INTEGER REFERENCES shifts(id),           -- khi mode='shift'
+      work_schedule_id INTEGER REFERENCES work_schedules(id),   -- khi mode='schedule'
+      from_date        TEXT NOT NULL,                   -- 'YYYY-MM-DD'
+      to_date          TEXT,                            -- NULL = mãi mãi
+      shift_type       TEXT NOT NULL DEFAULT 'fixed',   -- 'fixed' = cố định | 'rotating' = xoay
+      merge_rule       TEXT NOT NULL DEFAULT 'default', -- default|filo|tdhc|idm|tdqd (ghi đè quy tắc ghép log của ca)
+      note             TEXT DEFAULT '',
+      active           INTEGER NOT NULL DEFAULT 1,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Nhân viên tự đăng ký ca (chờ duyệt / tự áp dụng tuỳ cấu hình)
     CREATE TABLE IF NOT EXISTS shift_requests (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -305,6 +322,13 @@ function migrateColumns() {
   add('shifts', 'ot_start_after_min', 'INTEGER NOT NULL DEFAULT 30');  // ở lại tối thiểu để tính OT
   add('shifts', 'ot_rounding_unit',   'INTEGER NOT NULL DEFAULT 0');   // làm tròn OT (phút), 0=không
 
+  // Phân ca làm việc: quy tắc ghép log máy + ca đêm (dùng cho ghép punch máy ZKTeco)
+  add('shifts', 'merge_rule',    "TEXT NOT NULL DEFAULT 'filo'");   // filo|tdhc|idm|tdqd — quy tắc ghép log mặc định của ca
+  add('shifts', 'cross_midnight', 'INTEGER NOT NULL DEFAULT 0');    // 1 = ca đêm qua ngày hôm sau
+  add('shifts', 'tdqd_mode',     "TEXT NOT NULL DEFAULT 'pair'");   // pair|idm — cách ghép log cho quy tắc TĐ-QĐ
+  // Máy chấm công: số máy (IDM: máy lẻ = VÀO, máy chẵn = RA)
+  add('push_devices', 'machine_number', 'INTEGER NOT NULL DEFAULT 0');
+
   // GĐ1: các chỉ số tính công lưu trên bản ghi chấm công
   add('attendance', 'early_min',  'INTEGER DEFAULT 0');
   add('attendance', 'ot_min',     'INTEGER DEFAULT 0');
@@ -405,12 +429,34 @@ export function autoDetectShift(checkInIso, candidates, checkOutIso) {
   return scored[0].s;
 }
 
-// Ca hiển thị (chưa biết giờ chấm): phân ca thủ công → lịch trình (tự động) → ca mặc định.
+// Phân ca theo KHOẢNG NGÀY (bảng shift_assignments) phủ ngày này — bản ghi mới nhất thắng.
+export function rangedShiftAssignment(employeeId, workDate) {
+  return db.prepare(`SELECT * FROM shift_assignments
+    WHERE employee_id = ? AND active = 1 AND from_date <= ?
+      AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
+    ORDER BY id DESC LIMIT 1`).get(employeeId, workDate, workDate);
+}
+
+// Quy tắc ghép log thực tế: ưu tiên ghi đè từ phân ca → quy tắc của ca → 'filo'.
+function effectiveMergeRule(shift, override) {
+  const r = (override && override !== 'default') ? override : (shift && shift.merge_rule) || 'filo';
+  return r === 'default' ? 'filo' : r;
+}
+
+// Ca hiển thị (chưa biết giờ chấm): phân ca ngày → phân ca khoảng → lịch trình (auto) → ca mặc định.
 export function resolveShift(employeeId, workDate) {
   const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
   if (a) {
     if (a.is_off) return { off: true, shift: null, source: 'manual' };
     if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shift: s, source: 'manual' }; }
+  }
+  const ra = rangedShiftAssignment(employeeId, workDate);
+  if (ra) {
+    if (ra.mode === 'shift' && ra.shift_id) { const s = getShift(ra.shift_id); if (s) return { off: false, shift: s, source: 'assign' }; }
+    if (ra.mode === 'schedule' && ra.work_schedule_id && scheduleShifts(ra.work_schedule_id).length) {
+      const ws = db.prepare('SELECT name FROM work_schedules WHERE id = ?').get(ra.work_schedule_id);
+      return { off: false, shift: null, source: 'schedule', scheduleName: ws?.name || '' };
+    }
   }
   const emp = db.prepare('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
   if (emp?.work_schedule_id && scheduleShifts(emp.work_schedule_id).length) {
@@ -421,23 +467,33 @@ export function resolveShift(employeeId, workDate) {
   return { off: false, shift, source: shift ? 'default' : 'none' };
 }
 
-// Ca thực tế khi chấm: phân ca thủ công (đè) → lịch trình (auto theo giờ trong lịch trình) → ca mặc định → auto toàn cục.
+// Ca thực tế khi chấm: phân ca ngày (đè) → phân ca khoảng → lịch trình (auto theo giờ) → ca mặc định → auto toàn cục.
+// Trả kèm mergeRule = quy tắc ghép log máy áp dụng cho ca này (null nếu ngày nghỉ / không có ca).
 export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOutIso = null) {
   const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
   if (a) {
-    if (a.is_off) return { off: true, shift: null, source: 'manual' };
-    if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shift: s, source: 'manual' }; }
+    if (a.is_off) return { off: true, shift: null, source: 'manual', mergeRule: null };
+    if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shift: s, source: 'manual', mergeRule: effectiveMergeRule(s, null) }; }
+  }
+  const ra = rangedShiftAssignment(employeeId, workDate);
+  if (ra) {
+    const override = ra.merge_rule;
+    if (ra.mode === 'shift' && ra.shift_id) { const s = getShift(ra.shift_id); if (s) return { off: false, shift: s, source: 'assign', mergeRule: effectiveMergeRule(s, override) }; }
+    if (ra.mode === 'schedule' && ra.work_schedule_id) {
+      const cands = scheduleShifts(ra.work_schedule_id);
+      if (cands.length) { const s = autoDetectShift(checkInIso, cands, checkOutIso) || cands[0]; return { off: false, shift: s, source: 'schedule', mergeRule: effectiveMergeRule(s, override) }; }
+    }
   }
   const emp = db.prepare('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
   if (emp?.work_schedule_id) {
     const cands = scheduleShifts(emp.work_schedule_id);
     if (cands.length) {
       const s = autoDetectShift(checkInIso, cands, checkOutIso) || cands[0];
-      return { off: false, shift: s, source: 'schedule' };
+      return { off: false, shift: s, source: 'schedule', mergeRule: effectiveMergeRule(s, null) };
     }
   }
-  if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shift: s, source: 'default' }; }
+  if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shift: s, source: 'default', mergeRule: effectiveMergeRule(s, null) }; }
   const auto = autoDetectShift(checkInIso, null, checkOutIso);
-  if (auto) return { off: false, shift: auto, source: 'auto' };
-  return { off: false, shift: null, source: 'none' };
+  if (auto) return { off: false, shift: auto, source: 'auto', mergeRule: effectiveMergeRule(auto, null) };
+  return { off: false, shift: null, source: 'none', mergeRule: null };
 }

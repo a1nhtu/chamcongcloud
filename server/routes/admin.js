@@ -235,12 +235,13 @@ r.post('/shifts', need('shifts'), (req, res) => {
   const info = db.prepare(`INSERT INTO shifts
     (name,start_time,end_time,late_grace_min,work_days,active,
      break_minutes,early_grace_min,work_unit_value,allow_ot,ot_start_after_min,ot_rounding_unit,
-     code,check_in_start,check_in_end,check_out_start,check_out_end)
-    VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?)`).run(
+     code,check_in_start,check_in_end,check_out_start,check_out_end,merge_rule,cross_midnight,tdqd_mode)
+    VALUES (?,?,?,?,?,1,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).run(
       b.name, b.start_time, b.end_time, b.late_grace_min || 0, b.work_days || '1,2,3,4,5,6',
       b.break_minutes || 0, b.early_grace_min ?? 15, b.work_unit_value ?? 1.0,
       b.allow_ot ? 1 : 0, b.ot_start_after_min ?? 30, b.ot_rounding_unit || 0,
-      (b.code || '').trim(), b.check_in_start || null, b.check_in_end || null, b.check_out_start || null, b.check_out_end || null);
+      (b.code || '').trim(), b.check_in_start || null, b.check_in_end || null, b.check_out_start || null, b.check_out_end || null,
+      b.merge_rule || 'filo', b.cross_midnight ? 1 : 0, b.tdqd_mode || 'pair');
   res.json({ ok: true, id: info.lastInsertRowid });
 });
 r.put('/shifts/:id', need('shifts'), (req, res) => {
@@ -249,7 +250,7 @@ r.put('/shifts/:id', need('shifts'), (req, res) => {
   if (!s) return res.status(404).json({ error: 'Không tìm thấy ca' });
   db.prepare(`UPDATE shifts SET name=?, start_time=?, end_time=?, late_grace_min=?, work_days=?, active=?,
     break_minutes=?, early_grace_min=?, work_unit_value=?, allow_ot=?, ot_start_after_min=?, ot_rounding_unit=?,
-    code=?, check_in_start=?, check_in_end=?, check_out_start=?, check_out_end=? WHERE id=?`).run(
+    code=?, check_in_start=?, check_in_end=?, check_out_start=?, check_out_end=?, merge_rule=?, cross_midnight=?, tdqd_mode=? WHERE id=?`).run(
     b.name ?? s.name, b.start_time ?? s.start_time, b.end_time ?? s.end_time,
     b.late_grace_min ?? s.late_grace_min, b.work_days ?? s.work_days,
     b.active != null ? (b.active ? 1 : 0) : s.active,
@@ -259,7 +260,9 @@ r.put('/shifts/:id', need('shifts'), (req, res) => {
     b.code != null ? b.code.trim() : s.code, b.check_in_start !== undefined ? (b.check_in_start || null) : s.check_in_start,
     b.check_in_end !== undefined ? (b.check_in_end || null) : s.check_in_end,
     b.check_out_start !== undefined ? (b.check_out_start || null) : s.check_out_start,
-    b.check_out_end !== undefined ? (b.check_out_end || null) : s.check_out_end, s.id);
+    b.check_out_end !== undefined ? (b.check_out_end || null) : s.check_out_end,
+    b.merge_rule ?? s.merge_rule, b.cross_midnight != null ? (b.cross_midnight ? 1 : 0) : s.cross_midnight,
+    b.tdqd_mode ?? s.tdqd_mode, s.id);
   res.json({ ok: true });
 });
 r.delete('/shifts/:id', need('shifts'), (req, res) => {
@@ -453,6 +456,65 @@ r.post('/assignments/bulk', need('assignments'), (req, res) => {
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
   res.json({ ok: true, count: n });
+});
+
+/* -------------------- PHÂN CA LÀM VIỆC (gán ca/lịch trình theo khoảng ngày) -------------------- */
+// Danh sách phân ca khoảng đang hiệu lực (kèm tên NV, ca/lịch trình)
+r.get('/shift-assignments', (req, res) => {
+  const rows = db.prepare(`SELECT sa.*, e.code AS emp_code, e.full_name AS emp_name, e.department,
+      s.name AS shift_name, ws.name AS schedule_name
+    FROM shift_assignments sa
+    JOIN employees e ON e.id = sa.employee_id
+    LEFT JOIN shifts s ON s.id = sa.shift_id
+    LEFT JOIN work_schedules ws ON ws.id = sa.work_schedule_id
+    WHERE sa.active = 1 ORDER BY sa.id DESC`).all();
+  res.json({ rows });
+});
+
+// Tạo phân ca khoảng — áp cho 1 NV / cả phòng ban / toàn bộ NV
+r.post('/shift-assignments', need('assignments'), (req, res) => {
+  const b = req.body || {};
+  const scope = b.scope || 'emp';                       // emp | dept | all
+  const mode = b.mode === 'schedule' ? 'schedule' : 'shift';
+  const from = (b.from_date || '').slice(0, 10);
+  const to = (b.to_date || '').slice(0, 10) || null;
+  if (!from) return res.status(400).json({ error: 'Thiếu ngày bắt đầu' });
+  if (to && to < from) return res.status(400).json({ error: 'Ngày kết thúc phải sau ngày bắt đầu' });
+  const shiftId = mode === 'shift' ? (b.shift_id || null) : null;
+  const scheduleId = mode === 'schedule' ? (b.work_schedule_id || null) : null;
+  if (mode === 'shift' && !shiftId) return res.status(400).json({ error: 'Chưa chọn ca làm việc' });
+  if (mode === 'schedule' && !scheduleId) return res.status(400).json({ error: 'Chưa chọn lịch trình' });
+
+  // Xác định danh sách NV theo phạm vi áp dụng
+  let emps;
+  if (scope === 'all') emps = db.prepare("SELECT id FROM employees WHERE active=1 AND role!='admin'").all();
+  else if (scope === 'dept') {
+    if (!b.department) return res.status(400).json({ error: 'Chưa chọn phòng ban' });
+    emps = db.prepare("SELECT id FROM employees WHERE active=1 AND role!='admin' AND department=?").all(b.department);
+  } else {
+    if (!b.employee_id) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    emps = [{ id: b.employee_id }];
+  }
+  if (!emps.length) return res.status(400).json({ error: 'Không có nhân viên phù hợp trong phạm vi đã chọn' });
+
+  const shiftType = b.shift_type === 'rotating' ? 'rotating' : 'fixed';
+  const mergeRule = b.merge_rule || 'default';
+  const note = (b.note || '').slice(0, 500);
+  const ins = db.prepare(`INSERT INTO shift_assignments
+    (employee_id, mode, shift_id, work_schedule_id, from_date, to_date, shift_type, merge_rule, note)
+    VALUES (?,?,?,?,?,?,?,?,?)`);
+  let n = 0;
+  db.exec('BEGIN');
+  try {
+    for (const e of emps) { ins.run(e.id, mode, shiftId, scheduleId, from, to, shiftType, mergeRule, note); n++; }
+    db.exec('COMMIT');
+  } catch (err) { db.exec('ROLLBACK'); throw err; }
+  res.json({ ok: true, count: n });
+});
+
+r.delete('/shift-assignments/:id', need('assignments'), (req, res) => {
+  db.prepare('DELETE FROM shift_assignments WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
 });
 
 /* -------------------- PHÂN CA BẰNG EXCEL -------------------- */
@@ -803,9 +865,10 @@ r.put('/devices/:id', need('devices'), (req, res) => {
   const b = req.body || {};
   const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
-  db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=? WHERE id=?')
+  db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=? WHERE id=?')
     .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active,
-         b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || ''), d.id);
+         b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || ''),
+         b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0), d.id);
   res.json({ ok: true });
 });
 r.delete('/devices/:id', need('devices'), (req, res) => {
