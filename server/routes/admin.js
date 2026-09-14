@@ -790,7 +790,7 @@ r.post('/push/subscribe', (req, res) => {
 });
 r.post('/push/unsubscribe', (req, res) => { removeSubscription(req.body?.endpoint); res.json({ ok: true }); });
 r.post('/push/test', async (req, res) => {
-  try { await notifyManagers({ title: 'Digiplus Chấm công', body: 'Thông báo thử — hoạt động tốt ✅', url: '/admin' }); res.json({ ok: true }); }
+  try { const r2 = await notifyManagers({ title: 'Digiplus Chấm công', body: 'Thông báo thử — hoạt động tốt ✅', url: '/admin' }); res.json({ ok: true, ...r2 }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 r.put('/devices/:id', need('devices'), (req, res) => {

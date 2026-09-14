@@ -1427,6 +1427,15 @@ async function disablePush() {
   const sub = await reg.pushManager.getSubscription();
   if (sub) { try { await api('/admin/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch {} try { await sub.unsubscribe(); } catch {} }
 }
+// Đảm bảo server có đăng ký của trình duyệt này (đồng bộ lại, không hỏi quyền)
+async function ensureSubscribed() {
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) await api('/admin/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+    return !!sub;
+  } catch { return false; }
+}
 
 /* ---------- Cài app vào máy (PWA install) ---------- */
 let deferredPrompt = null;
@@ -1802,7 +1811,19 @@ async function pageSettings() {
       catch (e) { toast(e.message, 'err'); toggle.disabled = false; }
     };
     const testBtn = el('button', { class: 'btn ghost' }, 'Gửi thử');
-    testBtn.onclick = async () => { try { await api('/admin/push/test', { method: 'POST' }); toast('Đã gửi thử — chờ thông báo hiện lên', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+    testBtn.onclick = async () => {
+      testBtn.disabled = true;
+      try {
+        const okSub = await ensureSubscribed();   // đồng bộ đăng ký lên server trước
+        if (!okSub) { toast('Thiết bị chưa đăng ký. Bấm "Bật thông báo" lại giúp em.', 'err'); return; }
+        const r = await api('/admin/push/test', { method: 'POST' });
+        if (!r.total) toast('Server chưa có thiết bị nào đăng ký — thử Tắt rồi Bật lại thông báo.', 'err');
+        else if (r.sent) toast(`✅ Đã gửi tới ${r.sent}/${r.total} thiết bị. Chờ thông báo hiện ra (kiểm tra cả cài đặt Thông báo của máy).`, 'ok');
+        else toast(`Gửi không thành công (mã: ${(r.statuses || []).join(', ') || '?'}). `, 'err');
+      } catch (e) { toast(e.message, 'err'); }
+      finally { testBtn.disabled = false; }
+    };
+    if (on) ensureSubscribed();   // vào trang mà đang bật → đồng bộ đăng ký để server luôn có
     notifyBox.append(
       el('div', {}, el('b', { style: 'color:' + (on ? '#1a7f37' : '#7a808c') }, on ? '✅ Đang BẬT trên thiết bị này' : '⚪ Đang TẮT trên thiết bị này')),
       el('div', { style: 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap' }, toggle, ...(on ? [testBtn] : [])));

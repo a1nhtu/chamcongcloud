@@ -80,16 +80,25 @@ export function removeSubscription(endpoint) {
   if (endpoint) db.prepare('DELETE FROM push_subscriptions WHERE endpoint=?').run(endpoint);
 }
 
-// Gửi cho MỌI quản lý (admin/manager) đang bật thông báo. Bỏ qua người tự chấm (excludeId).
+// Gửi cho MỌI quản lý (admin/manager) + tài khoản tổng (employee_id NULL) đang bật thông báo.
+// Bỏ qua người tự chấm (excludeId). Trả { total, sent, statuses } để tiện chẩn đoán.
 export async function notifyManagers(payloadObj, excludeId = null) {
-  let subs;
+  let subs = [];
   try {
-    subs = db.prepare(`SELECT s.* FROM push_subscriptions s JOIN employees e ON e.id = s.employee_id
-      WHERE e.active = 1 AND e.role IN ('admin','manager')`).all();
-  } catch { return; }
+    subs = db.prepare(`SELECT s.* FROM push_subscriptions s
+      LEFT JOIN employees e ON e.id = s.employee_id
+      WHERE s.employee_id IS NULL OR (e.active = 1 AND e.role IN ('admin','manager'))`).all();
+  } catch { return { total: 0, sent: 0, statuses: [] }; }
+  const statuses = [];
+  let sent = 0;
   for (const s of subs) {
     if (excludeId && s.employee_id === excludeId) continue;
-    try { const code = await sendOne(s, payloadObj); if (code === 404 || code === 410) removeSubscription(s.endpoint); }
-    catch { /* bỏ qua lỗi mạng của 1 thiết bị */ }
+    try {
+      const code = await sendOne(s, payloadObj);
+      statuses.push(code);
+      if (code >= 200 && code < 300) sent++;
+      if (code === 404 || code === 410) removeSubscription(s.endpoint);
+    } catch (e) { statuses.push('err'); }
   }
+  return { total: subs.length, sent, statuses };
 }
