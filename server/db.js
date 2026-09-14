@@ -309,6 +309,35 @@ function migrateAttendanceMultiShift() {
   setSetting('att_multishift_migrated', '1');
 }
 
+// Dựng lại daily_shift_assignments để BỎ UNIQUE(employee_id, work_date) → cho NV có NHIỀU ca/ngày
+// (NV tự chọn 2-3 ca gãy). Giữ nguyên dữ liệu, thêm UNIQUE INDEX theo (NV, ngày, ca).
+function migrateDailyMultiShift() {
+  if (getSetting('daily_multishift_migrated') === '1') return;
+  const cols = db.prepare('PRAGMA table_info(daily_shift_assignments)').all();
+  if (!cols.length) { setSetting('daily_multishift_migrated', '1'); return; }
+  const colDefs = cols.map((c) => {
+    if (c.pk) return `${c.name} INTEGER PRIMARY KEY AUTOINCREMENT`;
+    let d = `${c.name} ${c.type || ''}`.trim();
+    if (c.notnull) d += ' NOT NULL';
+    if (c.dflt_value !== null && c.dflt_value !== undefined) d += ` DEFAULT (${c.dflt_value})`;
+    return d;
+  });
+  const colNames = cols.map((c) => c.name).join(', ');
+  db.exec('PRAGMA foreign_keys = OFF');
+  db.exec('BEGIN');
+  try {
+    db.exec(`CREATE TABLE dsa_new (${colDefs.join(', ')})`);
+    db.exec(`INSERT INTO dsa_new (${colNames}) SELECT ${colNames} FROM daily_shift_assignments`);
+    db.exec('DROP TABLE daily_shift_assignments');
+    db.exec('ALTER TABLE dsa_new RENAME TO daily_shift_assignments');
+    db.exec('CREATE INDEX IF NOT EXISTS idx_dsa_emp_date ON daily_shift_assignments(employee_id, work_date)');
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uidx_dsa_emp_date_shift ON daily_shift_assignments(employee_id, work_date, COALESCE(shift_id, 0))');
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); db.exec('PRAGMA foreign_keys = ON'); throw e; }
+  db.exec('PRAGMA foreign_keys = ON');
+  setSetting('daily_multishift_migrated', '1');
+}
+
 // Thêm cột mới cho DB đã tồn tại (an toàn, không mất dữ liệu)
 function migrateColumns() {
   const cols = (table) => new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
@@ -316,6 +345,7 @@ function migrateColumns() {
     if (!cols(table).has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
   };
   migrateAttendanceMultiShift();
+  migrateDailyMultiShift();
 
   // GĐ5: mã ca + cửa sổ nhận diện giờ vào (để tự động tìm ca)
   add('shifts', 'code',            "TEXT DEFAULT ''");   // mã ca dùng trong Excel phân ca (S, C, HC, DEM...)
@@ -473,12 +503,23 @@ function effectiveMergeRule(shift, override) {
   return r === 'default' ? 'filo' : r;
 }
 
+// Phân ca ngày của 1 NV trong 1 ngày — có thể NHIỀU ca (NV tự chọn 2-3 ca gãy).
+function dailyAssignments(employeeId, workDate) {
+  return db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').all(employeeId, workDate);
+}
+// Danh sách ca (object) từ phân ca ngày; [] nếu không có / toàn null.
+function dailyShiftObjs(da) {
+  return da.map((x) => x.shift_id).filter(Boolean).map((id) => getShift(id)).filter(Boolean);
+}
+
 // Ca hiển thị (chưa biết giờ chấm): phân ca ngày → phân ca khoảng → lịch trình (auto) → ca mặc định.
 export function resolveShift(employeeId, workDate) {
-  const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
-  if (a) {
-    if (a.is_off) return { off: true, shift: null, source: 'manual' };
-    if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shift: s, source: 'manual' }; }
+  const da = dailyAssignments(employeeId, workDate);
+  if (da.length) {
+    if (da.some((x) => x.is_off)) return { off: true, shift: null, source: 'manual' };
+    const shifts = dailyShiftObjs(da);
+    if (shifts.length > 1) return { off: false, shift: null, source: 'schedule', scheduleName: shifts.length + ' ca đã chọn' };
+    if (shifts.length === 1) return { off: false, shift: shifts[0], source: 'manual' };
   }
   const ra = rangedShiftAssignment(employeeId, workDate);
   if (ra) {
@@ -500,10 +541,14 @@ export function resolveShift(employeeId, workDate) {
 // Ca thực tế khi chấm: phân ca ngày (đè) → phân ca khoảng → lịch trình (auto theo giờ) → ca mặc định → auto toàn cục.
 // Trả kèm mergeRule = quy tắc ghép log máy áp dụng cho ca này (null nếu ngày nghỉ / không có ca).
 export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOutIso = null) {
-  const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
-  if (a) {
-    if (a.is_off) return { off: true, shift: null, source: 'manual', mergeRule: null };
-    if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shift: s, source: 'manual', mergeRule: effectiveMergeRule(s, null) }; }
+  const da = dailyAssignments(employeeId, workDate);
+  if (da.length) {
+    if (da.some((x) => x.is_off)) return { off: true, shift: null, source: 'manual', mergeRule: null };
+    const shifts = dailyShiftObjs(da);
+    if (shifts.length) {
+      const s = shifts.length === 1 ? shifts[0] : (autoDetectShift(checkInIso, shifts, checkOutIso) || shifts[0]);
+      return { off: false, shift: s, source: 'manual', mergeRule: effectiveMergeRule(s, null) };
+    }
   }
   const ra = rangedShiftAssignment(employeeId, workDate);
   if (ra) {
@@ -531,10 +576,11 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOut
 // DANH SÁCH ca của 1 ngày (để tách nhiều ca/ngày khi gán lịch trình). Ưu tiên như resolveEffectiveShift.
 // Trả { off, shifts:[ca...], mergeRule, source, isSchedule }. shifts rỗng + source='auto' = để tự dò 1 ca theo giờ.
 export function resolveDayShifts(employeeId, workDate) {
-  const a = db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').get(employeeId, workDate);
-  if (a) {
-    if (a.is_off) return { off: true, shifts: [], mergeRule: null, source: 'manual', isSchedule: false };
-    if (a.shift_id) { const s = getShift(a.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, null), source: 'manual', isSchedule: false }; }
+  const da = dailyAssignments(employeeId, workDate);
+  if (da.length) {
+    if (da.some((x) => x.is_off)) return { off: true, shifts: [], mergeRule: null, source: 'manual', isSchedule: false };
+    const shifts = dailyShiftObjs(da);
+    if (shifts.length) return { off: false, shifts, mergeRule: shifts.length === 1 ? effectiveMergeRule(shifts[0], null) : null, source: 'manual', isSchedule: shifts.length > 1 };
   }
   const ra = rangedShiftAssignment(employeeId, workDate);
   if (ra) {

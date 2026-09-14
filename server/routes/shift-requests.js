@@ -12,12 +12,17 @@ const enabled = () => getSetting('self_shift_enabled', '0') === '1';
 const needApprove = () => getSetting('self_shift_approve', '1') === '1';
 const isShiftMode = () => getSetting('attendance_mode', 'shift') !== 'hourly';
 
-// Áp một đăng ký đã duyệt vào bảng phân ca theo ngày (đè phân ca cũ của ngày đó)
+// Áp một đăng ký đã duyệt vào bảng phân ca theo ngày.
+// Xin nghỉ → xoá hết ca của ngày rồi đặt nghỉ. Đăng ký ca → CỘNG THÊM ca (cho phép nhiều ca gãy/ngày).
 function applyToAssignment(employeeId, workDate, shiftId, isOff) {
-  db.prepare(`INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off)
-    VALUES (?,?,?,?)
-    ON CONFLICT(employee_id, work_date) DO UPDATE SET shift_id=excluded.shift_id, is_off=excluded.is_off`)
-    .run(employeeId, workDate, isOff ? null : shiftId, isOff ? 1 : 0);
+  if (isOff) {
+    db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id=? AND work_date=?').run(employeeId, workDate);
+    db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,NULL,1)').run(employeeId, workDate);
+    return;
+  }
+  db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id=? AND work_date=? AND is_off=1').run(employeeId, workDate); // bỏ "xin nghỉ" nếu có
+  if (!db.prepare('SELECT 1 FROM daily_shift_assignments WHERE employee_id=? AND work_date=? AND COALESCE(shift_id,0)=?').get(employeeId, workDate, shiftId || 0))
+    db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,0)').run(employeeId, workDate, shiftId);
 }
 
 /* ---------------- Phía nhân viên ---------------- */
@@ -41,8 +46,8 @@ r.post('/', (req, res) => {
   if (shiftId && !db.prepare('SELECT 1 FROM shifts WHERE id=? AND active=1').get(shiftId))
     return res.status(400).json({ error: 'Ca không hợp lệ' });
 
-  // Không cho đăng ký đè lên đơn đang chờ duyệt của cùng ngày
-  const pending = db.prepare("SELECT id FROM shift_requests WHERE employee_id=? AND work_date=? AND status='pending'").get(req.user.id, workDate);
+  // Chỉ thay đơn chờ duyệt TRÙNG ca cùng ngày (khác ca → cho đăng ký thêm để làm 2-3 ca gãy)
+  const pending = db.prepare("SELECT id FROM shift_requests WHERE employee_id=? AND work_date=? AND status='pending' AND COALESCE(shift_id,0)=? AND is_off=?").get(req.user.id, workDate, shiftId || 0, isOff);
   if (pending) db.prepare('DELETE FROM shift_requests WHERE id=?').run(pending.id); // thay đơn cũ chờ duyệt
 
   const auto = !needApprove();

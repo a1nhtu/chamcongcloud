@@ -415,13 +415,10 @@ r.post('/assignments', need('assignments'), (req, res) => {
   if (!b.employee_id || !b.work_date) return res.status(400).json({ error: 'Thiếu nhân viên hoặc ngày' });
   const isOff = b.is_off ? 1 : 0;
   const shiftId = isOff ? null : (b.shift_id || null);
-  if (!isOff && !shiftId) {
-    db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').run(b.employee_id, b.work_date);
-    return res.json({ ok: true, cleared: true });
-  }
-  db.prepare(`INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off)
-    VALUES (?,?,?,?)
-    ON CONFLICT(employee_id, work_date) DO UPDATE SET shift_id=excluded.shift_id, is_off=excluded.is_off`)
+  // Ô lịch tuần = 1 ca/ngày → thay thế toàn bộ phân ca ngày (kể cả nhiều ca NV tự chọn)
+  db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').run(b.employee_id, b.work_date);
+  if (!isOff && !shiftId) return res.json({ ok: true, cleared: true });
+  db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,?)')
     .run(b.employee_id, b.work_date, shiftId, isOff);
   res.json({ ok: true });
 });
@@ -437,8 +434,7 @@ r.post('/assignments/bulk', need('assignments'), (req, res) => {
   const shiftId = isOff ? null : (b.shift_id || null);
   const clear = !isOff && !shiftId;
 
-  const insert = db.prepare(`INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off)
-    VALUES (?,?,?,?) ON CONFLICT(employee_id, work_date) DO UPDATE SET shift_id=excluded.shift_id, is_off=excluded.is_off`);
+  const insert = db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,?)');
   const del = db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?');
 
   let n = 0;
@@ -448,8 +444,8 @@ r.post('/assignments/bulk', need('assignments'), (req, res) => {
       const ds = d.toISOString().slice(0, 10);
       if (weekdays && !weekdays.has(vnWeekday(ds))) continue;
       for (const eid of empIds) {
-        if (clear) del.run(eid, ds);
-        else insert.run(eid, ds, shiftId, isOff);
+        del.run(eid, ds);                       // thay thế toàn bộ ca ngày đó
+        if (!clear) insert.run(eid, ds, shiftId, isOff);
         n++;
       }
     }
@@ -613,8 +609,8 @@ r.post('/assignments/import', need('assignments'), async (req, res) => {
 
   let updated = 0, cleared = 0, off = 0; const errors = [];
   const del = db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id=? AND work_date=?');
-  const up = db.prepare(`INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off)
-    VALUES (?,?,?,?) ON CONFLICT(employee_id, work_date) DO UPDATE SET shift_id=excluded.shift_id, is_off=excluded.is_off`);
+  const ins = db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,?)');
+  const up = (empId, date, sid, isOff) => { del.run(empId, date); ins.run(empId, date, sid, isOff); }; // 1 ca/ô = thay thế
 
   db.exec('BEGIN');
   try {
@@ -629,10 +625,10 @@ r.post('/assignments/import', need('assignments'), async (req, res) => {
         if (v === '') continue; // trống = không đổi
         const V = v.toUpperCase();
         if (['AUTO', 'TĐ', 'TU DONG', 'TỰ ĐỘNG', '-'].includes(V)) { del.run(empId, date); cleared++; continue; }
-        if (['NGHỈ', 'NGHI', 'OFF', 'N', 'X'].includes(V)) { up.run(empId, date, null, 1); off++; continue; }
+        if (['NGHỈ', 'NGHI', 'OFF', 'N', 'X'].includes(V)) { up(empId, date, null, 1); off++; continue; }
         const sid = shiftByCode.get(V);
         if (!sid) { errors.push(`Ngày ${date.slice(8)}: mã ca "${v}" (NV ${code}) không tồn tại`); continue; }
-        up.run(empId, date, sid, 0); updated++;
+        up(empId, date, sid, 0); updated++;
       }
     }
     db.exec('COMMIT');

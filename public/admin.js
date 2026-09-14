@@ -820,8 +820,9 @@ async function pageAssignments() {
   for (const d of depts) deptSel.append(el('option', { value: d }, d));
 
   // Map phân ca: key emp|date -> {shift_id,is_off}
+  // 1 ngày có thể NHIỀU ca (NV tự chọn ca gãy) → gom mảng theo emp|date
   const amap = new Map();
-  for (const a of data.assignments) amap.set(a.employee_id + '|' + a.work_date, a);
+  for (const a of data.assignments) { const k = a.employee_id + '|' + a.work_date; if (!amap.has(k)) amap.set(k, []); amap.get(k).push(a); }
 
   const shiftOpts = (sel) => [
     el('option', { value: '', ...(sel === '' ? { selected: '' } : {}) }, '⚙ Tự động (theo giờ)'),
@@ -877,23 +878,28 @@ async function pageAssignments() {
         el('b', {}, e.full_name),
         el('div', { style: 'color:#999;font-size:12px' }, `${e.code} · mặc định: ${e.shift_name || '—'}`)));
       for (const d of days) {
-        const a = amap.get(e.id + '|' + d);
+        const arr = amap.get(e.id + '|' + d) || [];
+        const a = arr[0];
         const cur = a ? (a.is_off ? 'off' : String(a.shift_id)) : '';
         const sel = el('select', { class: 'as-cell', style: 'padding:6px 8px;font-size:13px;min-width:120px' }, ...shiftOpts(cur));
         if (!hasPerm('assignments')) sel.disabled = true;
         if (cur === 'off') sel.style.color = '#b45309';
+        // Badge khi 1 ngày có nhiều ca (NV tự chọn ca gãy); đổi ô này sẽ THAY bằng 1 ca
+        const multi = arr.filter((x) => !x.is_off).length > 1
+          ? el('div', { style: 'font-size:11px;color:#0a7;margin-top:2px', title: 'NV có ' + arr.length + ' ca ngày này' }, '🔀 ' + arr.length + ' ca') : null;
         sel.onchange = async () => {
           const v = sel.value;
           try {
             await api('/admin/assignments', { method: 'POST', body: { employee_id: e.id, work_date: d, shift_id: (v === '' || v === 'off') ? null : +v, is_off: v === 'off' } });
-            if (v === 'off') { amap.set(e.id + '|' + d, { is_off: 1 }); sel.style.color = '#b45309'; }
+            if (v === 'off') { amap.set(e.id + '|' + d, [{ is_off: 1 }]); sel.style.color = '#b45309'; }
             else if (v === '') { amap.delete(e.id + '|' + d); sel.style.color = ''; }
-            else { amap.set(e.id + '|' + d, { shift_id: +v, is_off: 0 }); sel.style.color = ''; }
+            else { amap.set(e.id + '|' + d, [{ shift_id: +v, is_off: 0 }]); sel.style.color = ''; }
+            if (multi) multi.remove();
             toast('Đã lưu', 'ok');
           } catch (err) { toast(err.message, 'err'); }
         };
         const we = weekdayVN(d) >= 6;
-        tr.append(el('td', { style: we ? 'background:#fffaf3' : '' }, sel));
+        tr.append(el('td', { style: we ? 'background:#fffaf3' : '' }, sel, multi));
       }
       tb.append(tr);
     }

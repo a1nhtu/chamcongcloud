@@ -229,9 +229,10 @@ async function renderChonca() {
 
   const approve = info.needApprove;
   c.append(el('div', { class: 'status-banner', style: 'background:#eef2ff;color:#3730a3',
-    html: approve
+    html: (approve
       ? '🗓️ Bạn đăng ký ca cho ngày làm việc, <b>quản lý duyệt</b> rồi mới áp dụng.'
-      : '🗓️ Bạn đăng ký ca cho ngày làm việc, hệ thống <b>tự áp dụng ngay</b> (không cần duyệt).' }));
+      : '🗓️ Bạn đăng ký ca cho ngày làm việc, hệ thống <b>tự áp dụng ngay</b> (không cần duyệt).')
+      + '<br>Có thể đăng ký <b>nhiều ca cho cùng 1 ngày</b> (ca gãy): chọn từng ca rồi bấm gửi, làm lại cho ca tiếp theo.' }));
 
   // Form đăng ký
   const shiftSel = el('select', { id: 'sc-shift' });
