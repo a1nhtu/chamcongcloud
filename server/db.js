@@ -44,6 +44,13 @@ export function initSchema() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Định vị (văn phòng) mà từng NV được phép chấm — nhiều định vị/NV. Rỗng = được chấm ở TẤT CẢ.
+    CREATE TABLE IF NOT EXISTS employee_offices (
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      office_id   INTEGER NOT NULL REFERENCES offices(id),
+      PRIMARY KEY (employee_id, office_id)
+    );
+
     CREATE TABLE IF NOT EXISTS shifts (
       id             INTEGER PRIMARY KEY AUTOINCREMENT,
       name           TEXT NOT NULL,
@@ -487,6 +494,14 @@ export function autoDetectShift(checkInIso, candidates, checkOutIso) {
   });
   scored.sort((a, b) => b.score - a.score || a.outDist - b.outDist || a.inDist - b.inDist);
   return scored[0].s;
+}
+
+// Danh sách định vị (văn phòng) mà NV được phép chấm. Chưa cấu hình → TẤT CẢ định vị đang bật.
+export function allowedOffices(employeeId) {
+  const rows = db.prepare(`SELECT o.* FROM employee_offices eo JOIN offices o ON o.id = eo.office_id
+    WHERE eo.employee_id = ? AND o.active = 1 ORDER BY o.name`).all(employeeId);
+  if (rows.length) return rows;
+  return db.prepare('SELECT * FROM offices WHERE active = 1 ORDER BY name').all();
 }
 
 // Phân ca theo KHOẢNG NGÀY (bảng shift_assignments) phủ ngày này — bản ghi mới nhất thắng.

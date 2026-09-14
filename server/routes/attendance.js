@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, getSetting, resolveShift, resolveEffectiveShift, resolveDayShifts } from '../db.js';
+import { db, getSetting, resolveShift, resolveEffectiveShift, resolveDayShifts, allowedOffices } from '../db.js';
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
@@ -31,6 +31,19 @@ function dayFlags(date) {
 function otTypeOf(date) {
   const f = dayFlags(date);
   return f.isHoliday ? 'le' : f.isWeekend ? 'cuoi_tuan' : 'thuong';
+}
+
+// Định vị GẦN NHẤT trong danh sách NV được phép chấm (chưa cấu hình → tất cả định vị).
+// Trả { office, distance, outside } — outside=1 nếu xa hơn bán kính của định vị gần nhất.
+function nearestAllowedOffice(employeeId, lat, lng) {
+  const offices = allowedOffices(employeeId);
+  if (!offices.length) return { office: null, distance: null, outside: 0 };
+  let best = null;
+  for (const o of offices) {
+    const d = distanceMeters(lat, lng, o.lat, o.lng);
+    if (!best || d < best.distance) best = { office: o, distance: d };
+  }
+  return { office: best.office, distance: best.distance, outside: best.distance > best.office.radius_m ? 1 : 0 };
 }
 
 // ---- Khoá thiết bị (chống chấm hộ) ----
@@ -135,17 +148,11 @@ r.post('/check-in', (req, res) => {
   if (existing && existing.check_in_at && existing.check_out_at)
     return res.status(400).json({ error: `Bạn đã hoàn thành ${shiftLabel} hôm nay rồi` });
 
-  const office = req.user.office_id
-    ? db.prepare('SELECT * FROM offices WHERE id = ?').get(req.user.office_id) : null;
-
-  let distance = null, outside = 0;
-  if (office) {
-    distance = distanceMeters(lat, lng, office.lat, office.lng);
-    outside = distance > office.radius_m ? 1 : 0;
-    // Nếu bật "chỉ cho chấm trong bán kính" → chặn khi ở ngoài phạm vi
-    if (outside && getSetting('geofence_enforce', '0') === '1') {
-      return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần văn phòng để chấm công.` });
-    }
+  // Định vị GẦN NHẤT trong các định vị NV được phép chấm
+  const { office, distance, outside } = nearestAllowedOffice(req.user.id, lat, lng);
+  // Nếu bật "chỉ cho chấm trong bán kính" → chặn khi ở ngoài phạm vi định vị gần nhất
+  if (office && outside && getSetting('geofence_enforce', '0') === '1') {
+    return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần một định vị được phép để chấm công.` });
   }
 
   const late = shift ? computeLate(shift, at, date) : 0;
@@ -202,19 +209,15 @@ r.post('/check-out', (req, res) => {
 
   const wdate = row.work_date;   // ngày công của bản ghi (ca đêm = hôm qua)
   const at = nowIso();
-  const office = req.user.office_id
-    ? db.prepare('SELECT * FROM offices WHERE id = ?').get(req.user.office_id) : null;
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
   // DÒ LẠI ca bằng CẢ giờ vào + giờ ra (phân biệt ca cùng giờ vào: Sáng/Hành chính; và ca đêm)
   const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, wdate, row.check_in_at, at);
   const shift = rs.shift;
 
-  let distance = null;
-  if (office) {
-    distance = distanceMeters(lat, lng, office.lat, office.lng);
-    if (distance > office.radius_m && getSetting('geofence_enforce', '0') === '1') {
-      return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần văn phòng để chấm ra ca.` });
-    }
+  // Định vị GẦN NHẤT trong các định vị NV được phép chấm
+  const { office, distance } = nearestAllowedOffice(req.user.id, lat, lng);
+  if (office && distance > office.radius_m && getSetting('geofence_enforce', '0') === '1') {
+    return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần một định vị được phép để chấm ra ca.` });
   }
 
   let photoPath;

@@ -54,8 +54,23 @@ r.get('/employees', (req, res) => {
     LEFT JOIN shifts s ON s.id = e.shift_id
     LEFT JOIN work_schedules ws ON ws.id = e.work_schedule_id
     ORDER BY e.active DESC, e.full_name`).all();
+  // Danh sách định vị được phép chấm của từng NV
+  const eoMap = new Map();
+  for (const x of db.prepare('SELECT employee_id, office_id FROM employee_offices').all()) {
+    if (!eoMap.has(x.employee_id)) eoMap.set(x.employee_id, []);
+    eoMap.get(x.employee_id).push(x.office_id);
+  }
+  for (const e of rows) e.office_ids = eoMap.get(e.id) || [];
   res.json({ rows });
 });
+
+// Đặt danh sách định vị được phép chấm cho 1 NV (thay toàn bộ)
+function setEmpOffices(empId, officeIds) {
+  if (!Array.isArray(officeIds)) return;
+  db.prepare('DELETE FROM employee_offices WHERE employee_id=?').run(empId);
+  const ins = db.prepare('INSERT OR IGNORE INTO employee_offices(employee_id, office_id) VALUES (?,?)');
+  for (const oid of officeIds) { if (oid) ins.run(empId, +oid); }
+}
 
 r.post('/employees', need('employees'), (req, res) => {
   const b = req.body || {};
@@ -72,8 +87,10 @@ r.post('/employees', need('employees'), (req, res) => {
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(
       b.code.trim(), b.full_name.trim(), b.department || '', b.position || '', b.phone || '',
       b.role || 'employee', b.username.trim(), hashPassword(b.password),
-      b.office_id || null, b.shift_id || null, b.work_schedule_id || null, normPerms(b.role, b.permissions),
+      (Array.isArray(b.office_ids) && b.office_ids.length ? +b.office_ids[0] : (b.office_id || null)),
+      b.shift_id || null, b.work_schedule_id || null, normPerms(b.role, b.permissions),
       (b.device_pin || '').trim());
+    setEmpOffices(info.lastInsertRowid, b.office_ids);
     res.json({ ok: true, id: info.lastInsertRowid });
   } catch (e) {
     res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Mã NV hoặc tài khoản đã tồn tại' : e.message });
@@ -91,12 +108,14 @@ r.put('/employees/:id', need('employees'), (req, res) => {
       role=?, username=?, office_id=?, shift_id=?, work_schedule_id=?, permissions=?, device_pin=?, from_device=0, active=? WHERE id=?`).run(
       b.code ?? emp.code, b.full_name ?? emp.full_name, b.department ?? emp.department,
       b.position ?? emp.position, b.phone ?? emp.phone, newRole,
-      b.username ?? emp.username, b.office_id ?? emp.office_id,
+      b.username ?? emp.username,
+      (Array.isArray(b.office_ids) ? (b.office_ids.length ? +b.office_ids[0] : null) : (b.office_id ?? emp.office_id)),
       b.shift_id !== undefined ? (b.shift_id || null) : emp.shift_id,
       b.work_schedule_id !== undefined ? (b.work_schedule_id || null) : emp.work_schedule_id,
       newPerms,
       b.device_pin !== undefined ? (b.device_pin || '').trim() : (emp.device_pin || ''),
       b.active != null ? (b.active ? 1 : 0) : emp.active, emp.id);
+    if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
     if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
     res.json({ ok: true });
   } catch (e) {

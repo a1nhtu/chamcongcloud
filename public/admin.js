@@ -282,8 +282,11 @@ function empModal(e) {
   const mk = (id, ph, val = '') => (f[id] = input('e-' + id, { placeholder: ph, value: val }));
   const roleSel = el('select', { id: 'e-role' },
     ...['employee', 'manager', 'admin'].map(v => el('option', { value: v, ...(e?.role === v ? { selected: '' } : {}) }, { employee: 'Nhân viên', manager: 'Quản lý', admin: 'Admin' }[v])));
-  const officeSel = el('select', { id: 'e-office' }, el('option', { value: '' }, '— Chọn chi nhánh —'),
-    ...OFFICES.map(o => el('option', { value: o.id, ...(e?.office_id === o.id ? { selected: '' } : {}) }, o.name)));
+  const officeBox = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px 16px;padding-top:4px' },
+    ...OFFICES.map(o => el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)' },
+      el('input', { type: 'checkbox', class: 'e-office', value: o.id, style: 'width:auto', ...((e?.office_ids || []).includes(o.id) ? { checked: '' } : {}) }), o.name)));
+  const officeField = el('div', {}, el('label', {}, 'Định vị được chấm (bỏ trống = tất cả định vị)'),
+    OFFICES.length ? officeBox : el('div', { class: 'map-hint' }, 'Chưa có định vị nào. Thêm ở mục Chi nhánh.'));
   const assignSel = el('select', { id: 'e-assign' },
     el('option', { value: '' }, '— Chọn phân công ca —'),
     el('optgroup', { label: 'Ca cố định' },
@@ -344,7 +347,7 @@ function empModal(e) {
       field('Số điện thoại', mk('phone', '', e?.phone)),
       field('Số ID máy chấm công', mk('device_pin', 'VD: 1 (số ID trên máy)', e?.device_pin))),
     el('div', { class: 'two-col' }, field('Tài khoản *', mk('username', 'nv002', e?.username)), field('Vai trò', roleSel)),
-    hourlyMode() ? field('Chi nhánh', officeSel) : el('div', { class: 'two-col' }, field('Phân công ca', assignSel), field('Chi nhánh', officeSel)),
+    hourlyMode() ? officeField : el('div', {}, field('Phân công ca', assignSel), el('div', { style: 'margin-top:10px' }, officeField)),
     permWrap,
     field(e ? 'Mật khẩu mới (để trống nếu giữ nguyên)' : 'Mật khẩu *', input('e-password', { type: 'text', placeholder: e ? '••••••' : '123456' })),
     ...(e && deviceLockEnabled() ? [(() => {
@@ -366,7 +369,7 @@ function empModal(e) {
       code: f.code.value.trim(), full_name: f.full_name.value.trim(), department: deptSel.value,
       position: f.position.value, phone: f.phone.value, role: $('#e-role').value,
       device_pin: f.device_pin.value.trim(),
-      username: f.username.value.trim(), office_id: +$('#e-office').value || null,
+      username: f.username.value.trim(), office_ids: [...document.querySelectorAll('.e-office:checked')].map((x) => +x.value),
       password: $('#e-password').value || undefined,
     };
     const av = $('#e-assign')?.value || '';
