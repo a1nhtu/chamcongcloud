@@ -26,7 +26,7 @@ function vapidAuth(endpoint) {
   const { publicKey, privateKey } = getVapid();
   const aud = new URL(endpoint).origin;
   const head = b64url(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
-  const body = b64url(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:support@digiplus' }));
+  const body = b64url(JSON.stringify({ aud, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: 'mailto:support@maychamcongcloud.com' }));
   const unsigned = `${head}.${body}`;
   const sig = crypto.sign('sha256', Buffer.from(unsigned), { key: crypto.createPrivateKey(privateKey), dsaEncoding: 'ieee-p1363' });
   return `vapid t=${unsigned}.${b64url(sig)}, k=${publicKey}`;
