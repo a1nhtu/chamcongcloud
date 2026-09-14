@@ -273,6 +273,7 @@ r.get('/settings', (req, res) => {
     company_name: getSetting('company_name', 'Digiplus'),
     weekend_days: getSetting('weekend_days', '7'),
     workunit_rounding: getSetting('workunit_rounding', '2'),
+    workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
     pay_period_start_day: getSetting('pay_period_start_day', '1'),
     geofence_enforce: getSetting('geofence_enforce', '0'),
     attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
@@ -293,6 +294,7 @@ r.put('/settings', need('settings'), (req, res) => {
   if (b.company_name != null) setSetting('company_name', b.company_name);
   if (b.weekend_days != null) setSetting('weekend_days', b.weekend_days);
   if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
+  if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));
   if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);
   if (b.geofence_enforce != null) setSetting('geofence_enforce', b.geofence_enforce ? '1' : '0');
   if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');
@@ -582,6 +584,7 @@ r.post('/recompute', need('recompute'), (req, res) => {
   const month = (req.query.month || '').slice(0, 7);
   const weekend = getSetting('weekend_days', '7');
   const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
+  const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
 
   const rows = month
@@ -595,7 +598,7 @@ r.post('/recompute', need('recompute'), (req, res) => {
       // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định
       const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
       const shift = eff.shift;
-      const flags = { isHoliday: isHol(row.work_date), isWeekend: isWeekendDay(row.work_date, weekend), roundingDecimals };
+      const flags = { isHoliday: isHol(row.work_date), isWeekend: isWeekendDay(row.work_date, weekend), roundingDecimals, roundingMode };
       const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
       const late = shift ? computeLate(shift, row.check_in_at, row.work_date) : 0;
       if (!row.check_out_at) {
@@ -632,11 +635,12 @@ function vnToIso(date, hm) {
 function computeManual(employeeId, workDate, inIso, outIso) {
   const weekend = getSetting('weekend_days', '7');
   const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
+  const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
   const eff = hourly ? { shift: null, source: 'manual' } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
   const shift = eff.shift;
-  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals };
+  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals, roundingMode };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
   const late = (!hourly && shift && inIso) ? computeLate(shift, inIso, workDate) : 0;
   let c;

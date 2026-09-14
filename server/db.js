@@ -322,6 +322,7 @@ function migrateColumns() {
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN
   if (getSetting('workunit_rounding') == null) setSetting('workunit_rounding', '2'); // số lẻ thập phân
+  if (getSetting('workunit_rounding_mode') == null) setSetting('workunit_rounding_mode', '0'); // 0=lùi(floor),1=tới(ceil),2=gần nhất(round)
   if (getSetting('pay_period_start_day') == null) setSetting('pay_period_start_day', '1'); // ngày bắt đầu kỳ lương
   // Geofence: '0' = chấm tự do (mặc định); '1' = chỉ cho chấm trong bán kính chi nhánh
   if (getSetting('geofence_enforce') == null) setSetting('geofence_enforce', '0');

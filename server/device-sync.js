@@ -264,7 +264,8 @@ function metrics(employeeId, workDate, inIso, outIso) {
   const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
   const eff = hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
   const shift = eff.shift;
-  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals };
+  const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
+  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals, roundingMode };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
   const late = (!hourly && shift && inIso) ? computeLate(shift, inIso, workDate) : 0;
   let c;

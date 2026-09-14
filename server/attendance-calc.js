@@ -39,7 +39,7 @@ function roundOt(minutes, unit) {
  * @returns {early_min, ot_min, work_minutes, work_unit, ot_type, day_status}
  */
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2 } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0 } = opts;
   const ci = new Date(checkInIso);
   const co = new Date(checkOutIso);
   const { start, end } = shiftBounds(workDate, shift);
@@ -71,7 +71,8 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);
   const rawUnit = baseUnit * work_minutes / standard;
-  const work_unit = Math.min(baseUnit, Math.floor(rawUnit * factor) / factor);
+  const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor; // 0=lùi,1=tới,2=gần nhất
+  const work_unit = Math.min(baseUnit, roundFn(rawUnit * factor) / factor);
 
   const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
 

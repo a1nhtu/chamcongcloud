@@ -25,6 +25,7 @@ function dayFlags(date) {
     isHoliday: isHoliday(date),
     isWeekend: isWeekendDay(date, getSetting('weekend_days', '7')),
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
+    roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
   };
 }
 function otTypeOf(date) {

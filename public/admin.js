@@ -1069,8 +1069,11 @@ function salaryModal(s) {
 const WD_VN = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const wdName = (d) => WD_VN[new Date(d + 'T12:00:00Z').getUTCDay()];
 let EDITATT_EMP = null;
+const shiftName = (id) => { const s = SHIFTS.find(x => x.id === id); return s ? s.name : null; };
+const minCell = (v) => (v && v > 0) ? String(v) : '—';
 async function pageEditAtt() {
   setMain(head('Sửa công'), loading());
+  if (!SHIFTS.length) { try { await loadRefs(); } catch {} }
   let emps;
   try { emps = (await api('/admin/employees')).rows.filter(e => e.active); }
   catch (e) { setMain(head('Sửa công'), el('div', { class: 'empty' }, e.message)); return; }
@@ -1079,6 +1082,8 @@ async function pageEditAtt() {
     ...emps.map(e => el('option', { value: e.id, ...(e.id === EDITATT_EMP ? { selected: '' } : {}) }, `${e.full_name} (${e.code})`)));
   const monthI = el('input', { type: 'month', id: 'ea-month', value: todayMonth() });
   const addBtn = el('button', { class: 'btn' }, '+ Thêm giờ');
+  const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại');
+  const roundBtn = el('button', { class: 'btn ghost' }, '⚙ Làm tròn');
   const wrap = el('div', { id: 'ea-wrap' });
   const load = async () => {
     EDITATT_EMP = +empSel.value;
@@ -1087,15 +1092,20 @@ async function pageEditAtt() {
     try { data = await api(`/admin/attendance?employee_id=${empSel.value}&month=${monthI.value}`); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const tbl = el('table', { class: 'data' });
-    tbl.innerHTML = `<thead><tr><th>Ngày</th><th>Thứ</th><th>Vào</th><th>Ra</th><th>Giờ</th><th>Công</th><th>Ghi chú</th><th></th></tr></thead>`;
+    tbl.innerHTML = `<thead><tr><th>Ngày</th><th>Thứ</th><th>Vào</th><th>Ra</th><th>Ca</th><th>Muộn(ph)</th><th>Sớm(ph)</th><th>OT(ph)</th><th>Giờ</th><th>Công</th><th>Ghi chú</th><th></th></tr></thead>`;
     const tb = el('tbody');
-    if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, 'Chưa có bản ghi nào trong tháng. Bấm "+ Thêm giờ".'))));
+    if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: 12 }, el('div', { class: 'empty' }, 'Chưa có bản ghi nào trong tháng. Bấm "+ Thêm giờ".'))));
     for (const r of data.rows) {
+      const nm = shiftName(r.shift_id);
       tb.append(el('tr', {},
         el('td', {}, r.work_date.slice(8) + '/' + r.work_date.slice(5, 7), r.manual ? el('span', { class: 'pill muted', style: 'margin-left:6px' }, '✏️ tay') : ''),
         el('td', {}, wdName(r.work_date)),
         el('td', {}, r.check_in_at ? isoToHM(r.check_in_at) : '—'),
         el('td', {}, r.check_out_at ? isoToHM(r.check_out_at) : el('span', { class: 'pill muted' }, 'chưa ra')),
+        el('td', {}, nm ? el('span', { class: 'pill' }, nm) : el('span', { class: 'muted' }, '—')),
+        el('td', {}, r.late_min > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.late_min)) : '—'),
+        el('td', {}, r.early_min > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.early_min)) : '—'),
+        el('td', {}, r.ot_min > 0 ? el('span', { style: 'color:#0a7;font-weight:600' }, String(r.ot_min)) : '—'),
         el('td', {}, humanMinutes(r.work_minutes)),
         el('td', {}, String(r.work_unit ?? 0)),
         el('td', {}, r.note || '—'),
@@ -1106,12 +1116,47 @@ async function pageEditAtt() {
     }
     tbl.append(tb);
     wrap.innerHTML = '';
-    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Thêm/sửa giờ cho trường hợp quên chấm hoặc đi công tác. Hệ thống tự tính lại số công, đi muộn theo giờ nhập.'), el('div', { class: 'panel tbl-scroll' }, tbl));
+    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Thêm/sửa giờ cho trường hợp quên chấm hoặc đi công tác. Sau khi đổi ca, bấm "↻ Tính lại" để cập nhật Ca / Muộn / Sớm / OT / Công theo cấu hình mới.'), el('div', { class: 'panel tbl-scroll' }, tbl));
   };
   empSel.onchange = load; monthI.onchange = load;
   addBtn.onclick = () => attEditModal(null, +empSel.value, load);
-  setMain(head('Sửa công', empSel, monthI, addBtn), wrap);
+  recalcBtn.onclick = async () => {
+    if (!confirm(`Tính lại toàn bộ công tháng ${monthI.value} (tất cả nhân viên)?\nHệ thống sẽ dò lại ca theo giờ vào/ra và tính lại Muộn/Sớm/OT/Công.`)) return;
+    recalcBtn.disabled = true; recalcBtn.textContent = 'Đang tính…';
+    try { const rs = await api('/admin/recompute?month=' + monthI.value, { method: 'POST' }); toast(`Đã tính lại ${rs.updated} bản ghi`, 'ok'); await load(); }
+    catch (e) { toast(e.message, 'err'); }
+    finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại'; }
+  };
+  roundBtn.onclick = () => roundingModal(monthI.value, load);
+  setMain(head('Sửa công', empSel, monthI, addBtn, recalcBtn, roundBtn), wrap);
   load();
+}
+
+// Cấu hình làm tròn số công + tính lại
+async function roundingModal(month, reload) {
+  let cfg = {};
+  try { cfg = await api('/admin/settings'); } catch {}
+  const decI = el('select', { style: 'width:100%' },
+    ...[0, 1, 2, 3].map(d => el('option', { value: d, ...(String(cfg.workunit_rounding) === String(d) ? { selected: '' } : {}) },
+      d === 0 ? '0 (số nguyên)' : d + ' chữ số thập phân')));
+  const modeI = el('select', { style: 'width:100%' },
+    ...[['0', 'Lùi (làm tròn xuống)'], ['1', 'Tới (làm tròn lên)'], ['2', 'Gần nhất']].map(([v, t]) =>
+      el('option', { value: v, ...(String(cfg.workunit_rounding_mode || '0') === v ? { selected: '' } : {}) }, t)));
+  const body = [
+    field('Số chữ số thập phân của công', decI),
+    field('Kiểu làm tròn', modeI),
+    el('div', { class: 'map-hint' }, 'VD: công thực 0,86 → Lùi = 0,8 · Tới = 0,9 · Gần nhất = 0,9 (với 1 chữ số thập phân). Lưu xong sẽ tính lại công tháng ' + month + '.'),
+  ];
+  const save = el('button', { class: 'btn' }, 'Lưu & tính lại');
+  save.onclick = async () => {
+    save.disabled = true; save.textContent = 'Đang xử lý…';
+    try {
+      await api('/admin/settings', { method: 'PUT', body: { workunit_rounding: decI.value, workunit_rounding_mode: modeI.value } });
+      const rs = await api('/admin/recompute?month=' + month, { method: 'POST' });
+      toast(`Đã lưu và tính lại ${rs.updated} bản ghi`, 'ok'); closeModal(); reload();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; save.textContent = 'Lưu & tính lại'; }
+  };
+  openModal('Làm tròn số công', body, [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
 function attEditModal(row, employeeId, reload) {
   const date0 = row ? row.work_date : new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
