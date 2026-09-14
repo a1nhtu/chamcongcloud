@@ -21,3 +21,26 @@ self.addEventListener('fetch', (e) => {
     }).catch(() => caches.match(e.request))
   );
 });
+
+// --- Thông báo đẩy (Web Push) ---
+self.addEventListener('push', (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  const title = d.title || 'Digiplus Chấm công';
+  e.waitUntil(self.registration.showNotification(title, {
+    body: d.body || '',
+    icon: '/icons/logo.png',
+    badge: '/icons/logo.png',
+    tag: d.tag || undefined,
+    renotify: !!d.tag,
+    data: { url: d.url || '/admin' },
+  }));
+});
+self.addEventListener('notificationclick', (e) => {
+  e.notification.close();
+  const url = (e.notification.data && e.notification.data.url) || '/admin';
+  e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
+    for (const c of cs) { if (c.url.includes('/admin') && 'focus' in c) return c.focus(); }
+    return clients.openWindow(url);
+  }));
+});

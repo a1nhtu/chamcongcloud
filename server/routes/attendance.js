@@ -4,9 +4,18 @@ import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attendance-calc.js';
+import { notifyManagers } from '../push.js';
 
 const r = Router();
 r.use(authRequired);
+
+// Giờ VN HH:mm từ ISO
+function vnHm(iso) { const t = new Date(new Date(iso).getTime() + 7 * 3600000); return String(t.getUTCHours()).padStart(2, '0') + ':' + String(t.getUTCMinutes()).padStart(2, '0'); }
+// Dòng mô tả vị trí cho thông báo
+function pushLoc(office, distance, lat, lng) {
+  if (office) return office.name + (distance != null && distance > office.radius_m ? ` (ngoài ${distance}m)` : '');
+  return `GPS ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
+}
 
 function isHoliday(date) {
   return !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date = ?').get(date);
@@ -146,6 +155,12 @@ r.post('/check-in', (req, res) => {
   const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ?')
     .get(req.user.id, date);
   res.json({ ok: true, attendance: row, meta: { distance, outside: !!outside, late } });
+  // Thông báo cho quản lý (không chặn phản hồi)
+  notifyManagers({
+    title: '🟢 ' + req.user.full_name + ' vừa VÀO ca',
+    body: `${vnHm(at)} · ${pushLoc(office, distance, lat, lng)}` + (late > 0 ? ` · muộn ${late} phút` : ''),
+    url: '/admin', tag: 'in-' + req.user.id,
+  }, req.user.id).catch(() => {});
 });
 
 // Chấm RA CA
@@ -202,6 +217,11 @@ r.post('/check-out', (req, res) => {
 
   const updated = db.prepare('SELECT * FROM attendance WHERE id = ?').get(row.id);
   res.json({ ok: true, attendance: updated, meta: calc });
+  notifyManagers({
+    title: '🔴 ' + req.user.full_name + ' vừa RA ca',
+    body: `${vnHm(at)} · ${pushLoc(office, distance, lat, lng)}`,
+    url: '/admin', tag: 'out-' + req.user.id,
+  }, req.user.id).catch(() => {});
 });
 
 // Bảng công của tôi theo tháng (?month=YYYY-MM)

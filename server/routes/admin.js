@@ -7,6 +7,7 @@ import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
 import { rebuildDay, resyncNow } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
+import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
 import { networkInterfaces } from 'node:os';
 function lanIPs() {
@@ -778,6 +779,18 @@ r.get('/server-ips', need('devices'), (req, res) => {
 // Đồng bộ NGAY: đẩy toàn bộ vân tay/user của nhóm sang mọi máy trong nhóm (khỏi cần restart máy)
 r.post('/devices/resync', need('devices'), (req, res) => {
   try { res.json(resyncNow()); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+/* ------------- THÔNG BÁO ĐẨY (Web Push) cho quản lý ------------- */
+r.get('/push/vapid', (req, res) => res.json({ publicKey: getVapid().publicKey }));
+r.post('/push/subscribe', (req, res) => {
+  try { saveSubscription(req.user.id, req.body?.subscription); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+r.post('/push/unsubscribe', (req, res) => { removeSubscription(req.body?.endpoint); res.json({ ok: true }); });
+r.post('/push/test', async (req, res) => {
+  try { await notifyManagers({ title: 'Digiplus Chấm công', body: 'Thông báo thử — hoạt động tốt ✅', url: '/admin' }); res.json({ ok: true }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 r.put('/devices/:id', need('devices'), (req, res) => {

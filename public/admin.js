@@ -1398,6 +1398,36 @@ async function restoreFullBackup(file) {
 }
 const fmtSize = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 
+/* ---------- Thông báo đẩy (Web Push) cho quản lý ---------- */
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+function urlB64ToU8(b64) {
+  const pad = '='.repeat((4 - (b64.length % 4)) % 4);
+  const s = (b64 + pad).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s); const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+async function pushState() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  try { const reg = await navigator.serviceWorker.ready; return (await reg.pushManager.getSubscription()) ? 'on' : 'off'; } catch { return 'off'; }
+}
+async function enablePush() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('Trình duyệt này không hỗ trợ thông báo đẩy.');
+  const perm = await Notification.requestPermission();
+  if (perm !== 'granted') throw new Error('Bạn chưa cho phép hiện thông báo (kiểm tra quyền của trình duyệt).');
+  const reg = await navigator.serviceWorker.ready;
+  const { publicKey } = await api('/admin/push/vapid');
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(publicKey) });
+  await api('/admin/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+}
+async function disablePush() {
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  if (sub) { try { await api('/admin/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch {} try { await sub.unsubscribe(); } catch {} }
+}
+
 async function pageSettings() {
   setMain(head('Cài đặt'), loading());
   const s = await api('/admin/settings');
@@ -1725,11 +1755,37 @@ async function pageSettings() {
   const panelLicense = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, '🔑 Bản quyền'), licBox);
 
+  // ----- Thông báo đẩy khi có người chấm công -----
+  const notifyBox = el('div', {}, loading());
+  const renderNotify = async () => {
+    const st = await pushState();
+    notifyBox.innerHTML = '';
+    if (st === 'unsupported') { notifyBox.append(el('div', { class: 'map-hint' }, 'Thiết bị/trình duyệt này không hỗ trợ thông báo đẩy. Dùng Chrome/Edge trên Android, hoặc trên iPhone hãy “Thêm vào màn hình chính” rồi mở từ đó (iOS 16.4+). Cần mở qua HTTPS/domain.')); return; }
+    if (st === 'denied') { notifyBox.append(el('div', { class: 'map-hint' }, '⚠️ Bạn đã CHẶN quyền thông báo cho trang này. Vào cài đặt trình duyệt (biểu tượng ổ khoá cạnh địa chỉ) → cho phép Thông báo → tải lại trang.')); return; }
+    const on = st === 'on';
+    const toggle = el('button', { class: 'btn' }, on ? 'Tắt thông báo trên máy này' : '🔔 Bật thông báo chấm công');
+    toggle.onclick = async () => {
+      toggle.disabled = true;
+      try { if (on) { await disablePush(); toast('Đã tắt', 'ok'); } else { await enablePush(); toast('Đã bật thông báo trên thiết bị này', 'ok'); } renderNotify(); }
+      catch (e) { toast(e.message, 'err'); toggle.disabled = false; }
+    };
+    const testBtn = el('button', { class: 'btn ghost' }, 'Gửi thử');
+    testBtn.onclick = async () => { try { await api('/admin/push/test', { method: 'POST' }); toast('Đã gửi thử — chờ thông báo hiện lên', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+    notifyBox.append(
+      el('div', {}, el('b', { style: 'color:' + (on ? '#1a7f37' : '#7a808c') }, on ? '✅ Đang BẬT trên thiết bị này' : '⚪ Đang TẮT trên thiết bị này')),
+      el('div', { style: 'display:flex;gap:8px;margin-top:10px;flex-wrap:wrap' }, toggle, ...(on ? [testBtn] : [])));
+  };
+  const panelNotify = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, '🔔 Thông báo khi có người chấm công'),
+    el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bật để điện thoại/máy này nhận thông báo mỗi khi nhân viên chấm vào/ra (kèm tên, giờ, vị trí) — kể cả khi không mở app. Mỗi quản lý bật riêng trên thiết bị của mình.'),
+    notifyBox);
+
   const panel2 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px' },
     el('h3', { style: 'margin-top:0' }, 'Đổi mật khẩu của tôi'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Mật khẩu hiện tại', oldP), field('Mật khẩu mới', newP), savePw));
-  setMain(head('Cài đặt'), panel1, panelLicense, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
+  setMain(head('Cài đặt'), panel1, panelLicense, panelNotify, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
   loadLic();
+  renderNotify();
 }

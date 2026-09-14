@@ -229,6 +229,15 @@ export function initSchema() {
       updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
       PRIMARY KEY (serial, pin)
     );
+    -- Đăng ký nhận thông báo đẩy (Web Push) của quản lý — 1 dòng = 1 thiết bị/trình duyệt
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER,
+      endpoint    TEXT UNIQUE NOT NULL,
+      p256dh      TEXT NOT NULL,
+      auth        TEXT NOT NULL,
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     -- Hàng đợi lệnh gửi xuống máy (đồng bộ / cập nhật). Máy lấy qua /getrequest, báo kết quả qua /devicecmd.
     CREATE TABLE IF NOT EXISTS push_device_commands (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
