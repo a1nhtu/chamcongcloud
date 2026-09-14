@@ -498,8 +498,10 @@ r.post('/shift-assignments', need('assignments'), (req, res) => {
     if (!b.department) return res.status(400).json({ error: 'Chưa chọn phòng ban' });
     emps = db.prepare("SELECT id FROM employees WHERE active=1 AND role!='admin' AND department=?").all(b.department);
   } else {
-    if (!b.employee_id) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
-    emps = [{ id: b.employee_id }];
+    // Nhân viên cụ thể: nhận NHIỀU NV (employee_ids) hoặc 1 NV (employee_id) cho tương thích cũ
+    const ids = Array.isArray(b.employee_ids) ? b.employee_ids.filter(Boolean) : (b.employee_id ? [b.employee_id] : []);
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    emps = ids.map((id) => ({ id }));
   }
   if (!emps.length) return res.status(400).json({ error: 'Không có nhân viên phù hợp trong phạm vi đã chọn' });
 
@@ -521,6 +523,23 @@ r.post('/shift-assignments', need('assignments'), (req, res) => {
 r.delete('/shift-assignments/:id', need('assignments'), (req, res) => {
   db.prepare('DELETE FROM shift_assignments WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+
+// Xoá nhiều phân ca khoảng: {ids:[...]} , hoặc {all:true} (tuỳ chọn lọc theo department)
+r.post('/shift-assignments/delete', need('assignments'), (req, res) => {
+  const b = req.body || {};
+  let n = 0;
+  if (b.all) {
+    n = b.department
+      ? db.prepare('DELETE FROM shift_assignments WHERE employee_id IN (SELECT id FROM employees WHERE department=?)').run(b.department).changes
+      : db.prepare('DELETE FROM shift_assignments').run().changes;
+  } else {
+    const ids = Array.isArray(b.ids) ? b.ids.filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn phân ca để xoá' });
+    const del = db.prepare('DELETE FROM shift_assignments WHERE id = ?');
+    for (const id of ids) n += del.run(id).changes;
+  }
+  res.json({ ok: true, count: n });
 });
 
 /* -------------------- PHÂN CA BẰNG EXCEL -------------------- */
@@ -545,7 +564,7 @@ r.get('/assignments/export.xlsx', async (req, res) => {
   empSql += ' ORDER BY department, full_name';
   const emps = db.prepare(empSql).all(...args);
 
-  const shifts = db.prepare('SELECT id, code, name FROM shifts WHERE active=1').all();
+  const shifts = db.prepare('SELECT id, code, name, start_time, end_time FROM shifts WHERE active=1').all();
   const codeOf = new Map(shifts.map((s) => [s.id, (s.code || s.name || '').trim()]));
   // 1 ngày có thể NHIỀU ca (ca gãy) → gom mảng theo emp|date
   const assigns = new Map();

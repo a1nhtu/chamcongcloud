@@ -764,19 +764,30 @@ function addDays(dateStr, n) { const d = new Date(dateStr + 'T12:00:00Z'); d.set
 function weekdayVN(dateStr) { const dow = new Date(dateStr + 'T12:00:00Z').getUTCDay(); return dow === 0 ? 7 : dow; }
 function mondayOf(dateStr) { const d = new Date(dateStr + 'T12:00:00Z'); const dow = d.getUTCDay(); d.setUTCDate(d.getUTCDate() + (dow === 0 ? -6 : 1 - dow)); return ymd(d); }
 function todayVN() { return new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' }); }
+function addMonths(dateStr, n) { const d = new Date(dateStr.slice(0, 7) + '-01T12:00:00Z'); d.setUTCMonth(d.getUTCMonth() + n); return ymd(d); }
+function monthDaysArr(month) { const [y, m] = month.split('-').map(Number); const n = new Date(Date.UTC(y, m, 0)).getUTCDate(); return Array.from({ length: n }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`); }
 
-let _asStart = null; // ngày đầu tuần đang xem
+let _asStart = null;         // ngày mốc đang xem
+let _asMode = 'week';        // 'week' = theo tuần | 'month' = theo tháng
+let _asRange = null;         // {from,to} khi Anh tự chọn khoảng ngày (đè lên tuần/tháng)
+function daysBetween(from, to) { const out = []; let d = from; for (let i = 0; i < 366 && d <= to; i++) { out.push(d); d = addDays(d, 1); } return out.length ? out : [from]; }
 
 async function pageAssignments() {
-  if (!_asStart) _asStart = mondayOf(todayVN());
+  if (!_asStart) _asStart = todayVN();
+  const isMonth = _asMode === 'month';
 
-  const prevBtn = el('button', { class: 'btn ghost sm' }, '‹ Tuần trước');
-  const nextBtn = el('button', { class: 'btn ghost sm' }, 'Tuần sau ›');
-  const todayBtn = el('button', { class: 'btn ghost sm' }, 'Tuần này');
+  const modeSel = el('select', { id: 'as-mode', title: 'Xem theo tuần hay theo tháng' },
+    el('option', { value: 'week', ...(!isMonth ? { selected: '' } : {}) }, '🗓️ Theo tuần'),
+    el('option', { value: 'month', ...(isMonth ? { selected: '' } : {}) }, '📅 Theo tháng'));
+  modeSel.onchange = () => { _asMode = modeSel.value; _asRange = null; pageAssignments(); };
+
+  const prevBtn = el('button', { class: 'btn ghost sm' }, isMonth ? '‹ Tháng trước' : '‹ Tuần trước');
+  const nextBtn = el('button', { class: 'btn ghost sm' }, isMonth ? 'Tháng sau ›' : 'Tuần sau ›');
+  const todayBtn = el('button', { class: 'btn ghost sm' }, isMonth ? 'Tháng này' : 'Tuần này');
   const deptSel = el('select', { id: 'as-dept' }, el('option', { value: '' }, '-- Tất cả phòng ban --'));
-  prevBtn.onclick = () => { _asStart = addDays(_asStart, -7); pageAssignments(); };
-  nextBtn.onclick = () => { _asStart = addDays(_asStart, 7); pageAssignments(); };
-  todayBtn.onclick = () => { _asStart = mondayOf(todayVN()); pageAssignments(); };
+  prevBtn.onclick = () => { _asRange = null; _asStart = isMonth ? addMonths(_asStart, -1) : addDays(_asStart, -7); pageAssignments(); };
+  nextBtn.onclick = () => { _asRange = null; _asStart = isMonth ? addMonths(_asStart, 1) : addDays(_asStart, 7); pageAssignments(); };
+  todayBtn.onclick = () => { _asRange = null; _asStart = todayVN(); pageAssignments(); };
 
   const curMonth = _asStart.slice(0, 7);
   const exBtn = hasPerm('assignments') ? el('button', { class: 'btn ghost sm' }, '⬇ Xuất Excel mẫu') : null;
@@ -808,12 +819,15 @@ async function pageAssignments() {
   };
   const saBtn = hasPerm('assignments') ? el('button', { class: 'btn ghost sm' }, '📋 Phân ca làm việc') : null;
   if (saBtn) saBtn.onclick = shiftAssignManageModal;
-  const tools = [prevBtn, todayBtn, nextBtn, deptSel, saBtn, exBtn, imBtn, fileI].filter(Boolean);
+  const tools = [modeSel, prevBtn, todayBtn, nextBtn, deptSel, saBtn, exBtn, imBtn, fileI].filter(Boolean);
 
   setMain(head('Phân ca', ...tools), loading());
 
-  const days = Array.from({ length: 7 }, (_, i) => addDays(_asStart, i));
-  const from = days[0], to = days[6];
+  let days;
+  if (_asRange) days = daysBetween(_asRange.from, _asRange.to);
+  else if (isMonth) days = monthDaysArr(curMonth);
+  else { const ws = mondayOf(_asStart); days = Array.from({ length: 7 }, (_, i) => addDays(ws, i)); }
+  const from = days[0], to = days[days.length - 1];
   let data;
   try { data = await api(`/admin/assignments?from=${from}&to=${to}`); }
   catch (e) { setMain(head('Phân ca'), el('div', { class: 'empty' }, e.message)); return; }
@@ -841,22 +855,29 @@ async function pageAssignments() {
     const bulkShift = el('select', {}, ...shiftOpts(''));
     const bulkFrom = el('input', { type: 'date', value: from });
     const bulkTo = el('input', { type: 'date', value: to });
+    // Chọn Từ/Đến ngày → nạp lưới đúng khoảng đó (và cũng là khoảng để gán hàng loạt)
+    const applyRange = () => { const f = bulkFrom.value, t = bulkTo.value; if (!f || !t) return; if (t < f) return toast('Đến ngày phải sau Từ ngày', 'err'); _asRange = { from: f, to: t }; pageAssignments(); };
+    bulkFrom.onchange = applyRange; bulkTo.onchange = applyRange;
     const wdBoxes = [1, 2, 3, 4, 5, 6, 7].map(d => el('label', { style: 'display:flex;align-items:center;gap:4px;font-weight:600;color:var(--ink)' },
       el('input', { type: 'checkbox', class: 'bulk-wd', value: d, style: 'width:auto' }), WD[d]));
     const bulkBtn = el('button', { class: 'btn' }, `Áp dụng cho ${emps.length} NV đang hiển thị`);
+    const pickedIds = () => [...document.querySelectorAll('.emp-pick:checked')].map(x => +x.value);
+    const updateBulkLabel = () => { const n = pickedIds().length; bulkBtn.textContent = n ? `Áp dụng cho ${n} NV đã chọn` : `Áp dụng cho ${emps.length} NV đang hiển thị`; };
     bulkBtn.onclick = async () => {
       const v = bulkShift.value;
       const weekdays = [...document.querySelectorAll('.bulk-wd:checked')].map(x => +x.value);
-      const body = {
-        employee_ids: emps.map(e => e.id), from: bulkFrom.value, to: bulkTo.value, weekdays,
-        shift_id: (v === '' || v === 'off') ? null : +v, is_off: v === 'off',
-      };
+      const picked = pickedIds();
+      const ids = picked.length ? picked : emps.map(e => e.id);   // bỏ trống = tất cả đang hiển thị
+      if (!ids.length) return toast('Không có nhân viên', 'err');
+      const body = { employee_ids: ids, from: bulkFrom.value, to: bulkTo.value, weekdays,
+        shift_id: (v === '' || v === 'off') ? null : +v, is_off: v === 'off' };
       if (!body.from || !body.to) return toast('Chọn khoảng ngày', 'err');
-      try { const r = await api('/admin/assignments/bulk', { method: 'POST', body }); toast(`Đã gán ${r.count} lượt`, 'ok'); pageAssignments(); }
+      try { const r = await api('/admin/assignments/bulk', { method: 'POST', body }); toast(`Đã gán ${r.count} lượt cho ${ids.length} NV`, 'ok'); pageAssignments(); }
       catch (e) { toast(e.message, 'err'); }
     };
     const bulkPanel = hasPerm('assignments') ? el('div', { class: 'panel', style: 'padding:14px 16px;margin-bottom:14px' },
-      el('div', { style: 'font-weight:700;margin-bottom:10px' }, 'Gán hàng loạt'),
+      el('div', { style: 'font-weight:700;margin-bottom:4px' }, 'Gán hàng loạt'),
+      el('div', { class: 'map-hint', style: 'margin:0 0 10px' }, 'Tích chọn nhân viên ở bảng bên dưới để chỉ áp cho họ; bỏ trống = tất cả NV đang hiển thị.'),
       el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end' },
         el('div', {}, el('label', {}, 'Ca'), bulkShift),
         el('div', {}, el('label', {}, 'Từ ngày'), bulkFrom),
@@ -866,7 +887,9 @@ async function pageAssignments() {
 
     // Bảng lịch tuần
     const tbl = el('table', { class: 'data' });
-    const thead = el('tr', {}, el('th', {}, 'Nhân viên'));
+    const selAll = el('input', { type: 'checkbox', style: 'width:auto;margin-right:6px;vertical-align:middle', title: 'Chọn / bỏ tất cả' });
+    selAll.onchange = () => { document.querySelectorAll('.emp-pick').forEach((c) => { c.checked = selAll.checked; }); updateBulkLabel(); };
+    const thead = el('tr', {}, el('th', {}, selAll, 'Nhân viên'));
     for (const d of days) {
       const we = weekdayVN(d) >= 6;
       thead.append(el('th', { style: we ? 'background:#fff4e6' : '' },
@@ -875,12 +898,15 @@ async function pageAssignments() {
     }
     tbl.append(el('thead', {}, thead));
     const tb = el('tbody');
-    if (!emps.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, 'Không có nhân viên.'))));
+    if (!emps.length) tb.append(el('tr', {}, el('td', { colspan: days.length + 1 }, el('div', { class: 'empty' }, 'Không có nhân viên.'))));
     for (const e of emps) {
-      const tr = el('tr', {}, el('td', {},
-        el('b', {}, e.full_name),
-        el('div', { style: 'color:#999;font-size:12px' }, `${e.code} · `,
-          el('span', { style: /📋|📌|🛌/.test(e.base || '') ? 'color:#0a7;font-weight:600' : 'color:#999' }, e.base || (e.shift_name || '⚙ Tự động')))));
+      const cb = el('input', { type: 'checkbox', class: 'emp-pick', value: e.id, style: 'width:auto;margin-top:2px' });
+      cb.onchange = updateBulkLabel;
+      const tr = el('tr', {}, el('td', {}, el('div', { style: 'display:flex;align-items:flex-start;gap:8px' }, cb,
+        el('div', {},
+          el('b', {}, e.full_name),
+          el('div', { style: 'color:#999;font-size:12px' }, `${e.code} · `,
+            el('span', { style: /📋|📌|🛌/.test(e.base || '') ? 'color:#0a7;font-weight:600' : 'color:#999' }, e.base || (e.shift_name || '⚙ Tự động')))))));
       for (const d of days) {
         const arr = amap.get(e.id + '|' + d) || [];
         const a = arr[0];
@@ -910,7 +936,9 @@ async function pageAssignments() {
     tbl.append(tb);
 
     const range = el('div', { style: 'color:var(--muted);font-size:13px;margin-bottom:6px' },
-      `Tuần: ${from.slice(8)}/${from.slice(5, 7)} – ${to.slice(8)}/${to.slice(5, 7)}/${to.slice(0, 4)}`);
+      _asRange ? `Khoảng: ${from.slice(8)}/${from.slice(5, 7)} – ${to.slice(8)}/${to.slice(5, 7)}/${to.slice(0, 4)} (${days.length} ngày)`
+        : isMonth ? `Tháng ${curMonth.slice(5)}/${curMonth.slice(0, 4)} (${days.length} ngày)`
+          : `Tuần: ${from.slice(8)}/${from.slice(5, 7)} – ${to.slice(8)}/${to.slice(5, 7)}/${to.slice(0, 4)}`);
     const hint = el('div', { class: 'map-hint', style: 'margin-bottom:10px' },
       'Cột trái hiện lịch trình/ca gốc của NV (gán ở nút "📋 Phân ca làm việc"). Mỗi ô = ĐÈ ca cho riêng ngày đó; để "⚙ Tự động" là chấm theo lịch trình/ca gốc. Chỉ đổi ô khi muốn 1 ngày khác lịch (VD nghỉ, hoặc đổi ca đột xuất).');
     setMain(head('Phân ca', ...tools), range, hint, bulkPanel, el('div', { class: 'panel tbl-scroll' }, tbl));
@@ -934,27 +962,68 @@ async function shiftAssignManageModal() {
   const listBox = el('div', {}, loading());
   const addBtn = el('button', { class: 'btn' }, '+ Thêm phân ca');
   addBtn.onclick = () => shiftAssignFormModal(reload);
-  const reload = async () => {
-    let rows = [];
-    try { rows = (await api('/admin/shift-assignments')).rows; }
-    catch (e) { listBox.innerHTML = ''; listBox.append(el('div', { class: 'empty' }, e.message)); return; }
+  const deptSel = el('select', { style: 'min-width:170px' }, el('option', { value: '' }, '-- Tất cả phòng ban --'));
+  const selAll = el('input', { type: 'checkbox', style: 'width:auto', title: 'Chọn / bỏ tất cả' });
+  const delSelBtn = btnSm('🗑 Xoá đã chọn', () => doDelete('sel'), 'ghost');
+  const delAllBtn = btnSm('🗑 Xoá tất cả', () => doDelete('all'), 'ghost');
+  let ALL = [];
+
+  async function doDelete(kind) {
+    const dept = deptSel.value;
+    let ids, msg;
+    if (kind === 'all') {
+      const target = ALL.filter((r) => !dept || r.department === dept);
+      if (!target.length) return toast('Không có phân ca để xoá', 'err');
+      ids = target.map((r) => r.id);
+      msg = dept ? `Xoá TẤT CẢ ${ids.length} phân ca của phòng "${dept}"?` : `Xoá TẤT CẢ ${ids.length} phân ca?`;
+    } else {
+      ids = [...listBox.querySelectorAll('.sa-pick:checked')].map((x) => +x.value);
+      if (!ids.length) return toast('Chưa tích chọn phân ca nào', 'err');
+      msg = `Xoá ${ids.length} phân ca đã chọn?`;
+    }
+    if (!confirm(msg)) return;
+    try { const r = await api('/admin/shift-assignments/delete', { method: 'POST', body: { ids } }); toast(`Đã xoá ${r.count} phân ca`, 'ok'); reload(); }
+    catch (e) { toast(e.message, 'err'); }
+  }
+
+  const render = () => {
+    const dept = deptSel.value;
+    const rows = ALL.filter((r) => !dept || r.department === dept);
     listBox.innerHTML = '';
     if (!rows.length) { listBox.append(el('div', { class: 'map-hint' }, 'Chưa có phân ca nào. Bấm "+ Thêm phân ca".')); return; }
     for (const r of rows) {
       const target = r.mode === 'schedule' ? ('📋 ' + (r.schedule_name || 'Lịch trình')) : ('🕐 ' + (r.shift_name || 'Ca'));
       const range = r.from_date + (r.to_date ? ' → ' + r.to_date : ' → (mãi mãi)');
       const rule = (r.merge_rule && r.merge_rule !== 'default') ? (' · ' + (RULE_LABEL[r.merge_rule] || r.merge_rule).split(' —')[0]) : '';
-      const del = btnSm('Xoá', async () => { try { await api('/admin/shift-assignments/' + r.id, { method: 'DELETE' }); reload(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'ghost');
-      listBox.append(el('div', { style: 'padding:10px 2px;border-bottom:1px solid #f1efec;display:flex;align-items:center;gap:10px' },
+      const cb = el('input', { type: 'checkbox', class: 'sa-pick', value: r.id, style: 'width:auto;margin-top:3px' });
+      const del = btnSm('Xoá', async () => { if (!confirm(`Xoá phân ca của ${r.emp_name || 'NV này'}?`)) return; try { await api('/admin/shift-assignments/' + r.id, { method: 'DELETE' }); toast('Đã xoá', 'ok'); reload(); } catch (e) { toast(e.message, 'err'); } }, 'ghost');
+      listBox.append(el('div', { style: 'padding:10px 2px;border-bottom:1px solid #f1efec;display:flex;align-items:flex-start;gap:10px' },
+        cb,
         el('div', { style: 'flex:1' },
           el('div', {}, el('b', {}, r.emp_name || ''), el('span', { style: 'color:#999' }, ` · ${r.emp_code || ''}${r.department ? ' · ' + r.department : ''}`)),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, `${target} · ${range}${r.shift_type === 'rotating' ? ' · xoay' : ''}${rule}`)),
         del));
     }
   };
+  const reload = async () => {
+    try { ALL = (await api('/admin/shift-assignments')).rows; }
+    catch (e) { listBox.innerHTML = ''; listBox.append(el('div', { class: 'empty' }, e.message)); return; }
+    const depts = [...new Set(ALL.map((r) => r.department).filter(Boolean))].sort();
+    deptSel.innerHTML = ''; deptSel.append(el('option', { value: '' }, '-- Tất cả phòng ban --'));
+    for (const d of depts) deptSel.append(el('option', { value: d }, d));
+    selAll.checked = false;
+    render();
+  };
+  deptSel.onchange = () => { selAll.checked = false; render(); };
+  selAll.onchange = () => { listBox.querySelectorAll('.sa-pick').forEach((c) => { c.checked = selAll.checked; }); };
+
   openModal('Phân ca làm việc', [
-    el('div', { class: 'map-hint' }, 'Gán ca hoặc lịch trình cho NV theo khoảng ngày. Áp được cho cả phòng ban / toàn bộ nhân viên (không cần chọn từng người). Phân ca theo ngày trên lịch tuần vẫn ưu tiên đè lên phân ca này.'),
-    addBtn, listBox,
+    el('div', { class: 'map-hint' }, 'Gán ca/lịch trình cho NV theo khoảng ngày (áp cho cả phòng ban / nhiều NV). Phân ca theo ngày trên lịch tuần vẫn ưu tiên đè lên phân ca này.'),
+    addBtn,
+    el('div', { style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0 4px' },
+      el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, selAll, 'Chọn tất cả'),
+      deptSel, delSelBtn, delAllBtn),
+    listBox,
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
   reload();
 }
@@ -970,11 +1039,27 @@ async function shiftAssignFormModal(onSaved) {
     el('option', { value: 'emp' }, 'Nhân viên cụ thể'),
     el('option', { value: 'dept' }, 'Toàn phòng ban'),
     el('option', { value: 'all' }, 'Toàn bộ nhân viên'));
-  const empSel = el('select', {}, el('option', { value: '' }, '— Chọn nhân viên —'),
-    ...employees.map(e => el('option', { value: String(e.id) }, `${e.full_name} (${e.code})`)));
+  // Nhân viên cụ thể: tích chọn NHIỀU NV, có lọc phòng ban + chọn tất cả
+  const empFilterDept = el('select', {}, el('option', { value: '' }, '-- Tất cả phòng ban --'),
+    ...[...new Set(employees.map((e) => e.department).filter(Boolean))].sort().map((d) => el('option', { value: d }, d)));
+  const empSelAll = el('input', { type: 'checkbox', style: 'width:auto' });
+  const empListBox = el('div', { style: 'max-height:180px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:6px 10px' });
+  const renderEmpList = () => {
+    const dept = empFilterDept.value;
+    empListBox.innerHTML = '';
+    for (const e of employees.filter((x) => !dept || x.department === dept))
+      empListBox.append(el('label', { style: 'display:flex;align-items:center;gap:8px;padding:3px 0;font-weight:500;color:var(--ink)' },
+        el('input', { type: 'checkbox', class: 'saf-emp', value: e.id, style: 'width:auto' }), `${e.full_name} (${e.code})${e.department ? ' · ' + e.department : ''}`));
+  };
+  empFilterDept.onchange = () => { empSelAll.checked = false; renderEmpList(); };
+  empSelAll.onchange = () => { empListBox.querySelectorAll('.saf-emp').forEach((c) => { c.checked = empSelAll.checked; }); };
+  renderEmpList();
+  const empField = el('div', {}, el('label', {}, 'Nhân viên * (tích chọn 1 hoặc nhiều)'),
+    el('div', { style: 'display:flex;align-items:center;gap:10px;margin-bottom:6px' },
+      el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, empSelAll, 'Chọn tất cả'), empFilterDept),
+    empListBox);
   const deptSel = el('select', {}, el('option', { value: '' }, '— Chọn phòng ban —'),
     ...DEPARTMENTS.map(d => el('option', { value: d.name }, d.name)));
-  const empField = field('Nhân viên *', empSel);
   const deptField = field('Phòng ban *', deptSel);
 
   // Chế độ gán
@@ -1002,7 +1087,7 @@ async function shiftAssignFormModal(onSaved) {
   save.onclick = async () => {
     const scope = scopeSel.value, mode = modeSel.value;
     const body = { scope, mode, from_date: fromI.value, to_date: toI.value || null, shift_type: typeSel.value, merge_rule: ruleSel.value, note: noteI.value };
-    if (scope === 'emp') { if (!empSel.value) return toast('Chọn nhân viên', 'err'); body.employee_id = +empSel.value; }
+    if (scope === 'emp') { const ids = [...empListBox.querySelectorAll('.saf-emp:checked')].map((x) => +x.value); if (!ids.length) return toast('Tích chọn ít nhất 1 nhân viên', 'err'); body.employee_ids = ids; }
     else if (scope === 'dept') { if (!deptSel.value) return toast('Chọn phòng ban', 'err'); body.department = deptSel.value; }
     if (mode === 'shift') { if (!shiftSel.value) return toast('Chọn ca làm việc', 'err'); body.shift_id = +shiftSel.value; }
     else { if (!schedSel.value) return toast('Chọn lịch trình', 'err'); body.work_schedule_id = +schedSel.value; }
