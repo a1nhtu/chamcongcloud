@@ -77,6 +77,13 @@ r.post('/employees', need('employees'), (req, res) => {
   const b = req.body || {};
   if (!b.code || !b.full_name || !b.username || !b.password)
     return res.status(400).json({ error: 'Thiếu mã NV, họ tên, tài khoản hoặc mật khẩu' });
+  // Chống trùng mã NV + số ID máy chấm công
+  const code0 = b.code.trim();
+  if (db.prepare('SELECT 1 FROM employees WHERE code=?').get(code0))
+    return res.status(400).json({ error: `Mã nhân viên "${code0}" đã tồn tại` });
+  const pin0 = (b.device_pin || '').trim();
+  if (pin0 && db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>''").get(pin0))
+    return res.status(400).json({ error: `Số ID máy chấm công "${pin0}" đã có nhân viên dùng` });
   const lic = licenseState();
   if (lic.maxEmp) {
     const cnt = db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1 AND role != 'admin'").get().c;
@@ -102,11 +109,16 @@ r.put('/employees/:id', need('employees'), (req, res) => {
   const b = req.body || {};
   const emp = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.params.id);
   if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+  // Chống trùng mã NV khi đổi mã (loại trừ chính NV này)
+  if (b.code != null && b.code.trim() !== emp.code
+      && db.prepare('SELECT 1 FROM employees WHERE code=? AND id<>?').get(b.code.trim(), emp.id))
+    return res.status(400).json({ error: `Mã nhân viên "${b.code.trim()}" đã tồn tại` });
   try {
     const newRole = b.role ?? emp.role;
     const newPerms = b.permissions !== undefined ? normPerms(newRole, b.permissions) : emp.permissions;
+    // SỐ ID (device_pin) KHÓA sau khi tạo — không cho sửa qua PUT (dù là NV nhập tay hay từ máy)
     db.prepare(`UPDATE employees SET code=?, full_name=?, department=?, position=?, phone=?,
-      role=?, username=?, office_id=?, shift_id=?, work_schedule_id=?, permissions=?, device_pin=?, from_device=0, active=? WHERE id=?`).run(
+      role=?, username=?, office_id=?, shift_id=?, work_schedule_id=?, permissions=?, active=? WHERE id=?`).run(
       b.code ?? emp.code, b.full_name ?? emp.full_name, b.department ?? emp.department,
       b.position ?? emp.position, b.phone ?? emp.phone, newRole,
       b.username ?? emp.username,
@@ -114,7 +126,6 @@ r.put('/employees/:id', need('employees'), (req, res) => {
       b.shift_id !== undefined ? (b.shift_id || null) : emp.shift_id,
       b.work_schedule_id !== undefined ? (b.work_schedule_id || null) : emp.work_schedule_id,
       newPerms,
-      b.device_pin !== undefined ? (b.device_pin || '').trim() : (emp.device_pin || ''),
       b.active != null ? (b.active ? 1 : 0) : emp.active, emp.id);
     if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
     if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
@@ -201,22 +212,61 @@ r.delete('/schedules/:id', need('shifts'), (req, res) => {
 
 /* ----------------------------- BỘ PHẬN ----------------------------- */
 r.get('/departments', (req, res) => {
-  res.json({ rows: db.prepare('SELECT id, name FROM departments ORDER BY name').all() });
+  res.json({ rows: db.prepare('SELECT id, name, parent_id FROM departments ORDER BY name').all() });
 });
 r.post('/departments', need('departments'), (req, res) => {
   const name = (req.body?.name || '').trim();
+  const parent_id = req.body?.parent_id ? +req.body.parent_id : null;
   if (!name) return res.status(400).json({ error: 'Nhập tên bộ phận' });
+  if (parent_id && !db.prepare('SELECT 1 FROM departments WHERE id=?').get(parent_id))
+    return res.status(400).json({ error: 'Bộ phận cha không hợp lệ' });
   try {
-    const info = db.prepare('INSERT INTO departments(name) VALUES(?)').run(name);
+    const info = db.prepare('INSERT INTO departments(name, parent_id) VALUES(?,?)').run(name, parent_id);
     res.json({ ok: true, id: info.lastInsertRowid, name });
+  } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Bộ phận đã tồn tại' : e.message }); }
+});
+r.put('/departments/:id', need('departments'), (req, res) => {
+  const d = db.prepare('SELECT * FROM departments WHERE id=?').get(req.params.id);
+  if (!d) return res.status(404).json({ error: 'Không tìm thấy' });
+  const name = req.body?.name != null ? String(req.body.name).trim() : d.name;
+  let parent_id = req.body?.parent_id !== undefined ? (req.body.parent_id ? +req.body.parent_id : null) : d.parent_id;
+  if (parent_id === +req.params.id) return res.status(400).json({ error: 'Bộ phận không thể là cha của chính nó' });
+  try {
+    // đổi tên bộ phận → cập nhật luôn tên đang lưu ở nhân viên (department lưu theo tên)
+    if (name !== d.name) db.prepare('UPDATE employees SET department=? WHERE department=?').run(name, d.name);
+    db.prepare('UPDATE departments SET name=?, parent_id=? WHERE id=?').run(name, parent_id, d.id);
+    res.json({ ok: true });
   } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Bộ phận đã tồn tại' : e.message }); }
 });
 r.delete('/departments/:id', need('departments'), (req, res) => {
   const d = db.prepare('SELECT name FROM departments WHERE id = ?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Không tìm thấy' });
+  const children = db.prepare('SELECT COUNT(*) c FROM departments WHERE parent_id = ?').get(req.params.id).c;
+  if (children > 0) return res.status(400).json({ error: `Bộ phận này còn ${children} bộ phận con — xoá con trước` });
   const used = db.prepare('SELECT COUNT(*) c FROM employees WHERE department = ? AND active = 1').get(d.name).c;
   if (used > 0) return res.status(400).json({ error: `Còn ${used} nhân viên thuộc bộ phận này` });
   db.prepare('DELETE FROM departments WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+/* -------- Chức danh (danh mục để chọn khi khai báo NV) -------- */
+r.get('/positions', (req, res) => {
+  res.json({ rows: db.prepare('SELECT id, name FROM positions ORDER BY name').all() });
+});
+r.post('/positions', need('departments'), (req, res) => {
+  const name = (req.body?.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'Nhập tên chức danh' });
+  try {
+    const info = db.prepare('INSERT INTO positions(name) VALUES(?)').run(name);
+    res.json({ ok: true, id: info.lastInsertRowid, name });
+  } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Chức danh đã tồn tại' : e.message }); }
+});
+r.delete('/positions/:id', need('departments'), (req, res) => {
+  const p = db.prepare('SELECT name FROM positions WHERE id=?').get(req.params.id);
+  if (!p) return res.status(404).json({ error: 'Không tìm thấy' });
+  const used = db.prepare('SELECT COUNT(*) c FROM employees WHERE position = ? AND active = 1').get(p.name).c;
+  if (used > 0) return res.status(400).json({ error: `Còn ${used} nhân viên đang giữ chức danh này` });
+  db.prepare('DELETE FROM positions WHERE id=?').run(req.params.id);
   res.json({ ok: true });
 });
 

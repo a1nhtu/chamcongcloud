@@ -174,6 +174,13 @@ export function initSchema() {
     CREATE TABLE IF NOT EXISTS departments (
       id         INTEGER PRIMARY KEY AUTOINCREMENT,
       name       TEXT UNIQUE NOT NULL,
+      parent_id  INTEGER DEFAULT NULL,          -- bộ phận cha (NULL = cấp trên cùng)
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    -- Danh mục chức danh (để chọn khi khai báo NV, thay vì gõ tay)
+    CREATE TABLE IF NOT EXISTS positions (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT UNIQUE NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
@@ -395,6 +402,7 @@ function migrateColumns() {
   add('shifts', 'tdqd_mode',     "TEXT NOT NULL DEFAULT 'pair'");   // pair|idm — cách ghép log cho quy tắc TĐ-QĐ
   // Máy chấm công: số máy (IDM: máy lẻ = VÀO, máy chẵn = RA)
   add('push_devices', 'machine_number', 'INTEGER NOT NULL DEFAULT 0');
+  add('departments', 'parent_id', 'INTEGER DEFAULT NULL');   // bộ phận cha - con
 
   // GĐ1: các chỉ số tính công lưu trên bản ghi chấm công
   add('attendance', 'early_min',  'INTEGER DEFAULT 0');

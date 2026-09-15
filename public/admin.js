@@ -9,6 +9,7 @@ let SETTINGS = {};        // cache cấu hình (attendance_mode, geofence…)
 const NAV = [
   ['dashboard', '📊', 'Tổng quan', 'reports'],
   ['employees', '👥', 'Nhân viên', 'employees'],
+  ['org', '🏢', 'Bộ phận', 'departments'],
   ['shifts', '🕐', 'Ca làm', 'shifts'],
   ['assignments', '🗓️', 'Phân ca', 'assignments'],
   ['shiftreq', '🙋', 'Duyệt chọn ca', 'shift_requests'],
@@ -135,7 +136,7 @@ async function checkUpdateBanner() {
 }
 function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
-  ({ dashboard: pageDashboard, employees: pageEmployees, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, settings: pageSettings }[key])();
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, settings: pageSettings }[key])();
 }
 
 /* ---------- Thiết lập lần đầu ---------- */
@@ -272,20 +273,29 @@ function rowToday(r) {
 }
 
 /* ---------- 2) NHÂN VIÊN ---------- */
-let OFFICES = [], SHIFTS = [], DEPARTMENTS = [], SCHEDULES = [], PERM_CATALOG = [];
+let OFFICES = [], SHIFTS = [], DEPARTMENTS = [], SCHEDULES = [], PERM_CATALOG = [], POSITIONS = [];
 async function loadRefs() {
-  [OFFICES, SHIFTS, DEPARTMENTS, SCHEDULES] = await Promise.all([
+  [OFFICES, SHIFTS, DEPARTMENTS, SCHEDULES, POSITIONS] = await Promise.all([
     api('/admin/offices').then(r => r.rows),
     api('/admin/shifts').then(r => r.rows),
     api('/admin/departments').then(r => r.rows),
     api('/admin/schedules').then(r => r.rows),
+    api('/admin/positions').then(r => r.rows).catch(() => []),
   ]);
+}
+// Xếp bộ phận theo cây cha→con, trả [{id,name,parent_id,depth}] để đổ vào dropdown/quản lý
+function deptOrdered(list = DEPARTMENTS) {
+  const byParent = new Map();
+  for (const d of list) { const k = d.parent_id || 0; if (!byParent.has(k)) byParent.set(k, []); byParent.get(k).push(d); }
+  for (const arr of byParent.values()) arr.sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+  const out = [];
+  const walk = (pid, depth) => { for (const d of (byParent.get(pid) || [])) { out.push({ ...d, depth }); walk(d.id, depth + 1); } };
+  walk(0, 0);
+  return out;
 }
 async function pageEmployees() {
   const addBtn = hasPerm('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
-  const deptBtn = hasPerm('departments') ? el('button', { class: 'btn ghost' }, '🏢 Quản lý bộ phận') : null;
-  if (deptBtn) deptBtn.onclick = deptManageModal;
-  setMain(head('Nhân viên', deptBtn, addBtn), loading());
+  setMain(head('Nhân viên', addBtn), loading());
   try {
     await loadRefs();
     const { rows } = await api('/admin/employees');
@@ -312,7 +322,7 @@ async function pageEmployees() {
     }
     tbl.append(tb);
     if (addBtn) addBtn.onclick = () => empModal(null);
-    setMain(head('Nhân viên (' + rows.length + ')', deptBtn, addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Nhân viên (' + rows.length + ')', addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
 }
 function roleLabel(r) { return el('span', { class: 'pill ' + (r === 'admin' ? 'bad' : r === 'manager' ? 'warn' : 'muted') }, { admin: 'Admin', manager: 'Quản lý', employee: 'Nhân viên' }[r]); }
@@ -352,37 +362,25 @@ function empModal(e) {
   const mk = (id, ph, val = '') => (f[id] = input('e-' + id, { placeholder: ph, value: val }));
   const roleSel = el('select', { id: 'e-role' },
     ...['employee', 'manager', 'admin'].map(v => el('option', { value: v, ...(e?.role === v ? { selected: '' } : {}) }, { employee: 'Nhân viên', manager: 'Quản lý', admin: 'Admin' }[v])));
-  const officeBox = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px 16px;padding-top:4px' },
-    ...OFFICES.map(o => el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)' },
-      el('input', { type: 'checkbox', class: 'e-office', value: o.id, style: 'width:auto', ...((e?.office_ids || []).includes(o.id) ? { checked: '' } : {}) }), o.name)));
-  const officeField = el('div', {}, el('label', {}, 'Định vị được chấm (bỏ trống = tất cả định vị)'),
-    OFFICES.length ? officeBox : el('div', { class: 'map-hint' }, 'Chưa có định vị nào. Thêm ở mục Chi nhánh.'));
-  const assignSel = el('select', { id: 'e-assign' },
-    el('option', { value: '' }, '— Chọn phân công ca —'),
-    el('optgroup', { label: 'Ca cố định' },
-      ...SHIFTS.map(s => el('option', { value: 's:' + s.id, ...(!e?.work_schedule_id && e?.shift_id === s.id ? { selected: '' } : {}) }, `${s.name} (${s.start_time}-${s.end_time})`))),
-    el('optgroup', { label: 'Lịch trình ca (tự động tìm ca)' },
-      ...SCHEDULES.map(w => el('option', { value: 'w:' + w.id, ...(e?.work_schedule_id === w.id ? { selected: '' } : {}) }, `📋 ${w.name}`))));
+  // Định vị được phép chấm quản lý từ CHI NHÁNH; phân công ca quản lý từ màn PHÂN CA
+  // → bỏ cả 2 khỏi form NV. Không gửi office_ids/shift_id/work_schedule_id → giữ nguyên gán sẵn.
 
-  // Bộ phận: dropdown + thêm nhanh
+  // Bộ phận: dropdown phân cấp cha-con (khai báo ở tab "Bộ phận")
   const deptSel = el('select', { id: 'e-department' },
     el('option', { value: '' }, '— Chọn bộ phận —'),
-    ...DEPARTMENTS.map(d => el('option', { value: d.name, ...(e?.department === d.name ? { selected: '' } : {}) }, d.name)));
+    ...deptOrdered().map(d => el('option', { value: d.name, ...(e?.department === d.name ? { selected: '' } : {}) },
+      ' '.repeat(d.depth * 3) + (d.depth ? '↳ ' : '') + d.name)));
   if (e?.department && !DEPARTMENTS.some(d => d.name === e.department))
-    deptSel.append(el('option', { value: e.department, selected: '' }, e.department));
-  const addDeptBtn = el('button', { class: 'btn ghost sm', type: 'button', title: 'Thêm bộ phận' }, '＋');
-  addDeptBtn.onclick = async () => {
-    const name = (prompt('Tên bộ phận mới:') || '').trim();
-    if (!name) return;
-    try {
-      await api('/admin/departments', { method: 'POST', body: { name } });
-      DEPARTMENTS.push({ name });
-      deptSel.append(el('option', { value: name, selected: '' }, name));
-      deptSel.value = name; toast('Đã thêm bộ phận', 'ok');
-    } catch (err) { toast(err.message, 'err'); }
-  };
-  const deptField = el('div', {}, el('label', {}, 'Bộ phận'),
-    el('div', { style: 'display:flex;gap:6px' }, deptSel, addDeptBtn));
+    deptSel.append(el('option', { value: e.department, selected: '' }, e.department + ' (cũ)'));
+  const deptField = el('div', {}, el('label', {}, 'Bộ phận'), deptSel);
+
+  // Chức danh: chọn từ danh mục đã khai báo (tab "Bộ phận" → Chức danh)
+  const posSel = el('select', { id: 'e-position' },
+    el('option', { value: '' }, '— Chọn chức danh —'),
+    ...POSITIONS.map(p => el('option', { value: p.name, ...(e?.position === p.name ? { selected: '' } : {}) }, p.name)));
+  if (e?.position && !POSITIONS.some(p => p.name === e.position))
+    posSel.append(el('option', { value: e.position, selected: '' }, e.position + ' (cũ)'));
+  const posField = el('div', {}, el('label', {}, 'Chức danh'), posSel);
 
   // ----- Phân quyền chi tiết (chỉ áp cho Quản lý / Nhân viên; Admin toàn quyền) -----
   const permWrap = el('div', { id: 'e-perm-wrap', style: 'margin-top:4px' });
@@ -410,14 +408,20 @@ function empModal(e) {
   });
   renderPerms(e?.role || 'employee');
 
+  // Số ID máy chấm công: đặt khi TẠO MỚI, KHÓA sau khi tạo (NV nhập tay lẫn NV lấy từ máy đều không sửa)
+  const pinInput = input('e-device_pin', { placeholder: 'VD: 1 (số ID trên máy)', value: e?.device_pin || '',
+    ...(e ? { readonly: '', style: 'background:#f2f0ee;color:#777;cursor:not-allowed' } : {}) });
+  f.device_pin = pinInput;
+  const pinField = el('div', {}, el('label', {}, 'Số ID máy chấm công' + (e ? ' 🔒' : '')),
+    pinInput,
+    e ? el('div', { class: 'map-hint', style: 'margin-top:3px' }, e.from_device ? 'Lấy từ máy chấm công — không sửa được.' : 'Đã tạo — không sửa được số ID.')
+      : el('div', { class: 'map-hint', style: 'margin-top:3px' }, 'Nhập số ID trùng với số ID trên máy. Sau khi tạo sẽ không sửa được.'));
+
   const body = [
     el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name))),
-    el('div', { class: 'two-col' }, deptField, field('Chức danh', mk('position', 'Nhân viên · Sale', e?.position))),
-    el('div', { class: 'two-col' },
-      field('Số điện thoại', mk('phone', '', e?.phone)),
-      field('Số ID máy chấm công', mk('device_pin', 'VD: 1 (số ID trên máy)', e?.device_pin))),
+    el('div', { class: 'two-col' }, deptField, posField),
+    el('div', { class: 'two-col' }, field('Số điện thoại', mk('phone', '', e?.phone)), pinField),
     el('div', { class: 'two-col' }, field('Tài khoản *', mk('username', 'nv002', e?.username)), field('Vai trò', roleSel)),
-    hourlyMode() ? officeField : el('div', {}, field('Phân công ca', assignSel), el('div', { style: 'margin-top:10px' }, officeField)),
     permWrap,
     field(e ? 'Mật khẩu mới (để trống nếu giữ nguyên)' : 'Mật khẩu *', input('e-password', { type: 'text', placeholder: e ? '••••••' : '123456' })),
     ...(e && deviceLockEnabled() ? [(() => {
@@ -437,14 +441,13 @@ function empModal(e) {
   save.onclick = async () => {
     const body = {
       code: f.code.value.trim(), full_name: f.full_name.value.trim(), department: deptSel.value,
-      position: f.position.value, phone: f.phone.value, role: $('#e-role').value,
-      device_pin: f.device_pin.value.trim(),
-      username: f.username.value.trim(), office_ids: [...document.querySelectorAll('.e-office:checked')].map((x) => +x.value),
+      position: posSel.value, phone: f.phone.value, role: $('#e-role').value,
+      username: f.username.value.trim(),
       password: $('#e-password').value || undefined,
     };
-    const av = $('#e-assign')?.value || '';
-    body.shift_id = av.startsWith('s:') ? +av.slice(2) : null;
-    body.work_schedule_id = av.startsWith('w:') ? +av.slice(2) : null;
+    // Số ID chỉ gửi khi TẠO MỚI (sửa thì khóa, backend cũng bỏ qua)
+    if (!e) body.device_pin = f.device_pin.value.trim();
+    // Không gửi shift_id/work_schedule_id/office_ids → giữ nguyên phân ca & định vị đã gán ở màn riêng
     if (body.role !== 'admin') body.permissions = [...permState];
     try {
       if (e) await api('/admin/employees/' + e.id, { method: 'PUT', body });
@@ -456,35 +459,95 @@ function empModal(e) {
 }
 async function toggleEmp(e) { if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return; await api('/admin/employees/' + e.id, { method: 'DELETE' }); pageEmployees(); }
 
-function deptManageModal() {
-  const listBox = el('div', {}, loading());
-  const nameI = input('dm-name', { placeholder: 'VD: Kinh doanh, Kỹ thuật…' });
-  const addBtn = el('button', { class: 'btn' }, 'Thêm');
-  const load = async () => {
-    const { rows } = await api('/admin/departments');
-    DEPARTMENTS = rows;
-    listBox.innerHTML = '';
-    if (!rows.length) listBox.append(el('div', { class: 'map-hint' }, 'Chưa có bộ phận nào.'));
-    for (const d of rows) {
-      const del = btnSm('Xoá', async () => {
-        try { await api('/admin/departments/' + d.id, { method: 'DELETE' }); load(); toast('Đã xoá', 'ok'); }
+// Trang "Bộ phận & Chức danh" — khai báo bộ phận CHA-CON + danh mục chức danh
+async function pageOrg() {
+  setMain(head('Bộ phận & Chức danh'), loading());
+  const ro = !hasPerm('departments');   // chỉ xem
+  const box = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start' });
+  const deptPanel = el('div', { class: 'panel', style: 'padding:18px 20px' });
+  const posPanel = el('div', { class: 'panel', style: 'padding:18px 20px' });
+  box.append(deptPanel, posPanel);
+  if (innerWidth < 760) box.style.gridTemplateColumns = '1fr';
+  setMain(head('Bộ phận & Chức danh'), box);
+
+  // ---------- BỘ PHẬN (cây cha-con) ----------
+  const renderDept = () => {
+    deptPanel.innerHTML = '';
+    deptPanel.append(el('h3', { style: 'margin:0 0 4px' }, '🏢 Bộ phận'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:12px' }, 'Khai báo bộ phận, có thể lồng bộ phận con vào bộ phận cha. Không xoá được bộ phận còn nhân viên hoặc còn bộ phận con.'));
+    if (!ro) {
+      const nameI = input('org-dname', { placeholder: 'Tên bộ phận mới' });
+      const parentSel = el('select', {}, el('option', { value: '' }, '— Không có (cấp trên cùng) —'),
+        ...deptOrdered().map(d => el('option', { value: d.id }, ' '.repeat(d.depth * 3) + (d.depth ? '↳ ' : '') + d.name)));
+      const addBtn = el('button', { class: 'btn' }, 'Thêm');
+      addBtn.onclick = async () => {
+        const name = nameI.value.trim(); if (!name) return toast('Nhập tên bộ phận', 'err');
+        try { await api('/admin/departments', { method: 'POST', body: { name, parent_id: parentSel.value || null } }); nameI.value = ''; DEPARTMENTS = (await api('/admin/departments')).rows; renderDept(); toast('Đã thêm bộ phận', 'ok'); }
         catch (e) { toast(e.message, 'err'); }
-      }, 'ghost');
-      listBox.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid #f1efec' },
-        el('b', { style: 'flex:1' }, d.name), del));
+      };
+      deptPanel.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px' }, nameI, el('span', { style: 'align-self:center;color:var(--muted);font-size:13px' }, 'thuộc'), parentSel, addBtn));
     }
+    const tree = deptOrdered();
+    if (!tree.length) { deptPanel.append(el('div', { class: 'map-hint' }, 'Chưa có bộ phận nào.')); return; }
+    const list = el('div', { style: 'margin-top:8px' });
+    for (const d of tree) {
+      const acts = ro ? '' : el('div', { style: 'display:flex;gap:6px' },
+        btnSm('Sửa', () => deptEditModal(d, renderDept), 'ghost'),
+        btnSm('Xoá', async () => { if (!confirm(`Xoá bộ phận "${d.name}"?`)) return; try { await api('/admin/departments/' + d.id, { method: 'DELETE' }); DEPARTMENTS = (await api('/admin/departments')).rows; renderDept(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'ghost'));
+      list.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid #f1efec' },
+        el('div', { style: 'flex:1;padding-left:' + (d.depth * 18) + 'px' },
+          d.depth ? el('span', { style: 'color:var(--muted)' }, '↳ ') : '', el('b', {}, d.name)),
+        acts));
+    }
+    deptPanel.append(list);
   };
-  addBtn.onclick = async () => {
-    const n = nameI.value.trim(); if (!n) return;
-    try { await api('/admin/departments', { method: 'POST', body: { name: n } }); nameI.value = ''; load(); toast('Đã thêm', 'ok'); }
+
+  // ---------- CHỨC DANH ----------
+  const renderPos = () => {
+    posPanel.innerHTML = '';
+    posPanel.append(el('h3', { style: 'margin:0 0 4px' }, '💼 Chức danh'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:12px' }, 'Khai báo sẵn chức danh để CHỌN khi thêm nhân viên (thay vì gõ tay). Không xoá được chức danh còn nhân viên.'));
+    if (!ro) {
+      const nameI = input('org-pname', { placeholder: 'VD: Trưởng phòng, Nhân viên Sale…' });
+      const addBtn = el('button', { class: 'btn' }, 'Thêm');
+      addBtn.onclick = async () => {
+        const name = nameI.value.trim(); if (!name) return toast('Nhập tên chức danh', 'err');
+        try { await api('/admin/positions', { method: 'POST', body: { name } }); nameI.value = ''; POSITIONS = (await api('/admin/positions')).rows; renderPos(); toast('Đã thêm chức danh', 'ok'); }
+        catch (e) { toast(e.message, 'err'); }
+      };
+      posPanel.append(el('div', { style: 'display:flex;gap:8px;margin-bottom:6px' }, nameI, addBtn));
+    }
+    if (!POSITIONS.length) { posPanel.append(el('div', { class: 'map-hint' }, 'Chưa có chức danh nào.')); return; }
+    const list = el('div', { style: 'margin-top:8px' });
+    for (const p of POSITIONS) {
+      const del = ro ? '' : btnSm('Xoá', async () => { if (!confirm(`Xoá chức danh "${p.name}"?`)) return; try { await api('/admin/positions/' + p.id, { method: 'DELETE' }); POSITIONS = (await api('/admin/positions')).rows; renderPos(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'ghost');
+      list.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid #f1efec' },
+        el('b', { style: 'flex:1' }, p.name), del));
+    }
+    posPanel.append(list);
+  };
+
+  DEPARTMENTS = (await api('/admin/departments')).rows;
+  try { POSITIONS = (await api('/admin/positions')).rows; } catch { POSITIONS = []; }
+  renderDept(); renderPos();
+}
+
+// Sửa 1 bộ phận: đổi tên + chọn bộ phận cha (không cho chọn chính nó)
+function deptEditModal(d, after) {
+  const nameI = input('de-name', { value: d.name });
+  const parentSel = el('select', {}, el('option', { value: '' }, '— Không có (cấp trên cùng) —'),
+    ...deptOrdered().filter(x => x.id !== d.id).map(x => el('option', { value: x.id, ...((d.parent_id || '') == x.id ? { selected: '' } : {}) },
+      ' '.repeat(x.depth * 3) + (x.depth ? '↳ ' : '') + x.name)));
+  const save = el('button', { class: 'btn' }, 'Lưu');
+  save.onclick = async () => {
+    const name = nameI.value.trim(); if (!name) return toast('Nhập tên bộ phận', 'err');
+    try { await api('/admin/departments/' + d.id, { method: 'PUT', body: { name, parent_id: parentSel.value || null } }); DEPARTMENTS = (await api('/admin/departments')).rows; closeModal(); after && after(); toast('Đã lưu', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
-  openModal('Quản lý bộ phận', [
-    el('div', { class: 'map-hint' }, 'Tạo sẵn bộ phận để chọn khi thêm nhân viên. Không xoá được bộ phận đang có nhân viên.'),
-    el('div', { style: 'display:flex;gap:8px' }, nameI, addBtn),
-    listBox,
-  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
-  load();
+  openModal('Sửa bộ phận', [
+    el('div', {}, el('label', {}, 'Tên bộ phận'), nameI),
+    el('div', { style: 'margin-top:10px' }, el('label', {}, 'Thuộc bộ phận cha'), parentSel),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), save]);
 }
 
 /* ---------- 3) CA LÀM ---------- */
