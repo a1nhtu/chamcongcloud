@@ -101,12 +101,35 @@ async function checkUpdateBanner() {
   if (!r || !r.hasUpdate) return;
   const old = document.getElementById('upd-banner'); if (old) old.remove();
   const goBtn = el('button', { class: 'btn sm' }, '⬆ Cập nhật ngay');
-  goBtn.onclick = () => { banner.remove(); go('settings'); toast('Kéo xuống mục "Cập nhật phần mềm" và bấm Cập nhật ngay', 'ok'); };
   const laterBtn = el('button', { class: 'btn sm ghost' }, 'Để sau');
   laterBtn.onclick = () => banner.remove();
+  goBtn.onclick = async () => {
+    if (!confirm(`Cập nhật lên bản ${r.latest} ngay bây giờ?\nApp sẽ tự khởi động lại (khoảng 1 phút). Dữ liệu giữ nguyên và tự sao lưu trước.`)) return;
+    goBtn.disabled = laterBtn.disabled = true; goBtn.textContent = 'Đang cập nhật…';
+    try {
+      const res = await api('/admin/update/apply', { method: 'POST' });
+      if (res && res.ok === false) { // đang là bản mới nhất rồi
+        txt.textContent = '✓ Máy đã ở bản mới nhất. Hãy tải lại trang (F5).'; goBtn.style.display = 'none'; laterBtn.disabled = false; laterBtn.textContent = 'Đóng'; return;
+      }
+      txt.textContent = `⏳ Đang tải & cài bản ${res.latest || r.latest}. App sẽ tự khởi động lại — vui lòng đợi, KHÔNG tắt máy…`;
+      laterBtn.style.display = 'none';
+      // Đợi app khởi động lại xong (đổi version) rồi tự tải lại trang
+      const started = Date.now();
+      const timer = setInterval(async () => {
+        try {
+          const v = await fetch('/api/version', { cache: 'no-store' }).then((x) => x.json());
+          if (v && v.version && v.version !== r.current) { clearInterval(timer); location.reload(); return; }
+        } catch { /* app đang restart, bỏ qua */ }
+        if (Date.now() - started > 120000) { clearInterval(timer); txt.textContent = '✓ Đã gửi lệnh cập nhật. Nếu chưa đổi, hãy tải lại trang (F5) sau ít phút.'; }
+      }, 4000);
+    } catch (e) {
+      toast(e.message, 'err'); goBtn.disabled = laterBtn.disabled = false; goBtn.textContent = '⬆ Cập nhật ngay';
+    }
+  };
+  const txt = el('span', { style: 'flex:1;min-width:220px' }, `Đã có bản mới ${r.latest} (đang dùng ${r.current}). Nên cập nhật để có tính năng mới & tránh lỗi.`);
   const banner = el('div', { id: 'upd-banner', style: 'grid-column:1 / -1;background:linear-gradient(90deg,#fef3c7,#fde68a);color:#92400e;padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid #f0d98a;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.06)' },
     el('span', { style: 'font-size:20px;line-height:1' }, '🔔'),
-    el('span', { style: 'flex:1;min-width:220px' }, `Đã có bản mới ${r.latest} (đang dùng ${r.current}). Nên cập nhật để có tính năng mới & tránh lỗi.`),
+    txt,
     el('div', { style: 'display:flex;gap:8px;flex-shrink:0' }, goBtn, laterBtn));
   const appView = $('#app-view'); appView.insertBefore(banner, appView.firstChild);
 }
