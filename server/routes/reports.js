@@ -470,6 +470,74 @@ async function exportWorkhoursXlsx(res, month, dept, company, address) {
   res.end();
 }
 
+/* ===== Xuất Excel "Chi tiết giờ vào/ra" — ma trận 2 cột/ngày (Vào|Ra), 1 dòng/NV (mẫu ChiTietThoiGianLamViec) ===== */
+async function exportDaytimeXlsx(res, month, dept, company, address) {
+  const ctx = loadMonth(month, dept);
+  const days = monthDays(month);
+  const FIXED = 5;
+  const totalCols = FIXED + days.length * 2 + 1;   // + cột Tổng công
+  const congCol = totalCols;
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
+  const ws = wb.addWorksheet('GioVaoRa');
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  const teal = 'FF0F7D7D', pink = 'FFFFE0EC';
+
+  ws.mergeCells(1, 1, 1, totalCols); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
+  ws.mergeCells(2, 1, 2, totalCols); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
+  ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT THỜI GIAN LÀM VIỆC THÁNG ${month.slice(5)}/${month.slice(0, 4)}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
+  ws.mergeCells(4, 1, 4, totalCols); Object.assign(ws.getCell(4, 1), { value: 'Mỗi ngày gồm 2 cột: Giờ Vào | Giờ Ra', font: { italic: true, size: 10, color: { argb: 'FF666666' } } });
+
+  const H = 5;
+  const fixedLabels = ['STT', 'Phòng ban', 'Mã nhân viên', 'Tên nhân viên', 'Ngày vào làm'];
+  fixedLabels.forEach((lab, i) => { ws.mergeCells(H, i + 1, H + 1, i + 1); ws.getCell(H, i + 1).value = lab; });
+  days.forEach((d, di) => {
+    const c1 = FIXED + di * 2 + 1;
+    ws.mergeCells(H, c1, H, c1 + 1); ws.getCell(H, c1).value = +d.slice(8);
+    ws.getCell(H + 1, c1).value = 'Vào'; ws.getCell(H + 1, c1 + 1).value = 'Ra';
+  });
+  ws.mergeCells(H, congCol, H + 1, congCol); ws.getCell(H, congCol).value = 'Tổng công';
+  for (let r = H; r <= H + 1; r++) for (let c = 1; c <= totalCols; c++) {
+    const cell = ws.getCell(r, c);
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: teal } };
+    cell.border = border;
+  }
+
+  let r = H + 2, stt = 0;
+  for (const e of ctx.employees) {
+    stt++;
+    [stt, e.department || '', e.code, e.full_name, ''].forEach((v, i) => {
+      const cell = ws.getCell(r, i + 1); cell.value = v; cell.border = border;
+      cell.alignment = { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' };
+    });
+    let cong = 0;
+    for (let di = 0; di < days.length; di++) {
+      const d = days[di], c1 = FIXED + di * 2 + 1;
+      const c = ctx.cell.get(e.id + '|' + d);
+      const weekend = ctx.isWeekend(d);
+      ws.getCell(r, c1).value = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
+      ws.getCell(r, c1 + 1).value = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+      if (c) cong += c.work_unit || 0;
+      for (const cc of [c1, c1 + 1]) { const x = ws.getCell(r, cc); x.alignment = { horizontal: 'center' }; x.border = border; if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } }; }
+    }
+    const cc = ws.getCell(r, congCol); cc.value = round2(cong); cc.alignment = { horizontal: 'center' }; cc.border = border;
+    r++;
+  }
+  if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
+
+  ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
+  for (let i = 0; i < days.length; i++) { ws.getColumn(FIXED + i * 2 + 1).width = 7; ws.getColumn(FIXED + i * 2 + 2).width = 7; }
+  ws.getColumn(congCol).width = 10;
+  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="chitiet_giovaora_${month}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+
 /* ================= Routes ================= */
 r.get('/dashboard', (req, res) => {
   const today = vnDateStr();
@@ -517,8 +585,9 @@ r.get('/export.xlsx', async (req, res) => {
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');
 
-  // "Giờ công & tăng ca": mẫu chi tiết 3 dòng/NV (giờ chấm vào-ra / giờ công / giờ tăng ca), mỗi ngày 2 cột
+  // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
   if (type === 'workhours') return exportWorkhoursXlsx(res, month, dept, company, address);
+  if (type === 'daytime') return exportDaytimeXlsx(res, month, dept, company, address);
 
   const { title, columns, rows } = buildReport(type, month, dept);
 
