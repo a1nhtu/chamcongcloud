@@ -177,6 +177,9 @@ export function deviceUserList(serial) {
     FROM device_users_serial s LEFT JOIN device_users u ON u.pin = s.pin
     WHERE s.serial = ? ORDER BY CAST(s.pin AS INTEGER), s.pin`).all(serial);
 }
+// Mở cửa từ xa (máy kiểm soát cửa) — lệnh ADMS "AC_UNLOCK" (mục 12.7.2 Attendance PUSH Protocol),
+// máy kích relay mở khóa cửa; nextCommand bọc thành C:<id>:AC_UNLOCK. Máy phản hồi Return=0 nếu OK.
+export function openDoor(serial) { queueCmd(serial, 'AC_UNLOCK'); return 1; }
 // Xóa toàn bộ log chấm công trên máy
 export function clearDeviceLog(serial) { queueCmd(serial, 'CLEAR LOG'); return 1; }
 // Xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log) + dọn mirror local để đếm đúng

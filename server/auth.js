@@ -94,6 +94,7 @@ export const PERMISSIONS = [
   ['leaves',          'Duyệt đơn từ'],
   ['attendance_edit', 'Sửa / thêm giờ chấm'],
   ['devices',         'Máy chấm công'],
+  ['door_open',       'Mở cửa từ xa (kiểm soát cửa)'],
   ['salary',          'Bảng lương'],
   ['holidays',        'Ngày lễ'],
   ['recompute',       'Tính lại công'],

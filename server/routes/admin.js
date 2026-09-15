@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -960,11 +960,20 @@ r.put('/devices/:id', need('devices'), (req, res) => {
   const b = req.body || {};
   const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
-  db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=? WHERE id=?')
+  db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=?, access_control=? WHERE id=?')
     .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active,
          b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || ''),
-         b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0), d.id);
+         b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0),
+         b.access_control != null ? (b.access_control ? 1 : 0) : (d.access_control || 0), d.id);
   res.json({ ok: true });
+});
+// Mở cửa từ xa (chỉ máy có kiểm soát cửa) — gửi lệnh ADMS AC_UNLOCK xuống hàng đợi
+r.post('/devices/:id/open-door', need('door_open'), (req, res) => {
+  const d = db.prepare('SELECT serial, access_control FROM push_devices WHERE id=?').get(req.params.id);
+  if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  if (!d.access_control) return res.status(400).json({ error: 'Máy này chưa bật chức năng kiểm soát cửa.' });
+  openDoor(d.serial);
+  res.json({ ok: true, msg: 'Đã gửi lệnh mở cửa. Máy sẽ mở khi có kết nối.' });
 });
 r.delete('/devices/:id', need('devices'), (req, res) => {
   const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);

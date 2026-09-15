@@ -407,6 +407,8 @@ function migrateColumns() {
   add('push_devices', 'oper_stamp', "TEXT DEFAULT '0'");
   // Nhóm đồng bộ máy↔máy: các máy cùng nhãn nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau (rỗng=không đồng bộ)
   add('push_devices', 'sync_group', "TEXT DEFAULT ''");
+  // Máy có chức năng kiểm soát cửa (access control) → hiện nút "Mở cửa từ xa" (lệnh ADMS AC_UNLOCK)
+  add('push_devices', 'access_control', 'INTEGER NOT NULL DEFAULT 0');
   // Index khớp NV theo Số ID máy
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_emp_device_pin ON employees(device_pin)'); } catch {}
 

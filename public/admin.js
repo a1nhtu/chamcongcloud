@@ -1684,6 +1684,14 @@ async function pageDevices() {
     const mnumBtn = btnSm('Số máy', async () => { const n = prompt('Số máy (dùng cho quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { machine_number: parseInt(n, 10) || 0 } }); toast('Đã đặt số máy', 'ok'); pageDevices(); } }, 'ghost');
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m));
     const clearBtn = btnSm('🗑 Xóa dữ liệu', () => deviceClearModal(m), 'ghost');
+    // Bật/tắt "máy có kiểm soát cửa" (quyền devices)
+    const acBtn = hasPerm('devices')
+      ? btnSm(m.access_control ? '🚪 KS cửa: BẬT' : '🚪 KS cửa: tắt', async () => { await api('/admin/devices/' + m.id, { method: 'PUT', body: { access_control: !m.access_control } }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); }, 'ghost')
+      : null;
+    // Nút mở cửa: chỉ hiện khi máy bật kiểm soát cửa VÀ user có quyền door_open
+    const doorBtn = (m.access_control && hasPerm('door_open'))
+      ? btnSm('🔓 Mở cửa', async () => { if (!confirm(`Mở cửa tại máy "${m.name || m.serial}" ngay?`)) return; try { const r = await api('/admin/devices/' + m.id + '/open-door', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh mở cửa', 'ok'); } catch (e) { toast(e.message, 'err'); } })
+      : null;
     const del = btnSm('Xoá', async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } }, 'ghost');
     const cNV = el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0));
     const cFP = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.fp_count ?? 0));
@@ -1692,13 +1700,13 @@ async function pageDevices() {
     countCells[m.serial] = { cNV, cFP, cFace, cCard };
     tb.append(el('tr', {},
       el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, m.serial)),
-      el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : ''),
+      el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : '', m.access_control ? el('div', { style: 'font-size:11px;color:#b45309' }, '🚪 Kiểm soát cửa') : ''),
       el('td', {}, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
       cNV, cFP, cFace, cCard,
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
-      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, approve, rename, groupBtn, mnumBtn, logBtn, clearBtn, del)),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, approve, rename, groupBtn, mnumBtn, acBtn, doorBtn, logBtn, clearBtn, del)),
     ));
   }
   tbl.append(tb);
