@@ -1,0 +1,35 @@
+name: Deploy huongdan → Cloudflare Pages
+
+# Tự deploy trang hướng dẫn (public/huong-dan.html) lên Cloudflare Pages
+# mỗi khi file này đổi và được push lên main. Trang luôn online (Pages),
+# không phụ thuộc máy tính cá nhân.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'public/huong-dan.html'
+      - '.github/workflows/deploy-huongdan.yml'
+  workflow_dispatch: {}   # cho phép bấm chạy tay trong tab Actions
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Chuẩn bị site (huong-dan.html → index.html)
+        run: |
+          mkdir -p _site
+          cp public/huong-dan.html _site/index.html
+
+      - name: Deploy lên Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy _site --project-name=huongdan-digiplus --branch=main --commit-dirty=true
