@@ -1735,13 +1735,15 @@ const REPORT_GROUPS = [
   ['Chi tiết chấm công', [
     ['detail', '📆', 'Chi tiết theo ngày', 'Chi tiết chấm công từng ngày của từng nhân viên'],
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
+    ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: công, giờ, trễ, sớm, tăng ca'],
-    ['symbol', '🔤', 'Bảng ký hiệu công', 'X=làm · T=trễ/sớm · P=phép · L=lễ · V=vắng · O=thiếu ra'],
+    ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · L=lễ · V=vắng · O=thiếu ra'],
     ['late', '⏰', 'Đi muộn / về sớm', 'Danh sách đi muộn, về sớm và số phút'],
     ['ot', '➕', 'Tăng ca', 'Chi tiết giờ tăng ca theo ngày'],
   ]],
   ['Tổng hợp', [
     ['summary', '👥', 'Tổng hợp nhân viên', 'Tổng công, giờ, tăng ca, trễ, sớm mỗi NV'],
+    ['absence', '🚫', 'Vắng mặt / nghỉ phép', 'Số ngày làm, vắng, nghỉ phép, nghỉ lễ, thiếu ra'],
     ['leave', '🌴', 'Nghỉ phép / đơn từ', 'Tổng nghỉ phép và chi tiết theo loại'],
     ['payroll', '💰', 'Bảng lương', 'Bảng lương tháng theo kỳ lương đã cấu hình'],
   ]],

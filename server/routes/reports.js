@@ -199,6 +199,44 @@ function buildReport(type, month, dept) {
       return { title: `Chi tiết giờ vào/ra tháng ${month}`, columns, rows };
     }
 
+    /* --- Giờ công / giờ tăng ca theo ngày (ma trận) — mẫu GioChamGioCongGioTangCa --- */
+    case 'workhours': {
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.isWeekend(d) }));
+      const columns = [
+        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
+        { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
+        { key: 'totalh', label: 'Tổng giờ', w: 10 }, { key: 'oth', label: 'Tăng ca (giờ)', w: 12 }, { key: 'cong', label: 'Tổng công', w: 10 },
+      ];
+      const rows = ctx.employees.map((e) => {
+        const row = { code: e.code, name: e.full_name, dept: e.department || '' };
+        let totalMin = 0, otMin = 0, cong = 0;
+        for (const d of days) {
+          const c = ctx.cell.get(e.id + '|' + d);
+          if (c && (c.work_minutes || 0) > 0) { row['d' + d] = round2((c.work_minutes || 0) / 60); totalMin += c.work_minutes || 0; }
+          else row['d' + d] = '';
+          if (c) { otMin += c.ot_min || 0; cong += c.work_unit || 0; }
+        }
+        row.totalh = round2(totalMin / 60); row.oth = round2(otMin / 60); row.cong = round2(cong);
+        return row;
+      });
+      return { title: `Giờ công & tăng ca tháng ${month}`, columns, rows };
+    }
+
+    /* --- Vắng mặt / nghỉ phép — mẫu VangMatNghiPhep --- */
+    case 'absence': {
+      const columns = [
+        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
+        { key: 'work', label: 'Ngày làm', w: 10 }, { key: 'absent', label: 'Vắng', w: 8 }, { key: 'leave', label: 'Nghỉ phép', w: 10 },
+        { key: 'holiday', label: 'Nghỉ lễ', w: 9 }, { key: 'missing', label: 'Thiếu ra', w: 9 },
+      ];
+      const rows = ctx.employees.map((e) => {
+        const cnt = { X: 0, T: 0, P: 0, L: 0, V: 0, O: 0 };
+        for (const d of days) { const s = symbolOf(ctx, e.id, d); if (cnt[s] != null) cnt[s]++; }
+        return { code: e.code, name: e.full_name, dept: e.department || '', work: cnt.X + cnt.T, absent: cnt.V, leave: cnt.P, holiday: cnt.L, missing: cnt.O };
+      });
+      return { title: `Vắng mặt / nghỉ phép tháng ${month}`, columns, rows };
+    }
+
     /* --- Tổng hợp theo nhân viên --- */
     case 'summary': {
       const columns = [
