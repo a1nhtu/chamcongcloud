@@ -9,6 +9,29 @@ let MODE = 'shift';   // 'shift' | 'hourly' (chỉ tính giờ)
 let SELF_SHIFT = false;   // cho nhân viên tự chọn ca
 let SELF_APPROVE = true;  // chọn ca cần admin duyệt
 
+/* ---------- Cài app vào máy (PWA) — Android: 1 chạm; iPhone: chỉ dẫn (Apple không cho tự cài) ---------- */
+let deferredPrompt = null, installDismissed = false;
+window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); deferredPrompt = e; if (currentTab === 'cham' && ME) renderTab('cham'); });
+window.addEventListener('appinstalled', () => { deferredPrompt = null; if (currentTab === 'cham' && ME) renderTab('cham'); });
+const isStandalone = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
+function installBanner() {
+  if (isStandalone() || installDismissed) return null;
+  const closeBtn = el('button', { style: 'background:none;border:none;color:inherit;font-size:18px;cursor:pointer;padding:0 2px;opacity:.7' }, '×');
+  closeBtn.onclick = () => { installDismissed = true; renderTab(currentTab); };
+  if (deferredPrompt) {   // Android/Chrome: nút cài 1 chạm
+    const btn = el('button', { style: 'background:var(--brand,#E8541E);color:#fff;border:none;border-radius:8px;padding:7px 14px;font-weight:700;cursor:pointer;flex-shrink:0' }, '📲 Cài app');
+    btn.onclick = async () => { try { deferredPrompt.prompt(); await deferredPrompt.userChoice; } catch {} deferredPrompt = null; installDismissed = true; renderTab(currentTab); };
+    return el('div', { class: 'status-banner', style: 'background:#fff3ec;color:#c0410f;display:flex;align-items:center;gap:10px;flex-wrap:wrap' },
+      el('span', { style: 'flex:1;min-width:150px' }, 'Cài Digiplus vào máy để mở nhanh & nhận thông báo chấm công.'), btn, closeBtn);
+  }
+  if (isIOS()) {          // iPhone: Apple không cho tự cài → chỉ dẫn Safari
+    return el('div', { class: 'status-banner', style: 'background:#fff3ec;color:#c0410f;display:flex;align-items:center;gap:8px' },
+      el('span', { style: 'flex:1', html: 'Cài app: bấm <b>Chia sẻ ⬆️</b> ở thanh dưới Safari → <b>“Thêm vào MH chính”</b>.' }), closeBtn);
+  }
+  return null;            // desktop / trình duyệt chưa đủ điều kiện → không làm phiền
+}
+
 /* ---------------- Khởi động ---------------- */
 init();
 // Logo + tên công ty của khách (công khai, hiện được cả trước khi đăng nhập/kích hoạt)
@@ -91,6 +114,8 @@ async function renderCham() {
   const hasOut = a && a.check_out_at;
 
   c.innerHTML = '';
+  // Nhắc cài app vào máy (Android 1 chạm / iPhone chỉ dẫn) — bỏ qua được
+  const ib = installBanner(); if (ib) c.append(ib);
   // 2 ô Vào/Ra
   const grid = el('div', { class: 'io-grid' },
     el('div', { class: 'io-cell' }, el('div', { class: 'lbl' }, 'VÀO CA'), el('div', { class: 'val' }, hasIn ? isoToHM(a.check_in_at) : '--:--')),
