@@ -2200,6 +2200,7 @@ async function pageSettings() {
 
   // ----- Sao lưu & phục hồi dữ liệu -----
   const bkBox = el('div', { id: 'bk-box' }, loading());
+  let bkShow = 3;   // số bản sao lưu hiển thị (mặc định 3), 0 = tất cả
   const loadBackups = async () => {
     let d;
     try { d = await api('/admin/backup'); } catch (e) { bkBox.innerHTML = ''; bkBox.append(el('div', { class: 'map-hint' }, e.message)); return; }
@@ -2236,16 +2237,26 @@ async function pageSettings() {
     bkBox.append(el('div', { style: 'margin-top:14px;display:flex;gap:8px;flex-wrap:wrap' }, nowBtn, fullBtn));
     bkBox.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, '"Sao lưu ngày" (.db) = chỉ dữ liệu. "Sao lưu TOÀN BỘ" (.zip) = dữ liệu + ảnh chấm công + logo — dùng khi chuyển máy / lên VPS.'));
 
-    // Danh sách bản sao lưu
-    bkBox.append(el('div', { class: 'sec-title', style: 'font-weight:700;margin:16px 0 6px' }, `Các bản sao lưu (${d.list.length})`));
+    // Danh sách bản sao lưu — mặc định hiện 3 bản gần nhất
+    const showSel = el('select', { style: 'width:auto;padding:2px 6px;font-size:13px' },
+      ...[['3', '3 bản'], ['5', '5 bản'], ['10', '10 bản'], ['0', 'Tất cả']].map(([v, t]) => {
+        const o = el('option', { value: v }, t); if (+v === bkShow) o.selected = true; return o;
+      }));
+    showSel.onchange = () => { bkShow = +showSel.value; loadBackups(); };
+    bkBox.append(el('div', { style: 'display:flex;align-items:center;gap:10px;margin:16px 0 6px;flex-wrap:wrap' },
+      el('div', { class: 'sec-title', style: 'font-weight:700;flex:1' }, `Các bản sao lưu (${d.list.length})`),
+      el('span', { style: 'color:var(--muted);font-size:13px' }, 'Hiện:'), showSel));
     if (!d.list.length) bkBox.append(el('div', { class: 'map-hint' }, 'Chưa có bản sao lưu nào.'));
-    for (const b of d.list) {
+    const shown = bkShow > 0 ? d.list.slice(0, bkShow) : d.list;
+    for (const b of shown) {
       const dl = btnSm('Tải', () => downloadBackup(b.name));
       const del = btnSm('Xoá', async () => { if (confirm('Xoá bản sao lưu này?')) { await api('/admin/backup?name=' + encodeURIComponent(b.name), { method: 'DELETE' }); loadBackups(); } }, 'ghost');
       bkBox.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid #f1efec' },
         el('span', { style: 'flex:1;font-family:monospace;font-size:13px' }, (b.full ? '📦 ' : '🗃 ') + b.name),
         el('span', { style: 'color:var(--muted);font-size:12px' }, (b.full ? 'toàn bộ · ' : '') + fmtSize(b.size)), dl, del));
     }
+    if (bkShow > 0 && d.list.length > bkShow)
+      bkBox.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, `Đang hiện ${bkShow}/${d.list.length} bản. Chọn "Tất cả" ở trên để xem hết.`));
 
     // Phục hồi (nhận cả .db lẫn .zip toàn bộ)
     const fileI = el('input', { type: 'file', accept: '.db,.zip', style: 'font-size:13px' });
