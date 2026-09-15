@@ -1659,6 +1659,7 @@ async function pageDevices() {
     const groupBtn = btnSm('Nhóm ĐB', async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { sync_group: g } }); toast('Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } }, 'ghost');
     const mnumBtn = btnSm('Số máy', async () => { const n = prompt('Số máy (dùng cho quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await api('/admin/devices/' + m.id, { method: 'PUT', body: { machine_number: parseInt(n, 10) || 0 } }); toast('Đã đặt số máy', 'ok'); pageDevices(); } }, 'ghost');
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m));
+    const clearBtn = btnSm('🗑 Xóa dữ liệu', () => deviceClearModal(m), 'ghost');
     const del = btnSm('Xoá', async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } }, 'ghost');
     const cNV = el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0));
     const cFP = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.fp_count ?? 0));
@@ -1673,7 +1674,7 @@ async function pageDevices() {
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
-      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, approve, rename, groupBtn, mnumBtn, logBtn, del)),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, approve, rename, groupBtn, mnumBtn, logBtn, clearBtn, del)),
     ));
   }
   tbl.append(tb);
@@ -1746,6 +1747,57 @@ function usbImportModal() {
       el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, 'File danh sách NV: mỗi dòng "Số ID [tab/phẩy] Tên nhân viên".'),
       usrFile),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+}
+
+// Xóa dữ liệu trên máy chấm công (gửi lệnh ADMS) + xóa chấm công trong phần mềm theo ngày
+async function deviceClearModal(m) {
+  const post = async (path, body, okMsg) => { try { const r = await api('/admin/devices/' + m.id + path, { method: 'POST', body: body || {} }); toast(r.msg || okMsg || 'Đã gửi lệnh', 'ok'); return r; } catch (e) { toast(e.message, 'err'); throw e; } };
+  const userBox = el('div', { style: 'max-height:160px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:6px 10px;margin-top:6px' }, loading());
+  const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
+  const loadUsers = async () => {
+    let rows = []; try { rows = (await api('/admin/devices/' + m.id + '/users')).rows; } catch {}
+    userBox.innerHTML = '';
+    if (!rows.length) { userBox.append(el('div', { class: 'map-hint' }, 'Chưa có dữ liệu nhân viên trên máy này (theo đồng bộ).')); return; }
+    for (const u of rows) userBox.append(el('label', { style: 'display:flex;align-items:center;gap:8px;padding:3px 0;font-weight:500;color:var(--ink)' },
+      el('input', { type: 'checkbox', class: 'dc-pick', value: u.pin, style: 'width:auto' }), `${u.pin}${u.name ? ' · ' + u.name : ''}${u.privilege > 0 ? ' · [Quản trị]' : ''}`));
+  };
+  selAll.onchange = () => userBox.querySelectorAll('.dc-pick').forEach((c) => { c.checked = selAll.checked; });
+  const delUsersBtn = el('button', { class: 'btn' }, 'Xóa NV đã chọn khỏi máy');
+  delUsersBtn.onclick = async () => {
+    const pins = [...userBox.querySelectorAll('.dc-pick:checked')].map((x) => x.value);
+    if (!pins.length) return toast('Chưa chọn nhân viên', 'err');
+    if (!confirm(`Xóa ${pins.length} nhân viên khỏi máy "${m.name || m.serial}"? (không xóa dữ liệu trong phần mềm)`)) return;
+    await post('/delete-users', { pins }); loadUsers(); pageDevices();
+  };
+  const fromI = el('input', { type: 'date' }), toI = el('input', { type: 'date' });
+  const rangeBtn = el('button', { class: 'btn' }, 'Xóa chấm công (phần mềm)');
+  rangeBtn.onclick = async () => {
+    if (!fromI.value || !toI.value) return toast('Chọn khoảng ngày', 'err');
+    if (!confirm(`XÓA dữ liệu chấm công TRONG PHẦN MỀM từ ${fromI.value} đến ${toI.value}? Không thể hoàn tác.`)) return;
+    try { const r = await api('/admin/attendance/clear-range', { method: 'POST', body: { from: fromI.value, to: toI.value } }); toast(`Đã xóa ${r.attendance} bản ghi công + ${r.punches} lượt quẹt`, 'ok'); } catch (e) { toast(e.message, 'err'); }
+  };
+  const clearLogBtn = el('button', { class: 'btn ghost' }, '🧹 Xóa log chấm công trên máy');
+  clearLogBtn.onclick = () => { if (confirm(`Xóa TOÀN BỘ log chấm công trên máy "${m.name || m.serial}"?\n(Dữ liệu đã đồng bộ về phần mềm vẫn còn.)`)) post('/clear-log'); };
+  const clearAdminBtn = el('button', { class: 'btn ghost' }, '👤 Xóa quyền quản trị');
+  clearAdminBtn.onclick = () => { if (confirm('Hạ quyền tất cả quản trị trên máy về nhân viên thường (Pri=0)?')) post('/clear-admins'); };
+  const clearAllBtn = el('button', { class: 'btn', style: 'background:#c0392b' }, '⚠️ Xóa TOÀN BỘ dữ liệu máy');
+  clearAllBtn.onclick = () => { if (confirm(`XÓA SẠCH máy "${m.name || m.serial}": toàn bộ nhân viên + vân tay + log trên máy. Không hoàn tác được trên máy.`) && confirm('Xác nhận LẦN 2: xóa toàn bộ dữ liệu trên máy?')) { post('/clear-all'); pageDevices(); } };
+
+  openModal('Xóa dữ liệu máy · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint' }, 'Lệnh gửi xuống MÁY sẽ chạy khi máy có kết nối mạng. Xóa log máy KHÔNG mất dữ liệu đã đồng bộ về phần mềm.'),
+    el('div', { style: 'margin-top:12px;padding-top:8px;border-top:1px solid #f0efec' },
+      el('div', { style: 'font-weight:700;margin-bottom:6px' }, '1) Xóa nhân viên trên máy'),
+      el('div', { style: 'display:flex;align-items:center;gap:10px' }, el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, selAll, 'Chọn tất cả'), delUsersBtn),
+      userBox),
+    el('div', { style: 'margin-top:14px;padding-top:8px;border-top:1px solid #f0efec' },
+      el('div', { style: 'font-weight:700;margin-bottom:6px' }, '2) Xóa nhanh trên máy'),
+      el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, clearLogBtn, clearAdminBtn, clearAllBtn)),
+    el('div', { style: 'margin-top:14px;padding-top:8px;border-top:1px solid #f0efec' },
+      el('div', { style: 'font-weight:700;margin-bottom:6px' }, '3) Xóa chấm công trong phần mềm (theo khoảng ngày)'),
+      el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, 'Xóa bản ghi công + lượt quẹt trong phần mềm (không đụng máy). Dùng khi cần dọn dữ liệu sai.'),
+      el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('span', {}, 'Từ'), fromI, el('span', {}, 'đến'), toI, rangeBtn)),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+  loadUsers();
 }
 function devicePunchesModal(m) {
   const box = el('div', {}, loading());

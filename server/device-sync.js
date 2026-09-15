@@ -169,6 +169,50 @@ function buildUserCommand(pin) {
   const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
   return `DATA UPDATE USERINFO PIN=${pin}\tName=${u.name || pin}\tPasswd=${u.passwd || ''}${card}\tPri=${u.privilege || 0}\tGrp=1\tTZ=1\tVerify=0`;
 }
+
+/* ============================ XÓA DỮ LIỆU TRÊN MÁY (ADMS) ============================ */
+// Danh sách user trên 1 máy (để chọn xóa)
+export function deviceUserList(serial) {
+  return db.prepare(`SELECT s.pin, COALESCE(NULLIF(s.name,''), u.name, '') AS name, u.privilege
+    FROM device_users_serial s LEFT JOIN device_users u ON u.pin = s.pin
+    WHERE s.serial = ? ORDER BY CAST(s.pin AS INTEGER), s.pin`).all(serial);
+}
+// Xóa toàn bộ log chấm công trên máy
+export function clearDeviceLog(serial) { queueCmd(serial, 'CLEAR LOG'); return 1; }
+// Xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log) + dọn mirror local để đếm đúng
+export function clearDeviceAll(serial) {
+  queueCmd(serial, 'CLEAR DATA');
+  db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(serial);
+  db.prepare('DELETE FROM device_users_serial WHERE serial=?').run(serial);
+  return 1;
+}
+// Xóa nhân viên trên máy theo Số ID (PIN)
+export function deleteDeviceUsers(serial, pins) {
+  let n = 0;
+  for (const pin of (pins || [])) {
+    const p = String(pin).trim(); if (!p) continue;
+    queueCmd(serial, `DATA DELETE USERINFO\tPIN=${p}`);
+    db.prepare('DELETE FROM device_bio_templates WHERE serial=? AND pin=?').run(serial, p);
+    db.prepare('DELETE FROM device_users_serial WHERE serial=? AND pin=?').run(serial, p);
+    n++;
+  }
+  return n;
+}
+// Xóa quyền quản trị: hạ tất cả user đang là admin (Pri>0) trên máy về user thường (Pri=0)
+export function clearDeviceAdmins(serial) {
+  const onDevice = db.prepare('SELECT pin FROM device_users_serial WHERE serial=?').all(serial).map((r) => r.pin);
+  const set = new Set(onDevice);
+  const admins = db.prepare('SELECT pin, name, passwd, card FROM device_users WHERE privilege>0').all()
+    .filter((u) => !set.size || set.has(u.pin));
+  let n = 0;
+  for (const u of admins) {
+    const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
+    queueCmd(serial, `DATA UPDATE USERINFO PIN=${u.pin}\tName=${u.name || u.pin}\tPasswd=${u.passwd || ''}${card}\tPri=0\tGrp=1\tTZ=1\tVerify=0`);
+    db.prepare('UPDATE device_users SET privilege=0 WHERE pin=?').run(u.pin);
+    n++;
+  }
+  return n;
+}
 function buildBioCommand(t) {
   if (t.bio_type === 1 && (t.major_ver || 10) < 10) // vân tay ZKFinger 9.0
     return `DATA UPDATE FINGERTMP PIN=${t.pin}\tFID=${t.idx}\tSize=${(t.tmp || '').length}\tValid=${t.valid}\tTMP=${t.tmp}`;

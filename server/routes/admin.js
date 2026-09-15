@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -1012,6 +1012,50 @@ r.post('/devices/import-usb', need('devices'), (req, res) => {
     db.exec('COMMIT');
     res.json({ ok: true, kind: b.kind || 'attlog', ...r2 });
   } catch (e) { db.exec('ROLLBACK'); res.status(500).json({ error: e.message }); }
+});
+
+/* -------- Xóa dữ liệu / nhân viên TRÊN MÁY (gửi lệnh ADMS xuống máy) -------- */
+const serialOfDevice = (id) => db.prepare('SELECT serial FROM push_devices WHERE id=?').get(id)?.serial;
+
+r.get('/devices/:id/users', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  res.json({ rows: deviceUserList(serial) });
+});
+r.post('/devices/:id/clear-log', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  clearDeviceLog(serial);
+  res.json({ ok: true, msg: 'Đã gửi lệnh xóa log chấm công. Máy sẽ xóa khi kết nối.' });
+});
+r.post('/devices/:id/clear-admins', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  const n = clearDeviceAdmins(serial);
+  res.json({ ok: true, count: n, msg: n ? `Đã gửi lệnh hạ quyền ${n} quản trị.` : 'Không thấy quản trị nào trên máy (theo dữ liệu đã đồng bộ).' });
+});
+r.post('/devices/:id/clear-all', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  clearDeviceAll(serial);
+  res.json({ ok: true, msg: 'Đã gửi lệnh xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log).' });
+});
+r.post('/devices/:id/delete-users', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  const pins = Array.isArray(req.body?.pins) ? req.body.pins : [];
+  if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+  const n = deleteDeviceUsers(serial, pins);
+  res.json({ ok: true, count: n, msg: `Đã gửi lệnh xóa ${n} nhân viên trên máy.` });
+});
+// Xóa dữ liệu chấm công TRONG PHẦN MỀM theo khoảng ngày (không đụng máy)
+r.post('/attendance/clear-range', need('attendance_edit'), (req, res) => {
+  const from = (req.body?.from || '').slice(0, 10), to = (req.body?.to || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu khoảng ngày hợp lệ' });
+  if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
+  const a = db.prepare('DELETE FROM attendance WHERE work_date >= ? AND work_date <= ?').run(from, to).changes;
+  const p = db.prepare('DELETE FROM device_punches WHERE work_date >= ? AND work_date <= ?').run(from, to).changes;
+  res.json({ ok: true, attendance: a, punches: p });
 });
 
 export default r;
