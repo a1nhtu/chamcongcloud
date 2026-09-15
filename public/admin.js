@@ -1243,10 +1243,17 @@ async function reviewShiftReq(r, action) {
 
 /* ---------- 5b) LƯƠNG ---------- */
 const money = (n) => (Number(n) || 0).toLocaleString('vi-VN');
+let _salTab = 'config';
 async function pageSalary() {
-  setMain(head('Cấu hình lương'), loading());
+  const cfgBtn = el('button', { class: 'btn sm ' + (_salTab === 'config' ? '' : 'ghost') }, '⚙ Cấu hình lương');
+  const payBtn = el('button', { class: 'btn sm ' + (_salTab === 'payroll' ? '' : 'ghost') }, '📄 Bảng lương / Phiếu lương');
+  cfgBtn.onclick = () => { _salTab = 'config'; pageSalary(); };
+  payBtn.onclick = () => { _salTab = 'payroll'; pageSalary(); };
+  const tabs = [cfgBtn, payBtn];
+  if (_salTab === 'payroll') return salaryPayrollView(tabs);
+  setMain(head('Lương', ...tabs), loading());
   let data;
-  try { data = await api('/admin/salary'); } catch (e) { setMain(head('Cấu hình lương'), el('div', { class: 'empty' }, e.message)); return; }
+  try { data = await api('/admin/salary'); } catch (e) { setMain(head('Lương', ...tabs), el('div', { class: 'empty' }, e.message)); return; }
   const tbl = el('table', { class: 'data' });
   const canEdit = hasPerm('salary');
   const tb = el('tbody');
@@ -1284,7 +1291,95 @@ async function pageSalary() {
   const hint = el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, hourlyMode()
     ? 'Chế độ tính công theo giờ: Lương = Tổng giờ làm × đơn giá 1 giờ + phụ cấp.'
     : 'Lương = Số công × đơn giá ngày + OT (giờ × đơn giá giờ × hệ số) + nghỉ phép có lương + phụ cấp. Đơn giá giờ = đơn giá ngày ÷ 8.');
-  setMain(head('Cấu hình lương'), hint, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Lương', cfgBtn, payBtn), hint, el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+/* ---------- Bảng lương + Phiếu lương ---------- */
+async function salaryPayrollView(tabs) {
+  const monthI = el('input', { type: 'month', value: todayMonth() });
+  const deptSel = el('select', {}, el('option', { value: '' }, '-- Tất cả phòng ban --'));
+  const wrap = el('div', {}, loading());
+  const head2 = () => head('Lương', ...tabs, monthI, deptSel);
+  setMain(head2(), wrap);
+  try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
+
+  const load = async () => {
+    wrap.innerHTML = ''; wrap.append(loading());
+    let data;
+    try { data = await api(`/admin/payroll?month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}`); }
+    catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
+    const hourly = data.mode === 'hourly';
+    const tbl = el('table', { class: 'data' });
+    tbl.innerHTML = hourly
+      ? '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Tổng giờ</th><th>Đơn giá giờ</th><th>Lương giờ</th><th>Phụ cấp</th><th>Thực lĩnh</th><th></th></tr></thead>'
+      : '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Công</th><th>Phép</th><th>OT(g)</th><th>Đơn giá ngày</th><th>Lương công</th><th>Lương OT</th><th>Phụ cấp</th><th>Thực lĩnh</th><th></th></tr></thead>';
+    const tb = el('tbody');
+    if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 9 : 12 }, el('div', { class: 'empty' }, 'Chưa có nhân viên.'))));
+    for (const { emp, pay } of data.rows) {
+      const psBtn = btnSm('🧾 Phiếu lương', () => payslipModal(emp, pay, data));
+      const cells = hourly
+        ? [emp.code, emp.full_name, emp.department || '', pay.totalHours, money(pay.hourlyRate), money(pay.workSalary), money(pay.allowance), money(pay.net)]
+        : [emp.code, emp.full_name, emp.department || '', pay.workUnits, pay.paidLeaveDays, pay.otHoursTotal, money(pay.dailyRate), money(pay.workSalary), money(pay.otSalary), money(pay.allowance), money(pay.net)];
+      const tr = el('tr', {});
+      cells.forEach((c, i) => tr.append(el('td', i === 1 ? {} : {}, i === 1 ? el('b', {}, c) : String(c))));
+      tr.append(el('td', {}, psBtn));
+      tb.append(tr);
+    }
+    tbl.append(tb);
+    const totNet = data.rows.reduce((s, r) => s + (r.pay.net || 0), 0);
+    wrap.innerHTML = '';
+    wrap.append(
+      el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:4px' }, `Bảng lương tháng ${data.month}`),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Kỳ lương: ${data.from} → ${data.to} · Tổng thực lĩnh: ${money(totNet)} đ`),
+      el('div', { class: 'panel tbl-scroll' }, tbl));
+  };
+  monthI.onchange = load; deptSel.onchange = load;
+  load();
+}
+
+// Phiếu lương 1 nhân viên (in được)
+function payslipModal(emp, pay, ctx) {
+  const hourly = ctx.mode === 'hourly';
+  const line = (label, val, bold) => el('div', { style: 'display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px dashed #eee' + (bold ? ';font-weight:800;font-size:15px;border-bottom:2px solid #ddd' : '') },
+    el('span', {}, label), el('span', { style: 'font-variant-numeric:tabular-nums' }, val));
+  const rows = hourly ? [
+    line('Tổng giờ làm', pay.totalHours + ' giờ'),
+    line('Số ngày có công', String(pay.daysWorked)),
+    line('Đơn giá 1 giờ', money(pay.hourlyRate) + ' đ'),
+    line('Lương theo giờ', money(pay.workSalary) + ' đ'),
+    line('Phụ cấp', money(pay.allowance) + ' đ'),
+    line('THỰC LĨNH', money(pay.net) + ' đ', true),
+  ] : [
+    line('Số công', String(pay.workUnits)),
+    line('Nghỉ phép có lương', pay.paidLeaveDays + ' ngày'),
+    line('Lương cơ bản', money(pay.basicSalary) + ' đ'),
+    line('Đơn giá 1 ngày công', money(pay.dailyRate) + ' đ'),
+    line('Lương theo công', money(pay.workSalary) + ' đ'),
+    line('Lương nghỉ phép', money(pay.paidLeaveSalary) + ' đ'),
+    line(`Tăng ca (${pay.otHoursTotal} giờ)`, money(pay.otSalary) + ' đ'),
+    line('Phụ cấp', money(pay.allowance) + ' đ'),
+    line('THỰC LĨNH', money(pay.net) + ' đ', true),
+  ];
+  const sheet = el('div', { id: 'payslip-print' },
+    el('div', { style: 'text-align:center;margin-bottom:10px' },
+      el('div', { style: 'font-weight:800;font-size:16px' }, ctx.company || 'Digiplus'),
+      el('div', { style: 'font-size:18px;font-weight:800;margin-top:6px' }, 'PHIẾU LƯƠNG'),
+      el('div', { style: 'color:var(--muted);font-size:13px' }, `Tháng ${ctx.month} · Kỳ ${ctx.from} → ${ctx.to}`)),
+    el('div', { style: 'margin:10px 0;font-size:14px' },
+      el('div', {}, el('b', {}, 'Nhân viên: '), `${emp.full_name} (${emp.code})`),
+      el('div', {}, el('b', {}, 'Bộ phận: '), emp.department || '—')),
+    el('div', {}, ...rows));
+  const printBtn = el('button', { class: 'btn' }, '🖨 In phiếu');
+  printBtn.onclick = () => printNode(sheet, `Phiếu lương ${emp.code} ${ctx.month}`);
+  openModal('Phiếu lương · ' + emp.full_name, [sheet], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), printBtn]);
+}
+
+// In 1 node ra cửa sổ in (mở popup, chép HTML, gọi print)
+function printNode(node, title) {
+  const w = window.open('', '_blank', 'width=520,height=700');
+  if (!w) return toast('Trình duyệt chặn cửa sổ in', 'err');
+  w.document.write(`<html><head><title>${title}</title><meta charset="utf-8"><style>body{font-family:system-ui,Arial,sans-serif;padding:24px;color:#222}</style></head><body>${node.outerHTML}</body></html>`);
+  w.document.close(); w.focus(); setTimeout(() => { w.print(); }, 300);
 }
 function salaryModal(s) {
   const body = hourlyMode() ? [

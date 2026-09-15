@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { db, getSetting, setSetting, resolveShift, resolveEffectiveShift } from '../db.js';
 import { authRequired, roleRequired, hashPassword, permRequired, PERMISSIONS, effectivePermissions } from '../auth.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attendance-calc.js';
+import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
 import { rebuildDay, resyncNow } from '../device-sync.js';
@@ -410,6 +411,16 @@ r.put('/salary/:empId', need('salary'), (req, res) => {
     .run(eid, +b.basic_salary || 0, b.daily_rate ? +b.daily_rate : null, +b.working_days_per_month || 26,
       +b.ot_rate_weekday || 1.5, +b.ot_rate_weekend || 2.0, +b.ot_rate_holiday || 3.0, +b.allowance || 0, +b.hourly_rate || 0);
   res.json({ ok: true });
+});
+
+// Bảng lương tính sẵn cho 1 tháng (kèm chi tiết từng NV để in phiếu lương)
+r.get('/payroll', need('salary'), (req, res) => {
+  const month = (req.query.month || '').slice(0, 7);
+  const dept = req.query.dept || null;
+  const m = /^(\d{4})-(\d{2})$/.exec(month);
+  if (!m) return res.status(400).json({ error: 'Thiếu tháng (YYYY-MM)' });
+  const data = computePayrollTable(+m[1], +m[2], dept);
+  res.json({ ...data, month, mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
 });
 
 /* ----------------------------- NGÀY LỄ ----------------------------- */
