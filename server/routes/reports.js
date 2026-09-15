@@ -175,6 +175,30 @@ function buildReport(type, month, dept) {
       return { title: `Bảng ký hiệu tháng ${month} (X=làm, T=trễ/sớm, P=phép, L=lễ, V=vắng, O=thiếu ra)`, columns, rows };
     }
 
+    /* --- Chi tiết giờ vào/ra theo ngày (ma trận) --- */
+    case 'daytime': {
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.isWeekend(d) }));
+      const columns = [
+        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
+        { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
+        { key: 'total', label: 'Tổng công', w: 10 },
+      ];
+      const rows = ctx.employees.map((e) => {
+        const row = { code: e.code, name: e.full_name, dept: e.department || '' };
+        let total = 0;
+        for (const d of days) {
+          const c = ctx.cell.get(e.id + '|' + d);
+          if (c && c.check_in_at) {
+            row['d' + d] = isoToVnHM(c.check_in_at) + '-' + (c.check_out_at ? isoToVnHM(c.check_out_at) : '?');
+            total += c.work_unit || 0;
+          } else row['d' + d] = '';
+        }
+        row.total = round2(total);
+        return row;
+      });
+      return { title: `Chi tiết giờ vào/ra tháng ${month}`, columns, rows };
+    }
+
     /* --- Tổng hợp theo nhân viên --- */
     case 'summary': {
       const columns = [
@@ -377,37 +401,45 @@ r.get('/export.xlsx', async (req, res) => {
   const dept = req.query.dept || null;
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
+  const address = getSetting('company_address', '');
   const { title, columns, rows } = buildReport(type, month, dept);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Digiplus';
   const ws = wb.addWorksheet('BaoCao');
-
   const lastCol = columns.length;
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const allBorder = { top: thin, left: thin, bottom: thin, right: thin };
+
+  // Header công ty + địa chỉ + tiêu đề (giống mẫu)
   ws.mergeCells(1, 1, 1, lastCol);
-  const titleCell = ws.getCell(1, 1);
-  titleCell.value = `${company.toUpperCase()} — ${title.toUpperCase()}`;
-  titleCell.font = { size: 13, bold: true };
-  titleCell.alignment = { horizontal: 'center' };
+  Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
+  ws.mergeCells(2, 1, 2, lastCol);
+  ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
+  ws.mergeCells(3, 1, 3, lastCol);
+  Object.assign(ws.getCell(3, 1), { value: title.toUpperCase(), font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
   ws.addRow([]);
 
   const hr = ws.addRow(columns.map((c) => c.label));
   hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   hr.eachCell((cell, col) => {
     const meta = columns[col - 1];
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.weekend ? 'FFB45309' : 'FFE8541E' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.weekend ? 'FFB45309' : 'FF1E3A5F' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-    cell.border = { bottom: { style: 'thin' } };
+    cell.border = allBorder;
   });
 
   for (const row of rows) {
     const r2 = ws.addRow(columns.map((c) => row[c.key] ?? ''));
     r2.eachCell((cell, col) => {
-      if (columns[col - 1].weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
+      const meta = columns[col - 1];
+      cell.border = allBorder;
+      if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
+      if (col > 3) cell.alignment = { horizontal: 'center' };
     });
   }
   ws.columns.forEach((col, i) => { col.width = columns[i]?.w || 12; });
-  ws.views = [{ state: 'frozen', ySplit: 3, xSplit: 2 }];
+  ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 2 }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${month}.xlsx"`);

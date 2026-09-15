@@ -319,6 +319,7 @@ r.delete('/shifts/:id', need('shifts'), (req, res) => {
 r.get('/settings', (req, res) => {
   res.json({
     company_name: getSetting('company_name', 'Digiplus'),
+    company_address: getSetting('company_address', ''),
     weekend_days: getSetting('weekend_days', '7'),
     workunit_rounding: getSetting('workunit_rounding', '2'),
     workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
@@ -340,6 +341,7 @@ r.get('/settings', (req, res) => {
 r.put('/settings', need('settings'), (req, res) => {
   const b = req.body || {};
   if (b.company_name != null) setSetting('company_name', b.company_name);
+  if (b.company_address != null) setSetting('company_address', b.company_address);
   if (b.weekend_days != null) setSetting('weekend_days', b.weekend_days);
   if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
   if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));

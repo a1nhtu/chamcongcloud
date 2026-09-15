@@ -1734,6 +1734,7 @@ const REPORT_GROUPS = [
   ]],
   ['Chi tiết chấm công', [
     ['detail', '📆', 'Chi tiết theo ngày', 'Chi tiết chấm công từng ngày của từng nhân viên'],
+    ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: công, giờ, trễ, sớm, tăng ca'],
     ['symbol', '🔤', 'Bảng ký hiệu công', 'X=làm · T=trễ/sớm · P=phép · L=lễ · V=vắng · O=thiếu ra'],
     ['late', '⏰', 'Đi muộn / về sớm', 'Danh sách đi muộn, về sớm và số phút'],
@@ -1905,8 +1906,9 @@ async function pageSettings() {
   setMain(head('Cài đặt'), loading());
   const s = await api('/admin/settings');
   const nameI = input('st-name', { value: s.company_name });
-  const saveName = el('button', { class: 'btn' }, 'Lưu tên công ty');
-  saveName.onclick = async () => { try { await api('/admin/settings', { method: 'PUT', body: { company_name: nameI.value } }); toast('Đã lưu', 'ok'); applyBrand(); } catch (e) { toast(e.message, 'err'); } };
+  const addrI = input('st-addr', { value: s.company_address || '', placeholder: 'Địa chỉ công ty (hiện trên đầu báo cáo)' });
+  const saveName = el('button', { class: 'btn' }, 'Lưu tên & địa chỉ');
+  saveName.onclick = async () => { try { await api('/admin/settings', { method: 'PUT', body: { company_name: nameI.value, company_address: addrI.value } }); toast('Đã lưu', 'ok'); applyBrand(); } catch (e) { toast(e.message, 'err'); } };
 
   // Logo công ty
   const logoImg = el('img', { src: s.company_logo || '/icons/logo.png', alt: 'logo', style: 'height:56px;max-width:220px;object-fit:contain;background:#fff;border:1px solid var(--line,#eee);border-radius:10px;padding:6px' });
@@ -1942,7 +1944,8 @@ async function pageSettings() {
   const panel1 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Thông tin công ty'),
     hasPerm('settings') ? el('div', { style: 'display:flex;flex-direction:column;gap:14px' },
-      field('Tên công ty (hiển thị trên app)', nameI), saveName,
+      field('Tên công ty (hiển thị trên app)', nameI),
+      field('Địa chỉ công ty (hiện trên đầu báo cáo)', addrI), saveName,
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:2px 0' }),
       el('div', {},
         el('label', {}, 'Logo công ty (hiện ở màn đăng nhập & app nhân viên)'),
