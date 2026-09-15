@@ -20,7 +20,7 @@ function uniqueValue(column, base) {
 
 // Tự tạo / cập nhật NV từ dữ liệu máy đẩy về (đăng ký vân tay hoặc USERINFO).
 // Trả về id NV (hoặc null nếu tắt auto-create và chưa có NV).
-export function upsertEmployeeFromDevice(pin, name) {
+export function upsertEmployeeFromDevice(pin, name, force = false) {
   pin = String(pin || '').trim();
   if (!pin) return null;
   name = (name || '').trim();
@@ -41,8 +41,8 @@ export function upsertEmployeeFromDevice(pin, name) {
     return byCode.id;
   }
 
-  // Tự tạo NV nháp
-  if (getSetting('device_autocreate', '1') !== '1') return null;
+  // Tự tạo NV nháp (force=true khi nhập từ USB — luôn tạo dù tắt auto-create)
+  if (!force && getSetting('device_autocreate', '1') !== '1') return null;
   const code = uniqueValue('code', pin);
   const username = uniqueValue('username', `nv${pin}`);
   const fullName = name || `NV ${pin}`;
@@ -390,4 +390,64 @@ export function ingestAttlog(serial, rawBody) {
   }
   for (const key of toRebuild) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
   return n;
+}
+
+/* ============================ NHẬP TỪ USB ============================ */
+// Tìm NV theo Số ID máy hoặc mã; tự tạo (force) nếu chưa có.
+function ensureEmpByPin(pin) {
+  const e = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin!='' AND active=1").get(pin)
+    || db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
+  if (e) return { id: e.id, created: false };
+  const before = db.prepare('SELECT COUNT(*) c FROM employees').get().c;
+  const id = upsertEmployeeFromDevice(pin, '', true);
+  const created = id && db.prepare('SELECT COUNT(*) c FROM employees').get().c > before;
+  return { id, created: !!created };
+}
+
+// Nhập file chấm công từ USB (*_attlog.dat / .txt): mỗi dòng "PIN ... yyyy-MM-dd HH:mm:ss ..."
+// Tách PIN = token đầu, thời gian = regex; tự tạo NV cho PIN chưa có → tạo punch → dựng lại ngày công.
+export function importUsbAttlog(rawBody) {
+  const lines = String(rawBody || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const touched = new Set();
+  let n = 0; const newEmps = new Set();
+  const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
+  for (const line of lines) {
+    const pin = (line.split(/\s+/)[0] || '').trim();
+    if (!/^\d{1,20}$/.test(pin)) continue;
+    const m = line.match(/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2})?/);
+    if (!m) continue;
+    const timeStr = m[0].replace('T', ' ');
+    const d = new Date(timeStr.replace(' ', 'T') + '+07:00'); if (isNaN(d)) continue;
+    const workDate = timeStr.slice(0, 10);
+    const { id: empId, created } = ensureEmpByPin(pin);
+    if (created) newEmps.add(pin);
+    try { ins.run('USB', pin, d.toISOString(), workDate, 0, 0, empId); } catch {}
+    n++;
+    if (empId) touched.add(empId + '|' + workDate);
+  }
+  const toRebuild = new Set();
+  for (const key of touched) {
+    const [eid, date] = key.split('|'); toRebuild.add(key);
+    const prev = new Date(date + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
+    toRebuild.add(eid + '|' + prev.toISOString().slice(0, 10));
+  }
+  for (const key of toRebuild) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
+  return { punches: n, newEmps: newEmps.size };
+}
+
+// Nhập danh sách nhân viên từ USB (user.txt / .csv): mỗi dòng "PIN[TAB/,/;]Tên".
+export function importUsbUsers(rawBody) {
+  const lines = String(rawBody || '').split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let total = 0, created = 0;
+  for (const line of lines) {
+    if (/\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(line)) continue; // bỏ dòng chấm công
+    const parts = line.split(/\t|,|;| {2,}/).map((s) => s.trim()).filter(Boolean);
+    const pin = (parts[0] || '').replace(/^PIN[:=]?/i, '').trim();
+    if (!/^\d{1,20}$/.test(pin)) continue;
+    const name = (parts[1] || '').replace(/^Name[:=]?/i, '').trim();
+    const before = db.prepare('SELECT COUNT(*) c FROM employees').get().c;
+    const id = upsertEmployeeFromDevice(pin, name, true);
+    if (id) { total++; if (db.prepare('SELECT COUNT(*) c FROM employees').get().c > before) created++; }
+  }
+  return { total, created };
 }

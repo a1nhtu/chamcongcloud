@@ -91,6 +91,23 @@ async function afterLogin() {
   if (isAdmin() && SETTINGS.setup_done !== '1') { setupWizard(); return; }
   if (visible.length) go(visible[0][0]);
   else setMain(el('div', { class: 'empty' }, 'Tài khoản của bạn chưa được cấp quyền dùng chức năng nào. Vui lòng liên hệ quản trị viên.'));
+  checkUpdateBanner();   // báo khi có bản mới
+}
+
+// Banner nhắc cập nhật khi GitHub có bản mới hơn (chỉ admin) — tránh khách quên update rồi lỗi
+async function checkUpdateBanner() {
+  if (!isAdmin()) return;
+  let r; try { r = await api('/admin/update/check'); } catch { return; }
+  if (!r || !r.hasUpdate) return;
+  const old = document.getElementById('upd-banner'); if (old) old.remove();
+  const goBtn = el('button', { class: 'btn sm' }, '⬆ Cập nhật ngay');
+  goBtn.onclick = () => { banner.remove(); go('settings'); toast('Kéo xuống mục "Cập nhật phần mềm" và bấm Cập nhật ngay', 'ok'); };
+  const laterBtn = el('button', { class: 'btn sm ghost' }, 'Để sau');
+  laterBtn.onclick = () => banner.remove();
+  const banner = el('div', { id: 'upd-banner', style: 'background:#fef3c7;color:#92400e;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid #f0d98a;font-weight:600' },
+    el('span', { style: 'flex:1' }, `🔔 Đã có bản mới ${r.latest} (đang dùng ${r.current}). Nên cập nhật để có tính năng mới & tránh lỗi.`),
+    goBtn, laterBtn);
+  const appView = $('#app-view'); appView.insertBefore(banner, appView.firstChild);
 }
 function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
@@ -1694,7 +1711,41 @@ async function pageDevices() {
     } catch (e) { toast(e.message, 'err'); }
     finally { resyncBtn.disabled = false; resyncBtn.textContent = '🔁 Đồng bộ vân tay các máy'; }
   };
-  setMain(head('Máy chấm công', resyncBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+  const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
+  usbBtn.onclick = usbImportModal;
+  setMain(head('Máy chấm công', usbBtn, resyncBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+// Nhập dữ liệu chấm công + nhân viên từ USB (máy không nối mạng)
+function usbImportModal() {
+  const doImport = (kind, file, btn) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      if (btn) { btn.disabled = true; btn.textContent = 'Đang nhập…'; }
+      try {
+        const r = await api('/admin/devices/import-usb', { method: 'POST', body: { kind, fileBase64: reader.result } });
+        if (kind === 'users') toast(`Đã nhập ${r.total} nhân viên (${r.created} NV mới)`, 'ok');
+        else toast(`Đã nhập ${r.punches} lượt chấm, tạo ${r.newEmps} NV mới`, 'ok');
+        closeModal(); pageDevices();
+      } catch (e) { toast(e.message, 'err'); if (btn) { btn.disabled = false; btn.textContent = btn._t; } }
+    };
+    reader.readAsDataURL(file);
+  };
+  const attFile = el('input', { type: 'file', accept: '.dat,.txt,.csv', style: 'display:block;margin-top:6px' });
+  attFile.onchange = () => { if (attFile.files[0]) doImport('attlog', attFile.files[0]); };
+  const usrFile = el('input', { type: 'file', accept: '.dat,.txt,.csv', style: 'display:block;margin-top:6px' });
+  usrFile.onchange = () => { if (usrFile.files[0]) doImport('users', usrFile.files[0]); };
+  openModal('Nhập dữ liệu từ USB', [
+    el('div', { class: 'map-hint' }, 'Dùng khi máy chấm công KHÔNG nối mạng: cắm USB vào máy → chọn "Tải dữ liệu ra USB / Download" trên máy → rút USB cắm vào máy tính → chọn file bên dưới.'),
+    el('div', { style: 'margin:14px 0;padding-top:8px;border-top:1px solid #f0efec' },
+      el('div', { style: 'font-weight:700' }, '1) Nhập dữ liệu chấm công'),
+      el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, 'File thường tên *_attlog.dat hoặc .txt. Tự tạo NV cho Số ID chưa có rồi tính công.'),
+      attFile),
+    el('div', { style: 'margin:14px 0;padding-top:8px;border-top:1px solid #f0efec' },
+      el('div', { style: 'font-weight:700' }, '2) Nhập danh sách nhân viên'),
+      el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, 'File danh sách NV: mỗi dòng "Số ID [tab/phẩy] Tên nhân viên".'),
+      usrFile),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
 function devicePunchesModal(m) {
   const box = el('div', {}, loading());

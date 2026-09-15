@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -997,6 +997,21 @@ r.post('/devices/rebuild', need('devices'), (req, res) => {
   try { for (const d of days) { rebuildDay(d.employee_id, d.work_date); n++; } db.exec('COMMIT'); }
   catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
   res.json({ ok: true, rebuilt: n });
+});
+
+// Nhập dữ liệu từ USB (máy không kết nối mạng): file chấm công *_attlog.dat/.txt hoặc danh sách NV.
+// Body: { kind:'attlog'|'users', fileBase64 hoặc text }
+r.post('/devices/import-usb', need('devices'), (req, res) => {
+  const b = req.body || {};
+  let content = b.text || '';
+  if (!content && b.fileBase64) { try { content = Buffer.from(b.fileBase64.replace(/^data:.*;base64,/, ''), 'base64').toString('utf8'); } catch {} }
+  if (!content.trim()) return res.status(400).json({ error: 'File rỗng hoặc không đọc được' });
+  db.exec('BEGIN');
+  try {
+    const r2 = b.kind === 'users' ? importUsbUsers(content) : importUsbAttlog(content);
+    db.exec('COMMIT');
+    res.json({ ok: true, kind: b.kind || 'attlog', ...r2 });
+  } catch (e) { db.exec('ROLLBACK'); res.status(500).json({ error: e.message }); }
 });
 
 export default r;
