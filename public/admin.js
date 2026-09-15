@@ -104,9 +104,10 @@ async function checkUpdateBanner() {
   goBtn.onclick = () => { banner.remove(); go('settings'); toast('Kéo xuống mục "Cập nhật phần mềm" và bấm Cập nhật ngay', 'ok'); };
   const laterBtn = el('button', { class: 'btn sm ghost' }, 'Để sau');
   laterBtn.onclick = () => banner.remove();
-  const banner = el('div', { id: 'upd-banner', style: 'background:#fef3c7;color:#92400e;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;border-bottom:1px solid #f0d98a;font-weight:600' },
-    el('span', { style: 'flex:1' }, `🔔 Đã có bản mới ${r.latest} (đang dùng ${r.current}). Nên cập nhật để có tính năng mới & tránh lỗi.`),
-    goBtn, laterBtn);
+  const banner = el('div', { id: 'upd-banner', style: 'grid-column:1 / -1;background:linear-gradient(90deg,#fef3c7,#fde68a);color:#92400e;padding:12px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid #f0d98a;font-weight:600;box-shadow:0 2px 8px rgba(0,0,0,.06)' },
+    el('span', { style: 'font-size:20px;line-height:1' }, '🔔'),
+    el('span', { style: 'flex:1;min-width:220px' }, `Đã có bản mới ${r.latest} (đang dùng ${r.current}). Nên cập nhật để có tính năng mới & tránh lỗi.`),
+    el('div', { style: 'display:flex;gap:8px;flex-shrink:0' }, goBtn, laterBtn));
   const appView = $('#app-view'); appView.insertBefore(banner, appView.firstChild);
 }
 function go(key) {
