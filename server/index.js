@@ -102,24 +102,35 @@ function lanIPs() {
   return [...real, ...virt];
 }
 
-// HTTP (dùng cho localhost trên chính máy này)
-createHttp(app).listen(PORT, '0.0.0.0', () => {
+// HTTP (localhost trên máy này + Cloudflare Tunnel ra internet) — BẮT BUỘC phải mở được
+const httpServer = createHttp(app);
+httpServer.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') console.error(`\n  [X] Cổng HTTP ${PORT} đang bị chiếm — có thể app đã chạy sẵn. Không mở thêm.`);
+  else console.error(`\n  [X] Không mở được cổng HTTP ${PORT}: ${e.code}. App không thể chạy.`);
+  process.exit(1);
+});
+httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  === Digiplus Chấm công ===`);
   console.log(`  HTTP  (máy này):  http://localhost:${PORT}/  |  /admin`);
 });
 
-// HTTPS (bắt buộc để điện thoại dùng camera + GPS qua mạng LAN)
+// HTTPS (cho điện thoại dùng camera + GPS qua mạng LAN/wifi nội bộ) — KHÔNG bắt buộc:
+// nếu cổng bị Windows/phần mềm khác chặn thì chỉ cảnh báo, app vẫn chạy bình thường qua HTTP + tunnel.
 const keyPath = join(CERT_DIR, 'key.pem');
 const certPath = join(CERT_DIR, 'cert.pem');
 if (existsSync(keyPath) && existsSync(certPath)) {
-  createHttps({ key: readFileSync(keyPath), cert: readFileSync(certPath) }, app)
-    .listen(HTTPS_PORT, '0.0.0.0', () => {
-      const ips = lanIPs();
-      console.log(`  HTTPS (điện thoại/LAN):`);
-      if (!ips.length) console.log(`     https://localhost:${HTTPS_PORT}/`);
-      for (const ip of ips) console.log(`     https://${ip}:${HTTPS_PORT}/        (điện thoại mở link này)`);
-      console.log(`  * Điện thoại sẽ báo "không an toàn" (chứng chỉ tự ký) → bấm Nâng cao → Tiếp tục.\n`);
-    });
+  const httpsServer = createHttps({ key: readFileSync(keyPath), cert: readFileSync(certPath) }, app);
+  httpsServer.on('error', (e) => {
+    console.warn(`  [!] Bỏ qua HTTPS cổng ${HTTPS_PORT} (${e.code}) — app VẪN CHẠY bình thường qua HTTP + tunnel.`);
+    console.warn(`      (Chấm qua internet không cần cổng này. Chấm qua wifi nội bộ sẽ tạm không dùng được tới khi cổng ${HTTPS_PORT} rảnh — thường do Windows/Hyper-V/WSL giữ dải cổng. Đặt HTTPS_PORT khác trong config nếu cần.)\n`);
+  });
+  httpsServer.listen(HTTPS_PORT, '0.0.0.0', () => {
+    const ips = lanIPs();
+    console.log(`  HTTPS (điện thoại/LAN):`);
+    if (!ips.length) console.log(`     https://localhost:${HTTPS_PORT}/`);
+    for (const ip of ips) console.log(`     https://${ip}:${HTTPS_PORT}/        (điện thoại mở link này)`);
+    console.log(`  * Điện thoại sẽ báo "không an toàn" (chứng chỉ tự ký) → bấm Nâng cao → Tiếp tục.\n`);
+  });
 } else {
   console.log(`  (Chưa có chứng chỉ HTTPS trong /certs — chạy "npm run cert" để tạo, cần cho camera/GPS trên điện thoại)\n`);
 }

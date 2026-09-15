@@ -840,9 +840,12 @@ async function pageAssignments() {
   if (exBtn) exBtn.onclick = async () => {
     try {
       const res = await api(`/admin/assignments/export.xlsx?month=${curMonth}&dept=${encodeURIComponent(deptSel.value)}`, { raw: true });
-      const blob = await res.blob(); const a = document.createElement('a');
-      a.href = URL.createObjectURL(blob); a.download = `phanca_${curMonth}.xlsx`; a.click(); URL.revokeObjectURL(a.href);
-    } catch (e) { toast('Không xuất được', 'err'); }
+      if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status, 'err'); return; }
+      const blob = await res.blob(); const url = URL.createObjectURL(blob);
+      const a = el('a', { href: url, download: `phanca_${curMonth}.xlsx` });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+    } catch (e) { toast('Không xuất được (mất kết nối, thử lại)', 'err'); }
   };
   if (imBtn) imBtn.onclick = () => fileI.click();
   fileI.onchange = () => {
@@ -1824,11 +1827,14 @@ async function pageReport() {
 async function downloadExcel(type, month, dept) {
   try {
     const res = await api(`/reports/export.xlsx?type=${type}&month=${month}&dept=${encodeURIComponent(dept || '')}`, { raw: true });
+    if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
     const blob = await res.blob();
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob); a.download = `baocao_${type}_${month}.xlsx`; a.click();
-    URL.revokeObjectURL(a.href);
-  } catch (e) { toast('Không xuất được file', 'err'); }
+    const url = URL.createObjectURL(blob);
+    const a = el('a', { href: url, download: `baocao_${type}_${month}.xlsx` });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Đã xuất Excel', 'ok');
+  } catch (e) { toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
 }
 
 /* ---------- 7) CÀI ĐẶT ---------- */
