@@ -300,7 +300,7 @@ async function pageEmployees() {
     await loadRefs();
     const { rows } = await api('/admin/employees');
     const tbl = el('table', { class: 'data' });
-    tbl.innerHTML = `<thead><tr><th>Mã</th><th>Họ tên</th><th>Bộ phận</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>${hourlyMode() ? 'Chi nhánh' : 'Ca / Chi nhánh'}</th><th>TT</th><th></th></tr></thead>`;
+    tbl.innerHTML = `<thead><tr><th>Mã</th><th>Họ tên</th><th>Bộ phận</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
     const tb = el('tbody');
     for (const e of rows) {
       const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:6px' },
@@ -315,7 +315,6 @@ async function pageEmployees() {
         el('td', {}, e.position || '—'),
         el('td', {}, e.username),
         el('td', {}, roleLabel(e.role)),
-        el('td', {}, hourlyMode() ? (e.office_name || '—') : `${e.work_schedule_id ? '📋 ' + (e.schedule_name || '') : (e.shift_name || '—')} / ${e.office_name || '—'}`),
         el('td', {}, e.active ? el('span', { class: 'pill ok' }, 'Hoạt động') : el('span', { class: 'pill bad' }, 'Khoá')),
         el('td', {}, actions),
       ));
