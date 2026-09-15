@@ -576,12 +576,53 @@ async function pageOffices() {
       el('td', {}, o.radius_m + ' m'),
       el('td', {}, el('a', { href: `https://www.google.com/maps?q=${o.lat},${o.lng}`, target: '_blank' }, 'Xem')),
       el('td', {}, o.active ? el('span', { class: 'pill ok' }, 'Bật') : el('span', { class: 'pill bad' }, 'Tắt')),
-      el('td', {}, hasPerm('offices') ? btnSm('Sửa', () => officeModal(o)) : ''),
+      el('td', {}, hasPerm('offices') ? el('div', { style: 'display:flex;gap:6px' }, btnSm('👥 Nhân viên', () => officeEmpModal(o)), btnSm('Sửa', () => officeModal(o))) : ''),
     ));
   }
   tbl.append(tb);
   if (addBtn) addBtn.onclick = () => officeModal(null);
   setMain(head('Chi nhánh / Vị trí', addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+// Chọn nhân viên được phép chấm ở 1 định vị (quản lý từ phía định vị)
+async function officeEmpModal(o) {
+  const box = el('div', {}, loading());
+  const deptSel = el('select', { style: 'min-width:170px' }, el('option', { value: '' }, '-- Tất cả phòng ban --'));
+  const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
+  let ROWS = [];
+  const render = () => {
+    const dept = deptSel.value;
+    const rows = ROWS.filter((r) => !dept || r.department === dept);
+    box.innerHTML = '';
+    if (!rows.length) { box.append(el('div', { class: 'map-hint' }, 'Không có nhân viên.')); return; }
+    for (const e of rows) {
+      box.append(el('label', { style: 'display:flex;align-items:center;gap:8px;padding:5px 2px;border-bottom:1px solid #f4f2ef;font-weight:500;color:var(--ink)' },
+        el('input', { type: 'checkbox', class: 'oe-pick', value: e.id, style: 'width:auto', ...(e.picked ? { checked: '' } : {}) }),
+        el('span', { style: 'flex:1' }, `${e.full_name} (${e.code})${e.department ? ' · ' + e.department : ''}`),
+        e.anywhere ? el('span', { style: 'font-size:11px;color:#0a7' }, 'đang: mọi định vị') : ''));
+    }
+  };
+  const save = el('button', { class: 'btn' }, '💾 Lưu');
+  save.onclick = async () => {
+    const ids = [...box.querySelectorAll('.oe-pick:checked')].map((x) => +x.value);
+    save.disabled = true;
+    try { const r = await api('/admin/offices/' + o.id + '/employees', { method: 'POST', body: { employee_ids: ids } }); toast(`Đã lưu ${r.count} NV cho định vị này`, 'ok'); closeModal(); }
+    catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  };
+  openModal('Nhân viên chấm ở: ' + o.name, [
+    el('div', { class: 'map-hint' }, 'Tích các NV được phép chấm ở định vị này. NV được tích ở BẤT KỲ định vị nào sẽ CHỈ chấm được ở các định vị đã tích; NV không tích ở đâu = chấm được MỌI định vị.'),
+    el('div', { style: 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px' },
+      el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, selAll, 'Chọn tất cả'), deptSel),
+    box,
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+  try {
+    ROWS = (await api('/admin/offices/' + o.id + '/employees')).rows;
+    const depts = [...new Set(ROWS.map((r) => r.department).filter(Boolean))].sort();
+    for (const d of depts) deptSel.append(el('option', { value: d }, d));
+  } catch (e) { box.innerHTML = ''; box.append(el('div', { class: 'empty' }, e.message)); return; }
+  deptSel.onchange = render;
+  selAll.onchange = () => { box.querySelectorAll('.oe-pick').forEach((c) => { c.checked = selAll.checked; }); };
+  render();
 }
 // Ghép nhãn hiển thị từ 1 kết quả Photon
 function photonLabel(p) {
@@ -1590,56 +1631,97 @@ const REPORT_TYPES = [
   ['payroll', 'Bảng lương 💰'],
 ];
 const SYMBOL_COLOR = { X: '#166534', T: '#b45309', P: '#1d4ed8', L: '#7c3aed', V: '#dc2626', O: '#b45309' };
+// Nhóm báo cáo cho giao diện dạng thẻ: [nhóm, [ [type, icon, tên, mô tả] ... ]]
+const REPORT_GROUPS = [
+  ['Bản ghi chấm công', [
+    ['attendance', '📋', 'Bản ghi chấm công', 'Tất cả lần chấm: giờ vào/ra, đi muộn, vị trí'],
+    ['firstlast', '🕐', 'Giờ vào & ra đầu/cuối', 'Giờ chấm sớm nhất và muộn nhất mỗi ngày'],
+  ]],
+  ['Chi tiết chấm công', [
+    ['detail', '📆', 'Chi tiết theo ngày', 'Chi tiết chấm công từng ngày của từng nhân viên'],
+    ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: công, giờ, trễ, sớm, tăng ca'],
+    ['symbol', '🔤', 'Bảng ký hiệu công', 'X=làm · T=trễ/sớm · P=phép · L=lễ · V=vắng · O=thiếu ra'],
+    ['late', '⏰', 'Đi muộn / về sớm', 'Danh sách đi muộn, về sớm và số phút'],
+    ['ot', '➕', 'Tăng ca', 'Chi tiết giờ tăng ca theo ngày'],
+  ]],
+  ['Tổng hợp', [
+    ['summary', '👥', 'Tổng hợp nhân viên', 'Tổng công, giờ, tăng ca, trễ, sớm mỗi NV'],
+    ['leave', '🌴', 'Nghỉ phép / đơn từ', 'Tổng nghỉ phép và chi tiết theo loại'],
+    ['payroll', '💰', 'Bảng lương', 'Bảng lương tháng theo kỳ lương đã cấu hình'],
+  ]],
+];
 
 async function pageReport() {
-  // Chế độ theo giờ: bỏ các mẫu gắn với ca (đi muộn/về sớm, tăng ca, ký hiệu công)
-  const types = hourlyMode() ? REPORT_TYPES.filter(([v]) => !['late', 'ot', 'symbol'].includes(v)) : REPORT_TYPES;
-  const typeSel = el('select', { id: 'rp-type', style: 'min-width:180px' },
-    ...types.map(([v, l]) => el('option', { value: v }, l)));
+  const hourly = hourlyMode();
   const monthI = el('input', { type: 'month', id: 'rp-month', value: todayMonth() });
   const deptSel = el('select', { id: 'rp-dept' }, el('option', { value: '' }, '-- Tất cả phòng ban --'));
-  const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
-  setMain(head('Báo cáo', typeSel, monthI, deptSel, exportBtn), loading());
+  try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
 
-  try {
-    const { rows } = await api('/reports/departments');
-    for (const d of rows) deptSel.append(el('option', { value: d }, d));
-  } catch {}
-
-  const load = async () => {
-    const type = typeSel.value, month = monthI.value, dept = deptSel.value;
-    const wrap = el('div', { id: 'rp-wrap' }, loading());
-    setMain(head('Báo cáo', typeSel, monthI, deptSel, exportBtn), wrap);
-    let data;
-    try { data = await api(`/reports/data?type=${type}&month=${month}&dept=${encodeURIComponent(dept)}`); }
-    catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
-
-    const tbl = el('table', { class: 'data' });
-    const thead = el('tr', {});
-    for (const c of data.columns) thead.append(el('th', { style: c.weekend ? 'background:#fff4e6;color:#b45309' : '' }, c.label));
-    tbl.append(el('thead', {}, thead));
-    const tb = el('tbody');
-    if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
-    for (const row of data.rows) {
-      const tr = el('tr', {});
-      for (const c of data.columns) {
-        const v = row[c.key];
-        const isSym = type === 'symbol' && SYMBOL_COLOR[v];
-        tr.append(el('td', {
-          style: (c.weekend ? 'background:#fffaf3;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center' : '')),
-        }, v === '' || v == null ? '' : String(v)));
+  // Màn danh sách báo cáo dạng thẻ, gom nhóm
+  const hub = () => {
+    monthI.onchange = null; deptSel.onchange = null;
+    const wrap = el('div', {});
+    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng) và phòng ban ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
+    for (const [gname, cards] of REPORT_GROUPS) {
+      const list = cards.filter(([v]) => !hourly || !['late', 'ot', 'symbol'].includes(v));
+      if (!list.length) continue;
+      wrap.append(el('div', { style: 'font-weight:800;color:var(--ink);margin:18px 0 10px;font-size:15px' }, gname));
+      const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px' });
+      for (const [v, ic, title, desc] of list) {
+        const card = el('div', { class: 'panel', style: 'padding:16px;cursor:pointer;display:flex;gap:12px;align-items:flex-start;transition:box-shadow .15s,transform .15s' },
+          el('div', { style: 'font-size:26px;line-height:1' }, ic),
+          el('div', {}, el('div', { style: 'font-weight:700;color:var(--ink)' }, title),
+            el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, desc)));
+        card.onmouseenter = () => { card.style.boxShadow = '0 6px 18px rgba(0,0,0,.09)'; card.style.transform = 'translateY(-2px)'; };
+        card.onmouseleave = () => { card.style.boxShadow = ''; card.style.transform = ''; };
+        card.onclick = () => showReport(v);
+        grid.append(card);
       }
-      tb.append(tr);
+      wrap.append(grid);
     }
-    tbl.append(tb);
-    wrap.innerHTML = '';
-    wrap.append(el('div', { style: 'font-weight:700;margin-bottom:8px' }, data.title),
-      el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Báo cáo', monthI, deptSel), wrap);
   };
 
-  exportBtn.onclick = () => downloadExcel(typeSel.value, monthI.value, deptSel.value);
-  typeSel.onchange = load; monthI.onchange = load; deptSel.onchange = load;
-  load();
+  // Xem 1 báo cáo cụ thể (có nút quay lại danh sách)
+  const showReport = (type) => {
+    const backBtn = el('button', { class: 'btn ghost sm' }, '← Danh sách báo cáo');
+    backBtn.onclick = hub;
+    const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
+    exportBtn.onclick = () => downloadExcel(type, monthI.value, deptSel.value);
+    const wrap = el('div', {}, loading());
+    setMain(head('Báo cáo', backBtn, monthI, deptSel, exportBtn), wrap);
+    const load = async () => {
+      wrap.innerHTML = ''; wrap.append(loading());
+      let data;
+      try { data = await api(`/reports/data?type=${type}&month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}`); }
+      catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
+      const tbl = el('table', { class: 'data' });
+      const thead = el('tr', {});
+      for (const c of data.columns) thead.append(el('th', { style: c.weekend ? 'background:#fff4e6;color:#b45309' : '' }, c.label));
+      tbl.append(el('thead', {}, thead));
+      const tb = el('tbody');
+      if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
+      for (const row of data.rows) {
+        const tr = el('tr', {});
+        for (const c of data.columns) {
+          const v = row[c.key];
+          const isSym = type === 'symbol' && SYMBOL_COLOR[v];
+          tr.append(el('td', {
+            style: (c.weekend ? 'background:#fffaf3;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center' : '')),
+          }, v === '' || v == null ? '' : String(v)));
+        }
+        tb.append(tr);
+      }
+      tbl.append(tb);
+      wrap.innerHTML = '';
+      wrap.append(el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title),
+        el('div', { class: 'panel tbl-scroll' }, tbl));
+    };
+    monthI.onchange = load; deptSel.onchange = load;
+    load();
+  };
+
+  hub();
 }
 async function downloadExcel(type, month, dept) {
   try {

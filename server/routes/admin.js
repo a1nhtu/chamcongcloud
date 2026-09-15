@@ -244,6 +244,31 @@ r.delete('/offices/:id', need('offices'), (req, res) => {
   res.json({ ok: true });
 });
 
+// Nhân viên được phép chấm ở 1 định vị (quản lý từ phía định vị cho nhanh)
+r.get('/offices/:id/employees', need('offices'), (req, res) => {
+  const oid = +req.params.id;
+  const emps = db.prepare("SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin' ORDER BY department, full_name").all();
+  const picked = new Set(db.prepare('SELECT employee_id FROM employee_offices WHERE office_id=?').all(oid).map((r) => r.employee_id));
+  // NV chưa cấu hình định vị nào = được chấm mọi nơi (mặc định)
+  const restricted = new Set(db.prepare('SELECT DISTINCT employee_id FROM employee_offices').all().map((r) => r.employee_id));
+  for (const e of emps) { e.picked = picked.has(e.id); e.anywhere = !restricted.has(e.id); }
+  res.json({ rows: emps });
+});
+
+// Đặt danh sách NV được phép chấm ở định vị này (thay toàn bộ cho office này)
+r.post('/offices/:id/employees', need('offices'), (req, res) => {
+  const oid = +req.params.id;
+  const ids = Array.isArray(req.body?.employee_ids) ? req.body.employee_ids.filter(Boolean).map(Number) : [];
+  db.exec('BEGIN');
+  try {
+    db.prepare('DELETE FROM employee_offices WHERE office_id=?').run(oid);
+    const ins = db.prepare('INSERT OR IGNORE INTO employee_offices(employee_id, office_id) VALUES (?,?)');
+    for (const eid of ids) ins.run(eid, oid);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
+  res.json({ ok: true, count: ids.length });
+});
+
 /* ----------------------------- CA LÀM ----------------------------- */
 r.get('/shifts', (req, res) => {
   res.json({ rows: db.prepare('SELECT * FROM shifts ORDER BY active DESC, name').all() });
