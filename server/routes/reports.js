@@ -394,6 +394,82 @@ function buildReport(type, month, dept) {
   }
 }
 
+/* ===== Xuất Excel "Giờ công & tăng ca" — mẫu chi tiết 3 dòng/NV (giống file mẫu) ===== */
+const WD_LABEL = { 0: 'CN', 1: 'T.2', 2: 'T.3', 3: 'T.4', 4: 'T.5', 5: 'T.6', 6: 'T.7' };
+async function exportWorkhoursXlsx(res, month, dept, company, address) {
+  const ctx = loadMonth(month, dept);
+  const days = monthDays(month);
+  const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
+  const totalCols = FIXED + days.length * 2;
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
+  const ws = wb.addWorksheet('GioCong');
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  const teal = 'FF0F7D7D', pink = 'FFFFE0EC';
+
+  // Header công ty / địa chỉ / tiêu đề + chú thích
+  ws.mergeCells(1, 1, 1, totalCols); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
+  ws.mergeCells(2, 1, 2, totalCols); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
+  ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT GIỜ CÔNG & TĂNG CA THÁNG ${month.slice(5)}/${month.slice(0, 4)}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
+  ws.mergeCells(4, 1, 4, totalCols); Object.assign(ws.getCell(4, 1), { value: 'Mỗi nhân viên gồm 3 dòng: (1) Giờ chấm Vào–Ra · (2) Giờ công · (3) Giờ tăng ca', font: { italic: true, size: 10, color: { argb: 'FF666666' } } });
+
+  // 2 dòng tiêu đề cột (dòng số ngày + dòng thứ)
+  const H = 5;
+  const fixedLabels = ['STT', 'Phòng ban', 'Mã nhân viên', 'Tên nhân viên', 'Ngày vào làm'];
+  fixedLabels.forEach((lab, i) => { ws.mergeCells(H, i + 1, H + 1, i + 1); ws.getCell(H, i + 1).value = lab; });
+  days.forEach((d, di) => {
+    const c1 = FIXED + di * 2 + 1;
+    ws.mergeCells(H, c1, H, c1 + 1); ws.getCell(H, c1).value = +d.slice(8);
+    ws.mergeCells(H + 1, c1, H + 1, c1 + 1); ws.getCell(H + 1, c1).value = WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()];
+  });
+  for (let r = H; r <= H + 1; r++) {
+    for (let c = 1; c <= totalCols; c++) {
+      const cell = ws.getCell(r, c);
+      cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: teal } };
+      cell.border = border;
+    }
+  }
+
+  // Mỗi NV = 3 dòng
+  let r = H + 2, stt = 0;
+  const hireDate = () => ''; // chưa lưu ngày vào làm
+  for (const e of ctx.employees) {
+    stt++;
+    const rIn = r, rCong = r + 1, rOt = r + 2;
+    const fixedVals = [stt, e.department || '', e.code, e.full_name, hireDate()];
+    fixedVals.forEach((v, i) => { ws.mergeCells(rIn, i + 1, rOt, i + 1); Object.assign(ws.getCell(rIn, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' } }); });
+    for (let di = 0; di < days.length; di++) {
+      const d = days[di], c1 = FIXED + di * 2 + 1;
+      const c = ctx.cell.get(e.id + '|' + d);
+      const weekend = ctx.isWeekend(d);
+      ws.getCell(rIn, c1).value = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
+      ws.getCell(rIn, c1 + 1).value = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+      ws.mergeCells(rCong, c1, rCong, c1 + 1); ws.getCell(rCong, c1).value = c && c.work_minutes ? round2(c.work_minutes / 60) : 0;
+      ws.mergeCells(rOt, c1, rOt, c1 + 1); ws.getCell(rOt, c1).value = c && c.ot_min ? round2(c.ot_min / 60) : 0;
+      for (const [rr, cc] of [[rIn, c1], [rIn, c1 + 1], [rCong, c1], [rOt, c1]]) {
+        const cell = ws.getCell(rr, cc);
+        cell.alignment = { horizontal: 'center' };
+        cell.border = border;
+        if (weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+      }
+    }
+    for (let i = 1; i <= FIXED; i++) ws.getCell(rIn, i).border = border;
+    r += 3;
+  }
+  if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
+
+  ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
+  for (let i = 0; i < days.length; i++) { ws.getColumn(FIXED + i * 2 + 1).width = 7; ws.getColumn(FIXED + i * 2 + 2).width = 7; }
+  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="giocong_tangca_${month}.xlsx"`);
+  await wb.xlsx.write(res);
+  res.end();
+}
+
 /* ================= Routes ================= */
 r.get('/dashboard', (req, res) => {
   const today = vnDateStr();
@@ -440,6 +516,10 @@ r.get('/export.xlsx', async (req, res) => {
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');
+
+  // "Giờ công & tăng ca": mẫu chi tiết 3 dòng/NV (giờ chấm vào-ra / giờ công / giờ tăng ca), mỗi ngày 2 cột
+  if (type === 'workhours') return exportWorkhoursXlsx(res, month, dept, company, address);
+
   const { title, columns, rows } = buildReport(type, month, dept);
 
   const wb = new ExcelJS.Workbook();
