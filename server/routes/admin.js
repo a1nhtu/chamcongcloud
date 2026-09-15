@@ -116,7 +116,15 @@ r.put('/employees/:id', need('employees'), (req, res) => {
   try {
     const newRole = b.role ?? emp.role;
     const newPerms = b.permissions !== undefined ? normPerms(newRole, b.permissions) : emp.permissions;
-    // SỐ ID (device_pin) KHÓA sau khi tạo — không cho sửa qua PUT (dù là NV nhập tay hay từ máy)
+    // SỐ ID (device_pin): chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
+    if (b.device_pin !== undefined && !(emp.device_pin || '').trim()) {
+      const pin1 = (b.device_pin || '').trim();
+      if (pin1) {
+        if (db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?").get(pin1, emp.id))
+          return res.status(400).json({ error: `Số ID máy chấm công "${pin1}" đã có nhân viên dùng` });
+        db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin1, emp.id);
+      }
+    }
     db.prepare(`UPDATE employees SET code=?, full_name=?, department=?, position=?, phone=?,
       role=?, username=?, office_id=?, shift_id=?, work_schedule_id=?, permissions=?, active=? WHERE id=?`).run(
       b.code ?? emp.code, b.full_name ?? emp.full_name, b.department ?? emp.department,

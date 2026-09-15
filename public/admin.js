@@ -408,14 +408,17 @@ function empModal(e) {
   });
   renderPerms(e?.role || 'employee');
 
-  // Số ID máy chấm công: đặt khi TẠO MỚI, KHÓA sau khi tạo (NV nhập tay lẫn NV lấy từ máy đều không sửa)
+  // Số ID máy chấm công: chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
+  const pinLocked = !!(e && (e.device_pin || '').trim());
   const pinInput = input('e-device_pin', { placeholder: 'VD: 1 (số ID trên máy)', value: e?.device_pin || '',
-    ...(e ? { readonly: '', style: 'background:#f2f0ee;color:#777;cursor:not-allowed' } : {}) });
+    ...(pinLocked ? { readonly: '', style: 'background:#f2f0ee;color:#777;cursor:not-allowed' } : {}) });
   f.device_pin = pinInput;
-  const pinField = el('div', {}, el('label', {}, 'Số ID máy chấm công' + (e ? ' 🔒' : '')),
-    pinInput,
-    e ? el('div', { class: 'map-hint', style: 'margin-top:3px' }, e.from_device ? 'Lấy từ máy chấm công — không sửa được.' : 'Đã tạo — không sửa được số ID.')
-      : el('div', { class: 'map-hint', style: 'margin-top:3px' }, 'Nhập số ID trùng với số ID trên máy. Sau khi tạo sẽ không sửa được.'));
+  const pinHint = pinLocked
+    ? (e.from_device ? 'Lấy từ máy chấm công — không sửa được.' : 'Đã có số ID — không sửa được.')
+    : (e ? 'Nhân viên này chưa có số ID. Nhập rồi bấm Lưu — sau khi lưu sẽ khóa.'
+         : 'Nhập số ID trùng với số ID trên máy. Sau khi tạo sẽ không sửa được.');
+  const pinField = el('div', {}, el('label', {}, 'Số ID máy chấm công' + (pinLocked ? ' 🔒' : '')),
+    pinInput, el('div', { class: 'map-hint', style: 'margin-top:3px' }, pinHint));
 
   const body = [
     el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name))),
@@ -445,8 +448,8 @@ function empModal(e) {
       username: f.username.value.trim(),
       password: $('#e-password').value || undefined,
     };
-    // Số ID chỉ gửi khi TẠO MỚI (sửa thì khóa, backend cũng bỏ qua)
-    if (!e) body.device_pin = f.device_pin.value.trim();
+    // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
+    if (!pinLocked) body.device_pin = f.device_pin.value.trim();
     // Không gửi shift_id/work_schedule_id/office_ids → giữ nguyên phân ca & định vị đã gán ở màn riêng
     if (body.role !== 'admin') body.permissions = [...permState];
     try {
