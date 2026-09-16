@@ -242,6 +242,14 @@ export function initSchema() {
       received_at TEXT NOT NULL DEFAULT (datetime('now')),
       UNIQUE(serial, pin, bio_type, idx)
     );
+    -- Ảnh người dùng / ảnh khuôn mặt đăng ký trên máy (để hiện avatar + đồng bộ sang máy khác)
+    CREATE TABLE IF NOT EXISTS device_user_photos (
+      pin         TEXT PRIMARY KEY,              -- số ID trên máy
+      kind        TEXT NOT NULL DEFAULT 'user',  -- 'user' (USERPIC) | 'face' (BIOPHOTO)
+      face_type   INTEGER DEFAULT 0,             -- Type của BIOPHOTO (2=IR, 9=visible) nếu là face
+      photo       TEXT NOT NULL,                 -- base64 JPG
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
     -- Thông tin user trên máy (tên/thẻ/mật mã) để đẩy kèm khi đồng bộ
     CREATE TABLE IF NOT EXISTS device_users (
       pin         TEXT PRIMARY KEY,

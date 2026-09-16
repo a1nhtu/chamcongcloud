@@ -488,6 +488,11 @@ async function loadEmpBio(e, box) {
   box.innerHTML = '';
   if (!(e.device_pin || '').trim()) { box.append(el('div', { class: 'map-hint' }, 'Nhân viên chưa gắn Số ID máy chấm công nên chưa có dữ liệu sinh trắc.')); return; }
   let d; try { d = await api('/admin/employees/' + e.id + '/biometrics'); } catch (err) { box.append(el('div', { class: 'map-hint' }, err.message)); return; }
+  if (d.photoData) {
+    box.append(el('div', { style: 'text-align:center;margin-bottom:14px' },
+      el('img', { src: d.photoData, alt: 'Ảnh NV', style: 'width:120px;height:120px;object-fit:cover;border-radius:14px;border:2px solid var(--brand,#E8541E)' }),
+      el('div', { style: 'font-size:12px;color:var(--muted);margin-top:4px' }, d.photo === 'face' ? '📸 Ảnh khuôn mặt đăng ký trên máy' : '📸 Ảnh người dùng từ máy')));
+  }
   const stat = (icon, label, val) => el('div', { style: 'flex:1;min-width:110px;background:var(--soft,#fff3ec);border:1px solid #f2cdb8;border-radius:12px;padding:14px;text-align:center' },
     el('div', { style: 'font-size:24px;line-height:1' }, icon),
     el('div', { style: 'font-size:22px;font-weight:800;color:var(--brand-dark,#c0410f);margin-top:4px' }, String(val)),
@@ -1882,16 +1887,16 @@ async function pageDevices() {
     catch (e) { toast(e.message, 'err'); }
     finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Đồng bộ lại (khớp mã NV)'; }
   };
-  const resyncBtn = el('button', { class: 'btn' }, '🔁 Đồng bộ vân tay các máy');
+  const resyncBtn = el('button', { class: 'btn' }, '🔁 Đồng bộ');
   resyncBtn.onclick = async () => {
-    if (!confirm('Đẩy toàn bộ nhân viên/vân tay/thẻ/khuôn mặt của mỗi nhóm sang tất cả máy trong nhóm ngay bây giờ?\n(Dùng khi vân tay đăng ký trước lúc ghép nhóm, hoặc máy vừa bật lại — không cần khởi động lại máy.)')) return;
+    if (!confirm('Đẩy toàn bộ nhân viên/vân tay/khuôn mặt/thẻ/ảnh của mỗi nhóm sang tất cả máy trong nhóm ngay bây giờ?\n(Dùng khi đăng ký trước lúc ghép nhóm, hoặc máy vừa bật lại — không cần khởi động lại máy.)')) return;
     resyncBtn.disabled = true; resyncBtn.textContent = 'Đang đồng bộ…';
     try {
       const r = await api('/admin/devices/resync', { method: 'POST' });
       if (!r.devices) toast('Chưa có nhóm nào ≥2 máy để đồng bộ. Hãy đặt "Nhóm ĐB" giống nhau cho các máy.', 'err');
       else toast(`Đã xếp ${r.queued} lệnh đồng bộ cho ${r.devices} máy (${r.groups} nhóm). Máy sẽ nhận trong ít giây.`, 'ok');
     } catch (e) { toast(e.message, 'err'); }
-    finally { resyncBtn.disabled = false; resyncBtn.textContent = '🔁 Đồng bộ vân tay các máy'; }
+    finally { resyncBtn.disabled = false; resyncBtn.textContent = '🔁 Đồng bộ'; }
   };
   const resyncFullBtn = el('button', { class: 'btn ghost' }, '🔁 Đồng bộ lại TOÀN BỘ (sửa lỗi)');
   resyncFullBtn.onclick = async () => {

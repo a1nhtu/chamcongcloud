@@ -241,6 +241,36 @@ function buildBioCommand(t) {
   return `DATA UPDATE BIODATA Pin=${t.pin}\tNo=${t.idx}\tIndex=${t.idx}\tValid=${t.valid}\tDuress=${t.duress}\tType=${t.bio_type}\tMajorVer=${t.major_ver}\tMinorVer=${t.minor_ver}\tFormat=0\tTmp=${t.tmp}`;
 }
 
+// Nạp ẢNH người dùng / ảnh khuôn mặt máy đẩy về (dòng USERPIC / BIOPHOTO, thường trong OPERLOG).
+export function storeUserPhotos(serial, rawBody) {
+  const pins = new Set();
+  const up = db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo)
+    VALUES(?,?,?,?)
+    ON CONFLICT(pin) DO UPDATE SET kind=excluded.kind,face_type=excluded.face_type,photo=excluded.photo,updated_at=datetime('now')`);
+  for (let line of String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const m = line.match(/^(USERPIC|BIOPHOTO)\b\s*/i);
+    if (!m) continue;
+    const isFace = /BIOPHOTO/i.test(m[1]);
+    const kv = kvOf(line.slice(m[0].length));
+    const pin = (kv.pin || '').trim();
+    const content = (kv.content || '').trim();
+    if (!pin || content.length < 100) continue;   // ảnh phải có nội dung base64
+    const faceType = isFace ? (parseInt(kv.type || '9', 10) || 9) : 0;
+    try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
+    upsertEmployeeFromDevice(pin, '');
+    pins.add(pin);
+  }
+  return pins;
+}
+// Lệnh đẩy ẢNH của 1 pin xuống máy (BIOPHOTO nếu là ảnh mặt, USERPIC nếu ảnh người dùng). null nếu không có ảnh.
+function buildPhotoCommand(pin) {
+  const p = db.prepare('SELECT * FROM device_user_photos WHERE pin=?').get(pin);
+  if (!p || !p.photo) return null;
+  if (p.kind === 'face')
+    return `DATA UPDATE BIOPHOTO PIN=${pin}\tType=${p.face_type || 9}\tSize=${p.photo.length}\tContent=${p.photo}\tFormat=0\tPostBackTmpFlag=1`;
+  return `DATA UPDATE USERPIC PIN=${pin}\tSize=${p.photo.length}\tContent=${p.photo}`;
+}
+
 // Sau khi 1 máy đẩy user/template về → đẩy các PIN đó sang MỌI máy cùng nhóm (real-time).
 export function syncPinsToGroup(sourceSerial, pins) {
   if (!pins || !pins.size) return 0;
@@ -257,6 +287,7 @@ export function syncPinsToGroup(sourceSerial, pins) {
       upsertDeviceUserSerial(t.serial, pin, u.name, u.card);
       const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
       for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp)); mirrorTemplateTo(t.serial, tp); n++; }
+      const pc = buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc);   // đẩy ảnh (mặt/user) nếu có
     }
   }
   return n;
@@ -284,10 +315,19 @@ export function syncFillDevice(serial, force = false) {
       queueCmd(serial, buildUserCommand(t.pin));
       const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(t.pin) || {};
       upsertDeviceUserSerial(serial, t.pin, u.name, u.card);
+      const pc = buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc);   // đẩy ảnh (mặt/user) nếu có
       pushedPins.add(t.pin);
     }
     queueCmd(serial, buildBioCommand(t));
     mirrorTemplateTo(serial, t);
+  }
+  // đẩy thêm ảnh cho pin CHỈ có ảnh (không có template, VD mặt ánh sáng nhìn thấy lưu dạng ảnh)
+  const photoPins = db.prepare(`SELECT p.pin FROM device_user_photos p
+     WHERE p.pin IN (SELECT DISTINCT pin FROM device_users_serial WHERE serial IN (${ph}))`).all(...groupSerials);
+  for (const r of photoPins) {
+    if (pushedPins.has(r.pin)) continue;
+    const pc = buildPhotoCommand(r.pin); if (!pc) continue;
+    queueCmd(serial, buildUserCommand(r.pin)); queueCmd(serial, pc); pushedPins.add(r.pin);
   }
 }
 

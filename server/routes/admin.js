@@ -175,11 +175,28 @@ r.get('/employees/:id/biometrics', need('employees'), (req, res) => {
   const u = db.prepare("SELECT card, passwd FROM device_users WHERE pin=?").get(pin) || {};
   const card = (u.card && u.card !== '0') ? 1 : 0;
   const password = (u.passwd && u.passwd !== '') ? 1 : 0;
+  const ph = db.prepare('SELECT kind, photo FROM device_user_photos WHERE pin=?').get(pin);
+  const photo = ph ? ph.kind : '';   // '' = không có, 'face' | 'user'
+  const photoData = ph && ph.photo ? ('data:image/jpeg;base64,' + ph.photo) : '';
   const byDevice = db.prepare(`SELECT s.serial, COALESCE(d.name,'') AS name,
       (SELECT COUNT(DISTINCT b.idx) FROM device_bio_templates b WHERE b.serial=s.serial AND b.pin=s.pin AND b.bio_type=1) AS fp,
       (SELECT COUNT(DISTINCT b.idx) FROM device_bio_templates b WHERE b.serial=s.serial AND b.pin=s.pin AND b.bio_type IN (2,9)) AS face
     FROM device_users_serial s LEFT JOIN push_devices d ON d.serial=s.serial WHERE s.pin=?`).all(pin);
-  res.json({ pin, fp, face, card, password, byDevice });
+  res.json({ pin, fp, face, card, password, photo, photoData, byDevice });
+});
+// Ảnh người dùng/khuôn mặt của NV (lấy từ máy) → trả JPG để hiện avatar
+r.get('/employees/:id/photo', need('employees'), (req, res) => {
+  const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
+  const pin = emp && (emp.device_pin || '').trim();
+  if (!pin) return res.status(404).end();
+  const ph = db.prepare('SELECT photo FROM device_user_photos WHERE pin=?').get(pin);
+  if (!ph || !ph.photo) return res.status(404).end();
+  try {
+    const buf = Buffer.from(ph.photo, 'base64');
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.end(buf);
+  } catch { res.status(404).end(); }
 });
 
 // ---- Khoá thiết bị chấm công: duyệt đổi máy / gỡ thiết bị ----
