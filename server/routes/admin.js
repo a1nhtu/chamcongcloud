@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -1051,12 +1051,21 @@ r.put('/devices/:id', need('devices'), (req, res) => {
   const b = req.body || {};
   const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
   if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  const newGroup = b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || '');
   db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=?, access_control=? WHERE id=?')
-    .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active,
-         b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || ''),
+    .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active, newGroup,
          b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0),
          b.access_control != null ? (b.access_control ? 1 : 0) : (d.access_control || 0), d.id);
-  res.json({ ok: true });
+  // Vừa ĐẶT/ĐỔI Nhóm ĐB (và nhóm có ≥2 máy) → tự kích hoạt đồng bộ ngay cho CẢ NHÓM
+  // (khỏi phải bấm nút / khởi động lại máy). Đẩy dữ liệu nhóm sang máy này + máy khác nhận cái nó thiếu.
+  let synced = 0;
+  if (b.sync_group !== undefined && newGroup) {
+    try {
+      const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1").all(newGroup).map((r) => r.serial);
+      if (groupSerials.length >= 2) { for (const s of groupSerials) syncFillDevice(s); synced = groupSerials.length; }
+    } catch (e) { console.error('[device] auto-sync khi đặt nhóm lỗi:', e.message); }
+  }
+  res.json({ ok: true, synced });
 });
 // Mở cửa từ xa (chỉ máy có kiểm soát cửa) — gửi lệnh ADMS AC_UNLOCK xuống hàng đợi
 r.post('/devices/:id/open-door', need('door_open'), (req, res) => {
