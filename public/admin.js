@@ -459,7 +459,51 @@ function empModal(e) {
       toast('Đã lưu', 'ok'); closeModal(); pageEmployees();
     } catch (err) { toast(err.message, 'err'); }
   };
-  openModal(e ? 'Sửa nhân viên' : 'Thêm nhân viên', body, [el('button', { class: 'btn ghost' , onclick: closeModal }, 'Huỷ'), save]);
+  // ----- 2 tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) -----
+  let modalBody = body;
+  if (e) {
+    const tabInfo = el('div', {}, ...body);
+    const tabBio = el('div', { hidden: true }, loading());
+    let bioLoaded = false;
+    const mkTab = (label) => el('button', { class: 'btn sm ghost', type: 'button', style: 'border:none;border-radius:0;border-bottom:2px solid transparent' }, label);
+    const tI = mkTab('📋 Thông tin'), tB = mkTab('🖐 Sinh trắc / Máy');
+    const sel = (t) => {
+      const info = t === 'info';
+      tabInfo.hidden = !info; tabBio.hidden = info;
+      tI.style.borderBottomColor = info ? 'var(--brand,#E8541E)' : 'transparent';
+      tI.style.color = info ? 'var(--brand-dark,#c0410f)' : ''; tI.style.fontWeight = info ? '700' : '';
+      tB.style.borderBottomColor = info ? 'transparent' : 'var(--brand,#E8541E)';
+      tB.style.color = info ? '' : 'var(--brand-dark,#c0410f)'; tB.style.fontWeight = info ? '' : '700';
+      if (!info && !bioLoaded) { bioLoaded = true; loadEmpBio(e, tabBio); }
+    };
+    tI.onclick = () => sel('info'); tB.onclick = () => sel('bio');
+    const tabBar = el('div', { style: 'display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line,#eee)' }, tI, tB);
+    sel('info');
+    modalBody = [tabBar, tabInfo, tabBio];
+  }
+  openModal(e ? 'Sửa nhân viên' : 'Thêm nhân viên', modalBody, [el('button', { class: 'btn ghost' , onclick: closeModal }, 'Huỷ'), save]);
+}
+// Tab Sinh trắc: đếm vân tay/khuôn mặt/thẻ/mật mã của NV (theo Số ID máy)
+async function loadEmpBio(e, box) {
+  box.innerHTML = '';
+  if (!(e.device_pin || '').trim()) { box.append(el('div', { class: 'map-hint' }, 'Nhân viên chưa gắn Số ID máy chấm công nên chưa có dữ liệu sinh trắc.')); return; }
+  let d; try { d = await api('/admin/employees/' + e.id + '/biometrics'); } catch (err) { box.append(el('div', { class: 'map-hint' }, err.message)); return; }
+  const stat = (icon, label, val) => el('div', { style: 'flex:1;min-width:110px;background:var(--soft,#fff3ec);border:1px solid #f2cdb8;border-radius:12px;padding:14px;text-align:center' },
+    el('div', { style: 'font-size:24px;line-height:1' }, icon),
+    el('div', { style: 'font-size:22px;font-weight:800;color:var(--brand-dark,#c0410f);margin-top:4px' }, String(val)),
+    el('div', { style: 'font-size:12px;color:var(--muted)' }, label));
+  box.append(el('div', { style: 'display:flex;gap:10px;flex-wrap:wrap' },
+    stat('👉', 'Vân tay', d.fp), stat('😊', 'Khuôn mặt', d.face), stat('💳', 'Thẻ', d.card), stat('🔑', 'Mật mã', d.password)));
+  if (d.byDevice && d.byDevice.length) {
+    box.append(el('div', { style: 'font-weight:700;margin:16px 0 6px' }, 'Đã đăng ký trên máy:'));
+    for (const dv of d.byDevice)
+      box.append(el('div', { style: 'display:flex;gap:10px;padding:7px 2px;border-bottom:1px solid #f1efec;font-size:14px' },
+        el('span', { style: 'flex:1' }, dv.name || dv.serial),
+        el('span', { style: 'color:var(--muted)' }, `👉 ${dv.fp} · 😊 ${dv.face}`)));
+  } else {
+    box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Chưa thấy đăng ký trên máy nào (Số ID máy: ' + d.pin + ').'));
+  }
+  box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Dữ liệu lấy từ máy chấm công đã đồng bộ về. Đăng ký thêm vân tay/khuôn mặt trực tiếp trên máy.'));
 }
 async function toggleEmp(e) { if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return; await api('/admin/employees/' + e.id, { method: 'DELETE' }); pageEmployees(); }
 async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }

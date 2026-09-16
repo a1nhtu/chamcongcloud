@@ -164,6 +164,24 @@ r.delete('/employees/:id/purge', need('employees'), (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// Số vân tay / khuôn mặt / thẻ / mật mã của 1 NV (theo Số ID máy) — cho tab Sinh trắc
+r.get('/employees/:id/biometrics', need('employees'), (req, res) => {
+  const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
+  if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+  const pin = (emp.device_pin || '').trim();
+  if (!pin) return res.json({ pin: '', fp: 0, face: 0, card: 0, password: 0, byDevice: [] });
+  const fp = db.prepare("SELECT COUNT(DISTINCT idx) c FROM device_bio_templates WHERE pin=? AND bio_type=1").get(pin).c;
+  const face = db.prepare("SELECT COUNT(DISTINCT idx) c FROM device_bio_templates WHERE pin=? AND bio_type IN (2,9)").get(pin).c;
+  const u = db.prepare("SELECT card, passwd FROM device_users WHERE pin=?").get(pin) || {};
+  const card = (u.card && u.card !== '0') ? 1 : 0;
+  const password = (u.passwd && u.passwd !== '') ? 1 : 0;
+  const byDevice = db.prepare(`SELECT s.serial, COALESCE(d.name,'') AS name,
+      (SELECT COUNT(DISTINCT b.idx) FROM device_bio_templates b WHERE b.serial=s.serial AND b.pin=s.pin AND b.bio_type=1) AS fp,
+      (SELECT COUNT(DISTINCT b.idx) FROM device_bio_templates b WHERE b.serial=s.serial AND b.pin=s.pin AND b.bio_type IN (2,9)) AS face
+    FROM device_users_serial s LEFT JOIN push_devices d ON d.serial=s.serial WHERE s.pin=?`).all(pin);
+  res.json({ pin, fp, face, card, password, byDevice });
+});
+
 // ---- Khoá thiết bị chấm công: duyệt đổi máy / gỡ thiết bị ----
 // Danh sách NV đang xin đổi thiết bị
 r.get('/device-requests', need('employees'), (req, res) => {
