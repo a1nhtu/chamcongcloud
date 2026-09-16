@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -1103,6 +1103,12 @@ r.get('/devices/:id/users', need('devices'), (req, res) => {
   const serial = serialOfDevice(req.params.id);
   if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
   res.json({ rows: deviceUserList(serial) });
+});
+r.post('/devices/:id/query-users', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  queryDeviceUsers(serial);
+  res.json({ ok: true, msg: 'Đã gửi lệnh tải nhân viên từ máy. Máy sẽ đẩy danh sách NV + vân tay lên khi có kết nối (chờ chút rồi làm mới).' });
 });
 r.post('/devices/:id/clear-log', need('devices'), (req, res) => {
   const serial = serialOfDevice(req.params.id);
