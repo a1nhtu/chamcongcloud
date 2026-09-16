@@ -34,7 +34,7 @@ function initInfo(serial) {
     `TimeZone=7\n` +
     `TransTimes=00:00;14:05\n` +
     `TransInterval=1\n` +
-    `TransFlag=TransData AttLog OpLog EnrollUser ChgUser EnrollFP ChgFP UserPic\n` +
+    `TransFlag=TransData AttLog OpLog EnrollUser ChgUser EnrollFP ChgFP UserPic BioData BioPhoto FACE\n` +
     `Realtime=1\n` +
     `Encrypt=0\n` +
     `ServerVer=2.4.1\n` +
