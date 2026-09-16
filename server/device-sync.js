@@ -262,6 +262,49 @@ export function storeUserPhotos(serial, rawBody) {
   }
   return pins;
 }
+// Bảng mã thao tác trên máy ZKTeco (OPERLOG/OPLOG) — theo chuẩn ZKTeco.
+// Mã lạ (firmware riêng) sẽ hiển thị "Thao tác (mã N)" và vẫn giữ dòng gốc để đối chiếu.
+export const OPLOG_LABELS = {
+  0: 'Khởi động máy', 1: 'Tắt máy', 2: 'Xác thực thất bại', 3: 'Báo động',
+  4: 'Vào menu', 5: 'Đổi cấu hình', 6: 'Đăng ký vân tay', 7: 'Đăng ký mật khẩu',
+  8: 'Đăng ký thẻ', 9: 'Xóa người dùng', 10: 'Xóa vân tay', 11: 'Xóa mật khẩu',
+  12: 'Xóa thẻ', 13: 'Xóa dữ liệu', 14: 'Tạo thẻ MF', 15: 'Đăng ký thẻ MF',
+  16: 'Ghi danh thẻ MF', 17: 'Hủy đăng ký thẻ MF', 18: 'Xóa nội dung thẻ MF',
+  19: 'Chuyển dữ liệu vào thẻ MF', 20: 'Chép thẻ MF vào máy', 21: 'Đặt giờ (đồng hồ)',
+  22: 'Khôi phục cài đặt gốc', 23: 'Xóa bản ghi chấm công', 24: 'Xóa quyền admin',
+  25: 'Sửa nhóm truy cập', 26: 'Sửa múi giờ truy cập', 27: 'Sửa tổ hợp mở khóa',
+  28: 'Mở khóa cửa', 29: 'Đăng ký người dùng mới', 30: 'Đổi thông tin vân tay',
+  31: 'Nút bấm mở cửa', 34: 'Đăng ký khuôn mặt', 35: 'Xóa khuôn mặt',
+};
+export function oplogLabel(code) {
+  const n = Number(code);
+  return Number.isFinite(n) && OPLOG_LABELS[n] ? OPLOG_LABELS[n] : `Thao tác (mã ${code})`;
+}
+
+// Lưu NHẬT KÝ THAO TÁC trên máy (các dòng OPLOG trong bảng OPERLOG máy đẩy về).
+// Định dạng ZKTeco: OPLOG<TAB>opcode<TAB>adminPin<TAB>time<TAB>obj1<TAB>obj2<TAB>obj3
+// Luôn giữ dòng gốc (raw); giờ nhận diện bằng regex nên không phụ thuộc thứ tự cột.
+export function storeDeviceOplogs(serial, rawBody) {
+  const n = { count: 0 };
+  const ins = db.prepare(`INSERT OR IGNORE INTO device_oplogs
+    (serial, op_code, op_time, admin_pin, obj1, obj2, obj3, raw)
+    VALUES (?,?,?,?,?,?,?,?)`);
+  for (const line of String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
+    const m = line.match(/^OPLOG\b[\s\t]*/i);
+    if (!m) continue;
+    const parts = line.slice(m[0].length).split('\t').map((s) => s.trim()).filter((s) => s !== '');
+    if (!parts.length) continue;
+    const ti = parts.findIndex((p) => /^\d{4}[-/]\d\d[-/]\d\d[ T]\d\d:\d\d/.test(p));
+    const opTime = ti >= 0 ? parts[ti] : (parts[2] || '');
+    const others = parts.filter((_, i) => i !== ti);
+    const opCode = parseInt(others[0], 10);
+    const adminPin = others[1] || '';
+    const obj1 = others[2] || '', obj2 = others[3] || '', obj3 = others[4] || '';
+    try { const r = ins.run(serial, Number.isFinite(opCode) ? opCode : null, opTime, adminPin, obj1, obj2, obj3, line); if (r.changes) n.count++; } catch {}
+  }
+  return n.count;
+}
+
 // Lệnh đẩy ẢNH của 1 pin xuống máy (BIOPHOTO nếu là ảnh mặt, USERPIC nếu ảnh người dùng). null nếu không có ảnh.
 function buildPhotoCommand(pin) {
   const p = db.prepare('SELECT * FROM device_user_photos WHERE pin=?').get(pin);

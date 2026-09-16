@@ -27,3 +27,9 @@ tools/*.exe
 # Tai lieu NOI BO cua Anh - KHONG dua len GitHub
 QUY-TRINH-BAN-KHACH.txt
 DOC-CHO-ANH.txt
+
+# MAT KHAU / TAI KHOAN - TUYET DOI KHONG dua len GitHub
+PASS_*/
+*MAT_KHAU*
+*MATKHAU*
+*password*.txt

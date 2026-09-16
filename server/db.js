@@ -288,6 +288,39 @@ export function initSchema() {
       response_at TEXT
     );
 
+    -- Nhật ký thao tác của admin/quản lý trên phần mềm (thêm/sửa/xóa, đăng nhập...).
+    CREATE TABLE IF NOT EXISTS audit_logs (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      at         TEXT NOT NULL DEFAULT (datetime('now')),  -- ISO/UTC
+      user_id    INTEGER,                     -- employees.id (NULL/0 nếu tài khoản tổng)
+      username   TEXT DEFAULT '',
+      user_name  TEXT DEFAULT '',             -- họ tên hiển thị
+      role       TEXT DEFAULT '',
+      action     TEXT DEFAULT '',             -- nhãn thao tác tiếng Việt
+      method     TEXT DEFAULT '',
+      path       TEXT DEFAULT '',
+      detail     TEXT DEFAULT '',             -- tóm tắt tham số (JSON gọn, bỏ mật khẩu)
+      status     INTEGER DEFAULT 0,           -- HTTP status
+      ip         TEXT DEFAULT ''
+    );
+    -- Nhật ký thao tác TRÊN MÁY chấm công (ZKTeco đẩy về qua OPERLOG/OPLOG):
+    -- vào menu, đăng ký/xóa vân tay, xóa dữ liệu, đặt giờ, khôi phục gốc...
+    CREATE TABLE IF NOT EXISTS device_oplogs (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      serial      TEXT NOT NULL,              -- máy phát sinh thao tác
+      op_code     INTEGER,                    -- mã thao tác ZKTeco
+      op_time     TEXT,                       -- thời điểm trên máy (chuỗi máy gửi)
+      admin_pin   TEXT DEFAULT '',            -- Số ID người thao tác trên máy
+      obj1        TEXT DEFAULT '',
+      obj2        TEXT DEFAULT '',
+      obj3        TEXT DEFAULT '',
+      raw         TEXT DEFAULT '',            -- dòng gốc máy gửi (đối chiếu khi cần)
+      received_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(serial, op_code, op_time, admin_pin, obj1)
+    );
+    CREATE INDEX IF NOT EXISTS idx_audit_at ON audit_logs(at);
+    CREATE INDEX IF NOT EXISTS idx_oplog_serial ON device_oplogs(serial, op_time);
+
     CREATE INDEX IF NOT EXISTS idx_bio_serial ON device_bio_templates(serial);
     CREATE INDEX IF NOT EXISTS idx_bio_pin ON device_bio_templates(pin);
     CREATE INDEX IF NOT EXISTS idx_cmd_serial ON push_device_commands(serial, trans_time);

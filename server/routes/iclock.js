@@ -3,7 +3,7 @@
 // KHÔNG nằm sau cổng bản quyền — máy phải kết nối được. Chỉ XỬ LÝ khi bật "Dùng máy chấm công" + máy đã duyệt.
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand } from '../device-sync.js';
 
 const r = Router();
 // CHỈ parse text cho các route POST của máy (KHÔNG dùng r.use để tránh nuốt body /api)
@@ -83,9 +83,11 @@ function handleCData(req, res) {
           const userLines = lines.filter((l) => /^USER\b/i.test(l));
           const tmplLines = lines.filter((l) => /^(FP|BIODATA|FINGERTMP)\b/i.test(l));
           const photoLines = lines.filter((l) => /^(USERPIC|BIOPHOTO)\b/i.test(l));
+          const oplogLines = lines.filter((l) => /^OPLOG\b/i.test(l));   // nhật ký thao tác trên máy
           if (userLines.length) for (const p of ingestUserData(sn, 'USER', userLines.join('\n'))) pins.add(p);
           if (tmplLines.length) for (const p of storeTemplates(sn, 'FP', tmplLines.join('\n'))) pins.add(p);
           if (photoLines.length) for (const p of storeUserPhotos(sn, photoLines.join('\n'))) pins.add(p);
+          if (oplogLines.length) storeDeviceOplogs(sn, oplogLines.join('\n'));
           if (sn) db.prepare('UPDATE push_devices SET oper_stamp=? WHERE serial=?').run(String(stamp), sn);
         } else if (table === 'BIOPHOTO' || table === 'USERPIC') {
           for (const p of storeUserPhotos(sn, body)) pins.add(p);

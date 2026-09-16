@@ -99,6 +99,7 @@ export const PERMISSIONS = [
   ['holidays',        'Ngày lễ'],
   ['recompute',       'Tính lại công'],
   ['backup',          'Sao lưu & phục hồi'],
+  ['logs',            'Nhật ký thao tác'],
   ['settings',        'Cài đặt hệ thống'],
 ];
 export const ALL_PERMS = PERMISSIONS.map(([k]) => k);

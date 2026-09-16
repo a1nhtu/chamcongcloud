@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<title>Cẩm nang Đại lý Digiplus</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap">
+<style>
+:root{
+  --brand:#E8541E; --brand-2:#E11D23; --brand-ink:#A8380F; --wash:#FCEBE2;
+  --ink:#22262e; --muted:#6b7280; --line:#e7e2dc; --paper:#ffffff; --soft:#FBF6F2;
+  --green:#15803D; --green-bg:#E7F7EC; --amber:#B45309; --amber-bg:#FDF1D8;
+  --blue:#1D4ED8; --blue-bg:#E5EDFF; --red:#C0261C; --red-bg:#FCE9E7;
+  --radius:14px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--soft);color:var(--ink);
+  font-family:'Be Vietnam Pro',system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  line-height:1.62;font-size:15.5px;-webkit-font-smoothing:antialiased}
+.page{max-width:960px;margin:0 auto;background:var(--paper);
+  box-shadow:0 6px 40px rgba(60,25,10,.08)}
+a{color:var(--brand-ink)}
+
+/* ---------- Header ---------- */
+header{background:linear-gradient(135deg,#E8541E,#E11D23);color:#fff;padding:40px 44px 34px}
+.brandrow{display:flex;align-items:center;gap:14px}
+.mark{width:46px;height:50px;flex:none}
+.brandname{font-weight:800;font-size:22px;letter-spacing:.3px}
+.brandname small{display:block;font-weight:500;font-size:11px;opacity:.9;letter-spacing:2.5px;text-transform:uppercase}
+.doctag{display:inline-block;margin-top:22px;background:rgba(255,255,255,.16);
+  border:1px solid rgba(255,255,255,.35);border-radius:999px;padding:5px 14px;
+  font-size:12px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase}
+header h1{margin:12px 0 6px;font-size:31px;line-height:1.15;font-weight:800}
+header p{margin:0;font-size:15px;opacity:.95;max-width:640px}
+.hmeta{margin-top:18px;display:flex;flex-wrap:wrap;gap:8px}
+.hchip{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.28);
+  border-radius:10px;padding:6px 11px;font-size:12.5px;font-weight:600}
+
+/* ---------- Body ---------- */
+main{padding:34px 44px 10px}
+.lead{font-size:16px;color:#3a3f47}
+.toc{background:var(--soft);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 20px;margin:26px 0}
+.toc h4{margin:0 0 10px;font-size:12px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
+.toc ol{margin:0;padding-left:20px;columns:2;column-gap:32px}
+.toc li{margin:5px 0;break-inside:avoid}
+.toc a{text-decoration:none;font-weight:600;color:var(--ink)}
+.toc a:hover{color:var(--brand)}
+
+section{margin:38px 0;scroll-margin-top:16px}
+.sec-h{display:flex;align-items:center;gap:13px;margin:0 0 6px}
+.sec-n{flex:none;width:34px;height:34px;border-radius:10px;background:var(--brand);
+  color:#fff;font-weight:800;display:grid;place-items:center;font-size:16px}
+h2{font-size:22px;margin:0;font-weight:800;letter-spacing:.2px}
+.sub{color:var(--muted);margin:2px 0 16px 47px;font-size:14px}
+h3{font-size:16.5px;margin:22px 0 8px;font-weight:700;color:var(--brand-ink)}
+p{margin:9px 0}
+ul,ol{margin:9px 0;padding-left:22px}
+li{margin:5px 0}
+b,strong{font-weight:700}
+code{font-family:ui-monospace,"Cascadia Code","Courier New",monospace;
+  background:var(--wash);color:var(--brand-ink);padding:1px 6px;border-radius:6px;font-size:13.5px}
+
+/* step cards */
+.steps{list-style:none;padding:0;margin:14px 0;counter-reset:s}
+.steps>li{counter-increment:s;position:relative;padding:14px 16px 14px 56px;
+  border:1px solid var(--line);border-radius:12px;margin:10px 0;background:#fff}
+.steps>li::before{content:counter(s);position:absolute;left:14px;top:14px;
+  width:28px;height:28px;border-radius:8px;background:var(--brand-ink);color:#fff;
+  font-weight:800;display:grid;place-items:center;font-size:14px}
+.steps>li b{display:block;margin-bottom:2px}
+.steps small{color:var(--muted);font-size:13.5px}
+
+/* callouts */
+.box{border-radius:12px;padding:13px 16px;margin:14px 0;border:1px solid;font-size:14.5px}
+.box .t{font-weight:700;display:flex;align-items:center;gap:7px;margin-bottom:3px}
+.info{background:var(--blue-bg);border-color:#c7d7fb}.info .t{color:var(--blue)}
+.warn{background:var(--amber-bg);border-color:#f2dca6}.warn .t{color:var(--amber)}
+.tip{background:var(--green-bg);border-color:#bfe6cb}.tip .t{color:var(--green)}
+.stop{background:var(--red-bg);border-color:#f3c7c2}.stop .t{color:var(--red)}
+
+/* tables */
+table{width:100%;border-collapse:collapse;margin:14px 0;font-size:14px}
+th,td{border:1px solid var(--line);padding:9px 12px;text-align:left;vertical-align:top}
+th{background:var(--soft);font-weight:700}
+tr:nth-child(even) td{background:#fcfaf8}
+
+/* flow */
+.flow{display:flex;flex-wrap:wrap;align-items:stretch;gap:8px;margin:16px 0}
+.flow .node{flex:1 1 150px;background:var(--wash);border:1px solid #f0cdba;border-radius:12px;
+  padding:11px 13px;font-size:13.5px}
+.flow .node b{color:var(--brand-ink)}
+.flow .who{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--brand);display:block;margin-bottom:3px}
+.arrow{align-self:center;color:var(--brand);font-weight:800;font-size:18px}
+
+.kbd{background:#fff;border:1px solid var(--line);border-bottom-width:2px;border-radius:6px;padding:1px 7px;font-size:13px;font-weight:600}
+.rolegrid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 0}
+.rolecard{border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.rolecard h4{margin:0 0 8px;font-size:15px}
+.rolecard.you h4{color:var(--brand)}
+.rolecard.dp h4{color:var(--blue)}
+
+footer{background:var(--ink);color:#e9e4de;padding:26px 44px;margin-top:30px}
+footer .big{font-size:17px;font-weight:700;color:#fff}
+footer .call{font-size:22px;font-weight:800;color:#FFB596;letter-spacing:.5px}
+footer a{color:#FFB596}
+
+.printbtn{position:fixed;right:16px;bottom:16px;background:var(--brand);color:#fff;
+  border:none;border-radius:12px;padding:11px 16px;font-weight:700;font-size:14px;
+  cursor:pointer;box-shadow:0 6px 20px rgba(232,84,30,.4);font-family:inherit}
+.printbtn:hover{background:var(--brand-2)}
+
+@media (max-width:640px){
+  header,main,footer{padding-left:20px;padding-right:20px}
+  .toc ol{columns:1}.rolegrid{grid-template-columns:1fr}
+  header h1{font-size:25px}
+}
+@media print{
+  body{background:#fff}.page{box-shadow:none;max-width:none}
+  .printbtn{display:none}header{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  section{break-inside:avoid}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<header>
+  <div class="brandrow">
+    <svg class="mark" viewBox="0 0 44 48" fill="none" aria-hidden="true">
+      <path d="M4 24C4 12 12 4 22 4s18 8 18 20" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M9 24c0-8 6-13 13-13s13 5 13 13" stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".8"/>
+      <path d="M15 24c0-4 3-7 7-7s7 3 7 7" stroke="#fff" stroke-width="3" stroke-linecap="round" opacity=".6"/>
+      <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M9 40c0-6 5-11 13-11" stroke="#fff" stroke-width="3.2" stroke-linecap="round" opacity=".55"/>
+    </svg>
+    <div class="brandname">Digiplus<small>Chấm công thông minh</small></div>
+  </div>
+  <span class="doctag">Tài liệu dành cho Đại lý</span>
+  <h1>Cẩm nang Đại lý</h1>
+  <p>Hướng dẫn trọn bộ: từ triển khai phần mềm cho khách đến vận hành và hỗ trợ — để đại lý tự chủ và chăm sóc khách hàng của mình.</p>
+  <div class="hmeta">
+    <span class="hchip">🤝 Anh cấp domain · bộ cài · license</span>
+    <span class="hchip">🛠️ Đại lý cài &amp; hướng dẫn khách</span>
+    <span class="hchip">📞 Hỗ trợ: 0372 669 992</span>
+  </div>
+</header>
+
+<main>
+  <p class="lead">Chào mừng Anh/Chị trở thành đại lý của <b>Digiplus</b>. Tài liệu này giúp đại lý triển khai phần mềm chấm công cho khách một cách nhanh gọn, chuyên nghiệp và tự tin hỗ trợ khách hàng. Hãy đọc một lượt trước khi triển khai khách đầu tiên.</p>
+
+  <div class="box info">
+    <div class="t">ℹ️ Vai trò rõ ràng</div>
+    Digiplus lo phần <b>kỹ thuật lõi</b> (tạo tên miền riêng cho khách, đóng gói bộ cài, cấp bản quyền license). Đại lý lo phần <b>tiếp xúc khách</b> (tư vấn, cài đặt, khai báo, hướng dẫn sử dụng, hỗ trợ tuyến đầu). Đại lý <b>không cần</b> đụng tới máy chủ, khóa bản quyền hay cấu hình tên miền.
+  </div>
+
+  <div class="toc">
+    <h4>Nội dung</h4>
+    <ol>
+      <li><a href="#a">Hiểu nhanh sản phẩm để tư vấn</a></li>
+      <li><a href="#b">Hai chế độ triển khai</a></li>
+      <li><a href="#c">Quy trình triển khai 1 khách (A→Z)</a></li>
+      <li><a href="#d">Cài đặt &amp; kích hoạt chi tiết</a></li>
+      <li><a href="#e">Cấu hình máy chấm công vân tay/khuôn mặt</a></li>
+      <li><a href="#f">Khai báo &amp; vận hành để hướng dẫn khách</a></li>
+      <li><a href="#g">Trang hướng dẫn riêng của đại lý</a></li>
+      <li><a href="#h">Xử lý sự cố thường gặp</a></li>
+      <li><a href="#i">Lưu ý &amp; hỗ trợ</a></li>
+    </ol>
+  </div>
+
+  <!-- A -->
+  <section id="a">
+    <div class="sec-h"><div class="sec-n">A</div><h2>Hiểu nhanh sản phẩm để tư vấn</h2></div>
+    <div class="sub">Nắm 1 phút là bán được.</div>
+    <p><b>Digiplus Chấm công</b> là phần mềm chấm công + tính công + bảng lương, chấm bằng <b>2 cách kết hợp</b>:</p>
+    <ul>
+      <li>🔌 <b>Máy chấm công</b> vân tay / khuôn mặt / thẻ (ZKTeco) — đặt tại văn phòng, tự đẩy dữ liệu về phần mềm theo thời gian thực; đồng bộ nhiều máy, nhiều chi nhánh.</li>
+      <li>📸 <b>Điện thoại (ảnh selfie + định vị GPS)</b> — nhân viên đi ngoài vẫn chấm được; mỗi lần chấm có ảnh và vị trí, cảnh báo khi chấm ngoài phạm vi.</li>
+    </ul>
+    <p>Phần mềm <b>tự nhận đúng ca</b> (kể cả ca xoay, ca đêm), <b>tự tính công</b> (đi muộn, về sớm, tăng ca), <b>xuất báo cáo &amp; bảng lương ra Excel</b>. Dữ liệu nằm trên máy của chính doanh nghiệp — bản quyền gắn theo máy.</p>
+    <h3>Điểm mạnh để chốt khách</h3>
+    <table>
+      <tr><th>Khách lo</th><th>Digiplus trả lời</th></tr>
+      <tr><td>Nhân viên chấm hộ nhau</td><td>Ảnh đóng dấu giờ + khóa theo 1 điện thoại, đổi máy phải duyệt; cảnh báo chấm ngoài văn phòng.</td></tr>
+      <tr><td>Đi công trình/ngoài văn phòng</td><td>Chấm bằng điện thoại có ảnh + GPS, ở đâu cũng chấm được.</td></tr>
+      <tr><td>Đã có máy vân tay rồi</td><td>Kết nối luôn máy cũ ZKTeco, không phải bỏ máy; gộp cả máy lẫn điện thoại về một người.</td></tr>
+      <tr><td>Sợ khó dùng</td><td>Quản lý trên web, nhân viên mở link là chấm — không bắt cài gì phức tạp.</td></tr>
+      <tr><td>Tính công mệt</td><td>Tự nhận ca, tự tính công, xuất bảng lương Excel một cú bấm.</td></tr>
+    </table>
+  </section>
+
+  <!-- B -->
+  <section id="b">
+    <div class="sec-h"><div class="sec-n">B</div><h2>Hai chế độ triển khai</h2></div>
+    <div class="sub">Chọn đúng chế độ ngay từ đầu để tư vấn khách.</div>
+    <div class="rolegrid">
+      <div class="rolecard">
+        <h4>① Cài tại văn phòng khách</h4>
+        <p style="margin:0">Phần mềm chạy trên <b>máy tính của khách</b>. Máy đó bật + có internet là dùng mọi nơi qua tên miền riêng.</p>
+        <p style="margin:8px 0 0;color:var(--muted);font-size:13.5px"><b>Hợp với:</b> khách <b>có máy chấm công vân tay/khuôn mặt</b> (máy nối cùng mạng LAN với máy tính — đơn giản, máy đời nào cũng chạy).</p>
+      </div>
+      <div class="rolecard">
+        <h4>② Máy chủ trên VPS (Digiplus)</h4>
+        <p style="margin:0">Digiplus chạy sẵn trên máy chủ — khách <b>không lo bật máy</b>, dùng 24/7 mọi nơi.</p>
+        <p style="margin:8px 0 0;color:var(--muted);font-size:13.5px"><b>Hợp với:</b> khách <b>chỉ chấm bằng điện thoại</b> (ảnh + GPS). Khách có máy vân tay vẫn được nhưng máy phải đi ra internet — xem mục E.</p>
+      </div>
+    </div>
+    <div class="box tip"><div class="t">✅ Nguyên tắc chọn nhanh</div>
+      Khách <b>có máy vân tay/khuôn mặt</b> → chọn <b>Chế độ ①</b> (gọn nhất). Khách <b>chỉ chấm điện thoại</b> → chọn <b>Chế độ ②</b> (khỏi lo máy khách tắt). Khi báo Digiplus tạo khách, nói rõ chế độ này.
+    </div>
+  </section>
+
+  <!-- C -->
+  <section id="c">
+    <div class="sec-h"><div class="sec-n">C</div><h2>Quy trình triển khai 1 khách (A→Z)</h2></div>
+    <div class="sub">Sáu bước, phối hợp giữa Đại lý và Digiplus.</div>
+
+    <div class="flow">
+      <div class="node"><span class="who">Đại lý</span><b>1. Chốt khách</b><br>Thu thập thông tin</div>
+      <div class="arrow">→</div>
+      <div class="node"><span class="who">Digiplus</span><b>2. Cấp bộ cài</b><br>Tên miền + file .zip</div>
+      <div class="arrow">→</div>
+      <div class="node"><span class="who">Đại lý</span><b>3. Cài cho khách</b><br>Lấy Mã máy</div>
+      <div class="arrow">→</div>
+      <div class="node"><span class="who">Digiplus</span><b>4. Cấp license</b><br>Từ Mã máy</div>
+      <div class="arrow">→</div>
+      <div class="node"><span class="who">Đại lý</span><b>5. Kích hoạt + khai báo</b><br>Hướng dẫn khách</div>
+    </div>
+
+    <h3>Vai trò từng bên</h3>
+    <div class="rolegrid">
+      <div class="rolecard you">
+        <h4>🛠️ Đại lý làm</h4>
+        <ul style="margin:0">
+          <li>Tư vấn, chốt khách, thu tiền</li>
+          <li>Gửi Digiplus thông tin khách</li>
+          <li>Cài bộ cài cho khách</li>
+          <li>Lấy Mã máy gửi Digiplus</li>
+          <li>Dán license, khai báo ban đầu</li>
+          <li>Hướng dẫn &amp; hỗ trợ khách tuyến đầu</li>
+        </ul>
+      </div>
+      <div class="rolecard dp">
+        <h4>🤝 Digiplus làm</h4>
+        <ul style="margin:0">
+          <li>Tạo tên miền riêng cho khách</li>
+          <li>Đóng gói bộ cài .zip (có sẵn cấu hình)</li>
+          <li>Cấp chuỗi license từ Mã máy</li>
+          <li>Hỗ trợ kỹ thuật tuyến sau cho đại lý</li>
+          <li>Cập nhật phần mềm, sửa lỗi</li>
+        </ul>
+      </div>
+    </div>
+
+    <h3>Trình tự phía Digiplus (để đại lý nắm nhịp phối hợp)</h3>
+    <p>Digiplus chuẩn bị <b>tên miền</b> và <b>bộ cài</b> trước; <b>license</b> thì cấp sau khi đại lý cài xong và có Mã máy:</p>
+    <div class="flow">
+      <div class="node"><span class="who">Digiplus · trước</span><b>1. Tạo tên miền riêng</b><br>Dựng sẵn tên miền + kết nối cho khách</div>
+      <div class="arrow">→</div>
+      <div class="node"><span class="who">Digiplus · trước</span><b>2. Đóng gói bộ cài</b><br>File .zip gắn sẵn cấu hình → gửi đại lý</div>
+      <div class="arrow">→</div>
+      <div class="node" style="background:#eef4ff;border-color:#c7d7fb"><span class="who" style="color:#1D4ED8">Đại lý</span><b>Cài + lấy Mã máy</b><br>Gửi Mã máy về Digiplus</div>
+      <div class="arrow">→</div>
+      <div class="node"><span class="who">Digiplus · sau</span><b>3. Cấp license</b><br>Tạo từ Mã máy → gửi đại lý dán</div>
+    </div>
+    <div class="box warn"><div class="t">⚠️ License có SAU khi cài</div>
+      Tên miền + bộ cài được Digiplus chuẩn bị <b>trước</b> và gửi sẵn cho đại lý. Riêng <b>license phải chờ đại lý cài xong lấy Mã máy</b> — vì license gắn đúng theo máy tính của khách, không thể cấp trước khi cài.
+    </div>
+
+    <h3>Bước 1 — Thu thập thông tin khách (gửi Digiplus)</h3>
+    <p>Khi chốt xong, đại lý gửi Digiplus (qua Zalo <b>0372 669 992</b>):</p>
+    <ul>
+      <li><b>Tên công ty</b> viết <b>không dấu, không cách</b> (dùng để đặt tên miền, vd <code>congtyabc</code> → <code>congtyabc.maychamcongcloud.com</code>).</li>
+      <li><b>Chế độ triển khai</b>: ① văn phòng khách hay ② VPS (xem mục B).</li>
+      <li><b>Có máy chấm công vân tay/khuôn mặt không?</b> Nếu có, ghi rõ hãng/đời máy nếu biết.</li>
+      <li>(Tùy chọn) <b>Giới hạn số nhân viên / hạn dùng</b> theo gói khách mua.</li>
+    </ul>
+
+    <h3>Bước 2 — Nhận bộ cài từ Digiplus</h3>
+    <p>Digiplus gửi lại đại lý <b>1 file .zip</b> bộ cài (đã cài sẵn cấu hình + tên miền của khách). Đại lý chỉ việc mang đi cài. Bộ cài này <b>an toàn</b> để chuyển cho khách.</p>
+
+    <div class="box warn"><div class="t">⚠️ Cần Mã máy mới có license</div>
+      License gắn <b>đúng theo máy tính cài phần mềm</b>, nên phải cài xong (Bước 3) mới lấy được Mã máy để Digiplus cấp license (Bước 4). Không thể cấp license trước khi cài.
+    </div>
+
+    <p>Chi tiết cài đặt &amp; kích hoạt ở <a href="#d">mục D</a>.</p>
+  </section>
+
+  <!-- D -->
+  <section id="d">
+    <div class="sec-h"><div class="sec-n">D</div><h2>Cài đặt &amp; kích hoạt chi tiết</h2></div>
+    <div class="sub">Bước 3 → 5 của quy trình. Làm trên máy khách (trực tiếp hoặc qua Ultraviewer/TeamViewer).</div>
+
+    <ol class="steps">
+      <li><b>Giải nén bộ cài</b><small>Giải nén file .zip Digiplus gửi ra một thư mục trên máy khách (nên để ổ C hoặc D, đường dẫn không dấu).</small></li>
+      <li><b>Chạy <span class="kbd">CaiDat.bat</span></b><small>Bấm đúp. Phần mềm tự chạy và <b>tự khởi động cùng Windows</b> từ lần sau. Nếu Windows hỏi cho phép, chọn cho chạy.</small></li>
+      <li><b>Mở phần mềm — lấy Mã máy</b><small>Màn hình kích hoạt hiện <b>Mã máy</b> (dạng <code>103B-E555-114A-6CD3</code>). Copy chính xác gửi Digiplus qua Zalo.</small></li>
+      <li><b>Nhận &amp; dán license</b><small>Digiplus gửi lại chuỗi license → dán vào ô kích hoạt → bấm <b>Kích hoạt</b> → xong.</small></li>
+      <li><b>Đăng nhập quản lý</b><small>Mở <code>https://&lt;tencty&gt;.maychamcongcloud.com/admin</code> — tài khoản mặc định <b>admin / admin123</b>.</small></li>
+      <li><b>Đổi mật khẩu admin ngay</b><small>Bắt buộc, để bảo mật cho khách. (Có sẵn <code>nv001 / 123456</code> để thử app nhân viên.)</small></li>
+    </ol>
+
+    <div class="box info"><div class="t">📱 Nhân viên dùng thế nào</div>
+      Nhân viên mở <code>https://&lt;tencty&gt;.maychamcongcloud.com</code> trên điện thoại là chấm được, <b>không bắt buộc cài app</b>. Muốn tiện thì cài ra màn hình chính: <b>Android</b> bấm nút “📲 Cài app” hiện trong phần mềm; <b>iPhone</b> vào Safari → Chia sẻ → “Thêm vào MH chính”.
+    </div>
+
+    <div class="box tip"><div class="t">✅ Điều kiện hoạt động (nói rõ cho khách)</div>
+      Máy chủ (máy cài phần mềm) phải <b>bật + có internet</b> thì mọi nơi mới dùng được qua tên miền. Máy chủ tắt/mất mạng → hệ thống tạm ngừng. Riêng chấm bằng <b>điện thoại</b> thì ở đâu cũng chấm được. (Chế độ ② VPS không phụ thuộc máy khách bật.)
+    </div>
+  </section>
+
+  <!-- E -->
+  <section id="e">
+    <div class="sec-h"><div class="sec-n">E</div><h2>Cấu hình máy chấm công vân tay/khuôn mặt</h2></div>
+    <div class="sub">Chỉ làm khi khách CÓ máy ZKTeco. Nguyên lý: máy tự gửi dữ liệu ra tới địa chỉ "Server" mình đặt.</div>
+
+    <ol class="steps">
+      <li><b>Bật máy chấm công trong phần mềm</b><small>Vào <b>/admin → Máy chấm công → bật “Dùng máy chấm công”</b>.</small></li>
+      <li><b>Khai báo địa chỉ Server trên máy</b><small>Trên máy: Menu → Comm → Cloud/ADMS. Điền theo bảng dưới tùy chế độ.</small></li>
+      <li><b>Đăng ký vân tay/khuôn mặt trên máy</b><small>Nhân viên tự về phần mềm; điền <b>“Số ID máy”</b> cho khớp giữa máy và phần mềm.</small></li>
+      <li><b>Nhiều máy đồng bộ cho nhau</b><small>Đặt <b>“Nhóm ĐB”</b> giống nhau ở từng máy → tự chia sẻ (vân tay, khuôn mặt, thẻ, mật mã). Lệch thì bấm <b>“🔁 Đồng bộ”</b>; trục trặc thì <b>“Đồng bộ lại TOÀN BỘ”</b>. Bảng có cột NV/Vân tay/Mặt/Thẻ để đối chiếu.</small></li>
+    </ol>
+
+    <h3>Điền địa chỉ Server trên máy — theo chế độ</h3>
+    <table>
+      <tr><th>Chế độ</th><th>Server</th><th>Port</th><th>Giao thức</th><th>Điều kiện</th></tr>
+      <tr><td>① Văn phòng khách (LAN)</td><td><b>IP LAN</b> của máy tính cài phần mềm (vd <code>192.168.0.107</code>, xem nút “Refresh mạng”)</td><td><code>8686</code></td><td>HTTP (không SSL)</td><td>Máy <b>cùng mạng LAN</b> với máy tính. Đơn giản, máy đời nào cũng chạy.</td></tr>
+      <tr><td>② VPS — máy đời mới</td><td><code>&lt;tencty&gt;.maychamcongcloud.com</code></td><td><code>443</code></td><td>HTTPS/SSL bật</td><td>Máy hỗ trợ nhập <b>tên miền + HTTPS</b>. Đi qua Cloudflare có sẵn.</td></tr>
+      <tr><td>② VPS — máy đời rẻ (chỉ nhập IP)</td><td>IP công khai của VPS</td><td>port riêng do Digiplus mở</td><td>HTTP</td><td>Máy chỉ nhập được IP → Digiplus phải mở 1 port trên VPS. Báo Digiplus khi gặp máy loại này.</td></tr>
+    </table>
+
+    <div class="box warn"><div class="t">⚠️ Máy vân tay nên dùng Chế độ ①</div>
+      Nhiều máy ZKTeco đời rẻ chỉ nhập được IP + HTTP. Nếu khách có máy vân tay, <b>khuyên chọn Chế độ ① (cài tại văn phòng, dùng LAN)</b> cho gọn và ổn định. Web + điện thoại vẫn vào mọi nơi qua tên miền như thường.
+    </div>
+    <div class="box info"><div class="t">🚪 Mở cửa từ xa (tùy chọn)</div>
+      Máy có chức năng <b>kiểm soát cửa</b> (relay) thì trong phần mềm bật “KS cửa” và bấm “Mở cửa” để mở từ xa. Máy chấm công thuần (không có cửa) thì bỏ qua.
+    </div>
+  </section>
+
+  <!-- F -->
+  <section id="f">
+    <div class="sec-h"><div class="sec-n">F</div><h2>Khai báo &amp; vận hành để hướng dẫn khách</h2></div>
+    <div class="sub">Trình tự khai báo ban đầu cho khách chạy được ngay.</div>
+
+    <ol class="steps">
+      <li><b>Bộ phận &amp; Chức danh</b><small>Vào tab “Bộ phận &amp; Chức danh”: tạo bộ phận cha – con (vd Kinh doanh → Sale), khai báo danh sách chức danh để chọn.</small></li>
+      <li><b>Nhân viên</b><small>Thêm nhân viên (tên, mã NV, bộ phận, chức danh). Có máy chấm công thì điền <b>Số ID máy</b> khớp. Khóa/mở khóa hoặc xóa nhân viên khi cần. (Chống trùng Mã NV và Số ID.)</small></li>
+      <li><b>Ca làm &amp; Lịch trình</b><small>Khai báo các ca (sáng/chiều/đêm), gom vào lịch trình rồi gán cho nhân viên. Hệ thống <b>tự nhận đúng ca</b> theo giờ chấm, kể cả ca qua đêm.</small></li>
+      <li><b>Chấm công điện thoại</b><small>Bật định vị (geofence) quanh văn phòng nếu cần; nhân viên chấm có ảnh + GPS; mỗi tài khoản khóa theo 1 điện thoại (chống chấm hộ).</small></li>
+      <li><b>Duyệt &amp; Báo cáo</b><small>Xem bảng công hằng ngày (ảnh vào/ra, giờ, vị trí, đi muộn), duyệt chấm công, xuất báo cáo và bảng công ra Excel.</small></li>
+      <li><b>Bảng lương</b><small>Khai lương cơ bản, phụ cấp, hệ số tăng ca cho từng người → bảng lương tự tính theo số công, xuất Excel.</small></li>
+      <li><b>Sao lưu</b><small>Nhắc khách sao lưu định kỳ: chỉ cần copy <b>thư mục dữ liệu + thư mục ảnh</b> của phần mềm.</small></li>
+    </ol>
+
+    <div class="box tip"><div class="t">📎 Tài liệu sẵn có để gửi khách</div>
+      Trong bộ tài liệu Digiplus có các file hướng dẫn dành cho <b>khách cuối</b>, đại lý có thể gửi Zalo cho khách: <b>Hướng dẫn cài app điện thoại</b>, <b>Hướng dẫn quản lý (chấm định vị)</b>, <b>Hướng dẫn quản lý (máy + định vị)</b>, <b>Giới thiệu phần mềm</b>, <b>Bảng giá</b>.
+    </div>
+  </section>
+
+  <!-- G -->
+  <section id="g">
+    <div class="sec-h"><div class="sec-n">G</div><h2>Trang hướng dẫn riêng của đại lý</h2></div>
+    <div class="sub">Gửi khách link mang thương hiệu &amp; hotline của chính đại lý.</div>
+    <p>Digiplus có trang giới thiệu/hướng dẫn online. Mỗi đại lý được cấp <b>một đường link riêng</b> — khi khách mở, trang hiện <b>tên và hotline của đại lý</b> (ẩn thông tin Digiplus), để khách liên hệ thẳng đại lý.</p>
+    <table>
+      <tr><th>Loại link</th><th>Địa chỉ</th><th>Hiện gì</th></tr>
+      <tr><td>Link riêng của đại lý</td><td><code>huongdan.maychamcongcloud.com/?dl=<b>mã-đại-lý</b></code></td><td>Tên + hotline + web của đại lý</td></tr>
+      <tr><td>Ví dụ (Skytech)</td><td><code>huongdan.maychamcongcloud.com/?dl=skytech</code></td><td>Skytech · 0865 574 611 · vietskytech.com.vn</td></tr>
+    </table>
+    <div class="box info"><div class="t">ℹ️ Lấy link riêng thế nào</div>
+      Đại lý gửi Digiplus: <b>tên hiển thị</b>, <b>số hotline/Zalo</b>, <b>website (nếu có)</b>. Digiplus tạo mã và gửi lại link riêng cho đại lý dùng. Khi share link lên Zalo/Facebook, nếu thấy còn hiện tên cũ thì báo Digiplus làm mới bản xem trước.
+    </div>
+  </section>
+
+  <!-- H -->
+  <section id="h">
+    <div class="sec-h"><div class="sec-n">H</div><h2>Xử lý sự cố thường gặp</h2></div>
+    <div class="sub">Đại lý tự xử lý được phần lớn; vướng thì gọi Digiplus.</div>
+    <table>
+      <tr><th>Hiện tượng</th><th>Cách xử lý</th></tr>
+      <tr><td>Vào tên miền không được / lỗi <b>“Error 1033”</b></td><td>Máy chủ chưa chạy hoặc mất kết nối. Kiểm tra: máy có <b>bật + internet</b>; phần mềm đã chạy (mở <code>http://localhost:8686</code>). Bấm <span class="kbd">KiemTra-Tunnel.bat</span> trong bộ cài để soi log — thấy “Registered tunnel connection” là OK; báo lỗi đỏ thì chụp gửi Digiplus.</td></tr>
+      <tr><td>File <code>cloudflared.exe</code> tự biến mất</td><td>Phần mềm diệt virus xóa nhầm. Thêm <b>ngoại lệ (exclusion)</b> cho thư mục cài trong Windows Security, rồi cài lại/khởi động lại.</td></tr>
+      <tr><td>Phần mềm không tự chạy sau khi bật máy</td><td>Chạy lại <span class="kbd">CaiDat.bat</span> (thiết lập tự khởi động). Kiểm tra <code>http://localhost:8686</code>.</td></tr>
+      <tr><td>Máy chấm công không đẩy dữ liệu</td><td>Kiểm tra đã bật “Dùng máy chấm công”; địa chỉ Server + Port + giao thức trên máy đúng theo <a href="#e">mục E</a>; Chế độ ① thì máy phải cùng LAN.</td></tr>
+      <tr><td>Máy 2 chưa có vân tay của máy 1</td><td>Đặt “Nhóm ĐB” giống nhau, bấm “🔁 Đồng bộ”. Đồng bộ áp dần theo nhịp máy hỏi — chờ một lát; vẫn lệch thì “Đồng bộ lại TOÀN BỘ”.</td></tr>
+      <tr><td>Quên mật khẩu admin</td><td>Liên hệ Digiplus để hỗ trợ đặt lại.</td></tr>
+      <tr><td>Khách cần đổi tên miền / gỡ bỏ</td><td>Việc tên miền do Digiplus xử lý — báo Digiplus.</td></tr>
+    </table>
+  </section>
+
+  <!-- I -->
+  <section id="i">
+    <div class="sec-h"><div class="sec-n">I</div><h2>Lưu ý &amp; hỗ trợ</h2></div>
+    <div class="sub">Vài điều giúp triển khai trơn tru.</div>
+    <div class="box stop"><div class="t">⛔ Không cần &amp; không nên làm</div>
+      <ul style="margin:6px 0 0">
+        <li>Không cần chỉnh file cấu hình bên trong bộ cài — Digiplus đã cài sẵn cho từng khách.</li>
+        <li>Không tự thay đổi tên miền/token — phần đó Digiplus giữ để đảm bảo an toàn cho khách.</li>
+        <li>Bộ cài Digiplus gửi đã loại bỏ mọi thứ nhạy cảm — cứ yên tâm chuyển cho khách.</li>
+      </ul>
+    </div>
+    <div class="box tip"><div class="t">✅ Mẹo triển khai nhanh</div>
+      <ul style="margin:6px 0 0">
+        <li>Chốt xong gửi ngay thông tin khách cho Digiplus để có bộ cài sẵn, tới nơi là cài.</li>
+        <li>Có thể cài từ xa cho khách qua <b>Ultraviewer/TeamViewer</b> — không cần đến tận nơi.</li>
+        <li>Cài xong đổi mật khẩu admin và làm mẫu 1–2 nhân viên + 1 ca cho khách xem là khách tự làm tiếp được.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="big">Digiplus — Chấm công thông minh cho doanh nghiệp Việt.</div>
+  <p style="margin:8px 0 4px">Hỗ trợ đại lý (kỹ thuật · cấp tên miền · cấp license):</p>
+  <div class="call">📞 Hotline / Zalo: 0372 669 992</div>
+  <p style="margin:8px 0 0;opacity:.8;font-size:13px">Tài liệu nội bộ dành cho đại lý Digiplus. Vui lòng không chuyển nguyên bản cho khách cuối — gửi khách các file hướng dẫn dành riêng cho khách.</p>
+</footer>
+
+</div>
+
+<button class="printbtn" onclick="window.print()">🖨️ In / Lưu PDF</button>
+</body>
+</html>

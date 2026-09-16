@@ -20,6 +20,7 @@ const NAV = [
   ['leaves', '📝', 'Đơn từ', 'leaves'],
   ['salary', '💰', 'Lương', 'salary'],
   ['report', '📅', 'Báo cáo', 'reports'],
+  ['logs', '🧾', 'Nhật ký', 'logs'],
   ['settings', '⚙️', 'Cài đặt', 'settings'],
 ];
 const isMaster = () => ME?.role === 'master';                 // tài khoản tổng (Anh)
@@ -136,7 +137,7 @@ async function checkUpdateBanner() {
 }
 function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
-  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, settings: pageSettings }[key])();
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, logs: pageLogs, settings: pageSettings }[key])();
 }
 
 /* ---------- Thiết lập lần đầu ---------- */
@@ -1752,6 +1753,146 @@ async function pageDevReq() {
     el('div', { class: 'panel', style: 'padding:14px 16px;margin-bottom:12px;max-width:640px;font-size:13px;color:var(--muted)' },
       'Khi bật “Chống chấm hộ”, mỗi tài khoản chỉ chấm được trên 1 điện thoại. Nhân viên đổi/mất máy sẽ gửi yêu cầu về đây — Anh bấm Duyệt để gán điện thoại mới, hoặc Gỡ thiết bị để nhân viên gắn lại từ đầu.'),
     el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+/* ---------- NHẬT KÝ THAO TÁC ---------- */
+async function pageLogs() {
+  let tab = 'admin';                 // 'admin' | 'device'
+  const LIMIT = 200;
+  const st = { admin: { rows: [], total: 0 }, device: { rows: [], total: 0 } };
+
+  const fmt = (d) => d.toISOString().slice(0, 10);
+  const now = new Date();
+  const fromI = el('input', { type: 'date', value: fmt(new Date(now.getTime() - 29 * 86400000)), style: 'width:auto' });
+  const toI = el('input', { type: 'date', value: fmt(now), style: 'width:auto' });
+  const qI = el('input', { type: 'search', placeholder: 'Tìm thao tác / người…', style: 'width:190px' });
+  const serialSel = el('select', { style: 'width:auto' }, el('option', { value: '' }, 'Tất cả máy'));
+  const serialWrap = el('span', { style: 'display:none' }, serialSel);
+
+  const mkTab = (label, key) => { const b = el('button', { class: 'btn sm' + (tab === key ? '' : ' ghost') }, label); b.onclick = () => { tab = key; go2(); }; return b; };
+  const applyBtn = el('button', { class: 'btn sm' }, 'Lọc');
+  const exportBtn = el('button', { class: 'btn ghost sm' }, '⬇ Xuất Excel');
+  applyBtn.onclick = () => load();
+  qI.addEventListener('keydown', (e) => { if (e.key === 'Enter') load(); });
+  exportBtn.onclick = () => downloadLog();
+
+  const body = el('div');
+  const roleVi = { master: 'Tài khoản tổng', admin: 'Quản trị viên', manager: 'Quản lý' };
+
+  function qs() {
+    const p = new URLSearchParams();
+    if (fromI.value) p.set('from', fromI.value);
+    if (toI.value) p.set('to', toI.value);
+    if (qI.value.trim()) p.set('q', qI.value.trim());
+    if (tab === 'device' && serialSel.value) p.set('serial', serialSel.value);
+    return p;
+  }
+  async function downloadLog() {
+    exportBtn.disabled = true;
+    try {
+      const url = `/admin/logs/${tab}/export.xlsx?` + qs().toString();
+      const res = await api(url, { raw: true });
+      const blob = await res.blob(); const u = URL.createObjectURL(blob);
+      const a = el('a', { href: u, download: `nhatky_${tab === 'admin' ? 'quantri' : 'maychamcong'}.xlsx` });
+      document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(u);
+    } catch (e) { toast(e.message || 'Lỗi xuất Excel', 'err'); }
+    exportBtn.disabled = false;
+  }
+
+  async function load() {
+    body.innerHTML = ''; body.append(loading());
+    const p = qs(); p.set('limit', LIMIT); p.set('offset', 0);
+    try {
+      if (tab === 'admin') {
+        const d = await api('/admin/logs/admin?' + p.toString());
+        st.admin = d; renderAdmin();
+      } else {
+        const d = await api('/admin/logs/device?' + p.toString());
+        st.device = d;
+        // nạp danh sách máy cho bộ lọc
+        if (d.serials) {
+          const cur = serialSel.value;
+          serialSel.innerHTML = ''; serialSel.append(el('option', { value: '' }, 'Tất cả máy'));
+          d.serials.forEach((s) => serialSel.append(el('option', { value: s.serial }, (s.name || s.serial))));
+          serialSel.value = cur;
+        }
+        renderDevice();
+      }
+    } catch (e) { body.innerHTML = ''; body.append(el('div', { class: 'empty' }, e.message)); }
+  }
+
+  function renderAdmin() {
+    const d = st.admin;
+    const tbl = el('table', { class: 'data' });
+    tbl.innerHTML = '<thead><tr><th style="width:150px">Thời gian</th><th>Người thực hiện</th><th>Thao tác</th><th>Chi tiết</th><th style="width:110px">IP</th></tr></thead>';
+    const tb = el('tbody');
+    if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, 'Chưa có thao tác nào trong khoảng này.'))));
+    for (const x of d.rows) tb.append(el('tr', {},
+      el('td', {}, el('span', { style: 'font-variant-numeric:tabular-nums' }, x.at)),
+      el('td', {}, el('b', {}, x.user_name || x.username || '—'),
+        el('div', { style: 'color:#999;font-size:11px' }, (x.username || '') + (x.role ? ' · ' + (roleVi[x.role] || x.role) : ''))),
+      el('td', {}, el('span', { class: 'pill' }, x.action || '—')),
+      el('td', {}, el('div', { style: 'font-size:12px;color:var(--muted);max-width:360px;word-break:break-word', title: x.detail || '' }, x.detail || '')),
+      el('td', {}, el('span', { style: 'font-size:11px;color:#999' }, x.ip || '')),
+    ));
+    tbl.append(tb);
+    body.innerHTML = '';
+    body.append(el('div', { class: 'panel tbl-scroll' }, tbl), moreBar(d));
+  }
+
+  function renderDevice() {
+    const d = st.device;
+    const tbl = el('table', { class: 'data' });
+    tbl.innerHTML = '<thead><tr><th style="width:160px">Thời gian</th><th>Máy</th><th>Thao tác</th><th>Người thao tác</th><th>Đối tượng</th></tr></thead>';
+    const tb = el('tbody');
+    if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, 'Chưa có thao tác nào từ máy. Máy chấm công sẽ tự đẩy nhật ký (vào menu, thêm/xóa vân tay, xóa dữ liệu…) khi được bật.'))));
+    for (const x of d.rows) tb.append(el('tr', {},
+      el('td', {}, el('span', { style: 'font-variant-numeric:tabular-nums' }, x.op_time || '—')),
+      el('td', {}, el('div', {}, x.dev_name || x.serial), x.dev_name ? el('div', { style: 'color:#999;font-size:11px' }, x.serial) : null),
+      el('td', {}, el('span', { class: 'pill' }, x.action), el('span', { style: 'color:#bbb;font-size:11px;margin-left:4px' }, '#' + x.op_code)),
+      el('td', {}, x.emp_name ? el('b', {}, x.emp_name) : '', el('div', { style: 'color:#999;font-size:11px' }, x.admin_pin ? 'ID ' + x.admin_pin : '')),
+      el('td', {}, el('div', { style: 'font-size:12px;color:var(--muted);max-width:280px;word-break:break-word', title: x.raw || '' }, [x.obj1, x.obj2, x.obj3].filter(Boolean).join(' · '))),
+    ));
+    tbl.append(tb);
+    body.innerHTML = '';
+    body.append(el('div', { class: 'panel tbl-scroll' }, tbl), moreBar(d));
+  }
+
+  // Thanh "tải thêm" khi còn dữ liệu
+  function moreBar(d) {
+    const wrap = el('div', { style: 'display:flex;align-items:center;gap:12px;margin-top:10px;color:var(--muted);font-size:13px' });
+    wrap.append(`Hiển thị ${d.rows.length} / ${d.total} dòng`);
+    if (d.rows.length < d.total) {
+      const more = el('button', { class: 'btn ghost sm' }, 'Tải thêm');
+      more.onclick = async () => {
+        more.disabled = true;
+        const p = qs(); p.set('limit', LIMIT); p.set('offset', d.rows.length);
+        try {
+          const nd = await api(`/admin/logs/${tab}?` + p.toString());
+          d.rows = d.rows.concat(nd.rows); d.total = nd.total;
+          tab === 'admin' ? renderAdmin() : renderDevice();
+        } catch (e) { toast(e.message, 'err'); more.disabled = false; }
+      };
+      wrap.append(more);
+    }
+    return wrap;
+  }
+
+  function go2() {
+    tabBar.replaceChildren(mkTab('🖥️ Thao tác quản trị', 'admin'), mkTab('🔌 Thao tác trên máy', 'device'));
+    serialWrap.style.display = tab === 'device' ? '' : 'none';
+    load();
+  }
+  const tabBar = el('div', { style: 'display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap' },
+    mkTab('🖥️ Thao tác quản trị', 'admin'), mkTab('🔌 Thao tác trên máy', 'device'));
+
+  const filters = el('div', { class: 'panel', style: 'padding:12px 14px;margin-bottom:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap' },
+    el('span', { style: 'font-size:13px;color:var(--muted)' }, 'Từ'), fromI,
+    el('span', { style: 'font-size:13px;color:var(--muted)' }, 'đến'), toI,
+    serialWrap, qI, applyBtn, el('span', { style: 'flex:1' }), exportBtn);
+
+  setMain(head('Nhật ký thao tác'), tabBar, filters, body);
+  load();
 }
 
 /* ---------- MÁY CHẤM CÔNG (ZKTeco ADMS push) ---------- */

@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { db } from '../db.js';
 import { signToken, verifyPassword, hashPassword, authRequired, effectivePermissions, masterLogin, signMaster, masterUser } from '../auth.js';
+import { logLogin } from '../audit.js';
 
 const r = Router();
 
@@ -10,6 +11,7 @@ r.post('/login', (req, res) => {
   // Tài khoản tổng (Anh) — dùng chung mọi bản cài, không nằm trong DB
   if (masterLogin(username, password)) {
     const mu = masterUser(String(username).trim());
+    logLogin(req, mu);
     return res.json({ token: signMaster(mu.username), user: publicUser(mu) });
   }
   const emp = db.prepare('SELECT * FROM employees WHERE username = ? AND active = 1').get(String(username).trim());
@@ -17,6 +19,7 @@ r.post('/login', (req, res) => {
     return res.status(401).json({ error: 'Sai tài khoản hoặc mật khẩu' });
   }
   const token = signToken(emp);
+  if (emp.role === 'admin' || emp.role === 'manager') logLogin(req, emp);   // chỉ ghi đăng nhập quản trị
   res.json({ token, user: publicUser(emp) });
 });
 
