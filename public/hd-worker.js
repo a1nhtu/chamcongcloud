@@ -54,9 +54,9 @@ export default {
       `<meta name="description" content="${esc(DESC)}">` +
       `<script>window.__DL__=${JSON.stringify(d)};<\/script>`;
 
+    // Trang không có thẻ <head> tường minh → chèn ngay SAU <title>
     return new HTMLRewriter()
-      .on("title", { element(e) { e.setInnerContent(title); } })
-      .on("head", { element(e) { e.append(injected, { html: true }); } })
+      .on("title", { element(e) { e.setInnerContent(title); e.after(injected, { html: true }); } })
       .transform(res);
   }
 };
