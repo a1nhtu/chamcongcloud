@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog } from '../device-sync.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../update.js';
@@ -1127,6 +1127,16 @@ r.post('/devices/:id/query-users', need('devices'), (req, res) => {
   if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
   queryDeviceUsers(serial);
   res.json({ ok: true, msg: 'Đã gửi lệnh tải nhân viên từ máy. Máy sẽ đẩy danh sách NV + vân tay lên khi có kết nối (chờ chút rồi làm mới).' });
+});
+// Tải lại log chấm công cũ từ máy theo khoảng ngày (DATA QUERY ATTLOG)
+r.post('/devices/:id/query-attlog', need('devices'), (req, res) => {
+  const serial = serialOfDevice(req.params.id);
+  if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  const from = (req.body?.from || '').slice(0, 10), to = (req.body?.to || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu khoảng ngày hợp lệ' });
+  if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
+  queryDeviceAttlog(serial, from, to);
+  res.json({ ok: true, msg: `Đã gửi lệnh tải log ${from} → ${to}. Máy sẽ đẩy log lên khi có kết nối; chờ chút rồi vào Tính lại công / xem báo cáo.` });
 });
 r.post('/devices/:id/clear-log', need('devices'), (req, res) => {
   const serial = serialOfDevice(req.params.id);

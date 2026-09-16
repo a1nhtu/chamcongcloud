@@ -1833,6 +1833,7 @@ async function pageDevices() {
     const putDev = (body) => api('/admin/devices/' + m.id, { method: 'PUT', body });
     const moreBtn = rowMenu([
       { label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
+      { label: '⬇ Tải lại log chấm công (theo ngày)', fn: () => deviceAttlogModal(m) },
       { label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
       { label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { await putDev({ sync_group: g }); toast('Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
       { label: '🔢 Số máy (ghép log IDM)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
@@ -1930,6 +1931,23 @@ function usbImportModal() {
 }
 
 // Xóa dữ liệu trên máy chấm công (gửi lệnh ADMS) + xóa chấm công trong phần mềm theo ngày
+// Tải lại log chấm công CŨ từ máy theo khoảng ngày (DATA QUERY ATTLOG)
+function deviceAttlogModal(m) {
+  const fromI = el('input', { type: 'date' }), toI = el('input', { type: 'date' });
+  const today = new Date().toISOString().slice(0, 10);
+  const d30 = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
+  fromI.value = d30; toI.value = today;
+  const go = el('button', { class: 'btn' }, '⬇ Tải log về');
+  go.onclick = async () => {
+    if (!fromI.value || !toI.value) return toast('Chọn khoảng ngày', 'err');
+    try { const r = await api('/admin/devices/' + m.id + '/query-attlog', { method: 'POST', body: { from: fromI.value, to: toI.value } }); toast(r.msg || 'Đã gửi lệnh', 'ok'); closeModal(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  openModal('Tải lại log chấm công · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint' }, 'Yêu cầu máy gửi lại các lượt chấm công đã lưu trong khoảng ngày. Log về sẽ tự tính lại công. Chỉ tải được log MÁY CÒN LƯU (máy đầy sẽ ghi đè log cũ nhất).'),
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px' }, el('span', {}, 'Từ'), fromI, el('span', {}, 'đến'), toI, go),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+}
 async function deviceClearModal(m) {
   const post = async (path, body, okMsg) => { try { const r = await api('/admin/devices/' + m.id + path, { method: 'POST', body: body || {} }); toast(r.msg || okMsg || 'Đã gửi lệnh', 'ok'); return r; } catch (e) { toast(e.message, 'err'); throw e; } };
   const userBox = el('div', { style: 'max-height:160px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:6px 10px;margin-top:6px' }, loading());

@@ -177,6 +177,15 @@ export function deviceUserList(serial) {
     FROM device_users_serial s LEFT JOIN device_users u ON u.pin = s.pin
     WHERE s.serial = ? ORDER BY CAST(s.pin AS INTEGER), s.pin`).all(serial);
 }
+// Yêu cầu MÁY gửi lại LOG CHẤM CÔNG CŨ theo khoảng ngày (nếu máy còn lưu).
+// Cú pháp ADMS (Attendance PUSH Protocol): C:<id>:DATA QUERY ATTLOG StartTime=..<TAB>EndTime=..
+// từ/đến: 'YYYY-MM-DD'. Log máy gửi về sẽ qua ingestAttlog → tạo lượt quẹt + tính lại công.
+export function queryDeviceAttlog(serial, from, to) {
+  const start = `${from} 00:00:00`;
+  const end = `${to} 23:59:59`;
+  queueCmd(serial, `DATA QUERY ATTLOG StartTime=${start}\tEndTime=${end}`);
+  return 1;
+}
 // Kéo (tải) danh sách nhân viên + vân tay/khuôn mặt TỪ MÁY về phần mềm.
 // Gửi lệnh ADMS DATA QUERY để máy đẩy toàn bộ USERINFO + FINGERTMP + BIODATA lên;
 // server nhận sẽ tự tạo/cập nhật NV (upsertEmployeeFromDevice). Dùng khi cần tải lại NV từ máy.
