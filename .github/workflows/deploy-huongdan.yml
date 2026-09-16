@@ -9,6 +9,7 @@ on:
     branches: [main]
     paths:
       - 'public/huong-dan.html'
+      - 'public/hd-worker.js'
       - '.github/workflows/deploy-huongdan.yml'
   workflow_dispatch: {}   # cho phép bấm chạy tay trong tab Actions
 
@@ -26,6 +27,7 @@ jobs:
         run: |
           mkdir -p _site
           cp public/huong-dan.html _site/index.html
+          cp public/hd-worker.js _site/_worker.js
 
       - name: Deploy lên Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

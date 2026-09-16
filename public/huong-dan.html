@@ -514,31 +514,16 @@ footer b{color:var(--ink)}
 
 <script>
 /* ============================================================
-   DANH SÁCH ĐẠI LÝ  — Anh chỉ cần sửa trong khối này
-   ------------------------------------------------------------
-   Thêm mỗi đại lý một dòng theo mẫu:
-     "ma-dai-ly": { ten:"Tên đại lý", hotline:"09xx xxx xxx", web:"" },
-   • Đại lý gửi cho khách link:
-        https://huongdan.maychamcongcloud.com/?dl=ma-dai-ly
-     → trang tự hiện TÊN + HOTLINE của đại lý, ẩn hết thông tin Digiplus.
-   • Mã đặt chữ thường, không dấu, không cách (dùng gạch ngang).
-   • web để "" nếu đại lý không có website.
+   Thông tin đại lý do MÁY CHỦ (Cloudflare) tiêm vào window.__DL__
+   — để cả thẻ xem trước link (Zalo/Messenger) lẫn trang đều đúng.
+   DANH SÁCH ĐẠI LÝ nằm trong file _worker.js (Anh sửa ở đó, 1 nơi duy nhất).
+   Đoạn dưới chỉ ÁP dữ liệu đã tiêm vào giao diện; nếu thiếu thì mặc định Digiplus.
    ============================================================ */
-var DAILY = {
-  "skytech":  { ten:"Skytech",         hotline:"0865 574 611", web:"vietskytech.com.vn" },
-  // "spa-abc":  { ten:"Spa ABC",        hotline:"0900 000 001", web:"" },
-  // "cty-xyz":  { ten:"Công ty XYZ",    hotline:"0900 000 002", web:"xyz.vn" },
-};
-
-/* Mặc định khi KHÔNG có mã đại lý trên link = của chính Anh (Digiplus) */
-var MAC_DINH = { ten:"Digiplus", hotline:"0372 669 992", web:"maychamcongcloud.com" };
-/* ============================================================ */
-
 (function(){
   try{
-    var p = new URLSearchParams(location.search);
-    var code = (p.get('dl') || p.get('daily') || '').trim().toLowerCase();
-    var d = (code && DAILY[code]) ? DAILY[code] : MAC_DINH;
+    var d = (window.__DL__ && typeof window.__DL__ === 'object')
+              ? window.__DL__
+              : { ten:"Digiplus", hotline:"0372 669 992", web:"maychamcongcloud.com" };
     var ten = d.ten || 'Phần mềm chấm công';
     var set = function(id, txt){ var e=document.getElementById(id); if(e) e.textContent = txt; };
 
