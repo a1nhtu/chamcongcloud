@@ -206,7 +206,7 @@ footer b{color:var(--ink)}
         <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
         <path d="M9 40c0-6 5-11 13-11" stroke="#fff" stroke-width="3.2" stroke-linecap="round" opacity=".55"/>
       </svg>
-      <div class="brandname">Digiplus<small>Chấm Công Thông Minh</small></div>
+      <div class="brandname"><span id="brandName">Digiplus</span><small>Chấm Công Thông Minh</small></div>
     </div>
     <div class="hero">
       <h1>Chấm công bằng máy &amp; điện thoại. Quản lý trên máy tính.</h1>
@@ -226,7 +226,7 @@ footer b{color:var(--ink)}
 
   <!-- Value -->
   <section id="gioi-thieu">
-    <div class="eyebrow"><span>Vì sao chọn Digiplus</span></div>
+    <div class="eyebrow"><span id="whyBrand">Vì sao chọn Digiplus</span></div>
     <h2 class="sec">Máy chấm công + điện thoại — chấm công linh hoạt</h2>
     <p class="lead">Tại văn phòng nhân viên quẹt vân tay/khuôn mặt trên máy; đi ngoài thì chấm bằng điện thoại (ảnh + GPS). Tất cả gộp về một người, tự tính công và xuất báo cáo.</p>
     <div class="vgrid">
@@ -324,7 +324,7 @@ footer b{color:var(--ink)}
           <div class="bbar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">congty.maychamcongcloud.com/admin</div></div>
           <div class="admin">
             <div class="side">
-              <div class="b">Digiplus<small>Chấm công</small></div>
+              <div class="b"><span id="mockBrand">Digiplus</span><small>Chấm công</small></div>
               <a class="on"><span>📊</span>Tổng quan</a><a><span>👥</span>Nhân viên</a><a><span>🏢</span>Bộ phận</a><a><span>🕐</span>Ca làm</a><a><span>🗓️</span>Phân ca</a><a><span>🔌</span>Máy chấm công</a><a><span>📅</span>Báo cáo</a><a><span>💰</span>Lương</a>
             </div>
             <div class="body">
@@ -466,7 +466,7 @@ footer b{color:var(--ink)}
         <ol class="steps">
           <li><b>Giải nén &amp; chạy “CaiDat”</b><span>App tự chạy và tự bật mỗi khi mở máy.</span></li>
           <li><b>Lấy Mã máy</b><span>Màn hình hiện Mã máy của bạn.</span></li>
-          <li><b>Gửi Mã máy cho Digiplus</b><span>Digiplus cấp license khớp đúng máy đó.</span></li>
+          <li><b id="licSend1">Gửi Mã máy cho Digiplus</b><span id="licSend3">Digiplus cấp license khớp đúng máy đó.</span></li>
           <li><b>Dán license → dùng ngay</b><span>Truy cập qua đường link riêng của công ty bạn.</span></li>
         </ol>
         <div class="note"><span class="ic">🔒</span><div>License <b>gắn theo máy</b> — không thể copy sang máy khác. Bảo vệ bản quyền và dữ liệu doanh nghiệp.</div></div>
@@ -476,7 +476,7 @@ footer b{color:var(--ink)}
           <div class="bbar"><div class="dots"><i></i><i></i><i></i></div><div class="addr">Kích hoạt bản quyền</div></div>
           <div class="body" style="padding:22px">
             <h3 style="color:var(--brand-ink);font-size:18px">Kích hoạt bản quyền</h3>
-            <p style="color:var(--muted);font-size:13px;margin:4px 0 16px">Gửi Mã máy cho Digiplus để nhận license.</p>
+            <p id="licSend2" style="color:var(--muted);font-size:13px;margin:4px 0 16px">Gửi Mã máy cho Digiplus để nhận license.</p>
             <div style="font-size:11px;color:var(--muted);font-weight:700;margin-bottom:6px">MÃ MÁY</div>
             <div class="mono" style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px 13px;font-weight:600;letter-spacing:1px">103B-E555-114A-6CD3</div>
             <div style="font-size:11px;color:var(--muted);font-weight:700;margin:14px 0 6px">LICENSE</div>
@@ -507,10 +507,60 @@ footer b{color:var(--ink)}
 
 <footer>
   <div class="wrap fx">
-    <div><b>Digiplus — Chấm công thông minh.</b> Tài liệu hướng dẫn sử dụng &amp; giới thiệu sản phẩm.</div>
-    <div>Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
+    <div><b id="ftBrand">Digiplus — Chấm công thông minh.</b> Tài liệu hướng dẫn sử dụng &amp; giới thiệu sản phẩm.</div>
+    <div id="ftContact">Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
   </div>
 </footer>
+
+<script>
+/* ============================================================
+   DANH SÁCH ĐẠI LÝ  — Anh chỉ cần sửa trong khối này
+   ------------------------------------------------------------
+   Thêm mỗi đại lý một dòng theo mẫu:
+     "ma-dai-ly": { ten:"Tên đại lý", hotline:"09xx xxx xxx", web:"" },
+   • Đại lý gửi cho khách link:
+        https://huongdan.maychamcongcloud.com/?dl=ma-dai-ly
+     → trang tự hiện TÊN + HOTLINE của đại lý, ẩn hết thông tin Digiplus.
+   • Mã đặt chữ thường, không dấu, không cách (dùng gạch ngang).
+   • web để "" nếu đại lý không có website.
+   ============================================================ */
+var DAILY = {
+  // "spa-abc":  { ten:"Spa ABC",        hotline:"0900 000 001", web:"" },
+  // "cty-xyz":  { ten:"Công ty XYZ",    hotline:"0900 000 002", web:"xyz.vn" },
+};
+
+/* Mặc định khi KHÔNG có mã đại lý trên link = của chính Anh (Digiplus) */
+var MAC_DINH = { ten:"Digiplus", hotline:"0372 669 992", web:"maychamcongcloud.com" };
+/* ============================================================ */
+
+(function(){
+  try{
+    var p = new URLSearchParams(location.search);
+    var code = (p.get('dl') || p.get('daily') || '').trim().toLowerCase();
+    var d = (code && DAILY[code]) ? DAILY[code] : MAC_DINH;
+    var ten = d.ten || 'Phần mềm chấm công';
+    var set = function(id, txt){ var e=document.getElementById(id); if(e) e.textContent = txt; };
+
+    document.title = ten + ' — Chấm công';
+    set('brandName', ten);
+    set('mockBrand', ten);
+    set('whyBrand', 'Vì sao chọn ' + ten);
+    set('licSend1', 'Gửi Mã máy cho ' + ten);
+    set('licSend3', ten + ' cấp license khớp đúng máy đó.');
+    set('licSend2', 'Gửi Mã máy cho ' + ten + ' để nhận license.');
+    set('ftBrand', ten + ' — Chấm công thông minh.');
+
+    var ft = document.getElementById('ftContact');
+    if(ft){
+      var html = '';
+      if(d.hotline) html += 'Hotline / Zalo: <b>' + d.hotline + '</b>';
+      if(d.web)     html += (html ? ' · ' : '') + d.web;
+      ft.innerHTML = html;               // đại lý không có hotline/web thì ẩn hẳn dòng
+      ft.style.display = html ? '' : 'none';
+    }
+  }catch(e){ /* giữ nguyên nội dung mặc định nếu lỗi */ }
+})();
+</script>
 
 <button class="themebtn" id="tt">🌗 Giao diện</button>
 <script>
