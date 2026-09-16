@@ -263,14 +263,15 @@ export function syncPinsToGroup(sourceSerial, pins) {
 }
 
 // Khi 1 máy kết nối: kéo template hiện có của nó về (DATA QUERY) + đẩy những gì nhóm đã có mà máy này thiếu.
-export function syncFillDevice(serial) {
+// force=true: ĐẨY LẠI TOÀN BỘ template của nhóm (bỏ qua kiểm tra "đã có") — dùng khi đồng bộ lỗi.
+export function syncFillDevice(serial, force = false) {
   const dev = db.prepare('SELECT sync_group FROM push_devices WHERE serial=?').get(serial);
   if (!dev || !dev.sync_group) return;
   // 1) kéo template hiện có trên máy này về server (học dữ liệu sẵn có)
   queueCmd(serial, 'DATA QUERY FINGERTMP');
   queueCmd(serial, 'DATA QUERY BIODATA');
-  // 2) đẩy template của nhóm mà máy này CHƯA có
-  const mine = new Set(db.prepare("SELECT pin||'|'||bio_type||'|'||idx k FROM device_bio_templates WHERE serial=?").all(serial).map((r) => r.k));
+  // 2) đẩy template của nhóm mà máy này CHƯA có (force → đẩy hết)
+  const mine = force ? new Set() : new Set(db.prepare("SELECT pin||'|'||bio_type||'|'||idx k FROM device_bio_templates WHERE serial=?").all(serial).map((r) => r.k));
   const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>?").all(dev.sync_group, serial).map((r) => r.serial);
   if (!groupSerials.length) return;
   const ph = groupSerials.map(() => '?').join(',');
@@ -292,7 +293,7 @@ export function syncFillDevice(serial) {
 
 // Đồng bộ NGAY (bấm nút): mỗi máy trong nhóm (>=2 máy) học template sẵn có + nhận template nhóm còn thiếu.
 // Không cần khởi động lại máy. Trả số nhóm/máy/lệnh đã xếp.
-export function resyncNow() {
+export function resyncNow(force = false) {
   const rows = db.prepare("SELECT serial, sync_group FROM push_devices WHERE sync_group<>'' AND active=1").all();
   const groups = new Set();
   let devices = 0;
@@ -301,7 +302,7 @@ export function resyncNow() {
     const cnt = db.prepare("SELECT COUNT(*) c FROM push_devices WHERE sync_group=? AND active=1").get(r.sync_group).c;
     if (cnt < 2) continue;              // nhóm chỉ 1 máy thì không cần đồng bộ
     groups.add(r.sync_group);
-    syncFillDevice(r.serial);
+    syncFillDevice(r.serial, force);
     devices++;
   }
   const queued = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE trans_time IS NULL').get().c - before;

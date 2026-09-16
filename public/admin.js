@@ -1893,9 +1893,20 @@ async function pageDevices() {
     } catch (e) { toast(e.message, 'err'); }
     finally { resyncBtn.disabled = false; resyncBtn.textContent = '🔁 Đồng bộ vân tay các máy'; }
   };
+  const resyncFullBtn = el('button', { class: 'btn ghost' }, '🔁 Đồng bộ lại TOÀN BỘ (sửa lỗi)');
+  resyncFullBtn.onclick = async () => {
+    if (!confirm('ĐỒNG BỘ LẠI TOÀN BỘ giữa các máy cùng nhóm — ép đẩy lại HẾT nhân viên/vân tay/khuôn mặt/thẻ (kể cả cái máy tưởng đã có).\n\nDùng khi lần đồng bộ trước bị trục trặc/thiếu. Sẽ xếp nhiều lệnh hơn, máy nhận dần trong ít phút. Tiếp tục?')) return;
+    resyncFullBtn.disabled = true; resyncFullBtn.textContent = 'Đang đồng bộ lại…';
+    try {
+      const r = await api('/admin/devices/resync', { method: 'POST', body: { force: true } });
+      if (!r.devices) toast('Chưa có nhóm nào ≥2 máy. Đặt "Nhóm ĐB" giống nhau cho các máy trước.', 'err');
+      else toast(`Đã xếp ${r.queued} lệnh đồng bộ lại TOÀN BỘ cho ${r.devices} máy (${r.groups} nhóm).`, 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    finally { resyncFullBtn.disabled = false; resyncFullBtn.textContent = '🔁 Đồng bộ lại TOÀN BỘ (sửa lỗi)'; }
+  };
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
   usbBtn.onclick = usbImportModal;
-  setMain(head('Máy chấm công', usbBtn, resyncBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', usbBtn, resyncBtn, resyncFullBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
 // Nhập dữ liệu chấm công + nhân viên từ USB (máy không nối mạng)

@@ -1032,7 +1032,7 @@ r.get('/server-ips', need('devices'), (req, res) => {
 });
 // Đồng bộ NGAY: đẩy toàn bộ vân tay/user của nhóm sang mọi máy trong nhóm (khỏi cần restart máy)
 r.post('/devices/resync', need('devices'), (req, res) => {
-  try { res.json(resyncNow()); }
+  try { res.json(resyncNow(!!req.body?.force)); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 
