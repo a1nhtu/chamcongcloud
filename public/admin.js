@@ -303,9 +303,11 @@ async function pageEmployees() {
     tbl.innerHTML = `<thead><tr><th>Mã</th><th>Họ tên</th><th>Bộ phận</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
     const tb = el('tbody');
     for (const e of rows) {
-      const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:6px' },
+      const delBtn = btnSm('🗑 Xóa', () => delEmp(e), 'ghost'); delBtn.style.color = '#c0392b';
+      const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
         btnSm('Sửa', () => empModal(e)),
-        e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : el('span', { class: 'pill muted' }, 'đã khoá')) : '';
+        e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : btnSm('Mở khoá', () => unlockEmp(e), 'ghost'),
+        delBtn) : '';
       tb.append(el('tr', {},
         el('td', {}, e.code,
           e.device_pin ? el('div', { style: 'color:#0a7;font-size:11px' }, '🔌 ID máy: ' + e.device_pin) : ''),
@@ -460,6 +462,12 @@ function empModal(e) {
   openModal(e ? 'Sửa nhân viên' : 'Thêm nhân viên', body, [el('button', { class: 'btn ghost' , onclick: closeModal }, 'Huỷ'), save]);
 }
 async function toggleEmp(e) { if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return; await api('/admin/employees/' + e.id, { method: 'DELETE' }); pageEmployees(); }
+async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }
+async function delEmp(e) {
+  if (!confirm(`XÓA HẲN nhân viên "${e.full_name}" (${e.code})?\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của người này sẽ bị xóa, KHÔNG hoàn tác được.\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
+  try { await api('/admin/employees/' + e.id + '/purge', { method: 'DELETE' }); toast('Đã xóa nhân viên', 'ok'); pageEmployees(); }
+  catch (err) { toast(err.message, 'err'); }
+}
 
 // Trang "Bộ phận & Chức danh" — khai báo bộ phận CHA-CON + danh mục chức danh
 async function pageOrg() {

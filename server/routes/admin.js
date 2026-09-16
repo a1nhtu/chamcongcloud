@@ -143,10 +143,25 @@ r.put('/employees/:id', need('employees'), (req, res) => {
   }
 });
 
-// Vô hiệu hoá (không xoá cứng để giữ lịch sử chấm công)
+// Vô hiệu hoá (không xoá cứng để giữ lịch sử chấm công) — nút "Khoá"
 r.delete('/employees/:id', need('employees'), (req, res) => {
   db.prepare('UPDATE employees SET active = 0 WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
+});
+// XÓA CỨNG nhân viên + toàn bộ dữ liệu liên quan (khác Khoá). Lượt quẹt máy thô được GỠ KHỚP
+// (employee_id=NULL) chứ không xoá, để không mất log; NV nếu được tải lại từ máy sẽ tạo mới.
+r.delete('/employees/:id/purge', need('employees'), (req, res) => {
+  const emp = db.prepare('SELECT id, role FROM employees WHERE id=?').get(req.params.id);
+  if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+  if (req.user && req.user.id != null && Number(req.user.id) === emp.id)
+    return res.status(400).json({ error: 'Không thể tự xóa tài khoản đang đăng nhập' });
+  try {
+    for (const t of ['employee_offices', 'attendance', 'leave_requests', 'daily_shift_assignments', 'shift_assignments', 'shift_requests', 'salary_configs', 'push_subscriptions'])
+      db.prepare(`DELETE FROM ${t} WHERE employee_id=?`).run(emp.id);
+    db.prepare('UPDATE device_punches SET employee_id=NULL WHERE employee_id=?').run(emp.id);
+    db.prepare('DELETE FROM employees WHERE id=?').run(emp.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ---- Khoá thiết bị chấm công: duyệt đổi máy / gỡ thiết bị ----
