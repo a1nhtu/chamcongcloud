@@ -1623,19 +1623,31 @@ async function pageEditAtt() {
   let emps;
   try { emps = (await api('/admin/employees')).rows.filter(e => e.active); }
   catch (e) { setMain(head('Tính công'), el('div', { class: 'empty' }, e.message)); return; }
-  if (!EDITATT_EMP && emps[0]) EDITATT_EMP = emps[0].id;
-  const empSel = el('select', { id: 'ea-emp', style: 'min-width:200px' },
-    ...emps.map(e => el('option', { value: e.id, ...(e.id === EDITATT_EMP ? { selected: '' } : {}) }, `${e.full_name} (${e.code})`)));
+  let depts = [];
+  try { depts = (await api('/reports/departments')).rows || []; } catch {}
+
+  const deptSel = el('select', { id: 'ea-dept', style: 'min-width:150px' },
+    el('option', { value: '' }, '— Cả công ty —'), ...depts.map(d => el('option', { value: d }, d)));
+  const empSel = el('select', { id: 'ea-emp', style: 'min-width:210px' });
+  const fillEmps = () => {
+    const dv = deptSel.value;
+    empSel.innerHTML = '';
+    empSel.append(el('option', { value: 'ALL' }, dv ? `— Tất cả phòng "${dv}" —` : '— Tất cả nhân viên —'));
+    for (const e of emps) if (!dv || (e.department || '') === dv)
+      empSel.append(el('option', { value: e.id }, `${e.full_name} (${e.code})`));
+  };
+  fillEmps();
   const monthI = el('input', { type: 'month', id: 'ea-month', value: todayMonth() });
   const addBtn = el('button', { class: 'btn' }, '+ Thêm giờ');
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại');
   const roundBtn = el('button', { class: 'btn ghost' }, '⚙ Làm tròn');
   const wrap = el('div', { id: 'ea-wrap' });
-  const load = async () => {
-    EDITATT_EMP = +empSel.value;
+
+  // Chi tiết 1 nhân viên (sửa từng ngày)
+  const loadDetail = async (empId) => {
     wrap.innerHTML = ''; wrap.append(loading());
     let data;
-    try { data = await api(`/admin/attendance?employee_id=${empSel.value}&month=${monthI.value}`); }
+    try { data = await api(`/admin/attendance?employee_id=${empId}&month=${monthI.value}`); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = `<thead><tr><th>Ngày</th><th>Thứ</th><th>Vào</th><th>Ra</th><th>Ca</th><th>Muộn(ph)</th><th>Sớm(ph)</th><th>OT(ph)</th><th>Giờ</th><th>Công</th><th>Ghi chú</th><th></th></tr></thead>`;
@@ -1661,20 +1673,74 @@ async function pageEditAtt() {
       ));
     }
     tbl.append(tb);
+    const back = btnSm('← Về danh sách', () => { empSel.value = 'ALL'; load(); }, 'ghost');
     wrap.innerHTML = '';
-    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Thêm/sửa giờ cho trường hợp quên chấm hoặc đi công tác. Sau khi đổi ca, bấm "↻ Tính lại" để cập nhật Ca / Muộn / Sớm / OT / Công theo cấu hình mới.'), el('div', { class: 'panel tbl-scroll' }, tbl));
+    wrap.append(el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:10px;flex-wrap:wrap' }, back,
+      el('span', { class: 'map-hint', style: 'margin:0' }, 'Thêm/sửa giờ cho trường hợp quên chấm / đi công tác. Đổi ca xong bấm "↻ Tính lại".')),
+      el('div', { class: 'panel tbl-scroll' }, tbl));
   };
-  empSel.onchange = load; monthI.onchange = load;
-  addBtn.onclick = () => attEditModal(null, +empSel.value, load);
+
+  // Tổng hợp NHIỀU nhân viên (cả công ty / phòng ban) — có tick chọn để tính lại vài người
+  const loadSummary = async () => {
+    wrap.innerHTML = ''; wrap.append(loading());
+    let d;
+    try { d = await api(`/reports/data?type=summary&month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}`); }
+    catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
+    const rows = d.rows || [];
+    const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
+    const tbl = el('table', { class: 'data' });
+    const thead = el('thead'); thead.append(el('tr', {},
+      el('th', {}, selAll), el('th', {}, 'Mã'), el('th', {}, 'Họ tên'), el('th', {}, 'Bộ phận'),
+      el('th', {}, 'Tổng công'), el('th', {}, 'Tổng giờ'), el('th', {}, 'OT(g)'),
+      el('th', {}, 'Trễ'), el('th', {}, 'Sớm'), el('th', {}, 'Vắng'), el('th', {}, '')));
+    tbl.append(thead);
+    const tb = el('tbody');
+    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Không có nhân viên trong phạm vi này.'))));
+    for (const r of rows) tb.append(el('tr', {},
+      el('td', {}, el('input', { type: 'checkbox', class: 'ea-pick', value: r.id, style: 'width:auto' })),
+      el('td', {}, r.code),
+      el('td', {}, el('b', {}, r.name)),
+      el('td', {}, r.dept || '—'),
+      el('td', { style: 'text-align:center;font-weight:700' }, String(r.cong ?? 0)),
+      el('td', { style: 'text-align:center' }, String(r.gio ?? 0)),
+      el('td', { style: 'text-align:center' }, r.ot ? String(r.ot) : '—'),
+      el('td', { style: 'text-align:center' }, r.lateN ? `${r.lateN} (${r.lateM}p)` : '—'),
+      el('td', { style: 'text-align:center' }, r.earlyN ? `${r.earlyN} (${r.earlyM}p)` : '—'),
+      el('td', { style: 'text-align:center' }, r.vang ? String(r.vang) : '—'),
+      el('td', {}, btnSm('Chi tiết', () => { empSel.value = String(r.id); load(); })),
+    ));
+    tbl.append(tb);
+    selAll.onchange = () => tb.querySelectorAll('.ea-pick').forEach(c => { c.checked = selAll.checked; });
+    wrap.innerHTML = '';
+    wrap.append(
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên (${deptSel.value || 'cả công ty'}). Tick vài người rồi bấm "↻ Tính lại" để chỉ tính lại người đã chọn; KHÔNG tick = tính lại cả phạm vi đang xem. Bấm "Chi tiết" để sửa từng ngày.`),
+      el('div', { class: 'panel tbl-scroll' }, tbl));
+  };
+
+  const load = () => { if (empSel.value === 'ALL') loadSummary(); else loadDetail(+empSel.value); };
+  deptSel.onchange = () => { fillEmps(); empSel.value = 'ALL'; load(); };
+  empSel.onchange = load;
+  monthI.onchange = load;
+  addBtn.onclick = () => attEditModal(null, empSel.value === 'ALL' ? (emps[0] && emps[0].id) : +empSel.value, load);
   recalcBtn.onclick = async () => {
-    if (!confirm(`Tính lại toàn bộ công tháng ${monthI.value} (tất cả nhân viên)?\nHệ thống sẽ dò lại ca theo giờ vào/ra và tính lại Muộn/Sớm/OT/Công.`)) return;
+    let params = 'month=' + monthI.value, scope;
+    if (empSel.value !== 'ALL') { params += '&ids=' + empSel.value; scope = 'nhân viên đang xem'; }
+    else {
+      const checked = [...wrap.querySelectorAll('.ea-pick:checked')].map(x => x.value);
+      if (checked.length) { params += '&ids=' + checked.join(','); scope = checked.length + ' nhân viên đã chọn'; }
+      else if (deptSel.value) { params += '&dept=' + encodeURIComponent(deptSel.value); scope = 'phòng "' + deptSel.value + '"'; }
+      else scope = 'CẢ CÔNG TY';
+    }
+    if (!confirm(`Tính lại công tháng ${monthI.value} cho ${scope}?\nDò lại ca theo giờ vào/ra và tính lại Muộn/Sớm/OT/Công.`)) return;
     recalcBtn.disabled = true; recalcBtn.textContent = 'Đang tính…';
-    try { const rs = await api('/admin/recompute?month=' + monthI.value, { method: 'POST' }); toast(`Đã tính lại ${rs.updated} bản ghi`, 'ok'); await load(); }
+    try { const rs = await api('/admin/recompute?' + params, { method: 'POST' }); toast(`Đã tính lại ${rs.updated} bản ghi`, 'ok'); load(); }
     catch (e) { toast(e.message, 'err'); }
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại'; }
   };
   roundBtn.onclick = () => roundingModal(monthI.value, load);
-  setMain(head('Tính công', empSel, monthI, addBtn, recalcBtn, roundBtn), wrap);
+
+  empSel.value = 'ALL';   // mặc định xem tổng hợp cả công ty
+  setMain(head('Tính công', deptSel, empSel, monthI, addBtn, recalcBtn, roundBtn), wrap);
   load();
 }
 

@@ -257,7 +257,7 @@ function buildReport(type, month, dept) {
           if (symbolOf(ctx, e.id, d) === 'V') vang++;
         }
         return {
-          code: e.code, name: e.full_name, dept: e.department || '',
+          id: e.id, code: e.code, name: e.full_name, dept: e.department || '',
           cong: round2(cong), gio: round2(minutes / 60), ot: round2(ot / 60),
           lateN, lateM, earlyN, earlyM, vang,
         };

@@ -853,9 +853,15 @@ r.post('/recompute', need('recompute'), (req, res) => {
   const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
 
-  const rows = month
-    ? db.prepare("SELECT * FROM attendance WHERE work_date LIKE ? AND check_in_at IS NOT NULL").all(month + '%')
-    : db.prepare("SELECT * FROM attendance WHERE check_in_at IS NOT NULL").all();
+  // Phạm vi: ids (vài NV) > dept (1 phòng ban) > cả công ty
+  const dept = (req.query.dept || '').trim();
+  const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
+  const where = ['a.check_in_at IS NOT NULL']; const args = [];
+  if (month) { where.push('a.work_date LIKE ?'); args.push(month + '%'); }
+  let join = '';
+  if (ids.length) { where.push(`a.employee_id IN (${ids.map(() => '?').join(',')})`); args.push(...ids); }
+  else if (dept) { join = ' JOIN employees e ON e.id=a.employee_id'; where.push('e.department=?'); args.push(dept); }
+  const rows = db.prepare(`SELECT a.* FROM attendance a${join} WHERE ${where.join(' AND ')}`).all(...args);
 
   let n = 0;
   db.exec('BEGIN');
