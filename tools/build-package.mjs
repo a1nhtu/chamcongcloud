@@ -77,6 +77,8 @@ pause
 `);
 
 // CaiDat.bat: tạo autostart + chạy + mở trình duyệt
+// Shortcut autostart đặt tên THEO CỔNG (DigiplusChamCong-<PORT>.lnk) → chạy nhiều khách
+// trên cùng 1 VPS không đè autostart của nhau.
 writeFileSync(join(OUT, 'CaiDat.bat'),
 `@echo off
 chcp 65001 >nul
@@ -85,13 +87,13 @@ echo ============================================
 echo   DIGIPLUS CHAM CONG - CAI DAT
 echo ============================================
 echo.
-echo Dang cai dat va tao tu dong chay khi mo may...
-powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut([Environment]::GetFolderPath('Startup')+'\\DigiplusChamCong.lnk'); $s.TargetPath='%~dp0start-hidden.vbs'; $s.WorkingDirectory='%~dp0'; $s.Save()"
+set "PORT=8686"
+for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
+echo Dang cai dat va tao tu dong chay khi mo may (cong %PORT%)...
+powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut([Environment]::GetFolderPath('Startup')+'\\DigiplusChamCong-%PORT%.lnk'); $s.TargetPath='%~dp0start-hidden.vbs'; $s.WorkingDirectory='%~dp0'; $s.Save()"
 echo Dang khoi dong ung dung...
 start "" "%~dp0start-hidden.vbs"
 timeout /t 4 >nul
-set "PORT=8686"
-for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
 start "" "http://localhost:%PORT%/admin"
 echo.
 echo ============================================
@@ -104,15 +106,21 @@ echo.
 pause
 `);
 
-// GoCaiDat.bat: gỡ autostart + dừng
+// GoCaiDat.bat: gỡ autostart + dừng — CHỈ tắt instance của CỔNG này
+// (an toàn khi nhiều khách chạy chung 1 VPS: KHONG taskkill node/cloudflared tong the).
 writeFileSync(join(OUT, 'GoCaiDat.bat'),
 `@echo off
 chcp 65001 >nul
-echo Dang go cai dat (dung app + xoa tu dong chay)...
-del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong.lnk" 2>nul
-taskkill /f /im cloudflared.exe 2>nul
-taskkill /f /im node.exe 2>nul
-echo Da go. (Du lieu trong app\\data va app\\uploads van con.)
+cd /d "%~dp0"
+set "PORT=8686"
+for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
+echo Dang go cai dat instance cong %PORT% (KHONG dung khach khac tren may/VPS)...
+del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" 2>nul
+for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
+echo Da go autostart + dung app cong %PORT%.
+echo LUU Y: neu chay nhieu khach tren 1 VPS, cloudflared cua khach nay van chay -
+echo        dong cua so cloudflared tuong ung, hoac reboot may. KHONG taskkill cloudflared tong the.
+echo Du lieu trong app\\data va app\\uploads van con.
 pause
 `);
 

@@ -15,7 +15,15 @@ echo   2 = Cai tren SERVER VPS ben Anh (truy cap moi noi)
 echo.
 set /p CHEDO=Nhap 1 hoac 2 (Enter = 1):
 if "%CHEDO%"=="2" (set MODE=vps) else (set MODE=office)
+set "PORTIN="
+if "%MODE%"=="vps" (
+  echo.
+  echo === CONG APP ===
+  echo Neu VPS DA co khach khac dang chay, PHAI chon cong KHAC de khong trung.
+  echo   Vi du: khach 1 = 8686, khach 2 = 8687, khach 3 = 8688 ...
+  set /p PORTIN=Cong cho khach nay ^(Enter = 8686^):
+)
 echo.
-node tools\make-customer.mjs "%TENCTY%" %MODE%
+node tools\make-customer.mjs "%TENCTY%" %MODE% %PORTIN%
 echo.
 pause
