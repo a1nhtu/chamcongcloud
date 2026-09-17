@@ -479,6 +479,8 @@ function migrateColumns() {
   if (getSetting('device_autocreate') == null) setSetting('device_autocreate', '1');
   // Khoá thiết bị chấm công điện thoại (chống chấm hộ): '0' = tắt (mặc định), '1' = mỗi tài khoản chỉ chấm trên 1 điện thoại đã duyệt
   if (getSetting('device_lock_enabled') == null) setSetting('device_lock_enabled', '0');
+  // Bỏ qua lần chấm TRÙNG trong vòng N phút (chống double-tap app + máy quẹt liên tiếp). '0' = tắt.
+  if (getSetting('punch_dedup_min') == null) setSetting('punch_dedup_min', '0');
   // Nhân viên tự chọn ca: '0' = tắt (mặc định), '1' = cho nhân viên tự đăng ký ca trên app
   if (getSetting('self_shift_enabled') == null) setSetting('self_shift_enabled', '0');
   // Chọn ca có cần duyệt không: '1' = phải admin/quản lý duyệt (mặc định), '0' = tự động áp dụng

@@ -147,6 +147,15 @@ r.post('/check-in', (req, res) => {
     return res.status(400).json({ error: `Bạn đang trong ${shiftLabel}, chưa chấm ra. Hãy chấm RA trước.` });
   if (existing && existing.check_in_at && existing.check_out_at)
     return res.status(400).json({ error: `Bạn đã hoàn thành ${shiftLabel} hôm nay rồi` });
+  // Chống bấm nhầm 2 lần liền: nếu vừa chấm (vào/ra) trong vòng N phút → chặn
+  const dedupMinIn = parseInt(getSetting('punch_dedup_min', '0'), 10) || 0;
+  if (dedupMinIn > 0) {
+    const last = db.prepare(`SELECT MAX(t) mt FROM (
+      SELECT check_in_at t FROM attendance WHERE employee_id=? AND work_date=?
+      UNION ALL SELECT check_out_at t FROM attendance WHERE employee_id=? AND work_date=?)`).get(req.user.id, date, req.user.id, date);
+    if (last && last.mt && (Date.now() - new Date(last.mt)) < dedupMinIn * 60000)
+      return res.status(400).json({ error: `Bạn vừa chấm cách đây chưa tới ${dedupMinIn} phút. Vui lòng chờ (chống bấm nhầm).` });
+  }
 
   // Định vị GẦN NHẤT trong các định vị NV được phép chấm
   const { office, distance, outside } = nearestAllowedOffice(req.user.id, lat, lng);
@@ -206,6 +215,10 @@ r.post('/check-out', (req, res) => {
     if (yRow) row = yRow;
   }
   if (!row) return res.status(400).json({ error: 'Chưa có ca nào đang mở để chấm ra (hôm nay hoặc ca đêm hôm qua)' });
+  // Chống bấm nhầm: chấm RA quá sát giờ chấm VÀO (trong N phút) → chặn
+  const dedupMinOut = parseInt(getSetting('punch_dedup_min', '0'), 10) || 0;
+  if (dedupMinOut > 0 && (Date.now() - new Date(row.check_in_at)) < dedupMinOut * 60000)
+    return res.status(400).json({ error: `Bạn vừa chấm vào cách đây chưa tới ${dedupMinOut} phút — chưa thể chấm ra ngay (chống bấm nhầm).` });
 
   const wdate = row.work_date;   // ngày công của bản ghi (ca đêm = hôm qua)
   const at = nowIso();

@@ -464,6 +464,7 @@ r.put('/settings', need('settings'), (req, res) => {
     if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
   }
   if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
+  if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));
   if (b.self_shift_enabled != null) setSetting('self_shift_enabled', b.self_shift_enabled ? '1' : '0');
   if (b.self_shift_approve != null) setSetting('self_shift_approve', b.self_shift_approve ? '1' : '0');
   if (b.setup_done != null) setSetting('setup_done', b.setup_done ? '1' : '0');

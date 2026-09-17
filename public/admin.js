@@ -2528,11 +2528,12 @@ async function pageSettings() {
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
   const apprChk = el('input', { type: 'checkbox', id: 'st-appr', style: 'width:auto', ...(s.self_shift_approve !== '0' ? { checked: '' } : {}) });
+  const dedupI = el('input', { type: 'number', min: '0', style: 'width:70px', value: s.punch_dedup_min || '0' });
   const saveMode = el('button', { class: 'btn' }, 'Lưu cấu hình chấm công');
   saveMode.onclick = async () => {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value || 'shift';
     try {
-      const body = { attendance_mode, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked };
+      const body = { attendance_mode, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
       if (isMaster()) body.device_enabled = devChk.checked;   // chỉ tài khoản tổng đổi được máy chấm công
       await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
@@ -2555,6 +2556,11 @@ async function pageSettings() {
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, lockChk,
         el('div', {}, el('b', {}, 'Mỗi tài khoản chỉ chấm trên 1 điện thoại'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: điện thoại đầu tiên nhân viên chấm sẽ được gắn cho tài khoản; đăng nhập máy khác sẽ KHÔNG chấm được (chống mượn tài khoản, chấm hộ). Đổi điện thoại phải admin duyệt ở menu “Duyệt đổi thiết bị”. Ảnh chấm công luôn được đóng dấu giờ + tên + GPS.'))),
+      el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
+      el('h3', { style: 'margin:0;font-size:15px' }, 'Chống chấm trùng liên tiếp'),
+      el('label', { style: 'display:flex;gap:10px;align-items:center' },
+        el('div', {}, el('b', {}, 'Bỏ qua lần chấm trùng trong '), dedupI, el('b', {}, ' phút'),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Đặt số phút (VD 10): lượt quẹt/chấm của cùng một người trong khoảng đó chỉ tính 1 lần — chống double-tap trên app và máy quẹt liên tiếp. Đặt 0 = tắt.'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Máy chấm công (ZKTeco)'),
       isMaster()

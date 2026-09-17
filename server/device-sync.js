@@ -536,6 +536,7 @@ export function ingestAttlog(serial, rawBody) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const touched = new Set();
   let n = 0;
+  const dedupMs = (parseInt(getSetting('punch_dedup_min', '0'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
   for (const line of lines) {
     const p = line.split('\t');
@@ -549,6 +550,12 @@ export function ingestAttlog(serial, rawBody) {
     if (isNaN(d)) continue;
     const punchIso = d.toISOString();
     const workDate = timeStr.slice(0, 10);
+    // Chống trùng: nếu Số ID này vừa có lượt quẹt trong vòng N phút → bỏ qua lượt này
+    if (dedupMs > 0) {
+      const near = db.prepare('SELECT punch_at FROM device_punches WHERE pin=? AND work_date=?').all(pin, workDate)
+        .some((r) => Math.abs(new Date(r.punch_at) - d) < dedupMs);
+      if (near) continue;
+    }
     const emp = findEmpByPin(pin);
     const empId = emp?.id ?? null;
     try { ins.run(serial, pin, punchIso, workDate, status, verify, empId); } catch {}
