@@ -1993,10 +1993,16 @@ async function pageDevices() {
     const cFace = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.face_count ?? 0));
     const cCard = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.card_count ?? 0));
     countCells[m.serial] = { cNV, cFP, cFace, cCard };
-    tb.append(el('tr', {},
-      el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, m.serial)),
+    // Online = máy có gọi server trong vòng 2,5 phút gần đây (máy ADMS gọi ~mỗi 10s)
+    const online = !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
+    const dot = el('span', { title: online ? 'Đang online' : 'Offline', style: `display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle;background:${online ? '#16a34a' : '#bbb'}${online ? ';box-shadow:0 0 0 3px rgba(22,163,74,.18)' : ''}` });
+    const onlinePill = online
+      ? el('span', { class: 'pill ok' }, '🟢 Online')
+      : el('span', { class: 'pill', style: 'background:#eee;color:#8a8a8a' }, '⚪ Offline');
+    tb.append(el('tr', { style: online ? '' : 'opacity:.7' },
+      el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, dot, m.serial)),
       el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : '', m.access_control ? el('div', { style: 'font-size:11px;color:#b45309' }, '🚪 Kiểm soát cửa') : ''),
-      el('td', {}, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
+      el('td', {}, onlinePill, el('div', { style: 'margin-top:4px' }, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'))),
       cNV, cFP, cFace, cCard,
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),

@@ -1075,14 +1075,16 @@ r.put('/devices/:id', need('devices'), (req, res) => {
     .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active, newGroup,
          b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0),
          b.access_control != null ? (b.access_control ? 1 : 0) : (d.access_control || 0), d.id);
-  // Vừa ĐẶT/ĐỔI Nhóm ĐB (và nhóm có ≥2 máy) → tự kích hoạt đồng bộ ngay cho CẢ NHÓM
-  // (khỏi phải bấm nút / khởi động lại máy). Đẩy dữ liệu nhóm sang máy này + máy khác nhận cái nó thiếu.
+  // Tự kích hoạt đồng bộ NGAY cho CẢ NHÓM (khỏi phải bấm nút / khởi động lại máy) khi:
+  //  - Vừa ĐẶT/ĐỔI Nhóm ĐB, HOẶC
+  //  - Vừa DUYỆT máy (active 0→1) mà máy đã có nhóm → máy mới tự nhận vân tay/mặt/thẻ/mật mã/NV của nhóm.
   let synced = 0;
-  if (b.sync_group !== undefined && newGroup) {
+  const becameActive = b.active != null && !!b.active && !d.active;
+  if (newGroup && (b.sync_group !== undefined || becameActive)) {
     try {
       const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1").all(newGroup).map((r) => r.serial);
       if (groupSerials.length >= 2) { for (const s of groupSerials) syncFillDevice(s); synced = groupSerials.length; }
-    } catch (e) { console.error('[device] auto-sync khi đặt nhóm lỗi:', e.message); }
+    } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
   }
   res.json({ ok: true, synced });
 });
