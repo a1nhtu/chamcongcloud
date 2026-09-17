@@ -2028,12 +2028,12 @@ async function pageDevices() {
     if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
   };
   setTimeout(tickCounts, 10000);
-  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Tính lại công (khớp NV)');
+  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Tính lại công');
   rebuildBtn.onclick = async () => {
     rebuildBtn.disabled = true; rebuildBtn.textContent = 'Đang xử lý…';
     try { const r = await api('/admin/devices/rebuild', { method: 'POST' }); toast(`Đã tính lại ${r.rebuilt} ngày công`, 'ok'); pageDevices(); }
     catch (e) { toast(e.message, 'err'); }
-    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Tính lại công (khớp NV)'; }
+    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Tính lại công'; }
   };
   // 1 nút "Đồng bộ" gộp: bấm ra menu chọn Đồng bộ thường (mặc định) hoặc Ép toàn bộ.
   const doResync = async (force) => {
