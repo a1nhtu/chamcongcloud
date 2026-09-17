@@ -458,6 +458,11 @@ function migrateColumns() {
   add('push_devices', 'sync_group', "TEXT DEFAULT ''");
   // Máy có chức năng kiểm soát cửa (access control) → hiện nút "Mở cửa từ xa" (lệnh ADMS AC_UNLOCK)
   add('push_devices', 'access_control', 'INTEGER NOT NULL DEFAULT 0');
+  // Lệnh đồng bộ mang theo "đối tượng" để CHỈ cộng số đếm khi máy XÁC NHẬN đã nhận (chống đếm khống)
+  add('push_device_commands', 'pin',      "TEXT DEFAULT ''");
+  add('push_device_commands', 'bio_type', 'INTEGER');
+  add('push_device_commands', 'idx',      'INTEGER');
+  add('push_device_commands', 'mkind',    "TEXT DEFAULT ''");   // 'user' | 'bio' | 'photo' (mirror khi ack OK)
   // Index khớp NV theo Số ID máy
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_emp_device_pin ON employees(device_pin)'); } catch {}
 

@@ -1980,6 +1980,7 @@ async function pageDevices() {
     const moreBtn = rowMenu([
       { label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
       { label: '⬇ Tải lại log chấm công (theo ngày)', fn: () => deviceAttlogModal(m) },
+      { label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại. Chờ chút rồi Làm mới.', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
       { label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
       { label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
       { label: '🔢 Số máy (ghép log IDM)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
@@ -2027,12 +2028,12 @@ async function pageDevices() {
     if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
   };
   setTimeout(tickCounts, 10000);
-  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Tải lại dữ liệu chấm công');
+  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Tính lại công (khớp NV)');
   rebuildBtn.onclick = async () => {
     rebuildBtn.disabled = true; rebuildBtn.textContent = 'Đang xử lý…';
     try { const r = await api('/admin/devices/rebuild', { method: 'POST' }); toast(`Đã tính lại ${r.rebuilt} ngày công`, 'ok'); pageDevices(); }
     catch (e) { toast(e.message, 'err'); }
-    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Tải lại dữ liệu chấm công'; }
+    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Tính lại công (khớp NV)'; }
   };
   // 1 nút "Đồng bộ" gộp: bấm ra menu chọn Đồng bộ thường (mặc định) hoặc Ép toàn bộ.
   const doResync = async (force) => {

@@ -157,11 +157,13 @@ export function storeTemplates(serial, table, rawBody) {
   return pins;
 }
 
-// Xếp 1 lệnh xuống máy đích (chống trùng: bỏ qua nếu đã có lệnh y hệt đang chờ gửi)
-function queueCmd(serial, content) {
+// Xếp 1 lệnh xuống máy đích (chống trùng: bỏ qua nếu đã có lệnh y hệt đang chờ gửi).
+// meta = { pin, bio_type, idx, mkind } → để khi máy XÁC NHẬN (ack OK) mới cộng số đếm (mirror).
+function queueCmd(serial, content, meta = {}) {
   const dup = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND content=? AND trans_time IS NULL").get(serial, content);
   if (dup) return;
-  db.prepare('INSERT INTO push_device_commands(serial,content) VALUES(?,?)').run(serial, content);
+  db.prepare('INSERT INTO push_device_commands(serial,content,pin,bio_type,idx,mkind) VALUES(?,?,?,?,?,?)')
+    .run(serial, content, meta.pin ?? null, meta.bio_type ?? null, meta.idx ?? null, meta.mkind ?? null);
 }
 
 function buildUserCommand(pin) {
@@ -325,12 +327,10 @@ export function syncPinsToGroup(sourceSerial, pins) {
   let n = 0;
   for (const t of targets) {
     for (const pin of pins) {
-      queueCmd(t.serial, buildUserCommand(pin));
-      const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(pin) || {};
-      upsertDeviceUserSerial(t.serial, pin, u.name, u.card);
+      queueCmd(t.serial, buildUserCommand(pin), { pin, mkind: 'user' });
       const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
-      for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp)); mirrorTemplateTo(t.serial, tp); n++; }
-      const pc = buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc);   // đẩy ảnh (mặt/user) nếu có
+      for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp), { pin: tp.pin, bio_type: tp.bio_type, idx: tp.idx, mkind: 'bio' }); n++; }
+      const pc = buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc, { pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
     }
   }
   return n;
@@ -355,14 +355,11 @@ export function syncFillDevice(serial, force = false) {
     const key = `${t.pin}|${t.bio_type}|${t.idx}`;
     if (mine.has(key)) continue;
     if (!pushedPins.has(t.pin)) {
-      queueCmd(serial, buildUserCommand(t.pin));
-      const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(t.pin) || {};
-      upsertDeviceUserSerial(serial, t.pin, u.name, u.card);
-      const pc = buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc);   // đẩy ảnh (mặt/user) nếu có
+      queueCmd(serial, buildUserCommand(t.pin), { pin: t.pin, mkind: 'user' });
+      const pc = buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc, { pin: t.pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
       pushedPins.add(t.pin);
     }
-    queueCmd(serial, buildBioCommand(t));
-    mirrorTemplateTo(serial, t);
+    queueCmd(serial, buildBioCommand(t), { pin: t.pin, bio_type: t.bio_type, idx: t.idx, mkind: 'bio' });
   }
   // đẩy thêm ảnh cho pin CHỈ có ảnh (không có template, VD mặt ánh sáng nhìn thấy lưu dạng ảnh)
   const photoPins = db.prepare(`SELECT p.pin FROM device_user_photos p
@@ -370,7 +367,9 @@ export function syncFillDevice(serial, force = false) {
   for (const r of photoPins) {
     if (pushedPins.has(r.pin)) continue;
     const pc = buildPhotoCommand(r.pin); if (!pc) continue;
-    queueCmd(serial, buildUserCommand(r.pin)); queueCmd(serial, pc); pushedPins.add(r.pin);
+    queueCmd(serial, buildUserCommand(r.pin), { pin: r.pin, mkind: 'user' });
+    queueCmd(serial, pc, { pin: r.pin, mkind: 'photo' });
+    pushedPins.add(r.pin);
   }
 }
 
@@ -400,9 +399,36 @@ export function nextCommand(serial) {
   return `C:${cmd.id}:${cmd.content}`;
 }
 
-// /devicecmd: máy báo kết quả thực hiện lệnh
+// /devicecmd: máy báo kết quả thực hiện lệnh.
+// CHỈ khi máy xác nhận OK (Return=0) mới CỘNG SỐ ĐẾM (mirror) → số hiển thị đúng thực tế,
+// máy offline/lỗi mạng (không ack) sẽ không bị cộng khống.
 export function ackCommand(id, ret) {
+  const cmd = db.prepare('SELECT serial,pin,bio_type,idx,mkind FROM push_device_commands WHERE id=?').get(id);
   db.prepare("UPDATE push_device_commands SET return_value=?, response_at=datetime('now') WHERE id=?").run(String(ret), id);
+  if (!cmd || !cmd.mkind || String(ret).trim() !== '0') return;   // chỉ mirror khi thành công
+  try {
+    if (cmd.mkind === 'user') {
+      const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(cmd.pin) || {};
+      upsertDeviceUserSerial(cmd.serial, cmd.pin, u.name, u.card);
+    } else if (cmd.mkind === 'bio') {
+      const tp = db.prepare('SELECT * FROM device_bio_templates WHERE pin=? AND bio_type=? AND idx=? LIMIT 1').get(cmd.pin, cmd.bio_type, cmd.idx);
+      if (tp) mirrorTemplateTo(cmd.serial, tp);
+    }
+  } catch (e) { console.error('[device] mirror khi ack lỗi:', e.message); }
+}
+
+// "Đọc lại thông tin từ máy": xóa số đếm hiện tại của máy + hủy lệnh đồng bộ đang chờ,
+// rồi yêu cầu máy đẩy lại thực tế (NV/vân tay/khuôn mặt) → số hiển thị khớp máy thật.
+export function relearnDevice(serial) {
+  db.prepare('DELETE FROM device_users_serial WHERE serial=?').run(serial);
+  db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(serial);
+  // bỏ các lệnh đồng bộ CHƯA gửi (tránh sau đó lại cộng số khống)
+  db.prepare("DELETE FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial);
+  // yêu cầu máy đẩy lại thực tế
+  queueCmd(serial, 'DATA QUERY USERINFO');
+  queueCmd(serial, 'DATA QUERY FINGERTMP');
+  queueCmd(serial, 'DATA QUERY BIODATA');
+  return true;
 }
 
 // Tính chỉ số công cho 1 ngày (giống computeManual ở admin.js).

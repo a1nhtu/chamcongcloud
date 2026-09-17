@@ -6,7 +6,7 @@ import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attend
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, oplogLabel } from '../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, oplogLabel } from '../device-sync.js';
 import { auditMiddleware } from '../audit.js';
 import { saveBrandLogo, removeBrandLogo } from '../storage.js';
 import { getVapid, saveSubscription, removeSubscription, notifyManagers } from '../push.js';
@@ -1087,6 +1087,13 @@ r.put('/devices/:id', need('devices'), (req, res) => {
     } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
   }
   res.json({ ok: true, synced });
+});
+// Đọc lại thông tin từ máy: xóa số đếm hiện tại + yêu cầu máy đẩy lại thực tế (sửa số hiển thị sai)
+r.post('/devices/:id/relearn', need('devices'), (req, res) => {
+  const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
+  if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+  relearnDevice(d.serial);
+  res.json({ ok: true });
 });
 // Mở cửa từ xa (chỉ máy có kiểm soát cửa) — gửi lệnh ADMS AC_UNLOCK xuống hàng đợi
 r.post('/devices/:id/open-door', need('door_open'), (req, res) => {
