@@ -2027,38 +2027,33 @@ async function pageDevices() {
     if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
   };
   setTimeout(tickCounts, 10000);
-  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Đồng bộ lại (khớp mã NV)');
+  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Tải lại dữ liệu chấm công');
   rebuildBtn.onclick = async () => {
     rebuildBtn.disabled = true; rebuildBtn.textContent = 'Đang xử lý…';
-    try { const r = await api('/admin/devices/rebuild', { method: 'POST' }); toast(`Đã dựng lại ${r.rebuilt} ngày công`, 'ok'); pageDevices(); }
+    try { const r = await api('/admin/devices/rebuild', { method: 'POST' }); toast(`Đã tính lại ${r.rebuilt} ngày công`, 'ok'); pageDevices(); }
     catch (e) { toast(e.message, 'err'); }
-    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Đồng bộ lại (khớp mã NV)'; }
+    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Tải lại dữ liệu chấm công'; }
   };
-  const resyncBtn = el('button', { class: 'btn' }, '🔁 Đồng bộ');
-  resyncBtn.onclick = async () => {
-    if (!confirm('Đẩy toàn bộ nhân viên/vân tay/khuôn mặt/thẻ/ảnh của mỗi nhóm sang tất cả máy trong nhóm ngay bây giờ?\n(Dùng khi đăng ký trước lúc ghép nhóm, hoặc máy vừa bật lại — không cần khởi động lại máy.)')) return;
-    resyncBtn.disabled = true; resyncBtn.textContent = 'Đang đồng bộ…';
+  // 1 nút "Đồng bộ" gộp: bấm ra menu chọn Đồng bộ thường (mặc định) hoặc Ép toàn bộ.
+  const doResync = async (force) => {
+    const msg = force
+      ? 'ÉP ĐỒNG BỘ LẠI TOÀN BỘ giữa các máy cùng nhóm — đẩy lại HẾT nhân viên/vân tay/khuôn mặt/thẻ (kể cả cái máy tưởng đã có).\n\nDùng khi lần trước bị lỗi/thiếu. Xếp nhiều lệnh hơn, máy nhận dần trong ít phút. Tiếp tục?'
+      : 'Đồng bộ giữa các máy cùng nhóm — đẩy nhân viên/vân tay/khuôn mặt/thẻ/ảnh mà máy còn THIẾU sang mọi máy trong nhóm ngay bây giờ?';
+    if (!confirm(msg)) return;
     try {
-      const r = await api('/admin/devices/resync', { method: 'POST' });
+      const r = await api('/admin/devices/resync', { method: 'POST', body: force ? { force: true } : undefined });
       if (!r.devices) toast('Chưa có nhóm nào ≥2 máy để đồng bộ. Hãy đặt "Nhóm ĐB" giống nhau cho các máy.', 'err');
-      else toast(`Đã xếp ${r.queued} lệnh đồng bộ cho ${r.devices} máy (${r.groups} nhóm). Máy sẽ nhận trong ít giây.`, 'ok');
+      else toast(`Đã xếp ${r.queued} lệnh đồng bộ cho ${r.devices} máy (${r.groups} nhóm). Máy nhận dần trong ít ${force ? 'phút' : 'giây'}.`, 'ok');
     } catch (e) { toast(e.message, 'err'); }
-    finally { resyncBtn.disabled = false; resyncBtn.textContent = '🔁 Đồng bộ'; }
   };
-  const resyncFullBtn = el('button', { class: 'btn ghost' }, '🔁 Đồng bộ lại TOÀN BỘ (sửa lỗi)');
-  resyncFullBtn.onclick = async () => {
-    if (!confirm('ĐỒNG BỘ LẠI TOÀN BỘ giữa các máy cùng nhóm — ép đẩy lại HẾT nhân viên/vân tay/khuôn mặt/thẻ (kể cả cái máy tưởng đã có).\n\nDùng khi lần đồng bộ trước bị trục trặc/thiếu. Sẽ xếp nhiều lệnh hơn, máy nhận dần trong ít phút. Tiếp tục?')) return;
-    resyncFullBtn.disabled = true; resyncFullBtn.textContent = 'Đang đồng bộ lại…';
-    try {
-      const r = await api('/admin/devices/resync', { method: 'POST', body: { force: true } });
-      if (!r.devices) toast('Chưa có nhóm nào ≥2 máy. Đặt "Nhóm ĐB" giống nhau cho các máy trước.', 'err');
-      else toast(`Đã xếp ${r.queued} lệnh đồng bộ lại TOÀN BỘ cho ${r.devices} máy (${r.groups} nhóm).`, 'ok');
-    } catch (e) { toast(e.message, 'err'); }
-    finally { resyncFullBtn.disabled = false; resyncFullBtn.textContent = '🔁 Đồng bộ lại TOÀN BỘ (sửa lỗi)'; }
-  };
+  const resyncBtn = rowMenu([
+    { label: '🔁 Đồng bộ thường (đẩy cái còn thiếu)', fn: () => doResync(false) },
+    { label: '🔁 Ép đồng bộ lại TOÀN BỘ (khi lỗi/thiếu)', fn: () => doResync(true) },
+  ], '🔁 Đồng bộ');
+  resyncBtn.className = 'btn';   // nút chính (không phải kiểu mờ)
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
   usbBtn.onclick = usbImportModal;
-  setMain(head('Máy chấm công', usbBtn, resyncBtn, resyncFullBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', usbBtn, resyncBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
 // Nhập dữ liệu chấm công + nhân viên từ USB (máy không nối mạng)
