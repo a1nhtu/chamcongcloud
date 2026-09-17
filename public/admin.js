@@ -2028,12 +2028,14 @@ async function pageDevices() {
     if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
   };
   setTimeout(tickCounts, 10000);
-  const rebuildBtn = el('button', { class: 'btn ghost' }, '🔄 Tính lại công');
+  const RB_LABEL = '🔄 Tính lại công (đổi số máy / chẵn-lẻ vào-ra)';
+  const rebuildBtn = el('button', { class: 'btn ghost', title: 'Dùng khi vừa đổi SỐ MÁY hoặc quy tắc chẵn/lẻ (VÀO/RA): ghép LẠI giờ vào/ra từ lượt quẹt của máy theo quy tắc mới rồi tính lại công. Khác "↻ Tính lại" bên Tính công (cái đó giữ nguyên giờ vào/ra, chỉ tính lại chỉ số).' }, RB_LABEL);
   rebuildBtn.onclick = async () => {
+    if (!confirm('TÍNH LẠI CÔNG — dùng khi vừa đổi SỐ MÁY hoặc quy tắc chẵn/lẻ VÀO-RA.\n\nSẽ ghép LẠI giờ vào/ra từ lượt quẹt của máy theo quy tắc mới, rồi tính lại công cho các ngày có chấm.\n(Nếu chỉ đổi ca/cấu hình mà giờ vào/ra vẫn đúng → dùng "↻ Tính lại" bên trang Tính công.)\n\nTiếp tục?')) return;
     rebuildBtn.disabled = true; rebuildBtn.textContent = 'Đang xử lý…';
     try { const r = await api('/admin/devices/rebuild', { method: 'POST' }); toast(`Đã tính lại ${r.rebuilt} ngày công`, 'ok'); pageDevices(); }
     catch (e) { toast(e.message, 'err'); }
-    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = '🔄 Tính lại công'; }
+    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = RB_LABEL; }
   };
   // 1 nút "Đồng bộ" gộp: bấm ra menu chọn Đồng bộ thường (mặc định) hoặc Ép toàn bộ.
   const doResync = async (force) => {
