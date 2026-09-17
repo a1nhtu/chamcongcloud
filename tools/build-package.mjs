@@ -37,6 +37,7 @@ const masterEnv = join(ROOT, 'tools', 'master.env');
 if (existsSync(masterEnv)) { masterLines = readFileSync(masterEnv, 'utf8').trim() + '\n'; console.log('  + Da nhung TAI KHOAN TONG tu tools/master.env'); }
 writeFileSync(join(OUT, 'config.txt'),
 `PORT=8686
+CUSTOMER=
 TUNNEL_TOKEN=
 ${masterLines}`);
 

@@ -125,7 +125,9 @@ async function main() {
   // 6) Xuất file cấu hình cho khách
   const outDir = join(HERE, 'customers', slug);
   mkdirSync(outDir, { recursive: true });
-  writeFileSync(join(outDir, 'config.txt'), `PORT=${port}\nTUNNEL_TOKEN=${tunnelToken}\n`, 'utf8');
+  // CUSTOMER=<slug>: gắn Mã máy theo từng khách → nhiều công ty trên CÙNG 1 VPS
+  // vẫn có Mã máy/license KHÁC nhau (chống đại lý dùng lại 1 key cho nhiều công ty).
+  writeFileSync(join(outDir, 'config.txt'), `PORT=${port}\nCUSTOMER=${slug}\nTUNNEL_TOKEN=${tunnelToken}\n`, 'utf8');
 
   const url = `https://${fqdn}`;
   const guide = mode === 'vps'

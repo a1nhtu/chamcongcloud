@@ -32,6 +32,11 @@ export function machineId() {
       .map((n) => n.mac).sort().join(',');
     raw = 'h:' + os.hostname() + '|' + macs;
   }
+  // Mã khách (từ config.txt qua env CUSTOMER): để NHIỀU công ty trên CÙNG 1 VPS
+  // có Mã máy KHÁC nhau → mỗi công ty 1 license riêng (đại lý không tự nhân thêm được).
+  // Bỏ trống (cài máy riêng của khách / bản cũ) → giữ nguyên Mã máy cũ (tương thích ngược).
+  const cust = (process.env.CUSTOMER || '').trim().toLowerCase();
+  if (cust) raw += '|c:' + cust;
   _mid = sha(raw).slice(0, 16).toUpperCase();
   return _mid;
 }
