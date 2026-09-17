@@ -856,8 +856,11 @@ r.post('/recompute', need('recompute'), (req, res) => {
   // Phạm vi: ids (vài NV) > dept (1 phòng ban) > cả công ty
   const dept = (req.query.dept || '').trim();
   const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
+  const rcFrom = String(req.query.from || '').slice(0, 10);
+  const rcTo = String(req.query.to || '').slice(0, 10);
   const where = ['a.check_in_at IS NOT NULL']; const args = [];
-  if (month) { where.push('a.work_date LIKE ?'); args.push(month + '%'); }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(rcFrom) && /^\d{4}-\d{2}-\d{2}$/.test(rcTo)) { where.push('a.work_date>=? AND a.work_date<=?'); args.push(rcFrom, rcTo); }
+  else if (month) { where.push('a.work_date LIKE ?'); args.push(month + '%'); }
   let join = '';
   if (ids.length) { where.push(`a.employee_id IN (${ids.map(() => '?').join(',')})`); args.push(...ids); }
   else if (dept) { join = ' JOIN employees e ON e.id=a.employee_id'; where.push('e.department=?'); args.push(dept); }
@@ -895,6 +898,82 @@ r.post('/recompute', need('recompute'), (req, res) => {
     throw e;
   }
   res.json({ ok: true, updated: n });
+});
+
+// LƯỚI CHẤM CÔNG theo KHOẢNG NGÀY + phạm vi (cả công ty / phòng ban / vài NV).
+// mode=detail: từng ngày (giờ vào/ra, ca, CÁC LẦN CHẤM, nghỉ). mode=summary: tổng hợp mỗi NV.
+r.get('/attendance/grid', need('reports'), (req, res) => {
+  const from = String(req.query.from || '').slice(0, 10);
+  const to = String(req.query.to || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu khoảng ngày hợp lệ' });
+  if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
+  const dept = (req.query.dept || '').trim();
+  const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
+  const mode = req.query.mode === 'summary' ? 'summary' : 'detail';
+
+  let esql = "SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin'";
+  const eargs = [];
+  if (ids.length) { esql += ` AND id IN (${ids.map(() => '?').join(',')})`; eargs.push(...ids); }
+  else if (dept) { esql += ' AND department=?'; eargs.push(dept); }
+  esql += ' ORDER BY department, full_name';
+  const emps = db.prepare(esql).all(...eargs);
+  if (!emps.length) return res.json({ mode, rows: [] });
+  const empIds = emps.map((e) => e.id);
+  const ph = empIds.map(() => '?').join(',');
+  const empById = new Map(emps.map((e) => [e.id, e]));
+
+  const vnHM = (iso) => { if (!iso) return ''; const t = new Date(new Date(iso).getTime() + 7 * 3600000); return String(t.getUTCHours()).padStart(2, '0') + ':' + String(t.getUTCMinutes()).padStart(2, '0'); };
+  const addDay = (d) => new Date(new Date(d + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10);
+
+  // Nghỉ đã duyệt phủ theo từng ngày
+  const leaves = db.prepare(`SELECT * FROM leave_requests WHERE status='approved' AND employee_id IN (${ph}) AND from_date<=? AND to_date>=?`).all(...empIds, to, from);
+  const leaveSym = { 'Nghỉ phép': 'P', 'Nghỉ không lương': 'KL', 'Công tác': 'CT', 'Khác': 'K' };
+  const leaveMap = new Map();
+  for (const l of leaves) {
+    let d = l.from_date < from ? from : l.from_date; const end = l.to_date > to ? to : l.to_date;
+    while (d <= end) { leaveMap.set(l.employee_id + '|' + d, { sym: leaveSym[l.type] || 'N', type: l.type }); d = addDay(d); }
+  }
+
+  if (mode === 'summary') {
+    const att = db.prepare(`SELECT employee_id, work_date, check_in_at, work_unit, work_minutes, ot_min, late_min, early_min FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to);
+    const agg = new Map();
+    for (const e of emps) agg.set(e.id, { id: e.id, code: e.code, name: e.full_name, dept: e.department || '', cong: 0, minutes: 0, ot: 0, lateN: 0, lateM: 0, earlyN: 0, earlyM: 0, leaveN: 0, days: 0 });
+    for (const a of att) { const g = agg.get(a.employee_id); if (!g) continue; g.cong += a.work_unit || 0; g.minutes += a.work_minutes || 0; g.ot += a.ot_min || 0; if (a.late_min > 0) { g.lateN++; g.lateM += a.late_min; } if (a.early_min > 0) { g.earlyN++; g.earlyM += a.early_min; } if (a.check_in_at) g.days++; }
+    for (const key of leaveMap.keys()) { const g = agg.get(+key.split('|')[0]); if (g) g.leaveN++; }
+    const r2 = (n) => Math.round(n * 100) / 100;
+    const rows = [...agg.values()].map((g) => ({ id: g.id, code: g.code, name: g.name, dept: g.dept, cong: r2(g.cong), gio: r2(g.minutes / 60), ot: r2(g.ot / 60), lateN: g.lateN, lateM: g.lateM, earlyN: g.earlyN, earlyM: g.earlyM, leaveN: g.leaveN, days: g.days }));
+    return res.json({ mode, rows });
+  }
+
+  // detail
+  const att = db.prepare(`SELECT a.*, s.name shift_name FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
+    WHERE a.employee_id IN (${ph}) AND a.work_date>=? AND a.work_date<=?`).all(...empIds, from, to);
+  const punches = db.prepare(`SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
+  const punchMap = new Map();
+  for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at)); }
+
+  const rows = []; const seen = new Set();
+  for (const a of att) {
+    const e = empById.get(a.employee_id); if (!e) continue;
+    const key = a.employee_id + '|' + a.work_date; seen.add(key);
+    const lv = leaveMap.get(key);
+    rows.push({
+      date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
+      shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
+      punches: punchMap.get(key) || [], late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
+      cong: Math.round((a.work_unit || 0) * 100) / 100, leave: lv ? lv.sym : '',
+      status: a.check_out_at ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
+      att_id: a.id,
+    });
+  }
+  for (const [key, lv] of leaveMap) {   // ngày CHỈ có nghỉ (không có bản ghi chấm)
+    if (seen.has(key)) continue;
+    const [eid, d] = key.split('|'); const e = empById.get(+eid); if (!e) continue;
+    rows.push({ date: d, wd: WDVN[vnWd(d)], employee_id: +eid, code: e.code, name: e.full_name, dept: e.department || '',
+      shift: '', in: '', out: '', punches: [], late: 0, early: 0, ot: 0, cong: 0, leave: lv.sym, status: lv.type, att_id: null });
+  }
+  rows.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  return res.json({ mode, rows });
 });
 
 /* -------------------- SỬA / THÊM / XOÁ GIỜ CHẤM (bằng tay) -------------------- */
