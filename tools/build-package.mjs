@@ -155,17 +155,30 @@ Hỗ trợ: Digiplus.
 writeFileSync(join(ROOT, 'dist-khach', 'DOC-CHO-ANH.txt'),
 `GHI CHÚ CHO ANH (KHÔNG gửi khách)
 =================================
-1. Trước khi gửi bộ cài cho 1 khách, tạo subdomain + tunnel token trên Cloudflare:
-   - dash.cloudflare.com > Zero Trust > Networks > Tunnels > Create tunnel (Cloudflared)
-   - Đặt tên: vd congtyA. Copy TOKEN.
-   - Trong tunnel > Public Hostname > Add:
-       Subdomain: congtyA   Domain: maychamcongcloud.com
-       Service: HTTP  ->  localhost:8686
-2. Mở file config.txt trong bộ cài, dán: TUNNEL_TOKEN=<token vừa copy>
-3. Nén thư mục DigiplusChamCong lại (zip) rồi gửi khách.
-4. Khi khách gửi Mã máy: dùng tool CapLicense.bat để cấp license.
+Quy trình ĐẦY ĐỦ: xem file QUY-TRINH-BAN-KHACH.txt. Tóm tắt nhanh:
 
-KHÔNG BAO GIỜ đưa khách: tools/keys/private.pem, license-tool, license-gen. Bộ cài này đã KHÔNG chứa chúng.
+TẠO 1 KHÁCH (TỰ ĐỘNG — không cần vào Cloudflare bằng tay nữa):
+1. Build-BoCai.bat (chỉ khi vừa nâng cấp phần mềm) → đóng gói bản MỚI NHẤT.
+2. Tao-Khach.bat → gõ tên cty (không dấu) → chọn chế độ:
+     1 = cài tại VĂN PHÒNG KHÁCH (cổng 8686).
+     2 = chạy trên VPS bên Anh → NHẬP CỔNG (nhiều khách/1 VPS phải khác cổng).
+   → Tool tự tạo domain + tunnel + token + file tools\\customers\\<tencty>\\config.txt.
+3. Chép tools\\customers\\<tencty>\\config.txt ĐÈ vào dist-khach\\DigiplusChamCong\\config.txt.
+4. Nén thư mục dist-khach\\DigiplusChamCong (zip) → gửi khách / mang lên VPS.
+5. Khách (hoặc VPS): giải nén → CaiDat.bat → lấy MÃ MÁY → Anh cấp license bằng
+   tools\\license-tool\\CapLicense.bat → gửi chuỗi license → khách dán → xong.
+
+NHIỀU KHÁCH TRÊN CÙNG 1 VPS:
+   - Mỗi khách 1 CỔNG khác nhau (8686, 8687, 8688...) + để 1 THƯ MỤC RIÊNG.
+   - CaiDat.bat/GoCaiDat.bat đã TỰ an toàn theo cổng (không đè / không giết khách khác).
+   - KHÔNG chạy "taskkill /im node.exe" hay "cloudflared.exe" tổng thể → tắt HẾT khách.
+   - Cùng VPS = cùng Mã máy → dùng lại 1 chuỗi license được.
+
+XÓA KHÁCH: Xoa-Khach.bat → gõ tên cty → YES (xóa domain + tunnel + config).
+
+BẢO MẬT — KHÔNG BAO GIỜ đưa khách: tools\\keys\\private.pem, tools\\license-tool,
+   tools\\cf.env, QUY-TRINH-BAN-KHACH.txt, file này.
+   Bộ cài (dist-khach\\DigiplusChamCong) đã KHÔNG chứa chúng — gửi cả thư mục đó là an toàn.
 `);
 
 console.log('\\n✓ Đã đóng gói xong tại:', OUT);
