@@ -2,7 +2,7 @@ import { Router, raw } from 'express';
 import ExcelJS from 'exceljs';
 import { db, getSetting, setSetting, resolveShift, resolveEffectiveShift } from '../db.js';
 import { authRequired, roleRequired, hashPassword, permRequired, PERMISSIONS, effectivePermissions } from '../auth.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
@@ -875,7 +875,7 @@ r.post('/recompute', need('recompute'), (req, res) => {
         if (shift) c = computeCheckout(shift, row.check_in_at, row.check_out_at, row.work_date, flags);
         else {
           const wm = Math.max(0, Math.round((new Date(row.check_out_at) - new Date(row.check_in_at)) / 60000));
-          c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otType, day_status: 'lam_viec' };
+          c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, { roundingDecimals, roundingMode }), ot_type: otType, day_status: 'lam_viec' };
         }
         db.prepare(`UPDATE attendance SET late_min=?, early_min=?, ot_min=?, work_minutes=?,
           work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?`)
@@ -912,7 +912,7 @@ function computeManual(employeeId, workDate, inIso, outIso) {
   let c;
   if (inIso && outIso) {
     if (shift && !hourly) c = computeCheckout(shift, inIso, outIso, workDate, flags);
-    else { const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otType, day_status: 'lam_viec' }; }
+    else { const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, { roundingDecimals, roundingMode }), ot_type: otType, day_status: 'lam_viec' }; }
   } else {
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: inIso ? 'thieu_ra' : 'vang' };
   }

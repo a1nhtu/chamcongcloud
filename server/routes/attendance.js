@@ -3,7 +3,7 @@ import { db, getSetting, resolveShift, resolveEffectiveShift, resolveDayShifts, 
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday } from '../attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit } from '../attendance-calc.js';
 import { notifyManagers } from '../push.js';
 
 const r = Router();
@@ -230,7 +230,7 @@ r.post('/check-out', (req, res) => {
     calc = computeCheckout(shift, row.check_in_at, at, wdate, dayFlags(wdate));
   } else {
     const wm = Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
-    calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otTypeOf(wdate), day_status: 'lam_viec' };
+    calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate)), ot_type: otTypeOf(wdate), day_status: 'lam_viec' };
   }
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;

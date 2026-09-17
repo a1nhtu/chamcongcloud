@@ -38,6 +38,17 @@ function roundOt(minutes, unit) {
  * Tính đầy đủ chỉ số khi RA ca.
  * @returns {early_min, ot_min, work_minutes, work_unit, ot_type, day_status}
  */
+// Số công khi KHÔNG có ca (không xác định được giờ chuẩn theo ca):
+// tính theo TỈ LỆ so với 1 ngày công chuẩn (mặc định 8 giờ) → tránh cảnh 6 phút = 1 công.
+// Làm việc >= 1 ngày chuẩn thì tối đa 1 công.
+export function noShiftUnit(work_minutes, opts = {}) {
+  const { roundingDecimals = 2, roundingMode = 0, standardMinutes = 480 } = opts;
+  const std = Math.max(1, standardMinutes);
+  const factor = Math.pow(10, roundingDecimals);
+  const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor; // 0=lùi,1=tới,2=gần nhất
+  return Math.min(1, Math.max(0, roundFn((work_minutes / std) * factor) / factor));
+}
+
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
   const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0 } = opts;
   const ci = new Date(checkInIso);

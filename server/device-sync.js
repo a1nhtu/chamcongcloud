@@ -1,7 +1,7 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { db, getSetting, resolveEffectiveShift, resolveDayShifts } from './db.js';
-import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow } from './attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow, noShiftUnit } from './attendance-calc.js';
 import { hashPassword } from './auth.js';
 
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
@@ -447,7 +447,7 @@ function metrics(employeeId, workDate, inIso, outIso, presetShift) {
   let c;
   if (inIso && outIso) {
     if (shift && !hourly) c = computeCheckout(shift, inIso, outIso, workDate, flags);
-    else { const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: wm > 0 ? 1 : 0, ot_type: otType, day_status: 'lam_viec' }; }
+    else { const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, { roundingDecimals, roundingMode }), ot_type: otType, day_status: 'lam_viec' }; }
   } else {
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: inIso ? 'thieu_ra' : 'vang' };
   }
