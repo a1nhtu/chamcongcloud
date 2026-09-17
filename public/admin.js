@@ -1626,15 +1626,39 @@ async function pageEditAtt() {
   let depts = [];
   try { depts = (await api('/reports/departments')).rows || []; } catch {}
 
-  const deptSel = el('select', { style: 'min-width:130px' },
-    el('option', { value: '' }, '— Cả công ty —'), ...depts.map(d => el('option', { value: d }, d)));
-  const empSel = el('select', { style: 'min-width:190px' });
-  const fillEmps = () => {
-    const dv = deptSel.value; empSel.innerHTML = '';
-    empSel.append(el('option', { value: 'ALL' }, dv ? `— Tất cả phòng "${dv}" —` : '— Tất cả nhân viên —'));
-    for (const e of emps) if (!dv || (e.department || '') === dv) empSel.append(el('option', { value: e.id }, `${e.full_name} (${e.code})`));
+  // Helper: nút "chọn NHIỀU" (checklist tick). picked rỗng = tất cả.
+  const makeChecklist = (icon, allLabel, getItems, picked, afterChange) => {
+    const btn = el('button', { class: 'btn ghost sm', style: 'text-align:left;min-width:150px' });
+    const sync = () => { btn.textContent = (picked.size ? `${icon} Đã chọn ${picked.size}` : `${icon} ${allLabel}`) + ' ▾'; };
+    sync();
+    let dd = null;
+    const close = (reload) => { if (dd) { dd.remove(); dd = null; sync(); if (reload) afterChange(); } };
+    btn.onclick = (ev) => {
+      ev.stopPropagation();
+      if (dd) { close(true); return; }
+      dd = el('div', { style: 'position:fixed;z-index:1200;background:var(--surface,#fff);border:1px solid var(--line,#e5e5e5);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px;max-height:360px;overflow:auto;min-width:250px' });
+      const selAll = el('input', { type: 'checkbox', style: 'width:auto' }); selAll.checked = picked.size === 0;
+      selAll.onchange = () => { picked.clear(); dd.querySelectorAll('.mc-cb').forEach(c => c.checked = false); };
+      dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:5px 6px;border-bottom:1px solid var(--line,#eee);margin-bottom:4px;cursor:pointer' }, selAll, `${allLabel} (bỏ hết tick = tất cả)`));
+      for (const it of getItems()) {
+        const cb = el('input', { type: 'checkbox', class: 'mc-cb', style: 'width:auto', ...(picked.has(it.value) ? { checked: '' } : {}) });
+        cb.onchange = () => { cb.checked ? picked.add(it.value) : picked.delete(it.value); selAll.checked = picked.size === 0; };
+        dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 6px;cursor:pointer' }, cb, it.text));
+      }
+      const done = el('button', { class: 'btn sm', style: 'width:100%;margin-top:6px' }, 'Xong');
+      done.onclick = () => close(true); dd.append(done);
+      document.body.append(dd);
+      const r = btn.getBoundingClientRect();
+      dd.style.left = Math.max(8, Math.min(r.left, innerWidth - 270)) + 'px';
+      dd.style.top = (r.bottom + 4) + 'px';
+      setTimeout(() => document.addEventListener('click', function h(ev2) { if (dd && !dd.contains(ev2.target) && ev2.target !== btn) { close(true); document.removeEventListener('click', h, true); } }, true), 0);
+    };
+    return { btn, sync };
   };
-  fillEmps();
+  // Phòng ban (chọn nhiều) + Nhân viên (chọn nhiều, lọc theo phòng ban đã chọn)
+  const deptPick = new Set(), empPick = new Set();
+  const deptCl = makeChecklist('🏢', 'Cả công ty', () => depts.map(d => ({ value: d, text: d })), deptPick, () => { empPick.clear(); empCl.sync(); load(); });
+  const empCl = makeChecklist('👥', 'Tất cả NV', () => emps.filter(e => !deptPick.size || deptPick.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })), empPick, () => load());
   const fmt = (d) => d.toISOString().slice(0, 10);
   const now = new Date();
   const fromI = el('input', { type: 'date', value: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), style: 'width:auto' });
@@ -1654,8 +1678,8 @@ async function pageEditAtt() {
 
   const scope = () => {
     let p = `from=${fromI.value}&to=${toI.value}`;
-    if (empSel.value !== 'ALL') p += '&ids=' + empSel.value;
-    else if (deptSel.value) p += '&dept=' + encodeURIComponent(deptSel.value);
+    if (empPick.size) p += '&ids=' + [...empPick].join(',');
+    else if (deptPick.size) p += '&depts=' + encodeURIComponent([...deptPick].join(','));
     return p;
   };
   const mkIso = (date, hm) => hm ? new Date(`${date}T${hm}:00+07:00`).toISOString() : null;
@@ -1668,7 +1692,7 @@ async function pageEditAtt() {
     try { d = await api(`/admin/attendance/grid?mode=detail&${scope()}`); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const rows = d.rows || [];
-    const showNV = empSel.value === 'ALL';
+    const showNV = empPick.size !== 1;   // hiện cột NV trừ khi chọn đúng 1 người
     const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', 'Các lần chấm', 'Trễ(p)', 'Sớm(p)', 'OT(p)', 'Công', 'Nghỉ', 'Trạng thái', ''];
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
@@ -1707,17 +1731,11 @@ async function pageEditAtt() {
     try { d = await api(`/admin/attendance/grid?mode=summary&${scope()}`); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const rows = d.rows || [];
-    const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
     const tbl = el('table', { class: 'data' });
-    const thead = el('thead'); thead.append(el('tr', {},
-      el('th', {}, selAll), el('th', {}, 'Mã'), el('th', {}, 'Họ tên'), el('th', {}, 'Bộ phận'),
-      el('th', {}, 'Ngày công'), el('th', {}, 'Tổng công'), el('th', {}, 'Tổng giờ'), el('th', {}, 'OT(g)'),
-      el('th', {}, 'Trễ'), el('th', {}, 'Sớm'), el('th', {}, 'Nghỉ'), el('th', {}, '')));
-    tbl.append(thead);
+    tbl.innerHTML = '<thead><tr><th>Mã</th><th>Họ tên</th><th>Bộ phận</th><th>Ngày công</th><th>Tổng công</th><th>Tổng giờ</th><th>OT(g)</th><th>Trễ</th><th>Sớm</th><th>Nghỉ</th><th></th></tr></thead>';
     const tb = el('tbody');
-    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 12 }, el('div', { class: 'empty' }, 'Không có nhân viên trong phạm vi này.'))));
+    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Không có nhân viên trong phạm vi này.'))));
     for (const r of rows) tb.append(el('tr', {},
-      el('td', {}, el('input', { type: 'checkbox', class: 'ea-pick', value: r.id, style: 'width:auto' })),
       el('td', {}, r.code),
       el('td', {}, el('b', {}, r.name)),
       el('td', {}, r.dept || '—'),
@@ -1728,44 +1746,36 @@ async function pageEditAtt() {
       el('td', { style: 'text-align:center' }, r.lateN ? `${r.lateN} (${r.lateM}p)` : '—'),
       el('td', { style: 'text-align:center' }, r.earlyN ? `${r.earlyN} (${r.earlyM}p)` : '—'),
       el('td', { style: 'text-align:center' }, r.leaveN ? String(r.leaveN) : '—'),
-      el('td', {}, btnSm('Chi tiết', () => { empSel.value = String(r.id); fillScopeSel(); view = 'detail'; renderViewBar(); load(); })),
+      el('td', {}, btnSm('Chi tiết', () => { empPick.clear(); empPick.add(r.id); empCl.sync(); view = 'detail'; renderViewBar(); load(); })),
     ));
     tbl.append(tb);
-    selAll.onchange = () => tb.querySelectorAll('.ea-pick').forEach(c => { c.checked = selAll.checked; });
     wrap.innerHTML = '';
     wrap.append(
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên (${deptSel.value || 'cả công ty'}). Tick vài người rồi bấm "↻ Tính lại" để chỉ tính lại người đã chọn; KHÔNG tick = tính lại cả phạm vi. Bấm "Chi tiết" để xem/sửa.`),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên. Chọn phòng ban / nhân viên (nút 🏢 / 👥) rồi bấm "↻ Tính lại" để tính lại đúng phạm vi. Bấm "Chi tiết" để xem/sửa 1 người.`),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
-  const fillScopeSel = () => {};   // (giữ chỗ) empSel đã có option NV
 
   const load = () => { view === 'summary' ? loadSummary() : loadDetail(); };
-  deptSel.onchange = () => { fillEmps(); empSel.value = 'ALL'; load(); };
-  empSel.onchange = load;
   fromI.onchange = load; toI.onchange = load;
   addBtn.onclick = () => {
-    if (empSel.value === 'ALL') return toast('Chọn 1 nhân viên trước khi thêm giờ', 'err');
-    attEditModal(null, +empSel.value, load);
+    if (empPick.size !== 1) return toast('Chọn đúng 1 nhân viên (nút 👥) trước khi thêm giờ', 'err');
+    attEditModal(null, [...empPick][0], load);
   };
   recalcBtn.onclick = async () => {
-    let p = `from=${fromI.value}&to=${toI.value}`, scopeTxt;
-    if (empSel.value !== 'ALL') { p += '&ids=' + empSel.value; scopeTxt = 'nhân viên đang chọn'; }
-    else {
-      const checked = view === 'summary' ? [...wrap.querySelectorAll('.ea-pick:checked')].map(x => x.value) : [];
-      if (checked.length) { p += '&ids=' + checked.join(','); scopeTxt = checked.length + ' nhân viên đã chọn'; }
-      else if (deptSel.value) { p += '&dept=' + encodeURIComponent(deptSel.value); scopeTxt = 'phòng "' + deptSel.value + '"'; }
-      else scopeTxt = 'CẢ CÔNG TY';
-    }
+    let scopeTxt;
+    if (empPick.size) scopeTxt = empPick.size + ' nhân viên đã chọn';
+    else if (deptPick.size) scopeTxt = deptPick.size + ' phòng ban đã chọn';
+    else scopeTxt = 'CẢ CÔNG TY';
     if (!confirm(`Tính lại công từ ${fromI.value} đến ${toI.value} cho ${scopeTxt}?\nDò lại ca theo giờ vào/ra và tính lại Muộn/Sớm/OT/Công.`)) return;
     recalcBtn.disabled = true; recalcBtn.textContent = 'Đang tính…';
-    try { const rs = await api('/admin/recompute?' + p, { method: 'POST' }); toast(`Đã tính lại ${rs.updated} bản ghi`, 'ok'); load(); }
+    try { const rs = await api('/admin/recompute?' + scope(), { method: 'POST' }); toast(`Đã tính lại ${rs.updated} bản ghi`, 'ok'); load(); }
     catch (e) { toast(e.message, 'err'); }
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại'; }
   };
   roundBtn.onclick = () => roundingModal(fromI.value.slice(0, 7), load);
 
   const bar = el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' },
-    viewBar, deptSel, empSel,
+    viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
     addBtn, recalcBtn, roundBtn);

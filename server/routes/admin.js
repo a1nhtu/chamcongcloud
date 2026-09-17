@@ -854,8 +854,9 @@ r.post('/recompute', need('recompute'), (req, res) => {
   const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
   const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
 
-  // Phạm vi: ids (vài NV) > dept (1 phòng ban) > cả công ty
+  // Phạm vi: ids (vài NV) > depts (nhiều phòng ban) > dept (1 phòng ban) > cả công ty
   const dept = (req.query.dept || '').trim();
+  const deptList = String(req.query.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
   const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
   const rcFrom = String(req.query.from || '').slice(0, 10);
   const rcTo = String(req.query.to || '').slice(0, 10);
@@ -864,6 +865,7 @@ r.post('/recompute', need('recompute'), (req, res) => {
   else if (month) { where.push('a.work_date LIKE ?'); args.push(month + '%'); }
   let join = '';
   if (ids.length) { where.push(`a.employee_id IN (${ids.map(() => '?').join(',')})`); args.push(...ids); }
+  else if (deptList.length) { join = ' JOIN employees e ON e.id=a.employee_id'; where.push(`e.department IN (${deptList.map(() => '?').join(',')})`); args.push(...deptList); }
   else if (dept) { join = ' JOIN employees e ON e.id=a.employee_id'; where.push('e.department=?'); args.push(dept); }
   const rows = db.prepare(`SELECT a.* FROM attendance a${join} WHERE ${where.join(' AND ')}`).all(...args);
 
@@ -909,12 +911,14 @@ r.get('/attendance/grid', need('reports'), (req, res) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu khoảng ngày hợp lệ' });
   if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
   const dept = (req.query.dept || '').trim();
+  const deptList = String(req.query.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
   const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
   const mode = req.query.mode === 'summary' ? 'summary' : 'detail';
 
   let esql = "SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin'";
   const eargs = [];
   if (ids.length) { esql += ` AND id IN (${ids.map(() => '?').join(',')})`; eargs.push(...ids); }
+  else if (deptList.length) { esql += ` AND department IN (${deptList.map(() => '?').join(',')})`; eargs.push(...deptList); }
   else if (dept) { esql += ' AND department=?'; eargs.push(dept); }
   esql += ' ORDER BY department, full_name';
   const emps = db.prepare(esql).all(...eargs);
