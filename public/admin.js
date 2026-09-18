@@ -1072,8 +1072,10 @@ async function pageAssignments() {
   try { data = await api(`/admin/assignments?from=${from}&to=${to}`); }
   catch (e) { setMain(head('Phân ca'), el('div', { class: 'empty' }, e.message)); return; }
 
-  // Dropdown phòng ban
-  const depts = [...new Set(data.employees.map(e => e.department).filter(Boolean))].sort();
+  // Dropdown phòng ban = danh mục Bộ phận đã khai (master) GỘP phòng ban đang gán ở NV
+  let deptNames = data.employees.map(e => e.department).filter(Boolean);
+  try { deptNames = deptNames.concat(((await api('/admin/departments')).rows || []).map(d => d.name)); } catch {}
+  const depts = [...new Set(deptNames.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
   for (const d of depts) deptSel.append(el('option', { value: d }, d));
 
   // Map phân ca: key emp|date -> {shift_id,is_off}
@@ -2321,15 +2323,23 @@ const REPORT_GROUPS = [
 
 async function pageReport() {
   const hourly = hourlyMode();
-  const monthI = el('input', { type: 'month', id: 'rp-month', value: todayMonth() });
+  const monthI = el('input', { type: 'month', id: 'rp-month', value: todayMonth(), title: 'Chọn nhanh trọn 1 tháng' });
+  const md0 = monthDaysArr(todayMonth());
+  const fromI = el('input', { type: 'date', id: 'rp-from', value: md0[0], title: 'Từ ngày' });
+  const toI = el('input', { type: 'date', id: 'rp-to', value: md0[md0.length - 1], title: 'Đến ngày' });
+  const arrow = el('span', { style: 'align-self:center;color:var(--muted)' }, '→');
   const deptSel = el('select', { id: 'rp-dept' }, el('option', { value: '' }, '-- Tất cả phòng ban --'));
   try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
 
+  const periodQS = () => `from=${fromI.value}&to=${toI.value}`;
+  // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
+  const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; };
+
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
   const hub = () => {
-    monthI.onchange = null; deptSel.onchange = null;
+    monthI.onchange = snapMonth; fromI.onchange = null; toI.onchange = null; deptSel.onchange = null;
     const wrap = el('div', {});
-    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng) và phòng ban ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
+    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày) và phòng ban ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
     for (const [gname, cards] of REPORT_GROUPS) {
       const list = cards.filter(([v]) => !hourly || !['late', 'ot', 'symbol'].includes(v));
       if (!list.length) continue;
@@ -2347,7 +2357,7 @@ async function pageReport() {
       }
       wrap.append(grid);
     }
-    setMain(head('Báo cáo', monthI, deptSel), wrap);
+    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptSel), wrap);
   };
 
   // Xem 1 báo cáo cụ thể (có nút quay lại danh sách)
@@ -2355,13 +2365,14 @@ async function pageReport() {
     const backBtn = el('button', { class: 'btn ghost sm' }, '← Danh sách báo cáo');
     backBtn.onclick = hub;
     const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
-    exportBtn.onclick = () => downloadExcel(type, monthI.value, deptSel.value);
+    exportBtn.onclick = () => downloadExcel(type, fromI.value, toI.value, deptSel.value);
     const wrap = el('div', {}, loading());
-    setMain(head('Báo cáo', backBtn, monthI, deptSel, exportBtn), wrap);
+    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptSel, exportBtn), wrap);
     const load = async () => {
+      if (fromI.value && toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
       wrap.innerHTML = ''; wrap.append(loading());
       let data;
-      try { data = await api(`/reports/data?type=${type}&month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}`); }
+      try { data = await api(`/reports/data?type=${type}&${periodQS()}&dept=${encodeURIComponent(deptSel.value)}`); }
       catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
       const tbl = el('table', { class: 'data' });
       const thead = el('tr', {});
@@ -2385,19 +2396,20 @@ async function pageReport() {
       wrap.append(el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title),
         el('div', { class: 'panel tbl-scroll' }, tbl));
     };
-    monthI.onchange = load; deptSel.onchange = load;
+    const snapAndLoad = () => { snapMonth(); load(); };
+    monthI.onchange = snapAndLoad; fromI.onchange = load; toI.onchange = load; deptSel.onchange = load;
     load();
   };
 
   hub();
 }
-async function downloadExcel(type, month, dept) {
+async function downloadExcel(type, from, to, dept) {
   try {
-    const res = await api(`/reports/export.xlsx?type=${type}&month=${month}&dept=${encodeURIComponent(dept || '')}`, { raw: true });
+    const res = await api(`/reports/export.xlsx?type=${type}&from=${from}&to=${to}&dept=${encodeURIComponent(dept || '')}`, { raw: true });
     if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
-    const a = el('a', { href: url, download: `baocao_${type}_${month}.xlsx` });
+    const a = el('a', { href: url, download: `baocao_${type}_${from}_${to}.xlsx` });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
     toast('Đã xuất Excel', 'ok');

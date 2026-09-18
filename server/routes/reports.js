@@ -25,9 +25,35 @@ function monthDays(month) {
   const n = new Date(Date.UTC(y, m, 0)).getUTCDate();
   return Array.from({ length: n }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
 }
+// Mảng ngày YYYY-MM-DD trong khoảng [from, to] (bao gồm 2 đầu)
+function daysBetween(from, to) {
+  const out = [];
+  for (let d = new Date(from + 'T12:00:00Z'); d <= new Date(to + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1))
+    out.push(d.toISOString().slice(0, 10));
+  return out;
+}
+// Từ query: ưu tiên from/to; nếu thiếu thì suy ra từ month (cả tháng). Tự đảo nếu to < from.
+function resolvePeriod(q) {
+  let from = (q.from || '').slice(0, 10), to = (q.to || '').slice(0, 10);
+  if (!from || !to) {
+    const month = (q.month || vnDateStr().slice(0, 7)).slice(0, 7);
+    const ds = monthDays(month);
+    from = ds[0]; to = ds[ds.length - 1];
+  }
+  if (to < from) { const t = from; from = to; to = t; }
+  return { from, to };
+}
+// Nhãn kỳ: nếu đúng trọn 1 tháng → "tháng MM/YYYY", ngược lại → "kỳ DD/MM/YYYY – DD/MM/YYYY"
+function periodLabel(from, to) {
+  if (from.slice(0, 7) === to.slice(0, 7)) {
+    const md = monthDays(from.slice(0, 7));
+    if (from === md[0] && to === md[md.length - 1]) return `tháng ${from.slice(5, 7)}/${from.slice(0, 4)}`;
+  }
+  return `kỳ ${fmtDMY(from)} – ${fmtDMY(to)}`;
+}
 
-// Nạp toàn bộ dữ liệu 1 tháng để các báo cáo dùng chung
-function loadMonth(month, dept) {
+// Nạp toàn bộ dữ liệu 1 khoảng ngày [from, to] để các báo cáo dùng chung
+function loadRange(from, to, dept) {
   const weekend = getSetting('weekend_days', '7');
   let empSql = `SELECT id, code, full_name, department, position, shift_id
                 FROM employees WHERE active = 1 AND role != 'admin'`;
@@ -41,8 +67,8 @@ function loadMonth(month, dept) {
             s.start_time AS shift_start, s.end_time AS shift_end
      FROM attendance a JOIN employees e ON e.id = a.employee_id
      LEFT JOIN shifts s ON s.id = a.shift_id
-     WHERE a.work_date LIKE ?`
-  ).all(month + '%');
+     WHERE a.work_date >= ? AND a.work_date <= ?`
+  ).all(from, to);
   // shift join fallback: nếu không có phân ca ngày, lấy ca mặc định
   const shiftsById = new Map(db.prepare('SELECT * FROM shifts').all().map((s) => [s.id, s]));
   const empById = new Map(employees.map((e) => [e.id, e]));
@@ -70,20 +96,21 @@ function loadMonth(month, dept) {
   }
 
   const assigns = new Map(); // empId|date -> {shift_id,is_off}
-  for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date LIKE ?').all(month + '%'))
+  for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?').all(from, to))
     assigns.set(a.employee_id + '|' + a.work_date, a);
 
-  const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date LIKE ?').all(month + '%').map((h) => h.holiday_date));
+  const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date >= ? AND holiday_date <= ?').all(from, to).map((h) => h.holiday_date));
 
   // Nghỉ phép đã duyệt phủ lên từng ngày
   const leaveDays = new Set(); // empId|date
   const leaveRows = db.prepare(
     `SELECT l.*, e.code, e.full_name, e.department FROM leave_requests l JOIN employees e ON e.id=l.employee_id
      WHERE l.from_date <= ? AND l.to_date >= ?`
-  ).all(month + '-31', month + '-01');
+  ).all(to, from);
+  const rangeDays = daysBetween(from, to);
   for (const l of leaveRows) {
     if (l.status !== 'approved') continue;
-    for (const d of monthDays(month)) if (d >= l.from_date && d <= l.to_date) leaveDays.add(l.employee_id + '|' + d);
+    for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) leaveDays.add(l.employee_id + '|' + d);
   }
 
   // ca theo lịch của 1 NV trong 1 ngày (để xác định ngày công theo lịch)
@@ -102,7 +129,7 @@ function loadMonth(month, dept) {
     return days.includes(wd);
   };
 
-  return { month, weekend, employees, cell, holidays, leaveDays, leaveRows, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend) };
+  return { from, to, weekend, employees, cell, holidays, leaveDays, leaveRows, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend) };
 }
 
 function symbolOf(ctx, empId, date) {
@@ -123,9 +150,10 @@ const DS_LABEL = {
 
 /* ================= Report builders ================= */
 // Trả về { title, columns:[{key,label,weekend?,w?}], rows:[obj] }
-function buildReport(type, month, dept) {
-  const ctx = loadMonth(month, dept);
-  const days = monthDays(month);
+function buildReport(type, from, to, dept) {
+  const ctx = loadRange(from, to, dept);
+  const days = daysBetween(from, to);
+  const PERIOD = periodLabel(from, to);
   const sortedResults = () => [...ctx.cell.values()].sort((a, b) =>
     a.full_name === b.full_name ? (a.work_date < b.work_date ? -1 : 1) : (a.full_name < b.full_name ? -1 : 1));
 
@@ -153,7 +181,7 @@ function buildReport(type, month, dept) {
         row.total = round2(total); row.ot = round2(ot / 60); row.late = late; row.early = early; row.absent = absent;
         return row;
       });
-      return { title: `Bảng công ngang tháng ${month}`, columns, rows };
+      return { title: `Bảng công ngang ${PERIOD}`, columns, rows };
     }
 
     /* --- Ký hiệu (X/V/T/P/L/O) --- */
@@ -172,7 +200,7 @@ function buildReport(type, month, dept) {
         Object.assign(row, cnt);
         return row;
       });
-      return { title: `Bảng ký hiệu tháng ${month} (X=làm, T=trễ/sớm, P=phép, L=lễ, V=vắng, O=thiếu ra)`, columns, rows };
+      return { title: `Bảng ký hiệu ${PERIOD} (X=làm, T=trễ/sớm, P=phép, L=lễ, V=vắng, O=thiếu ra)`, columns, rows };
     }
 
     /* --- Chi tiết giờ vào/ra theo ngày (ma trận) --- */
@@ -196,7 +224,7 @@ function buildReport(type, month, dept) {
         row.total = round2(total);
         return row;
       });
-      return { title: `Chi tiết giờ vào/ra tháng ${month}`, columns, rows };
+      return { title: `Chi tiết giờ vào/ra ${PERIOD}`, columns, rows };
     }
 
     /* --- Giờ công / giờ tăng ca theo ngày (ma trận) — mẫu GioChamGioCongGioTangCa --- */
@@ -219,7 +247,7 @@ function buildReport(type, month, dept) {
         row.totalh = round2(totalMin / 60); row.oth = round2(otMin / 60); row.cong = round2(cong);
         return row;
       });
-      return { title: `Giờ công & tăng ca tháng ${month}`, columns, rows };
+      return { title: `Giờ công & tăng ca ${PERIOD}`, columns, rows };
     }
 
     /* --- Vắng mặt / nghỉ phép — mẫu VangMatNghiPhep --- */
@@ -234,7 +262,7 @@ function buildReport(type, month, dept) {
         for (const d of days) { const s = symbolOf(ctx, e.id, d); if (cnt[s] != null) cnt[s]++; }
         return { code: e.code, name: e.full_name, dept: e.department || '', work: cnt.X + cnt.T, absent: cnt.V, leave: cnt.P, holiday: cnt.L, missing: cnt.O };
       });
-      return { title: `Vắng mặt / nghỉ phép tháng ${month}`, columns, rows };
+      return { title: `Vắng mặt / nghỉ phép ${PERIOD}`, columns, rows };
     }
 
     /* --- Tổng hợp theo nhân viên --- */
@@ -262,7 +290,7 @@ function buildReport(type, month, dept) {
           lateN, lateM, earlyN, earlyM, vang,
         };
       });
-      return { title: `Tổng hợp chấm công tháng ${month}`, columns, rows };
+      return { title: `Tổng hợp chấm công ${PERIOD}`, columns, rows };
     }
 
     /* --- Chi tiết chấm công (từng ngày có dữ liệu) --- */
@@ -283,7 +311,7 @@ function buildReport(type, month, dept) {
         late: c.late_min || 0, early: c.early_min || 0, ot: c.ot_min || 0,
         cong: round2(c.work_unit), status: c.check_out_at ? (c.late_min > 0 ? 'Đi muộn' : c.early_min > 0 ? 'Về sớm' : 'Đủ công') : 'Thiếu ra',
       }));
-      return { title: `Chi tiết chấm công tháng ${month}`, columns, rows };
+      return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
     }
 
     /* --- Chấm công (mọi bản ghi) --- */
@@ -301,7 +329,7 @@ function buildReport(type, month, dept) {
         late: c.late_min || 0, early: c.early_min || 0, gio: round2((c.work_minutes || 0) / 60),
         ot: c.ot_min || 0, cong: round2(c.work_unit),
       }));
-      return { title: `Báo cáo chấm công tháng ${month}`, columns, rows };
+      return { title: `Báo cáo chấm công ${PERIOD}`, columns, rows };
     }
 
     /* --- Đi muộn / về sớm --- */
@@ -316,7 +344,7 @@ function buildReport(type, month, dept) {
         inReal: isoToVnHM(c.check_in_at), outReal: isoToVnHM(c.check_out_at),
         late: c.late_min || 0, early: c.early_min || 0,
       }));
-      return { title: `Đi muộn / về sớm tháng ${month}`, columns, rows };
+      return { title: `Đi muộn / về sớm ${PERIOD}`, columns, rows };
     }
 
     /* --- Tăng ca --- */
@@ -331,7 +359,7 @@ function buildReport(type, month, dept) {
         inReal: isoToVnHM(c.check_in_at), outReal: isoToVnHM(c.check_out_at),
         otp: c.ot_min || 0, oth: round2((c.ot_min || 0) / 60), loai: OT_LABEL[c.ot_type] || '',
       }));
-      return { title: `Tăng ca chi tiết tháng ${month}`, columns, rows };
+      return { title: `Tăng ca chi tiết ${PERIOD}`, columns, rows };
     }
 
     /* --- Giờ vào đầu / ra cuối --- */
@@ -348,7 +376,7 @@ function buildReport(type, month, dept) {
           first: isoToVnHM(c.check_in_at), last: isoToVnHM(c.check_out_at), gio,
         };
       });
-      return { title: `Giờ vào đầu & ra cuối tháng ${month}`, columns, rows };
+      return { title: `Giờ vào đầu & ra cuối ${PERIOD}`, columns, rows };
     }
 
     /* --- Nghỉ phép / vắng (từ đơn từ) --- */
@@ -365,13 +393,13 @@ function buildReport(type, month, dept) {
         days: Math.round((new Date(l.to_date) - new Date(l.from_date)) / 86400000) + 1,
         reason: l.reason || '', status: stLabel[l.status] || l.status,
       }));
-      return { title: `Nghỉ phép / đơn từ tháng ${month}`, columns, rows };
+      return { title: `Nghỉ phép / đơn từ ${PERIOD}`, columns, rows };
     }
 
-    /* --- Bảng lương --- */
+    /* --- Bảng lương (luôn theo THÁNG chứa ngày bắt đầu) --- */
     case 'payroll': {
-      const [y, m] = month.split('-').map(Number);
-      const { from, to, rows: pr } = computePayrollTable(y, m, dept);
+      const [y, m] = from.split('-').map(Number);
+      const { from: pFrom, to: pTo, rows: pr } = computePayrollTable(y, m, dept);
       const money = (n) => (n || 0).toLocaleString('vi-VN');
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
@@ -386,19 +414,20 @@ function buildReport(type, month, dept) {
         dayrate: money(pay.dailyRate), workpay: money(pay.workSalary), leavepay: money(pay.paidLeaveSalary),
         otpay: money(pay.otSalary), allow: money(pay.allowance), net: money(pay.net),
       }));
-      return { title: `Bảng lương tháng ${month} (kỳ ${fmtDMY(from)} - ${fmtDMY(to)})`, columns, rows };
+      return { title: `Bảng lương tháng ${String(m).padStart(2, '0')}/${y} (kỳ ${fmtDMY(pFrom)} - ${fmtDMY(pTo)})`, columns, rows };
     }
 
     default:
-      return buildReport('horizontal', month, dept);
+      return buildReport('horizontal', from, to, dept);
   }
 }
 
 /* ===== Xuất Excel "Giờ công & tăng ca" — mẫu chi tiết 3 dòng/NV (giống file mẫu) ===== */
 const WD_LABEL = { 0: 'CN', 1: 'T.2', 2: 'T.3', 3: 'T.4', 4: 'T.5', 5: 'T.6', 6: 'T.7' };
-async function exportWorkhoursXlsx(res, month, dept, company, address) {
-  const ctx = loadMonth(month, dept);
-  const days = monthDays(month);
+async function exportWorkhoursXlsx(res, from, to, dept, company, address) {
+  const ctx = loadRange(from, to, dept);
+  const days = daysBetween(from, to);
+  const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
   const totalCols = FIXED + days.length * 2;
   const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
@@ -410,7 +439,7 @@ async function exportWorkhoursXlsx(res, month, dept, company, address) {
   // Header công ty / địa chỉ / tiêu đề + chú thích
   ws.mergeCells(1, 1, 1, totalCols); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
   ws.mergeCells(2, 1, 2, totalCols); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
-  ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT GIỜ CÔNG & TĂNG CA THÁNG ${month.slice(5)}/${month.slice(0, 4)}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
+  ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT GIỜ CÔNG & TĂNG CA ${PERIOD}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
   ws.mergeCells(4, 1, 4, totalCols); Object.assign(ws.getCell(4, 1), { value: 'Mỗi nhân viên gồm 3 dòng: (1) Giờ chấm Vào–Ra · (2) Giờ công · (3) Giờ tăng ca', font: { italic: true, size: 10, color: { argb: 'FF666666' } } });
 
   // 2 dòng tiêu đề cột (dòng số ngày + dòng thứ)
@@ -465,15 +494,16 @@ async function exportWorkhoursXlsx(res, month, dept, company, address) {
   ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="giocong_tangca_${month}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="giocong_tangca_${from}_${to}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
 }
 
 /* ===== Xuất Excel "Chi tiết giờ vào/ra" — ma trận 2 cột/ngày (Vào|Ra), 1 dòng/NV (mẫu ChiTietThoiGianLamViec) ===== */
-async function exportDaytimeXlsx(res, month, dept, company, address) {
-  const ctx = loadMonth(month, dept);
-  const days = monthDays(month);
+async function exportDaytimeXlsx(res, from, to, dept, company, address) {
+  const ctx = loadRange(from, to, dept);
+  const days = daysBetween(from, to);
+  const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;
   const totalCols = FIXED + days.length * 2 + 1;   // + cột Tổng công
   const congCol = totalCols;
@@ -485,7 +515,7 @@ async function exportDaytimeXlsx(res, month, dept, company, address) {
 
   ws.mergeCells(1, 1, 1, totalCols); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
   ws.mergeCells(2, 1, 2, totalCols); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
-  ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT THỜI GIAN LÀM VIỆC THÁNG ${month.slice(5)}/${month.slice(0, 4)}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
+  ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT THỜI GIAN LÀM VIỆC ${PERIOD}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
   ws.mergeCells(4, 1, 4, totalCols); Object.assign(ws.getCell(4, 1), { value: 'Mỗi ngày gồm 2 cột: Giờ Vào | Giờ Ra', font: { italic: true, size: 10, color: { argb: 'FF666666' } } });
 
   const H = 5;
@@ -533,7 +563,7 @@ async function exportDaytimeXlsx(res, month, dept, company, address) {
   ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="chitiet_giovaora_${month}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="chitiet_giovaora_${from}_${to}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
 }
@@ -563,33 +593,35 @@ r.get('/attendance', (req, res) => {
   res.json({ month, rows });
 });
 
-// Danh sách phòng ban (cho filter)
+// Danh sách phòng ban (cho filter) = danh mục Bộ phận đã khai (master) GỘP phòng ban đang gán ở NV
 r.get('/departments', (req, res) => {
-  const rows = db.prepare("SELECT DISTINCT department FROM employees WHERE active=1 AND department != '' ORDER BY department").all();
-  res.json({ rows: rows.map((r) => r.department) });
+  const master = db.prepare('SELECT name FROM departments').all().map((r) => r.name);
+  const used = db.prepare("SELECT DISTINCT department FROM employees WHERE active=1 AND department != ''").all().map((r) => r.department);
+  const rows = [...new Set([...master, ...used].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
+  res.json({ rows });
 });
 
-// Báo cáo JSON (generic)
+// Báo cáo JSON (generic) — hỗ trợ ?month=YYYY-MM hoặc ?from=YYYY-MM-DD&to=YYYY-MM-DD
 r.get('/data', (req, res) => {
-  const month = (req.query.month || vnDateStr().slice(0, 7)).slice(0, 7);
+  const { from, to } = resolvePeriod(req.query);
   const dept = req.query.dept || null;
   const type = req.query.type || 'horizontal';
-  res.json(buildReport(type, month, dept));
+  res.json(buildReport(type, from, to, dept));
 });
 
-// Xuất Excel (generic theo type)
+// Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to
 r.get('/export.xlsx', async (req, res) => {
-  const month = (req.query.month || vnDateStr().slice(0, 7)).slice(0, 7);
+  const { from, to } = resolvePeriod(req.query);
   const dept = req.query.dept || null;
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');
 
   // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
-  if (type === 'workhours') return exportWorkhoursXlsx(res, month, dept, company, address);
-  if (type === 'daytime') return exportDaytimeXlsx(res, month, dept, company, address);
+  if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, dept, company, address);
+  if (type === 'daytime') return exportDaytimeXlsx(res, from, to, dept, company, address);
 
-  const { title, columns, rows } = buildReport(type, month, dept);
+  const { title, columns, rows } = buildReport(type, from, to, dept);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Digiplus';
@@ -629,7 +661,7 @@ r.get('/export.xlsx', async (req, res) => {
   ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 2 }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${month}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${from}_${to}.xlsx"`);
   await wb.xlsx.write(res);
   res.end();
 });
