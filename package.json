@@ -1,11 +1,12 @@
 {
   "name": "digiplus-chamcong",
-  "version": "1.15.9",
+  "version": "1.15.10",
   "description": "Digiplus - Hệ thống chấm công bằng điện thoại (ảnh + GPS) và quản lý web",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
     "start": "node --no-warnings server/index.js",
+    "test": "node --no-warnings --test \"test/**/*.test.mjs\"",
     "dev": "node --no-warnings --watch server/index.js",
     "seed": "node --no-warnings server/seed.js",
     "cert": "node --no-warnings tools/gen-cert.mjs"

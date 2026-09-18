@@ -2,7 +2,8 @@ import { Router, raw } from 'express';
 import ExcelJS from 'exceljs';
 import { db, getSetting, setSetting, resolveShift, resolveEffectiveShift } from '../db.js';
 import { authRequired, roleRequired, hashPassword, permRequired, PERMISSIONS, effectivePermissions } from '../auth.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit } from '../attendance-calc.js';
+import { vnWeekday } from '../attendance-calc.js';
+import { payrollCtx, computeDayMetrics } from '../day-metrics.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { licenseState } from '../license.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../backup.js';
@@ -849,10 +850,8 @@ r.post('/assignments/import', need('assignments'), async (req, res) => {
 /* -------------------- TÍNH LẠI CÔNG (áp cho dữ liệu cũ) -------------------- */
 r.post('/recompute', need('recompute'), (req, res) => {
   const month = (req.query.month || '').slice(0, 7);
-  const weekend = getSetting('weekend_days', '7');
-  const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
-  const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
-  const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
+  // Đọc cấu hình + ngày lễ MỘT LẦN cho cả mẻ (thay vì query mỗi dòng)
+  const ctx = payrollCtx(getSetting, db);
 
   // Phạm vi: ids (vài NV) > depts (nhiều phòng ban) > dept (1 phòng ban) > cả công ty
   const dept = (req.query.dept || '').trim();
@@ -869,29 +868,23 @@ r.post('/recompute', need('recompute'), (req, res) => {
   else if (dept) { join = ' JOIN employees e ON e.id=a.employee_id'; where.push('e.department=?'); args.push(dept); }
   const rows = db.prepare(`SELECT a.* FROM attendance a${join} WHERE ${where.join(' AND ')}`).all(...args);
 
+  // Prepare MỘT LẦN ngoài vòng (không re-prepare mỗi dòng)
+  const updNoOut = db.prepare('UPDATE attendance SET late_min=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?');
+  const updFull = db.prepare(`UPDATE attendance SET late_min=?, early_min=?, ot_min=?, work_minutes=?,
+    work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?`);
+
   let n = 0;
   db.exec('BEGIN');
   try {
     for (const row of rows) {
       // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định
       const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
-      const shift = eff.shift;
-      const flags = { isHoliday: isHol(row.work_date), isWeekend: isWeekendDay(row.work_date, weekend), roundingDecimals, roundingMode };
-      const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
-      const late = shift ? computeLate(shift, row.check_in_at, row.work_date) : 0;
+      const m = computeDayMetrics(ctx, eff.shift, row.work_date, row.check_in_at, row.check_out_at || null);
       if (!row.check_out_at) {
-        db.prepare('UPDATE attendance SET late_min=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?')
-          .run(late, 'thieu_ra', otType, shift?.id ?? null, eff.source, row.id);
+        // Chưa chấm ra: chỉ cập nhật muộn/trạng thái/ca — GIỮ NGUYÊN giờ công cũ (như trước)
+        updNoOut.run(m.late, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);
       } else {
-        let c;
-        if (shift) c = computeCheckout(shift, row.check_in_at, row.check_out_at, row.work_date, flags);
-        else {
-          const wm = Math.max(0, Math.round((new Date(row.check_out_at) - new Date(row.check_in_at)) / 60000));
-          c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, { roundingDecimals, roundingMode }), ot_type: otType, day_status: 'lam_viec' };
-        }
-        db.prepare(`UPDATE attendance SET late_min=?, early_min=?, ot_min=?, work_minutes=?,
-          work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?`)
-          .run(late, c.early_min, c.ot_min, c.work_minutes, c.work_unit, c.day_status, c.ot_type, shift?.id ?? null, eff.source, row.id);
+        updFull.run(m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);
       }
       n++;
     }
@@ -989,24 +982,10 @@ function vnToIso(date, hm) {
 }
 // Tính lại các chỉ số cho 1 bản ghi khi admin nhập tay
 function computeManual(employeeId, workDate, inIso, outIso) {
-  const weekend = getSetting('weekend_days', '7');
-  const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
-  const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
-  const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
-  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  const eff = hourly ? { shift: null, source: 'manual' } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
-  const shift = eff.shift;
-  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals, roundingMode };
-  const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
-  const late = (!hourly && shift && inIso) ? computeLate(shift, inIso, workDate) : 0;
-  let c;
-  if (inIso && outIso) {
-    if (shift && !hourly) c = computeCheckout(shift, inIso, outIso, workDate, flags);
-    else { const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, { roundingDecimals, roundingMode }), ot_type: otType, day_status: 'lam_viec' }; }
-  } else {
-    c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: inIso ? 'thieu_ra' : 'vang' };
-  }
-  return { shiftId: shift?.id ?? null, late, ...c };
+  const ctx = payrollCtx(getSetting, db);
+  // Chế độ theo GIỜ: không dò ca, không muộn/sớm (giữ nguyên hành vi cũ)
+  const eff = ctx.hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
+  return computeDayMetrics(ctx, eff.shift, workDate, inIso, outIso);
 }
 
 // Danh sách chấm công của 1 NV theo tháng (để sửa)

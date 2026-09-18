@@ -399,6 +399,10 @@ function migrateColumns() {
   const add = (table, name, ddl) => {
     if (!cols(table).has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${ddl}`);
   };
+  // Cột shift_id/shift_source PHẢI có TRƯỚC khi rebuild attendance (unique index dùng COALESCE(shift_id,0)).
+  // Trên DB mới (initSchema chưa có 2 cột này) nếu không thêm trước → migrateAttendanceMultiShift lỗi "no such column: shift_id".
+  add('attendance', 'shift_id',    'INTEGER');
+  add('attendance', 'shift_source', "TEXT DEFAULT ''");
   migrateAttendanceMultiShift();
   migrateDailyMultiShift();
 
