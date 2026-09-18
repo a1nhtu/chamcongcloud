@@ -1,6 +1,7 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
-import { db, getSetting, resolveEffectiveShift, resolveDayShifts } from './db.js';
+import { db, getSetting } from './db.js';
+import { resolveEffectiveShift, resolveDayShifts } from './shift-resolver.js';
 import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow, noShiftUnit } from './attendance-calc.js';
 import { hashPassword } from './auth.js';
 

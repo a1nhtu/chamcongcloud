@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { db, getSetting, resolveShift, resolveEffectiveShift, resolveDayShifts, allowedOffices } from '../db.js';
+import { db, getSetting, allowedOffices } from '../db.js';
+import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
