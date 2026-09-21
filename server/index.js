@@ -74,9 +74,20 @@ app.get('/api/config', (req, res) => res.json({
 app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 // Trang tĩnh (PWA nhân viên + trang admin)
-app.use(express.static(PUBLIC_DIR));
-app.get('/admin', (req, res) => res.sendFile(join(PUBLIC_DIR, 'admin.html')));
-app.get('/', (req, res) => res.sendFile(join(PUBLIC_DIR, 'index.html')));
+app.use(express.static(PUBLIC_DIR, { index: false }));
+// Trả HTML kèm cache-busting: chèn ?v=<version> vào js/css nội bộ để trình duyệt/Cloudflare
+// tự lấy bản mới mỗi khi lên version (khỏi phải xoá cache tay khi cập nhật).
+function sendHtmlNoCache(res, file) {
+  try {
+    const v = currentVersion();
+    const html = readFileSync(join(PUBLIC_DIR, file), 'utf8')
+      .replace(/(src|href)="(\/[^"?]+\.(?:js|css))"/g, `$1="$2?v=${v}"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    res.type('html').send(html);
+  } catch { res.sendFile(join(PUBLIC_DIR, file)); }
+}
+app.get('/admin', (req, res) => sendHtmlNoCache(res, 'admin.html'));
+app.get('/', (req, res) => sendHtmlNoCache(res, 'index.html'));
 
 // Fallback lỗi JSON
 app.use((err, req, res, next) => {

@@ -20,13 +20,15 @@ export function shiftBounds(workDate, shift) {
 
 const mins = (a, b) => Math.round((b - a) / 60000);
 
-// Tính đi muộn (phút) khi VÀO ca
+// Tính đi muộn (phút) khi VÀO ca.
+// Dung sai (late_grace_min) chỉ là NGƯỠNG: trễ trong ngưỡng → bỏ qua (0);
+// vượt ngưỡng → ghi ĐÚNG số phút trễ thực tế (KHÔNG trừ dung sai).
 export function computeLate(shift, checkInIso, workDate) {
   if (!shift || !checkInIso) return 0;
   const { start } = shiftBounds(workDate, shift);
   const raw = mins(start, new Date(checkInIso));
   const grace = shift.late_grace_min || 0;
-  return raw > grace ? raw - grace : 0;
+  return raw > grace ? raw : 0;
 }
 
 function roundOt(minutes, unit) {

@@ -29,7 +29,7 @@ test('có ca + đủ vào/ra → dùng computeCheckout', () => {
 
 test('có ca + đi muộn → late tính theo ca', () => {
   const m = computeDayMetrics(ctx(), shift, WD, iso(WD, '08:20'), iso(WD, '17:00'));
-  assert.equal(m.late, 15); // 20' - grace 5'
+  assert.equal(m.late, 20); // 20' > grace 5' → ghi đủ số phút muộn thực tế
 });
 
 test('KHÔNG ca + có vào/ra → công theo tỉ lệ 8h (không còn 6 phút = 1 công)', () => {

@@ -26,9 +26,10 @@ test('shiftBounds: ca đêm qua ngày (end <= start → +24h)', () => {
   assert.equal(end.getTime() - start.getTime(), 8 * 3600 * 1000);
 });
 
-test('computeLate: trong ân hạn → 0, quá ân hạn → phút muộn', () => {
-  assert.equal(computeLate(shift, iso(WD, '08:03'), WD), 0);   // 3' <= grace 5'
-  assert.equal(computeLate(shift, iso(WD, '08:10'), WD), 5);   // 10' - grace 5'
+test('computeLate: trong ân hạn → 0, quá ân hạn → phút muộn THỰC TẾ (không trừ dung sai)', () => {
+  assert.equal(computeLate(shift, iso(WD, '08:03'), WD), 0);   // 3' <= grace 5' → bỏ qua
+  assert.equal(computeLate(shift, iso(WD, '08:10'), WD), 10);  // 10' > grace 5' → ghi đủ 10'
+  assert.equal(computeLate(shift, iso(WD, '09:41'), WD), 101); // 101' > grace 5' → ghi đủ 101'
   assert.equal(computeLate(null, iso(WD, '08:10'), WD), 0);    // không ca
 });
 
