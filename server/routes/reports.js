@@ -52,15 +52,25 @@ function periodLabel(from, to) {
   return `kỳ ${fmtDMY(from)} – ${fmtDMY(to)}`;
 }
 
+// Bộ lọc nhân viên dùng chung: nhận string dept (cũ) HOẶC object {dept, depts:[], ids:[]}.
+// Ưu tiên: ids (chọn NV cụ thể) > depts (nhiều phòng ban) > dept (1 phòng ban, tương thích cũ).
+export function empFilterSql(filter) {
+  const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
+  const ids = (f.ids || []).map(Number).filter(Boolean);
+  const depts = (f.depts || []).filter(Boolean);
+  if (ids.length) return { where: ` AND id IN (${ids.map(() => '?').join(',')})`, args: ids };
+  if (depts.length) return { where: ` AND department IN (${depts.map(() => '?').join(',')})`, args: depts };
+  if (f.dept) return { where: ' AND department = ?', args: [f.dept] };
+  return { where: '', args: [] };
+}
+
 // Nạp toàn bộ dữ liệu 1 khoảng ngày [from, to] để các báo cáo dùng chung
-function loadRange(from, to, dept) {
+function loadRange(from, to, filter) {
   const weekend = getSetting('weekend_days', '7');
-  let empSql = `SELECT id, code, full_name, department, position, shift_id
-                FROM employees WHERE active = 1 AND role != 'admin'`;
-  const args = [];
-  if (dept) { empSql += ' AND department = ?'; args.push(dept); }
-  empSql += ' ORDER BY department, full_name';
-  const employees = db.prepare(empSql).all(...args);
+  const ef = empFilterSql(filter);
+  const empSql = `SELECT id, code, full_name, department, position, shift_id
+                FROM employees WHERE active = 1 AND role != 'admin'${ef.where} ORDER BY department, full_name`;
+  const employees = db.prepare(empSql).all(...ef.args);
 
   const results = db.prepare(
     `SELECT a.*, e.code, e.full_name, e.department, s.name AS shift_name,
@@ -150,8 +160,8 @@ const DS_LABEL = {
 
 /* ================= Report builders ================= */
 // Trả về { title, columns:[{key,label,weekend?,w?}], rows:[obj] }
-function buildReport(type, from, to, dept) {
-  const ctx = loadRange(from, to, dept);
+function buildReport(type, from, to, filter) {
+  const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
   const sortedResults = () => [...ctx.cell.values()].sort((a, b) =>
@@ -399,7 +409,7 @@ function buildReport(type, from, to, dept) {
     /* --- Bảng lương (luôn theo THÁNG chứa ngày bắt đầu) --- */
     case 'payroll': {
       const [y, m] = from.split('-').map(Number);
-      const { from: pFrom, to: pTo, rows: pr } = computePayrollTable(y, m, dept);
+      const { from: pFrom, to: pTo, rows: pr } = computePayrollTable(y, m, filter);
       const money = (n) => (n || 0).toLocaleString('vi-VN');
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
@@ -418,14 +428,14 @@ function buildReport(type, from, to, dept) {
     }
 
     default:
-      return buildReport('horizontal', from, to, dept);
+      return buildReport('horizontal', from, to, filter);
   }
 }
 
 /* ===== Xuất Excel "Giờ công & tăng ca" — mẫu chi tiết 3 dòng/NV (giống file mẫu) ===== */
 const WD_LABEL = { 0: 'CN', 1: 'T.2', 2: 'T.3', 3: 'T.4', 4: 'T.5', 5: 'T.6', 6: 'T.7' };
-async function exportWorkhoursXlsx(res, from, to, dept, company, address) {
-  const ctx = loadRange(from, to, dept);
+async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
+  const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
@@ -500,8 +510,8 @@ async function exportWorkhoursXlsx(res, from, to, dept, company, address) {
 }
 
 /* ===== Xuất Excel "Chi tiết giờ vào/ra" — ma trận 2 cột/ngày (Vào|Ra), 1 dòng/NV (mẫu ChiTietThoiGianLamViec) ===== */
-async function exportDaytimeXlsx(res, from, to, dept, company, address) {
-  const ctx = loadRange(from, to, dept);
+async function exportDaytimeXlsx(res, from, to, filter, company, address) {
+  const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;
@@ -602,26 +612,32 @@ r.get('/departments', (req, res) => {
 });
 
 // Báo cáo JSON (generic) — hỗ trợ ?month=YYYY-MM hoặc ?from=YYYY-MM-DD&to=YYYY-MM-DD
+// Bộ lọc NV từ query: ?ids=1,2,3 (NV cụ thể) hoặc ?depts=A,B (nhiều phòng ban) hoặc ?dept=A (cũ)
+function filterFromQuery(q) {
+  const ids = String(q.ids || '').split(',').map(Number).filter(Boolean);
+  const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
+  return { ids, depts, dept: q.dept || null };
+}
+
 r.get('/data', (req, res) => {
   const { from, to } = resolvePeriod(req.query);
-  const dept = req.query.dept || null;
   const type = req.query.type || 'horizontal';
-  res.json(buildReport(type, from, to, dept));
+  res.json(buildReport(type, from, to, filterFromQuery(req.query)));
 });
 
 // Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to
 r.get('/export.xlsx', async (req, res) => {
   const { from, to } = resolvePeriod(req.query);
-  const dept = req.query.dept || null;
+  const filter = filterFromQuery(req.query);
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');
 
   // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
-  if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, dept, company, address);
-  if (type === 'daytime') return exportDaytimeXlsx(res, from, to, dept, company, address);
+  if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, filter, company, address);
+  if (type === 'daytime') return exportDaytimeXlsx(res, from, to, filter, company, address);
 
-  const { title, columns, rows } = buildReport(type, from, to, dept);
+  const { title, columns, rows } = buildReport(type, from, to, filter);
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Digiplus';

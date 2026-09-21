@@ -1250,7 +1250,10 @@ async function shiftAssignManageModal() {
   const reload = async () => {
     try { ALL = (await api('/admin/shift-assignments')).rows; }
     catch (e) { listBox.innerHTML = ''; listBox.append(el('div', { class: 'empty' }, e.message)); return; }
-    const depts = [...new Set(ALL.map((r) => r.department).filter(Boolean))].sort();
+    // Dropdown phòng ban = danh mục Bộ phận (master) GỘP phòng ban đang có ở phân ca/NV
+    let deptNames = ALL.map((r) => r.department).filter(Boolean);
+    try { deptNames = deptNames.concat(((await api('/admin/departments')).rows || []).map((d) => d.name)); } catch {}
+    const depts = [...new Set(deptNames.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'vi'));
     deptSel.innerHTML = ''; deptSel.append(el('option', { value: '' }, '-- Tất cả phòng ban --'));
     for (const d of depts) deptSel.append(el('option', { value: d }, d));
     selAll.checked = false;
@@ -2321,6 +2324,36 @@ const REPORT_GROUPS = [
   ]],
 ];
 
+// Nút "chọn nhiều" dùng chung (phòng ban / NV): bỏ hết tick = tất cả. Trả {btn, sync}.
+function makeChecklist(icon, allLabel, getItems, picked, afterChange) {
+  const btn = el('button', { class: 'btn ghost sm', style: 'text-align:left;min-width:150px' });
+  const sync = () => { btn.textContent = (picked.size ? `${icon} Đã chọn ${picked.size}` : `${icon} ${allLabel}`) + ' ▾'; };
+  sync();
+  let dd = null;
+  const close = (reload) => { if (dd) { dd.remove(); dd = null; sync(); if (reload) afterChange(); } };
+  btn.onclick = (ev) => {
+    ev.stopPropagation();
+    if (dd) { close(true); return; }
+    dd = el('div', { style: 'position:fixed;z-index:1200;background:var(--surface,#fff);border:1px solid var(--line,#e5e5e5);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px;max-height:360px;overflow:auto;min-width:250px' });
+    const selAll = el('input', { type: 'checkbox', style: 'width:auto' }); selAll.checked = picked.size === 0;
+    selAll.onchange = () => { picked.clear(); dd.querySelectorAll('.mc-cb').forEach(c => c.checked = false); };
+    dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:5px 6px;border-bottom:1px solid var(--line,#eee);margin-bottom:4px;cursor:pointer' }, selAll, `${allLabel} (bỏ hết tick = tất cả)`));
+    for (const it of getItems()) {
+      const cb = el('input', { type: 'checkbox', class: 'mc-cb', style: 'width:auto', ...(picked.has(it.value) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(it.value) : picked.delete(it.value); selAll.checked = picked.size === 0; };
+      dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 6px;cursor:pointer' }, cb, it.text));
+    }
+    const done = el('button', { class: 'btn sm', style: 'width:100%;margin-top:6px' }, 'Xong');
+    done.onclick = () => close(true); dd.append(done);
+    document.body.append(dd);
+    const r = btn.getBoundingClientRect();
+    dd.style.left = Math.max(8, Math.min(r.left, innerWidth - 270)) + 'px';
+    dd.style.top = (r.bottom + 4) + 'px';
+    setTimeout(() => document.addEventListener('click', function h(ev2) { if (dd && !dd.contains(ev2.target) && ev2.target !== btn) { close(true); document.removeEventListener('click', h, true); } }, true), 0);
+  };
+  return { btn, sync };
+}
+
 async function pageReport() {
   const hourly = hourlyMode();
   const monthI = el('input', { type: 'month', id: 'rp-month', value: todayMonth(), title: 'Chọn nhanh trọn 1 tháng' });
@@ -2328,18 +2361,28 @@ async function pageReport() {
   const fromI = el('input', { type: 'date', id: 'rp-from', value: md0[0], title: 'Từ ngày' });
   const toI = el('input', { type: 'date', id: 'rp-to', value: md0[md0.length - 1], title: 'Đến ngày' });
   const arrow = el('span', { style: 'align-self:center;color:var(--muted)' }, '→');
-  const deptSel = el('select', { id: 'rp-dept' }, el('option', { value: '' }, '-- Tất cả phòng ban --'));
-  try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
+  // Phòng ban + Nhân viên chọn NHIỀU (bỏ hết tick = tất cả). Chọn NV cụ thể sẽ ưu tiên hơn phòng ban.
+  let depts = [], emps = [];
+  try { depts = (await api('/reports/departments')).rows || []; } catch {}
+  try { emps = (await api('/admin/employees')).rows || []; } catch {}
+  emps = emps.filter(e => e.role !== 'admin' && e.active !== 0);
+  const deptPick = new Set(), empPick = new Set();
+  let onFilterChange = () => {};
+  const deptCl = makeChecklist('🏢', 'Tất cả phòng ban', () => depts.map(d => ({ value: d, text: d })), deptPick, () => { empPick.clear(); empCl.sync(); onFilterChange(); });
+  const empCl = makeChecklist('👥', 'Tất cả NV', () => emps.filter(e => !deptPick.size || deptPick.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })), empPick, () => onFilterChange());
 
   const periodQS = () => `from=${fromI.value}&to=${toI.value}`;
+  // Phần lọc NV cho query: ưu tiên NV cụ thể (ids), rồi tới nhiều phòng ban (depts)
+  const filterQS = () => empPick.size ? '&ids=' + [...empPick].join(',')
+    : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : '');
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
   const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; };
 
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
   const hub = () => {
-    monthI.onchange = snapMonth; fromI.onchange = null; toI.onchange = null; deptSel.onchange = null;
+    monthI.onchange = snapMonth; fromI.onchange = null; toI.onchange = null; onFilterChange = () => {};
     const wrap = el('div', {});
-    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày) và phòng ban ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
+    wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
     for (const [gname, cards] of REPORT_GROUPS) {
       const list = cards.filter(([v]) => !hourly || !['late', 'ot', 'symbol'].includes(v));
       if (!list.length) continue;
@@ -2357,7 +2400,7 @@ async function pageReport() {
       }
       wrap.append(grid);
     }
-    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptSel), wrap);
+    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptCl.btn, empCl.btn), wrap);
   };
 
   // Xem 1 báo cáo cụ thể (có nút quay lại danh sách)
@@ -2365,14 +2408,14 @@ async function pageReport() {
     const backBtn = el('button', { class: 'btn ghost sm' }, '← Danh sách báo cáo');
     backBtn.onclick = hub;
     const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
-    exportBtn.onclick = () => downloadExcel(type, fromI.value, toI.value, deptSel.value);
+    exportBtn.onclick = () => downloadExcel(type, fromI.value, toI.value, filterQS());
     const wrap = el('div', {}, loading());
-    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptSel, exportBtn), wrap);
+    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, exportBtn), wrap);
     const load = async () => {
       if (fromI.value && toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
       wrap.innerHTML = ''; wrap.append(loading());
       let data;
-      try { data = await api(`/reports/data?type=${type}&${periodQS()}&dept=${encodeURIComponent(deptSel.value)}`); }
+      try { data = await api(`/reports/data?type=${type}&${periodQS()}${filterQS()}`); }
       catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
       const tbl = el('table', { class: 'data' });
       const thead = el('tr', {});
@@ -2397,15 +2440,15 @@ async function pageReport() {
         el('div', { class: 'panel tbl-scroll' }, tbl));
     };
     const snapAndLoad = () => { snapMonth(); load(); };
-    monthI.onchange = snapAndLoad; fromI.onchange = load; toI.onchange = load; deptSel.onchange = load;
+    monthI.onchange = snapAndLoad; fromI.onchange = load; toI.onchange = load; onFilterChange = load;
     load();
   };
 
   hub();
 }
-async function downloadExcel(type, from, to, dept) {
+async function downloadExcel(type, from, to, extraQS) {
   try {
-    const res = await api(`/reports/export.xlsx?type=${type}&from=${from}&to=${to}&dept=${encodeURIComponent(dept || '')}`, { raw: true });
+    const res = await api(`/reports/export.xlsx?type=${type}&from=${from}&to=${to}${extraQS || ''}`, { raw: true });
     if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);

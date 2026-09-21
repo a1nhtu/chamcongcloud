@@ -95,12 +95,18 @@ export function computePayrollForEmployee(employeeId, from, to) {
 }
 
 // Bảng lương cho tất cả NV theo "tháng lương"
-export function computePayrollTable(year, month, dept) {
+// filter: string dept (cũ) HOẶC {dept, depts:[], ids:[]} — ưu tiên ids > depts > dept.
+export function computePayrollTable(year, month, filter) {
   const startDay = parseInt(getSetting('pay_period_start_day', '1'), 10) || 1;
   const { from, to } = payPeriod(year, month, startDay);
+  const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
+  const ids = (f.ids || []).map(Number).filter(Boolean);
+  const depts = (f.depts || []).filter(Boolean);
   let sql = "SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin'";
   const args = [];
-  if (dept) { sql += ' AND department = ?'; args.push(dept); }
+  if (ids.length) { sql += ` AND id IN (${ids.map(() => '?').join(',')})`; args.push(...ids); }
+  else if (depts.length) { sql += ` AND department IN (${depts.map(() => '?').join(',')})`; args.push(...depts); }
+  else if (f.dept) { sql += ' AND department = ?'; args.push(f.dept); }
   sql += ' ORDER BY department, full_name';
   const emps = db.prepare(sql).all(...args);
   const rows = emps.map((e) => ({ emp: e, pay: computePayrollForEmployee(e.id, from, to) }));
