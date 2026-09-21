@@ -240,13 +240,24 @@ async function renderDashboard(showLoading) {
     const rep = await api('/reports/attendance?month=' + todayMonth());
     const today = rep.rows.filter(r => r.work_date === d.today);
     const hourly = hourlyMode();
+    const person = (r, info) => ({ name: r.full_name, code: r.code, dept: r.department, info });
     const cards = el('div', { class: 'cards' },
-      mcard('brand', d.totalEmp, 'Nhân viên'),
-      mcard('green', d.checkedIn, 'Đã chấm vào'),
-      mcard('warn', d.notYet, 'Chưa chấm'),
-      ...(hourly ? [] : [mcard('warn', d.late, 'Đi muộn')]),
-      mcard('red', d.outside, 'Chấm ngoài VP'),
-      mcard('red', d.pendingLeaves, 'Đơn chờ duyệt'),
+      mcard('brand', d.totalEmp, 'Nhân viên', () => go('employees')),
+      mcard('green', d.checkedIn, 'Đã chấm vào', () => dashListModal('Đã chấm vào hôm nay',
+        today.filter(r => r.check_in_hm).map(r => person(r, r.check_in_hm)))),
+      mcard('warn', d.notYet, 'Chưa chấm', async () => {
+        let emps = [];
+        try { emps = (await api('/admin/employees')).rows || []; } catch {}
+        const inCodes = new Set(today.filter(r => r.check_in_hm).map(r => r.code));
+        const people = emps.filter(e => e.role !== 'admin' && e.active !== 0 && !inCodes.has(e.code))
+          .map(e => ({ name: e.full_name, code: e.code, dept: e.department, info: 'Chưa chấm' }));
+        dashListModal('Chưa chấm hôm nay', people);
+      }),
+      ...(hourly ? [] : [mcard('warn', d.late, 'Đi muộn', () => dashListModal('Đi muộn hôm nay',
+        today.filter(r => r.late_min > 0).map(r => person(r, r.late_min + ' phút'))))]),
+      mcard('red', d.outside, 'Chấm ngoài VP', () => dashListModal('Chấm ngoài văn phòng',
+        today.filter(r => r.check_in_outside).map(r => person(r, 'Ngoài ' + humanDistance(r.check_in_distance_m))))),
+      mcard('red', d.pendingLeaves, 'Đơn chờ duyệt', () => go('leaves')),
     );
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vào</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vị trí</th><th>Ra</th><th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
@@ -258,7 +269,29 @@ async function renderDashboard(showLoading) {
     setMain(head('Tổng quan · ' + d.today, clock, refreshBtn), cards, el('div', { class: 'panel tbl-scroll' }, tbl));
   } catch (e) { if (showLoading) setMain(head('Tổng quan'), el('div', { class: 'empty' }, e.message)); }
 }
-function mcard(cls, n, l) { return el('div', { class: 'mcard ' + cls }, el('div', { class: 'n' }, String(n)), el('div', { class: 'l' }, l)); }
+function mcard(cls, n, l, onClick) {
+  const c = el('div', { class: 'mcard ' + cls }, el('div', { class: 'n' }, String(n)), el('div', { class: 'l' }, l));
+  if (onClick) {
+    c.style.cursor = 'pointer'; c.title = 'Bấm để xem chi tiết';
+    c.onclick = onClick;
+    c.onmouseenter = () => { c.style.boxShadow = '0 6px 18px rgba(0,0,0,.10)'; c.style.transform = 'translateY(-2px)'; };
+    c.onmouseleave = () => { c.style.boxShadow = ''; c.style.transform = ''; };
+  }
+  return c;
+}
+// Popup danh sách người cho các thẻ Tổng quan (Đã chấm/Chưa chấm/Đi muộn/Ngoài VP)
+function dashListModal(title, people) {
+  const body = el('div', {});
+  if (!people.length) body.append(el('div', { class: 'empty' }, 'Không có ai.'));
+  else {
+    const list = el('div', {});
+    for (const p of people) list.append(el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #f1efec' },
+      el('div', {}, el('b', {}, p.name || p.code || ''), el('div', { style: 'color:#999;font-size:12px' }, (p.code || '') + (p.dept ? ' · ' + p.dept : ''))),
+      el('div', { style: 'font-weight:600;color:var(--ink);white-space:nowrap' }, p.info || '')));
+    body.append(list);
+  }
+  openModal(`${title} (${people.length})`, [body], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+}
 function rowToday(r) {
   return el('tr', {},
     el('td', {}, photoCell(r.check_in_photo)),
