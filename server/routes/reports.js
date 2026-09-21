@@ -86,6 +86,7 @@ function loadRange(from, to, filter) {
   // empId|date -> 1 ô gộp (có thể NHIỀU ca/ngày): cộng công/giờ/OT/muộn/sớm, vào sớm nhất, ra muộn nhất
   const cell = new Map();
   for (const row of results) {
+    if (!empById.has(row.employee_id)) continue; // chỉ giữ NV trong bộ lọc (phòng ban/NV cụ thể)
     const key = row.employee_id + '|' + row.work_date;
     const ex = cell.get(key);
     if (!ex) { cell.set(key, { ...row, _shiftNames: row.shift_name ? [row.shift_name] : [], _missingOut: (!row.check_out_at) ? 1 : 0 }); continue; }
@@ -116,7 +117,7 @@ function loadRange(from, to, filter) {
   const leaveRows = db.prepare(
     `SELECT l.*, e.code, e.full_name, e.department FROM leave_requests l JOIN employees e ON e.id=l.employee_id
      WHERE l.from_date <= ? AND l.to_date >= ?`
-  ).all(to, from);
+  ).all(to, from).filter((l) => empById.has(l.employee_id)); // chỉ NV trong bộ lọc
   const rangeDays = daysBetween(from, to);
   for (const l of leaveRows) {
     if (l.status !== 'approved') continue;

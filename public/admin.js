@@ -393,15 +393,22 @@ function empModal(e) {
   let permState = new Set(initialPerms());
   const renderPerms = (role) => {
     permWrap.innerHTML = '';
+    // Nhân viên (dùng app điện thoại) → không cần phân quyền quản trị: ẩn hẳn cho gọn form.
+    if (role === 'employee') return;
     if (role === 'admin') { permWrap.append(el('div', { class: 'map-hint' }, '👑 Admin có toàn quyền mọi chức năng — không cần phân quyền.')); return; }
-    permWrap.append(el('label', {}, 'Cho phép dùng chức năng'));
-    const grid = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:4px;padding:10px;border:1px solid var(--line,#eee);border-radius:10px' });
+    // Quản lý: gói danh sách quyền vào nút mũi tên (mặc định thu gọn) cho đỡ vướng.
+    const grid = el('div', { style: 'display:none;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:8px;padding:10px;border:1px solid var(--line,#eee);border-radius:10px' });
     for (const [k, label] of PERM_CATALOG) {
       const cb = el('input', { type: 'checkbox', class: 'e-perm', value: k, style: 'width:auto', ...(permState.has(k) ? { checked: '' } : {}) });
-      cb.addEventListener('change', () => { cb.checked ? permState.add(k) : permState.delete(k); });
+      cb.addEventListener('change', () => { cb.checked ? permState.add(k) : permState.delete(k); updateToggle(); });
       grid.append(el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)' }, cb, label));
     }
-    permWrap.append(grid);
+    let open = false;
+    const toggle = el('button', { type: 'button', class: 'btn ghost sm', style: 'width:100%;text-align:left;margin-top:2px' });
+    const updateToggle = () => { toggle.textContent = `${open ? '▾' : '▸'} Cho phép dùng chức năng (đã chọn ${permState.size})`; };
+    toggle.onclick = () => { open = !open; grid.style.display = open ? 'grid' : 'none'; updateToggle(); };
+    updateToggle();
+    permWrap.append(toggle, grid);
   };
   roleSel.addEventListener('change', () => {
     // Đổi vai trò → gợi ý bộ quyền mặc định của vai trò đó
