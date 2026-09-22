@@ -120,7 +120,7 @@ export function registerEmployeeRoutes(r, { need }) {
       ['• Số ID máy chấm công', 'Số ID trên máy chấm công (nếu có). Đã có rồi thì không đổi.'],
       ['• Lương cơ bản', 'Số tiền/tháng. Để trống = không đặt lương.'],
       ['• Tài khoản đăng nhập', 'Để trống = lấy theo Mã NV.'],
-      ['• Mật khẩu', 'Để trống = lấy theo Mã NV.'],
+      ['• Mật khẩu', 'Để trống = 123456 (nên nhắc nhân viên đổi sau).'],
       ['', ''],
       ['CHẾ ĐỘ THÊM MỚI', 'Thêm nhân viên mới. Mã đã tồn tại sẽ bỏ qua.'],
       ['CHẾ ĐỘ CẬP NHẬT', 'Sửa nhân viên theo Mã. Ô để trống = giữ nguyên. Mã chưa có sẽ bỏ qua.'],
@@ -175,7 +175,7 @@ export function registerEmployeeRoutes(r, { need }) {
         const pin = cellStr(row, 7);
         const basic = cellNum(row, 8);
         const username = cellStr(row, 9) || code;
-        const password = cellStr(row, 10) || code;
+        const password = cellStr(row, 10) || '123456';
         const CODE = code.toUpperCase();
 
         // Tự tạo bộ phận / chức danh mới
