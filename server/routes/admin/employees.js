@@ -1,4 +1,5 @@
 // Nhóm route NHÂN VIÊN + phân quyền chi tiết + khoá thiết bị chấm công điện thoại.
+import ExcelJS from 'exceljs';
 import { db } from '../../db.js';
 import { hashPassword, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
@@ -10,6 +11,25 @@ function normPerms(role, perms) {
   if (Array.isArray(perms)) return JSON.stringify(perms.filter((k) => PERM_KEYS.includes(k)));
   return null;
 }
+
+// Map chữ vai trò trong Excel → role hệ thống
+function mapRole(txt) {
+  const t = String(txt || '').trim().toLowerCase();
+  if (['admin', 'quản trị', 'quan tri', 'quản trị viên', 'quan tri vien', 'qtv'].includes(t)) return 'admin';
+  if (['manager', 'quản lý', 'quan ly', 'quản lí', 'quan li', 'ql'].includes(t)) return 'manager';
+  return 'employee';
+}
+// Đặt lương cơ bản, giữ nguyên các cấu hình lương khác nếu đã có
+function setBasicSalary(empId, basic) {
+  db.prepare(`INSERT INTO salary_configs (employee_id, basic_salary, working_days_per_month)
+    VALUES (?, ?, 26)
+    ON CONFLICT(employee_id) DO UPDATE SET basic_salary=excluded.basic_salary, updated_at=datetime('now')`).run(empId, basic);
+}
+// Các cột file Excel nhập nhân viên (thứ tự cố định)
+const EMP_IMPORT_COLS = [
+  'Mã NV *', 'Họ tên *', 'Bộ phận', 'Chức danh', 'Số điện thoại',
+  'Vai trò', 'Số ID máy chấm công', 'Lương cơ bản', 'Tài khoản đăng nhập', 'Mật khẩu',
+];
 
 // Đặt danh sách định vị được phép chấm cho 1 NV (thay toàn bộ)
 function setEmpOffices(empId, officeIds) {
@@ -74,6 +94,132 @@ export function registerEmployeeRoutes(r, { need }) {
     } catch (e) {
       res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Mã NV hoặc tài khoản đã tồn tại' : e.message });
     }
+  });
+
+  // Tải file Excel mẫu để nhập nhân viên hàng loạt
+  r.get('/employees/template.xlsx', need('employees'), async (req, res) => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('NhanVien');
+    const hr = ws.addRow(EMP_IMPORT_COLS);
+    hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    hr.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
+    // 2 dòng ví dụ
+    ws.addRow(['NV001', 'Nguyễn Văn A', 'Kinh doanh', 'Nhân viên bán hàng', '0900000001', 'Nhân viên', '1', 8000000, 'nv001', '123456']);
+    ws.addRow(['QL001', 'Trần Thị B', 'Kinh doanh', 'Trưởng phòng', '0900000002', 'Quản lý', '2', 15000000, 'ql001', '123456']);
+    const widths = [12, 22, 18, 20, 14, 12, 16, 14, 18, 12];
+    ws.columns.forEach((c, i) => { c.width = widths[i] || 14; });
+    // Sheet hướng dẫn
+    const g = wb.addWorksheet('HuongDan');
+    g.addRow(['HƯỚNG DẪN NHẬP NHÂN VIÊN']).font = { bold: true, size: 13 };
+    [
+      ['• Mã NV *', 'Bắt buộc, không trùng. Dùng để đối chiếu khi Cập nhật.'],
+      ['• Họ tên *', 'Bắt buộc.'],
+      ['• Bộ phận', 'Nếu chưa có trong phần mềm sẽ TỰ TẠO MỚI.'],
+      ['• Chức danh', 'Nếu chưa có sẽ TỰ TẠO MỚI.'],
+      ['• Vai trò', 'Nhân viên / Quản lý / Admin (để trống = Nhân viên).'],
+      ['• Số ID máy chấm công', 'Số ID trên máy chấm công (nếu có). Đã có rồi thì không đổi.'],
+      ['• Lương cơ bản', 'Số tiền/tháng. Để trống = không đặt lương.'],
+      ['• Tài khoản đăng nhập', 'Để trống = lấy theo Mã NV.'],
+      ['• Mật khẩu', 'Để trống = lấy theo Mã NV.'],
+      ['', ''],
+      ['CHẾ ĐỘ THÊM MỚI', 'Thêm nhân viên mới. Mã đã tồn tại sẽ bỏ qua.'],
+      ['CHẾ ĐỘ CẬP NHẬT', 'Sửa nhân viên theo Mã. Ô để trống = giữ nguyên. Mã chưa có sẽ bỏ qua.'],
+    ].forEach((r2) => g.addRow(r2));
+    g.getColumn(1).width = 26; g.getColumn(2).width = 60;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', 'attachment; filename="mau_nhan_vien.xlsx"');
+    await wb.xlsx.write(res);
+    res.end();
+  });
+
+  // Nhập nhân viên bằng Excel: {fileBase64, mode:'add'|'update'}
+  // Tự tạo bộ phận / chức danh mới nếu chưa có; đặt lương cơ bản nếu điền.
+  r.post('/employees/import', need('employees'), async (req, res) => {
+    const b64 = req.body?.fileBase64 || '';
+    const mode = req.body?.mode === 'update' ? 'update' : 'add';
+    if (!b64) return res.status(400).json({ error: 'Thiếu file' });
+    const buf = Buffer.from(b64.replace(/^data:.*;base64,/, ''), 'base64');
+    const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(buf); } catch { return res.status(400).json({ error: 'File Excel không đọc được' }); }
+    const ws = wb.worksheets[0];
+    if (!ws) return res.status(400).json({ error: 'File rỗng' });
+
+    const cellStr = (row, c) => String(row.getCell(c).value ?? '').trim();
+    const cellNum = (row, c) => { const n = Number(String(row.getCell(c).value ?? '').replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
+
+    const deptSet = new Set(db.prepare('SELECT name FROM departments').all().map((d) => d.name));
+    const posSet = new Set(db.prepare('SELECT name FROM positions').all().map((p) => p.name));
+    const insDept = db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)');
+    const insPos = db.prepare('INSERT OR IGNORE INTO positions(name) VALUES(?)');
+    const empByCode = new Map(db.prepare('SELECT id, code, device_pin FROM employees').all().map((e) => [String(e.code).trim().toUpperCase(), e]));
+    const pinUsed = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?");
+
+    const lic = licenseState();
+    let activeCount = db.prepare("SELECT COUNT(*) c FROM employees WHERE active=1 AND role!='admin'").get().c;
+
+    let added = 0, updated = 0, skipped = 0, newDepts = 0, newPos = 0;
+    const errors = [];
+
+    db.exec('BEGIN');
+    try {
+      for (let r2 = 2; r2 <= ws.rowCount; r2++) {
+        const row = ws.getRow(r2);
+        const code = cellStr(row, 1);
+        if (!code) continue;
+        const name = cellStr(row, 2);
+        const dept = cellStr(row, 3);
+        const pos = cellStr(row, 4);
+        const phone = cellStr(row, 5);
+        const roleTxt = cellStr(row, 6);
+        const role = mapRole(roleTxt);
+        const pin = cellStr(row, 7);
+        const basic = cellNum(row, 8);
+        const username = cellStr(row, 9) || code;
+        const password = cellStr(row, 10) || code;
+        const CODE = code.toUpperCase();
+
+        // Tự tạo bộ phận / chức danh mới
+        if (dept && !deptSet.has(dept)) { insDept.run(dept); deptSet.add(dept); newDepts++; }
+        if (pos && !posSet.has(pos)) { insPos.run(pos); posSet.add(pos); newPos++; }
+
+        const existing = empByCode.get(CODE);
+
+        if (mode === 'add') {
+          if (existing) { errors.push(`Dòng ${r2}: Mã "${code}" đã tồn tại — bỏ qua`); skipped++; continue; }
+          if (!name) { errors.push(`Dòng ${r2}: thiếu Họ tên — bỏ qua`); skipped++; continue; }
+          if (lic.maxEmp && role !== 'admin' && activeCount >= lic.maxEmp) { errors.push(`Dòng ${r2}: vượt giới hạn bản quyền ${lic.maxEmp} NV — bỏ qua`); skipped++; continue; }
+          let pinOk = pin;
+          if (pin && pinUsed.get(pin, 0)) { errors.push(`Dòng ${r2}: Số ID máy "${pin}" đã có NV dùng — bỏ qua số ID`); pinOk = ''; }
+          try {
+            const info = db.prepare(`INSERT INTO employees
+              (code, full_name, department, position, phone, role, username, password_hash, permissions, device_pin, active)
+              VALUES (?,?,?,?,?,?,?,?,?,?,1)`).run(
+              code, name, dept, pos, phone, role, username, hashPassword(password),
+              normPerms(role, role === 'admin' ? null : []), pinOk);
+            empByCode.set(CODE, { id: info.lastInsertRowid, code, device_pin: pinOk });
+            if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
+            if (role !== 'admin') activeCount++;
+            added++;
+          } catch (e) { errors.push(`Dòng ${r2}: ${/UNIQUE/.test(e.message) ? `trùng Mã NV hoặc tài khoản "${username}"` : e.message}`); skipped++; }
+        } else { // update theo mã
+          if (!existing) { errors.push(`Dòng ${r2}: Mã "${code}" chưa có — bỏ qua`); skipped++; continue; }
+          const sets = [], args = [];
+          if (name) { sets.push('full_name=?'); args.push(name); }
+          if (dept) { sets.push('department=?'); args.push(dept); }
+          if (pos) { sets.push('position=?'); args.push(pos); }
+          if (phone) { sets.push('phone=?'); args.push(phone); }
+          if (roleTxt) { sets.push('role=?'); args.push(role); }
+          // Số ID: chỉ đặt khi NV chưa có ID và ID chưa bị NV khác dùng
+          if (pin && !(existing.device_pin || '').trim() && !pinUsed.get(pin, existing.id)) { sets.push('device_pin=?'); args.push(pin); }
+          if (sets.length) { args.push(existing.id); db.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE id=?`).run(...args); }
+          if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(cellStr(row, 10)), existing.id);
+          if (basic > 0) setBasicSalary(existing.id, basic);
+          updated++;
+        }
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: 'Lỗi khi nhập: ' + e.message }); }
+    res.json({ ok: true, mode, added, updated, skipped, newDepts, newPos, errors: errors.slice(0, 80) });
   });
 
   r.put('/employees/:id', need('employees'), (req, res) => {

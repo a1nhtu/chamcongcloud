@@ -329,7 +329,15 @@ function deptOrdered(list = DEPARTMENTS) {
 }
 async function pageEmployees() {
   const addBtn = hasPerm('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
-  setMain(head('Nhân viên', addBtn), loading());
+  const canEdit = hasPerm('employees');
+  const tmplBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '📄 Tải mẫu Excel') : null;
+  const impAddBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '⬆ Nhập thêm mới') : null;
+  const impUpdBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '🔄 Cập nhật từ Excel') : null;
+  if (tmplBtn) tmplBtn.onclick = downloadEmpTemplate;
+  if (impAddBtn) impAddBtn.onclick = () => importEmployees('add');
+  if (impUpdBtn) impUpdBtn.onclick = () => importEmployees('update');
+  const headArgs = ['Nhân viên', addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
+  setMain(head(...headArgs), loading());
   try {
     await loadRefs();
     const { rows } = await api('/admin/employees');
@@ -357,8 +365,47 @@ async function pageEmployees() {
     }
     tbl.append(tb);
     if (addBtn) addBtn.onclick = () => empModal(null);
-    setMain(head('Nhân viên (' + rows.length + ')', addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+    const headArgs2 = ['Nhân viên (' + rows.length + ')', addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
+    setMain(head(...headArgs2), el('div', { class: 'panel tbl-scroll' }, tbl));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
+}
+// Tải file Excel mẫu nhập nhân viên
+async function downloadEmpTemplate() {
+  try {
+    const res = await api('/admin/employees/template.xlsx', { raw: true });
+    if (!res.ok) { toast('Không tải được file mẫu', 'err'); return; }
+    const url = URL.createObjectURL(await res.blob());
+    const a = el('a', { href: url, download: 'mau_nhan_vien.xlsx' });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Đã tải file mẫu', 'ok');
+  } catch { toast('Không tải được file mẫu', 'err'); }
+}
+// Nhập nhân viên bằng Excel (mode 'add' = thêm mới, 'update' = cập nhật)
+function importEmployees(mode) {
+  const fileI = el('input', { type: 'file', accept: '.xlsx', style: 'display:none' });
+  document.body.appendChild(fileI);
+  fileI.onchange = () => {
+    const f = fileI.files[0]; if (!f) { fileI.remove(); return; }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const r = await api('/admin/employees/import', { method: 'POST', body: { mode, fileBase64: reader.result } });
+        const lines = [
+          mode === 'add' ? `✅ Đã thêm mới: ${r.added} nhân viên` : `✅ Đã cập nhật: ${r.updated} nhân viên`,
+          r.skipped ? `⏭️ Bỏ qua: ${r.skipped}` : '',
+          r.newDepts ? `🏢 Tạo mới bộ phận: ${r.newDepts}` : '',
+          r.newPos ? `🏷️ Tạo mới chức danh: ${r.newPos}` : '',
+        ].filter(Boolean);
+        if (r.errors && r.errors.length) lines.push('', '⚠️ Chi tiết bỏ qua:', ...r.errors);
+        alert(lines.join('\n'));
+        pageEmployees();
+      } catch (e) { toast(e.message || 'Lỗi nhập Excel', 'err'); }
+      fileI.remove();
+    };
+    reader.readAsDataURL(f);
+  };
+  fileI.click();
 }
 function roleLabel(r) { return el('span', { class: 'pill ' + (r === 'admin' ? 'bad' : r === 'manager' ? 'warn' : 'muted') }, { admin: 'Admin', manager: 'Quản lý', employee: 'Nhân viên' }[r]); }
 function btnSm(t, fn, cls = '') { const b = el('button', { class: 'btn sm ' + cls }, t); b.onclick = fn; return b; }
