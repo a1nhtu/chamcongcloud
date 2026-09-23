@@ -240,24 +240,36 @@ function buildReport(type, from, to, filter) {
 
     /* --- Giờ công / giờ tăng ca theo ngày (ma trận) — mẫu GioChamGioCongGioTangCa --- */
     case 'workhours': {
-      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.isWeekend(d) }));
+      // Mỗi NV = 3 dòng (giống mẫu + bản xuất Excel): Giờ Vào–Ra / Giờ công / Giờ tăng ca.
+      // Mỗi ngày tách 2 cột: Vào | Ra.
+      const dayCols = [];
+      for (const d of days) {
+        const wk = ctx.isWeekend(d);
+        dayCols.push({ key: 'd' + d + 'i', label: d.slice(8), weekend: wk });
+        dayCols.push({ key: 'd' + d + 'o', label: 'Ra', weekend: wk });
+      }
       const columns = [
-        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
-        { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
-        { key: 'totalh', label: 'Tổng giờ', w: 10 }, { key: 'oth', label: 'Tăng ca (giờ)', w: 12 }, { key: 'cong', label: 'Tổng công', w: 10 },
+        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+        { key: 'dept', label: 'Bộ phận', w: 12 }, { key: 'loai', label: 'Chỉ tiêu', w: 12 },
+        ...dayCols, { key: 'total', label: 'Tổng', w: 9 },
       ];
-      const rows = ctx.employees.map((e) => {
-        const row = { code: e.code, name: e.full_name, dept: e.department || '' };
-        let totalMin = 0, otMin = 0, cong = 0;
+      const rows = [];
+      for (const e of ctx.employees) {
+        const rIn = { code: e.code, name: e.full_name, dept: e.department || '', loai: 'Giờ Vào–Ra' };
+        const rCong = { code: '', name: '', dept: '', loai: 'Giờ công' };
+        const rOt = { code: '', name: '', dept: '', loai: 'Giờ tăng ca' };
+        let totalMin = 0, otMin = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
-          if (c && (c.work_minutes || 0) > 0) { row['d' + d] = round2((c.work_minutes || 0) / 60); totalMin += c.work_minutes || 0; }
-          else row['d' + d] = '';
-          if (c) { otMin += c.ot_min || 0; cong += c.work_unit || 0; }
+          rIn['d' + d + 'i'] = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
+          rIn['d' + d + 'o'] = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+          rCong['d' + d + 'i'] = c ? round2((c.work_minutes || 0) / 60) : ''; rCong['d' + d + 'o'] = '';
+          rOt['d' + d + 'i'] = c ? round2((c.ot_min || 0) / 60) : ''; rOt['d' + d + 'o'] = '';
+          if (c) { totalMin += c.work_minutes || 0; otMin += c.ot_min || 0; }
         }
-        row.totalh = round2(totalMin / 60); row.oth = round2(otMin / 60); row.cong = round2(cong);
-        return row;
-      });
+        rIn.total = ''; rCong.total = round2(totalMin / 60); rOt.total = round2(otMin / 60);
+        rows.push(rIn, rCong, rOt);
+      }
       return { title: `Giờ công & tăng ca ${PERIOD}`, columns, rows };
     }
 
