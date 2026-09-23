@@ -10,6 +10,7 @@ on:
     paths:
       - 'public/huong-dan.html'
       - 'public/hd-worker.js'
+      - 'HuongDan/**'
       - '.github/workflows/deploy-huongdan.yml'
   workflow_dispatch: {}   # cho phép bấm chạy tay trong tab Actions
 
@@ -23,11 +24,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Chuẩn bị site (huong-dan.html → index.html)
+      - name: Chuẩn bị site (huong-dan.html → index.html + các trang HuongDan)
         run: |
           mkdir -p _site
           cp public/huong-dan.html _site/index.html
           cp public/hd-worker.js _site/_worker.js
+          # Các trang bán khách: bảng giá, giới thiệu, cẩm nang đại lý, hướng dẫn...
+          cp HuongDan/*.html _site/ 2>/dev/null || true
 
       - name: Deploy lên Cloudflare Pages
         uses: cloudflare/wrangler-action@v3
