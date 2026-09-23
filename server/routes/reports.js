@@ -337,6 +337,42 @@ function buildReport(type, from, to, filter) {
       return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
     }
 
+    /* --- Chi tiết chấm công (danh sách: mỗi NV × mỗi ngày 1 dòng) — mẫu BCC --- */
+    case 'detaillist': {
+      const columns = [
+        { key: 'stt', label: 'STT', w: 6 }, { key: 'code', label: 'Mã nhân viên', w: 12 },
+        { key: 'name', label: 'Tên nhân viên', w: 22 }, { key: 'dept', label: 'Phòng ban', w: 14 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 },
+        { key: 'cin', label: 'Giờ vào', w: 9 }, { key: 'cout', label: 'Giờ ra', w: 9 },
+        { key: 'late', label: 'Trễ', w: 7 }, { key: 'early', label: 'Sớm', w: 7 },
+        { key: 'cong', label: 'Công', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
+        { key: 'ot', label: 'Tăng ca', w: 9 }, { key: 'gross', label: 'Tổng toàn bộ', w: 12 },
+        { key: 'ca', label: 'Ca', w: 8 },
+      ];
+      const rows = [];
+      let stt = 0;
+      for (const e of ctx.employees) {
+        for (const d of days) {
+          const c = ctx.cell.get(e.id + '|' + d);
+          const isLeave = ctx.leaveDays.has(e.id + '|' + d);
+          if (!c && !ctx.isScheduled(e.id, d) && !isLeave) continue; // bỏ ngày không lịch, không chấm, không nghỉ
+          stt++;
+          const gross = (c && c.check_in_at && c.check_out_at)
+            ? round2((new Date(c.check_out_at) - new Date(c.check_in_at)) / 3600000) : 0;
+          rows.push({
+            stt, code: e.code, name: e.full_name, dept: e.department || '',
+            date: fmtDMY(d), wd: WD[vnWeekday(d)],
+            cin: c ? isoToVnHM(c.check_in_at) : '', cout: c ? isoToVnHM(c.check_out_at) : '',
+            late: c ? (c.late_min || 0) : 0, early: c ? (c.early_min || 0) : 0,
+            cong: c ? round2(c.work_unit) : 0, gio: c ? round2((c.work_minutes || 0) / 60) : 0,
+            ot: c ? round2((c.ot_min || 0) / 60) : 0, gross,
+            ca: c ? (c.shift_name || 'HC') : (symbolOf(ctx, e.id, d) || 'V'),
+          });
+        }
+      }
+      return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
+    }
+
     /* --- Chấm công (mọi bản ghi) --- */
     case 'attendance': {
       const columns = [
