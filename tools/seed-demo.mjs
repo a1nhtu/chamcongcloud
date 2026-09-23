@@ -12,6 +12,9 @@ db.exec('PRAGMA busy_timeout = 8000'); // chờ nếu app đang ghi → chạy �
 const office = db.prepare('SELECT * FROM offices ORDER BY id LIMIT 1').get();
 const shift = db.prepare("SELECT * FROM shifts WHERE name='Hành chính' ORDER BY id LIMIT 1").get() || db.prepare('SELECT * FROM shifts ORDER BY id LIMIT 1').get();
 const officeId = office.id, shiftId = shift.id;
+// Demo: BẬT tăng ca cho ca này để dữ liệu có OT trực quan (mặc định ca hành chính tắt OT)
+db.prepare('UPDATE shifts SET allow_ot=1, ot_start_after_min=30 WHERE id=?').run(shiftId);
+shift.allow_ot = 1; shift.ot_start_after_min = 30;
 const weekend = getSetting('weekend_days', '7');
 const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
 const adminId = db.prepare("SELECT id FROM employees WHERE username='admin'").get()?.id || null;
@@ -40,7 +43,7 @@ console.log('✓ Tài khoản demo:  demo / demo123  (toàn quyền, khách ngh�
 const EMP = [
   { code: 'NV001', name: 'Nguyễn Việt Hoàng', dept: 'Kinh doanh', pos: 'Nhân viên · Sale', user: 'nv001', today: { in: '07:58', out: null, outside: false } },
   { code: 'NV002', name: 'Trần Thị Mai Anh', dept: 'Kinh doanh', pos: 'Trưởng nhóm Sale', user: 'nv002', today: { in: '08:22', out: null, outside: false } }, // đi muộn
-  { code: 'NV003', name: 'Lê Minh Quân', dept: 'Kỹ thuật', pos: 'Kỹ thuật viên', user: 'nv003', today: { in: '07:46', out: '17:41', outside: false } },
+  { code: 'NV003', name: 'Lê Minh Quân', dept: 'Kỹ thuật', pos: 'Kỹ thuật viên', user: 'nv003', today: { in: '07:46', out: '19:50', outside: false } }, // tăng ca hôm nay
   { code: 'NV004', name: 'Phạm Thu Hà', dept: 'Kế toán', pos: 'Kế toán viên', user: 'nv004', today: { in: '08:02', out: null, outside: false } },
   { code: 'NV005', name: 'Hoàng Văn Dũng', dept: 'Kỹ thuật', pos: 'Kỹ thuật viên', user: 'nv005', today: { in: '08:05', out: null, outside: true } }, // ngoài VP
   { code: 'NV006', name: 'Vũ Thị Lan', dept: 'Marketing', pos: 'Nhân viên Marketing', user: 'nv006', today: null }, // chưa chấm
@@ -131,9 +134,9 @@ function randomDay(empId, date) {
   let co = null;
   if (!noOut) {
     const ro = Math.random();
-    if (ro < 0.72) co = 1050 + randInt(-2, 25);           // ra đúng giờ (17:28–17:55)
-    else if (ro < 0.90) co = 1050 - randInt(18, 42);      // về sớm
-    else co = 1050 + randInt(12, 55);                      // ở lại muộn
+    if (ro < 0.60) co = 1050 + randInt(-2, 25);           // ra đúng giờ (17:28–17:55) ~60%
+    else if (ro < 0.78) co = 1050 - randInt(18, 42);      // về sớm ~18%
+    else co = 1050 + randInt(75, 210);                     // ở lại TĂNG CA ~22% (18:45–21:00 → OT 1–3h)
   }
   const outside = Math.random() < 0.08;
   writeDay(empId, date, ci, co, outside);
