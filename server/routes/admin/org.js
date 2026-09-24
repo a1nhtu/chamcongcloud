@@ -1,5 +1,6 @@
 // Nhóm route DANH MỤC TỔ CHỨC: lịch trình ca, bộ phận, chức danh, chi nhánh/định vị, ca làm.
 import { db } from '../../db.js';
+import { sendCaughtError } from '../../util.js';
 
 export function registerOrgRoutes(r, { need }) {
   /* ----------------------------- LỊCH TRÌNH CA ----------------------------- */
@@ -23,7 +24,7 @@ export function registerOrgRoutes(r, { need }) {
       ids.forEach((sid, i) => ins.run(wsId, sid, i));
       db.exec('COMMIT');
       res.json({ ok: true, id: wsId });
-    } catch (e) { db.exec('ROLLBACK'); res.status(500).json({ error: e.message }); }
+    } catch (e) { db.exec('ROLLBACK'); sendCaughtError(res, 'POST /admin/schedules', e); }
   });
   r.put('/schedules/:id', need('shifts'), (req, res) => {
     const b = req.body || {};
@@ -42,7 +43,7 @@ export function registerOrgRoutes(r, { need }) {
       }
       db.exec('COMMIT');
       res.json({ ok: true });
-    } catch (e) { db.exec('ROLLBACK'); res.status(500).json({ error: e.message }); }
+    } catch (e) { db.exec('ROLLBACK'); sendCaughtError(res, 'PUT /admin/schedules/:id', e); }
   });
   r.delete('/schedules/:id', need('shifts'), (req, res) => {
     const used = db.prepare('SELECT COUNT(*) c FROM employees WHERE work_schedule_id = ? AND active = 1').get(req.params.id).c;
@@ -64,7 +65,10 @@ export function registerOrgRoutes(r, { need }) {
     try {
       const info = db.prepare('INSERT INTO departments(name, parent_id) VALUES(?,?)').run(name, parent_id);
       res.json({ ok: true, id: info.lastInsertRowid, name });
-    } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Bộ phận đã tồn tại' : e.message }); }
+    } catch (e) {
+      if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Bộ phận đã tồn tại' });
+      sendCaughtError(res, 'POST /admin/departments', e, { status: 400 });
+    }
   });
   r.put('/departments/:id', need('departments'), (req, res) => {
     const d = db.prepare('SELECT * FROM departments WHERE id=?').get(req.params.id);
@@ -77,7 +81,10 @@ export function registerOrgRoutes(r, { need }) {
       if (name !== d.name) db.prepare('UPDATE employees SET department=? WHERE department=?').run(name, d.name);
       db.prepare('UPDATE departments SET name=?, parent_id=? WHERE id=?').run(name, parent_id, d.id);
       res.json({ ok: true });
-    } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Bộ phận đã tồn tại' : e.message }); }
+    } catch (e) {
+      if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Bộ phận đã tồn tại' });
+      sendCaughtError(res, 'PUT /admin/departments/:id', e, { status: 400 });
+    }
   });
   r.delete('/departments/:id', need('departments'), (req, res) => {
     const d = db.prepare('SELECT name FROM departments WHERE id = ?').get(req.params.id);
@@ -100,7 +107,10 @@ export function registerOrgRoutes(r, { need }) {
     try {
       const info = db.prepare('INSERT INTO positions(name) VALUES(?)').run(name);
       res.json({ ok: true, id: info.lastInsertRowid, name });
-    } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Chức danh đã tồn tại' : e.message }); }
+    } catch (e) {
+      if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Chức danh đã tồn tại' });
+      sendCaughtError(res, 'POST /admin/positions', e, { status: 400 });
+    }
   });
   r.delete('/positions/:id', need('departments'), (req, res) => {
     const p = db.prepare('SELECT name FROM positions WHERE id=?').get(req.params.id);
@@ -157,7 +167,7 @@ export function registerOrgRoutes(r, { need }) {
       const ins = db.prepare('INSERT OR IGNORE INTO employee_offices(employee_id, office_id) VALUES (?,?)');
       for (const eid of ids) ins.run(eid, oid);
       db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/offices/:id/employees', e); }
     res.json({ ok: true, count: ids.length });
   });
 

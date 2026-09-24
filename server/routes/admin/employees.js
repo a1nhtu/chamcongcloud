@@ -4,6 +4,7 @@ import { db } from '../../db.js';
 import { hashPassword, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
+import { sendCaughtError } from '../../util.js';
 
 const PERM_KEYS = PERMISSIONS.map(([k]) => k);
 // Chuẩn hoá quyền để lưu: admin = null (toàn quyền); còn lại = JSON mảng key hợp lệ.
@@ -97,7 +98,8 @@ export function registerEmployeeRoutes(r, { need }) {
       setEmpOffices(info.lastInsertRowid, b.office_ids);
       res.json({ ok: true, id: info.lastInsertRowid });
     } catch (e) {
-      res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Mã NV hoặc tài khoản đã tồn tại' : e.message });
+      if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
+      sendCaughtError(res, 'POST /admin/employees', e, { status: 400 });
     }
   });
 
@@ -207,7 +209,11 @@ export function registerEmployeeRoutes(r, { need }) {
             if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
             if (role !== 'admin') activeCount++;
             added++;
-          } catch (e) { errors.push(`Dòng ${r2}: ${/UNIQUE/.test(e.message) ? `trùng Mã NV hoặc tài khoản "${username}"` : e.message}`); skipped++; }
+          } catch (e) {
+            if (/UNIQUE/.test(e.message)) errors.push(`Dòng ${r2}: trùng Mã NV hoặc tài khoản "${username}"`);
+            else { console.error('[POST /admin/employees/import]', e); errors.push(`Dòng ${r2}: Có lỗi hệ thống, vui lòng thử lại hoặc liên hệ Digiplus`); }
+            skipped++;
+          }
         } else { // update theo mã
           if (!existing) { errors.push(`Dòng ${r2}: Mã "${code}" chưa có — bỏ qua`); skipped++; continue; }
           const guardTarget = guardUpdateTarget(req.user, existing, { role: roleTxt ? role : undefined, permissions: undefined });
@@ -227,7 +233,7 @@ export function registerEmployeeRoutes(r, { need }) {
         }
       }
       db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); return res.status(400).json({ error: 'Lỗi khi nhập: ' + e.message }); }
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/import', e, { status: 400 }); }
     res.json({ ok: true, mode, added, updated, skipped, newDepts, newPos, errors: errors.slice(0, 80) });
   });
 
@@ -269,7 +275,8 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
       res.json({ ok: true });
     } catch (e) {
-      res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Mã NV hoặc tài khoản đã tồn tại' : e.message });
+      if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
+      sendCaughtError(res, 'PUT /admin/employees/:id', e, { status: 400 });
     }
   });
 
@@ -291,7 +298,7 @@ export function registerEmployeeRoutes(r, { need }) {
       db.prepare('UPDATE device_punches SET employee_id=NULL WHERE employee_id=?').run(emp.id);
       db.prepare('DELETE FROM employees WHERE id=?').run(emp.id);
       res.json({ ok: true });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { sendCaughtError(res, 'DELETE /admin/employees/:id/purge', e, { status: 400 }); }
   });
 
   // Số vân tay / khuôn mặt / thẻ / mật mã của 1 NV (theo Số ID máy) — cho tab Sinh trắc

@@ -2,6 +2,7 @@
 import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
 import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice } from '../../device-sync.js';
+import { sendCaughtError } from '../../util.js';
 
 // IP LAN thật của máy chủ (để điền vào máy chấm công). Adapter ảo xếp cuối.
 function lanIPs() {
@@ -38,7 +39,7 @@ export function registerDeviceRoutes(r, { need }) {
   // Đồng bộ NGAY: đẩy toàn bộ vân tay/user của nhóm sang mọi máy trong nhóm (khỏi cần restart máy)
   r.post('/devices/resync', need('devices'), (req, res) => {
     try { res.json(resyncNow(!!req.body?.force)); }
-    catch (e) { res.status(400).json({ error: e.message }); }
+    catch (e) { sendCaughtError(res, 'POST /admin/devices/resync', e, { status: 400 }); }
   });
   r.put('/devices/:id', need('devices'), (req, res) => {
     const b = req.body || {};
@@ -106,7 +107,7 @@ export function registerDeviceRoutes(r, { need }) {
     let n = 0;
     db.exec('BEGIN');
     try { for (const d of days) { rebuildDay(d.employee_id, d.work_date); n++; } db.exec('COMMIT'); }
-    catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
+    catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/devices/rebuild', e); }
     res.json({ ok: true, rebuilt: n });
   });
 
@@ -122,7 +123,7 @@ export function registerDeviceRoutes(r, { need }) {
       const r2 = b.kind === 'users' ? importUsbUsers(content) : importUsbAttlog(content);
       db.exec('COMMIT');
       res.json({ ok: true, kind: b.kind || 'attlog', ...r2 });
-    } catch (e) { db.exec('ROLLBACK'); res.status(500).json({ error: e.message }); }
+    } catch (e) { db.exec('ROLLBACK'); sendCaughtError(res, 'POST /admin/devices/import-usb', e); }
   });
 
   /* -------- Xóa dữ liệu / nhân viên TRÊN MÁY (gửi lệnh ADMS xuống máy) -------- */

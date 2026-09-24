@@ -2,6 +2,7 @@
 import { raw } from 'express';
 import { getSetting, setSetting } from '../../db.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../../backup.js';
+import { sendCaughtError } from '../../util.js';
 
 export function registerBackupRoutes(r, { need }) {
   r.get('/backup', need('backup'), (req, res) => {
@@ -25,7 +26,7 @@ export function registerBackupRoutes(r, { need }) {
   });
   r.post('/backup/now', need('backup'), (req, res) => {
     try { const r2 = doBackup('manual'); pruneBackups(getSetting('backup_keep_days', '7')); res.json({ ok: true, ...r2 }); }
-    catch (e) { res.status(500).json({ error: e.message }); }
+    catch (e) { sendCaughtError(res, 'POST /admin/backup/now', e); }
   });
   r.get('/backup/download', need('backup'), (req, res) => {
     const p = backupPath(req.query.name || '');
@@ -42,12 +43,12 @@ export function registerBackupRoutes(r, { need }) {
       if (!req.body || !req.body.length) return res.status(400).json({ error: 'Chưa nhận được file' });
       stageRestore(req.body);
       res.json({ ok: true, restartNeeded: true });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { sendCaughtError(res, 'POST /admin/backup/restore', e, { status: 400 }); }
   });
   // Sao lưu TOÀN BỘ (.zip = DB + ảnh + logo) — dùng khi chuyển máy/VPS
   r.post('/backup/full', need('backup'), (req, res) => {
     try { res.json({ ok: true, ...doFullBackup() }); }
-    catch (e) { res.status(500).json({ error: 'Không tạo được bản sao lưu toàn bộ: ' + e.message }); }
+    catch (e) { sendCaughtError(res, 'POST /admin/backup/full', e, { message: 'Không tạo được bản sao lưu toàn bộ, vui lòng thử lại hoặc liên hệ Digiplus' }); }
   });
   // Phục hồi TOÀN BỘ từ .zip → nạp DB (áp lúc khởi động lại) + thay ảnh/logo ngay
   r.post('/backup/full-restore', need('backup'), raw({ type: () => true, limit: '500mb' }), (req, res) => {
@@ -55,6 +56,6 @@ export function registerBackupRoutes(r, { need }) {
       if (!req.body || !req.body.length) return res.status(400).json({ error: 'Chưa nhận được file' });
       stageFullRestore(req.body);
       res.json({ ok: true, restartNeeded: true });
-    } catch (e) { res.status(400).json({ error: e.message }); }
+    } catch (e) { sendCaughtError(res, 'POST /admin/backup/full-restore', e, { status: 400 }); }
   });
 }

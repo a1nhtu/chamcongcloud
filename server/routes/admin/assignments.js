@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { db } from '../../db.js';
 import { resolveShift } from '../../shift-resolver.js';
 import { vnWeekday } from '../../attendance-calc.js';
+import { sendCaughtError } from '../../util.js';
 
 const WDVN = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 function monthDaysList(month) {
@@ -293,7 +294,7 @@ export function registerAssignmentRoutes(r, { need }) {
         }
       }
       db.exec('COMMIT');
-    } catch (e) { db.exec('ROLLBACK'); return res.status(500).json({ error: e.message }); }
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/import', e); }
 
     res.json({ ok: true, updated, off, cleared, errors: errors.slice(0, 20), errorCount: errors.length });
   });
