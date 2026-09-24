@@ -3,6 +3,7 @@ import ExcelJS from 'exceljs';
 import { db } from '../../db.js';
 import { hashPassword, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
+import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget } from '../../permission-guard.js';
 
 const PERM_KEYS = PERMISSIONS.map(([k]) => k);
 // Chuẩn hoá quyền để lưu: admin = null (toàn quyền); còn lại = JSON mảng key hợp lệ.
@@ -80,14 +81,16 @@ export function registerEmployeeRoutes(r, { need }) {
       const cnt = db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1 AND role != 'admin'").get().c;
       if (cnt >= lic.maxEmp) return res.status(400).json({ error: `Bản quyền giới hạn ${lic.maxEmp} nhân viên. Liên hệ Digiplus để nâng gói.` });
     }
+    const guard = guardRoleAndPermissions(req.user, { role: b.role || 'employee', permissions: b.permissions });
+    if (guard.error) return res.status(403).json({ error: guard.error });
     try {
       const info = db.prepare(`INSERT INTO employees
         (code, full_name, department, position, phone, role, username, password_hash, office_id, shift_id, work_schedule_id, permissions, device_pin, active)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1)`).run(
         b.code.trim(), b.full_name.trim(), b.department || '', b.position || '', b.phone || '',
-        b.role || 'employee', b.username.trim(), hashPassword(b.password),
+        guard.role, b.username.trim(), hashPassword(b.password),
         (Array.isArray(b.office_ids) && b.office_ids.length ? +b.office_ids[0] : (b.office_id || null)),
-        b.shift_id || null, b.work_schedule_id || null, normPerms(b.role, b.permissions),
+        b.shift_id || null, b.work_schedule_id || null, normPerms(guard.role, guard.permissions),
         (b.device_pin || '').trim());
       setEmpOffices(info.lastInsertRowid, b.office_ids);
       res.json({ ok: true, id: info.lastInsertRowid });
@@ -151,7 +154,7 @@ export function registerEmployeeRoutes(r, { need }) {
     const posSet = new Set(db.prepare('SELECT name FROM positions').all().map((p) => p.name));
     const insDept = db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)');
     const insPos = db.prepare('INSERT OR IGNORE INTO positions(name) VALUES(?)');
-    const empByCode = new Map(db.prepare('SELECT id, code, device_pin FROM employees').all().map((e) => [String(e.code).trim().toUpperCase(), e]));
+    const empByCode = new Map(db.prepare('SELECT id, code, role, device_pin FROM employees').all().map((e) => [String(e.code).trim().toUpperCase(), e]));
     const pinUsed = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?");
 
     const lic = licenseState();
@@ -171,7 +174,9 @@ export function registerEmployeeRoutes(r, { need }) {
         const pos = cellStr(row, 4);
         const phone = cellStr(row, 5);
         const roleTxt = cellStr(row, 6);
-        const role = mapRole(roleTxt);
+        const roleGuard = resolveImportRole(req.user, mapRole(roleTxt));
+        const role = roleGuard.role;
+        if (roleGuard.downgraded) errors.push(`Dòng ${r2}: bạn không có quyền cấp vai trò Admin — đã hạ xuống Nhân viên`);
         const pin = cellStr(row, 7);
         const basic = cellNum(row, 8);
         const username = cellStr(row, 9) || code;
@@ -196,13 +201,15 @@ export function registerEmployeeRoutes(r, { need }) {
               VALUES (?,?,?,?,?,?,?,?,?,?,1)`).run(
               code, name, dept, pos, phone, role, username, hashPassword(password),
               normPerms(role, role === 'admin' ? null : []), pinOk);
-            empByCode.set(CODE, { id: info.lastInsertRowid, code, device_pin: pinOk });
+            empByCode.set(CODE, { id: info.lastInsertRowid, code, role, device_pin: pinOk });
             if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
             if (role !== 'admin') activeCount++;
             added++;
           } catch (e) { errors.push(`Dòng ${r2}: ${/UNIQUE/.test(e.message) ? `trùng Mã NV hoặc tài khoản "${username}"` : e.message}`); skipped++; }
         } else { // update theo mã
           if (!existing) { errors.push(`Dòng ${r2}: Mã "${code}" chưa có — bỏ qua`); skipped++; continue; }
+          const guardTarget = guardUpdateTarget(req.user, existing, { role: roleTxt ? role : undefined, permissions: undefined });
+          if (!guardTarget.ok) { errors.push(`Dòng ${r2}: ${guardTarget.error} — bỏ qua`); skipped++; continue; }
           const sets = [], args = [];
           if (name) { sets.push('full_name=?'); args.push(name); }
           if (dept) { sets.push('department=?'); args.push(dept); }
@@ -230,9 +237,13 @@ export function registerEmployeeRoutes(r, { need }) {
     if (b.code != null && b.code.trim() !== emp.code
         && db.prepare('SELECT 1 FROM employees WHERE code=? AND id<>?').get(b.code.trim(), emp.id))
       return res.status(400).json({ error: `Mã nhân viên "${b.code.trim()}" đã tồn tại` });
+    const guardTarget = guardUpdateTarget(req.user, emp, b);
+    if (!guardTarget.ok) return res.status(403).json({ error: guardTarget.error });
+    const roleGuard = guardRoleAndPermissions(req.user, { role: b.role ?? emp.role, permissions: b.permissions });
+    if (roleGuard.error) return res.status(403).json({ error: roleGuard.error });
     try {
-      const newRole = b.role ?? emp.role;
-      const newPerms = b.permissions !== undefined ? normPerms(newRole, b.permissions) : emp.permissions;
+      const newRole = roleGuard.role;
+      const newPerms = b.permissions !== undefined ? normPerms(newRole, roleGuard.permissions) : emp.permissions;
       // SỐ ID (device_pin): chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
       if (b.device_pin !== undefined && !(emp.device_pin || '').trim()) {
         const pin1 = (b.device_pin || '').trim();

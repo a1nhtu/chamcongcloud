@@ -1,12 +1,13 @@
 // Xác thực JWT + middleware phân quyền
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'node:crypto';
 import { db, getSetting, setSetting } from './db.js';
 
 function getSecret() {
   let s = getSetting('jwt_secret');
   if (!s) {
-    s = 'digiplus_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
+    s = randomBytes(32).toString('hex');
     setSetting('jwt_secret', s);
   }
   return s;
