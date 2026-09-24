@@ -12,7 +12,8 @@ body { background: var(--bg); }
 
 /* Layout */
 .layout { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
-.sidebar { background: #1f2430; color: #cfd3db; display: flex; flex-direction: column; }
+.sidebar { background: #1f2430; color: #cfd3db; display: flex; flex-direction: column;
+  position: sticky; top: 0; align-self: start; height: 100vh; overflow-y: auto; }
 .sidebar .brand { padding: 20px; font-size: 20px; font-weight: 800; color: #fff; border-bottom: 1px solid #2c3140; }
 .sidebar .brand small { display: block; font-size: 11px; font-weight: 500; color: #8a90a0; margin-top: 2px; }
 .sidebar nav { padding: 10px; flex: 1; }
@@ -81,7 +82,7 @@ table.data tr:hover td { background: #fcfbfa; }
 .empty { text-align: center; color: var(--muted); padding: 40px; }
 @media (max-width: 780px) {
   .layout { grid-template-columns: 1fr; }
-  .sidebar { flex-direction: row; overflow-x: auto; }
+  .sidebar { flex-direction: row; overflow-x: auto; position: static; height: auto; }
   .sidebar .brand, .sidebar .foot { display: none; }
   .sidebar nav { display: flex; padding: 6px; }
   .sidebar nav button { white-space: nowrap; margin: 0 2px; }
