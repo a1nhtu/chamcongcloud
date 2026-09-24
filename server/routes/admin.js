@@ -30,6 +30,6 @@ registerAttendanceRoutes(r, { need });   // tính lại công, lưới, sửa gi
 registerBackupRoutes(r, { need });       // sao lưu / phục hồi
 registerDeviceRoutes(r, { need });       // máy chấm công
 registerPushRoutes(r);                   // thông báo đẩy
-registerLogRoutes(r, { need });          // nhật ký thao tác
+registerLogRoutes(r, { need, adminOnly });          // nhật ký thao tác
 
 export default r;

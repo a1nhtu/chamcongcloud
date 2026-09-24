@@ -2,8 +2,20 @@
 import ExcelJS from 'exceljs';
 import { db } from '../../db.js';
 import { oplogLabel } from '../../device-sync.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { LOG_FILE } from '../../logger.js';
 
-export function registerLogRoutes(r, { need }) {
+export function registerLogRoutes(r, { need, adminOnly }) {
+  // --- File log máy chủ (server.log) để gửi cho Digiplus khi cần tra lỗi — chỉ admin ---
+  r.get('/logs/server/download', adminOnly, (req, res) => {
+    try {
+      const prev = existsSync(LOG_FILE + '.1') ? readFileSync(LOG_FILE + '.1', 'utf8') : '';
+      const cur = existsSync(LOG_FILE) ? readFileSync(LOG_FILE, 'utf8') : '';
+      res.set({ 'Content-Type': 'text/plain; charset=utf-8', 'Content-Disposition': 'attachment; filename="server.log.txt"', 'X-Content-Type-Options': 'nosniff' });
+      res.send(prev + cur || '(chưa có log)');
+    } catch (e) { console.error('[GET /admin/logs/server/download]', e); res.status(500).json({ error: 'Không đọc được file log' }); }
+  });
+
   // --- Nhật ký thao tác của admin/quản lý trên phần mềm ---
   function adminLogQuery(query) {
     const where = [], args = [];

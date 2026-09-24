@@ -2913,12 +2913,24 @@ async function pageSettings() {
     } catch (e) { updStatus.append(el('span', { style: 'color:#c0392b' }, e.message)); }
     finally { checkBtn.disabled = false; checkBtn.textContent = '🔎 Kiểm tra cập nhật'; }
   };
+  const logBtn = el('button', { class: 'btn sm ghost' }, '📄 Tải file log lỗi');
+  logBtn.onclick = async () => {
+    logBtn.disabled = true;
+    try {
+      const res = await api('/admin/logs/server/download', { raw: true });
+      const blob = await res.blob(); const u = URL.createObjectURL(blob);
+      const a = el('a', { href: u, download: 'digiplus-server-log.txt' });
+      document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(u);
+    } catch (e) { toast(e.message || 'Không tải được file log', 'err'); }
+    logBtn.disabled = false;
+  };
   const panelUpdate = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, '⬆ Cập nhật phần mềm'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', {}, el('span', { style: 'color:var(--muted)' }, 'Phiên bản đang dùng: '), el('b', {}, s.app_version || '—')),
       el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, checkBtn, applyBtn),
       updStatus,
+      el('div', {}, logBtn, el('span', { class: 'map-hint', style: 'margin-left:8px' }, 'Khi gặp lỗi, tải file này gửi cho Digiplus để được hỗ trợ nhanh.')),
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;
 
   // ----- Bản quyền / Gia hạn -----

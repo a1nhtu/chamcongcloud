@@ -1,3 +1,4 @@
+import './logger.js';   // ghi log ra data/logs/server.log (phải import đầu tiên)
 import express from 'express';
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
