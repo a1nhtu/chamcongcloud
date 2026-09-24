@@ -1,6 +1,6 @@
 // Chặn tự nâng quyền / vượt quyền khi tạo, nhập Excel hoặc sửa nhân viên.
 // Hàm thuần (không đụng DB) để dễ viết test — gọi từ server/routes/admin/employees.js.
-import { effectivePermissions } from './auth.js';
+import { effectivePermissions, hasPerm } from './auth.js';
 
 function isSuperUser(caller) {
   return !!(caller && (caller.master || caller.role === 'admin'));
@@ -41,4 +41,18 @@ export function guardUpdateTarget(caller, targetEmp, body) {
     return { ok: false, error: 'Bạn không thể tự sửa vai trò hoặc phân quyền của chính mình' };
   }
   return { ok: true };
+}
+
+// Các trường "khoá thiết bị chấm công" + tài khoản/quyền — chỉ ai có quyền "employees" mới được xem
+// qua GET /employees. Dùng cho GET /employees vì route này còn được các màn KHÔNG có quyền "employees"
+// gọi để đổ dropdown/bộ lọc NV (Tổng quan, Báo cáo, Tính công) — không thể chặn cả route bằng need('employees')
+// vì sẽ làm vỡ các màn đó, nên chỉ bớt trường nhạy cảm thay vì chặn hẳn.
+const EMP_SENSITIVE_FIELDS = ['username', 'permissions', 'device_pin', 'device_id', 'pending_device', 'device_label'];
+
+export function filterEmployeeFields(caller, rows) {
+  if (hasPerm(caller, 'employees')) return rows;
+  for (const row of rows) {
+    for (const f of EMP_SENSITIVE_FIELDS) delete row[f];
+  }
+  return rows;
 }

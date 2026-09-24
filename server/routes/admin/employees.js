@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { db } from '../../db.js';
 import { hashPassword, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
-import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget } from '../../permission-guard.js';
+import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 
 const PERM_KEYS = PERMISSIONS.map(([k]) => k);
 // Chuẩn hoá quyền để lưu: admin = null (toàn quyền); còn lại = JSON mảng key hợp lệ.
@@ -62,7 +62,9 @@ export function registerEmployeeRoutes(r, { need }) {
       eoMap.get(x.employee_id).push(x.office_id);
     }
     for (const e of rows) e.office_ids = eoMap.get(e.id) || [];
-    res.json({ rows });
+    // Không có quyền "employees" (chỉ vào xem qua Tổng quan/Báo cáo/Tính công): bớt trường nhạy cảm
+    // (tài khoản, quyền, thông tin thiết bị) — vẫn đủ id/mã/tên/bộ phận để đổ dropdown/bộ lọc.
+    res.json({ rows: filterEmployeeFields(req.user, rows) });
   });
 
   r.post('/employees', need('employees'), (req, res) => {

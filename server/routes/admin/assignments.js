@@ -15,7 +15,7 @@ const vnWd = (d) => { const dow = new Date(d + 'T12:00:00Z').getUTCDay(); return
 export function registerAssignmentRoutes(r, { need }) {
   /* ----------------------------- PHÂN CA THEO NGÀY ----------------------------- */
   // Danh sách NV + ca + các phân ca trong khoảng ngày
-  r.get('/assignments', (req, res) => {
+  r.get('/assignments', need('assignments'), (req, res) => {
     const from = (req.query.from || '').slice(0, 10);
     const to = (req.query.to || '').slice(0, 10);
     const dept = req.query.dept || null;
@@ -94,7 +94,7 @@ export function registerAssignmentRoutes(r, { need }) {
 
   /* -------------------- PHÂN CA LÀM VIỆC (gán ca/lịch trình theo khoảng ngày) -------------------- */
   // Danh sách phân ca khoảng đang hiệu lực (kèm tên NV, ca/lịch trình)
-  r.get('/shift-assignments', (req, res) => {
+  r.get('/shift-assignments', need('assignments'), (req, res) => {
     const rows = db.prepare(`SELECT sa.*, e.code AS emp_code, e.full_name AS emp_name, e.department,
         s.name AS shift_name, ws.name AS schedule_name
       FROM shift_assignments sa
@@ -172,7 +172,7 @@ export function registerAssignmentRoutes(r, { need }) {
 
   /* -------------------- PHÂN CA BẰNG EXCEL -------------------- */
   // Xuất mẫu Excel phân ca tháng (lưới NV × ngày)
-  r.get('/assignments/export.xlsx', async (req, res) => {
+  r.get('/assignments/export.xlsx', need('assignments'), async (req, res) => {
     const month = (req.query.month || '').slice(0, 7);
     const dept = req.query.dept || null;
     if (!month) return res.status(400).json({ error: 'Thiếu tháng' });
