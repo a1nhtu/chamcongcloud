@@ -70,8 +70,17 @@ app.get('/api/config', (req, res) => res.json({
   self_shift_approve: getSetting('self_shift_approve', '1'),
 }));
 
-// Ảnh selfie
-app.use('/uploads', express.static(UPLOAD_DIR, { maxAge: '7d' }));
+// Ảnh selfie + logo công ty. Logo cho phép định dạng SVG (nhúng qua thẻ <img> ở giao
+// diện, không bị ảnh hưởng bởi header dưới đây) — nhưng nếu ai đó mở thẳng file .svg
+// bằng trình duyệt (điều hướng trực tiếp, không qua <img>), chặn thực thi script/tải
+// tài nguyên ngoài để tránh XSS lưu trữ.
+app.use('/uploads', (req, res, next) => {
+  if (req.path.toLowerCase().endsWith('.svg')) {
+    res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+  }
+  next();
+}, express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 // Trang tĩnh (PWA nhân viên + trang admin)
 app.use(express.static(PUBLIC_DIR, { index: false }));

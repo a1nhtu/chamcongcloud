@@ -1,8 +1,24 @@
 // Xác thực JWT + middleware phân quyền
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
-import { randomBytes } from 'node:crypto';
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { db, getSetting, setSetting } from './db.js';
+
+// So sánh 2 chuỗi kiểu hằng thời gian (không lộ số ký tự trùng đầu chuỗi qua thời gian
+// phản hồi). Giữ nguyên ngữ nghĩa của `===`: khác kiểu (không phải chuỗi) → luôn false.
+// Luôn so 2 buffer cùng độ dài (pad chuỗi ngắn hơn) để bản thân phép so cũng không lộ
+// chênh lệch độ dài qua thời gian, rồi đối lại độ dài thật để tránh false positive.
+function timingSafeStringEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  const bufA = Buffer.from(a, 'utf8');
+  const bufB = Buffer.from(b, 'utf8');
+  const len = Math.max(bufA.length, bufB.length, 1);
+  const padA = Buffer.alloc(len);
+  const padB = Buffer.alloc(len);
+  bufA.copy(padA);
+  bufB.copy(padB);
+  return timingSafeEqual(padA, padB) && bufA.length === bufB.length;
+}
 
 function getSecret() {
   let s = getSetting('jwt_secret');
@@ -41,7 +57,7 @@ export function masterLogin(username, password) {
   const u = masterUsername();
   if (!u || String(username || '').trim() !== u) return false;
   const plain = process.env.MASTER_PASS;
-  if (plain != null && plain !== '') return password === plain;
+  if (plain != null && plain !== '') return timingSafeStringEqual(password, plain);
   const hash = (process.env.MASTER_HASH || DEFAULT_MASTER_HASH).trim();
   try { return bcrypt.compareSync(password || '', hash); } catch { return false; }
 }
