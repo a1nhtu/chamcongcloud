@@ -33,3 +33,9 @@ PASS_*/
 *MAT_KHAU*
 *MATKHAU*
 *password*.txt
+
+# Du lieu demo quay video (co file .db) - KHONG dua len GitHub
+data_video_demo/
+*.db
+*.db-shm
+*.db-wal
