@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { db, DATA_DIR, DB_PATH, getSetting, setSetting } from './db.js';
 import { UPLOAD_DIR } from './storage.js';
+import { userError } from './util.js';
 
 const ROOT = join(DATA_DIR, '..');                 // thư mục app (chứa uploads/)
 const winTar = () => { const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
@@ -66,7 +67,7 @@ const PENDING = DB_PATH + '.restore';
 export function stageRestore(buffer) {
   // kiểm tra chữ ký SQLite ("SQLite format 3\0")
   const sig = buffer.slice(0, 16).toString('latin1');
-  if (!sig.startsWith('SQLite format 3')) throw new Error('File không phải cơ sở dữ liệu Digiplus hợp lệ');
+  if (!sig.startsWith('SQLite format 3')) throw userError('File không phải cơ sở dữ liệu Digiplus hợp lệ');
   writeFileSync(PENDING, buffer);   // ghi đồng bộ
   return true;
 }
@@ -93,17 +94,17 @@ export function doFullBackup() {
 
 // Phục hồi từ .zip: nạp lại database (áp lúc khởi động lại) + thay ngay thư mục uploads.
 export function stageFullRestore(buffer) {
-  if (buffer.slice(0, 2).toString('latin1') !== 'PK') throw new Error('File không phải bản sao lưu .zip hợp lệ');
+  if (buffer.slice(0, 2).toString('latin1') !== 'PK') throw userError('File không phải bản sao lưu .zip hợp lệ');
   const tmp = join(BACKUP_DIR, '_restore_' + Date.now());
   mkdirSync(tmp, { recursive: true });
   const zp = join(tmp, 'in.zip');
   writeFileSync(zp, buffer);
   try { execFileSync(winTar(), ['-xf', zp, '-C', tmp], { stdio: 'ignore' }); }
-  catch { rmSync(tmp, { recursive: true, force: true }); throw new Error('Không giải nén được file sao lưu'); }
+  catch { rmSync(tmp, { recursive: true, force: true }); throw userError('Không giải nén được file sao lưu'); }
   const dbIn = join(tmp, 'digiplus.db');
-  if (!existsSync(dbIn)) { rmSync(tmp, { recursive: true, force: true }); throw new Error('File sao lưu thiếu dữ liệu (digiplus.db)'); }
+  if (!existsSync(dbIn)) { rmSync(tmp, { recursive: true, force: true }); throw userError('File sao lưu thiếu dữ liệu (digiplus.db)'); }
   const head = readFileSync(dbIn).slice(0, 16).toString('latin1');
-  if (!head.startsWith('SQLite format 3')) { rmSync(tmp, { recursive: true, force: true }); throw new Error('Dữ liệu trong file không hợp lệ'); }
+  if (!head.startsWith('SQLite format 3')) { rmSync(tmp, { recursive: true, force: true }); throw userError('Dữ liệu trong file không hợp lệ'); }
   copyFileSync(dbIn, PENDING);                         // DB áp lúc khởi động lại (giống phục hồi .db)
   const upIn = join(tmp, 'uploads');
   if (existsSync(upIn)) {                              // thay ảnh + logo ngay

@@ -82,3 +82,24 @@ export function humanMinutes(min) {
 export function nowIso() {
   return new Date().toISOString();
 }
+
+// --- Che lỗi hệ thống khi trả về client (không lộ câu SQL / đường dẫn file) ---
+
+// Đánh dấu lỗi NGHIỆP VỤ có chủ đích (thông báo tiếng Việt an toàn để hiện cho người dùng),
+// khác với lỗi hệ thống không lường trước (SQLite, hệ thống tệp...) cần bị che lại.
+export function userError(message, status = 400) {
+  const err = new Error(message);
+  err.userFacing = true;
+  err.status = status;
+  return err;
+}
+
+const GENERIC_ERROR_MESSAGE = 'Có lỗi hệ thống, vui lòng thử lại hoặc liên hệ Digiplus';
+
+// Trả lỗi cho client: nếu là lỗi nghiệp vụ (tạo bằng userError) thì trả nguyên văn message;
+// nếu không, che lại bằng thông báo chung và ghi chi tiết đầy đủ ra log server (kèm tên route).
+export function sendCaughtError(res, routeName, e, { status = 500, message = GENERIC_ERROR_MESSAGE } = {}) {
+  if (e && e.userFacing) return res.status(e.status || 400).json({ error: e.message });
+  console.error(`[${routeName}]`, e);
+  res.status(status).json({ error: message });
+}

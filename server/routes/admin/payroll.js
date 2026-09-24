@@ -1,6 +1,7 @@
 // Nhóm route CẤU HÌNH LƯƠNG + bảng lương + ngày lễ.
 import { db, getSetting } from '../../db.js';
 import { computePayrollTable } from '../../payroll-calc.js';
+import { sendCaughtError } from '../../util.js';
 
 export function registerPayrollRoutes(r, { need }) {
   /* ----------------------------- CẤU HÌNH LƯƠNG ----------------------------- */
@@ -53,7 +54,10 @@ export function registerPayrollRoutes(r, { need }) {
     try {
       db.prepare('INSERT INTO public_holidays(holiday_date, name) VALUES (?,?)').run(b.holiday_date, b.name || '');
       res.json({ ok: true });
-    } catch (e) { res.status(400).json({ error: /UNIQUE/.test(e.message) ? 'Ngày lễ đã tồn tại' : e.message }); }
+    } catch (e) {
+      if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Ngày lễ đã tồn tại' });
+      sendCaughtError(res, 'POST /admin/holidays', e, { status: 400 });
+    }
   });
   r.delete('/holidays/:id', need('holidays'), (req, res) => {
     db.prepare('DELETE FROM public_holidays WHERE id = ?').run(req.params.id);
