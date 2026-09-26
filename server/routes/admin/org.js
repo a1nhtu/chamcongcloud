@@ -143,6 +143,14 @@ export function registerOrgRoutes(r, { need }) {
   });
   r.delete('/offices/:id', need('offices'), (req, res) => {
     const id = req.params.id;
+    // Xoá HẲN (force): gỡ gán NV + bỏ liên kết lịch sử chấm rồi xoá khỏi CSDL
+    if (req.query.force === '1') {
+      db.prepare('DELETE FROM employee_offices WHERE office_id=?').run(id);
+      db.prepare('UPDATE employees SET office_id=NULL WHERE office_id=?').run(id);
+      db.prepare('UPDATE attendance SET check_in_office_id=NULL WHERE check_in_office_id=?').run(id);
+      db.prepare('DELETE FROM offices WHERE id=?').run(id);
+      return res.json({ ok: true, hard: true, forced: true });
+    }
     // Còn NV đang gán / còn lịch sử chấm công → chỉ TẮT (giữ dữ liệu); chưa dùng → XÓA HẲN
     const empCnt = db.prepare('SELECT COUNT(*) c FROM employees WHERE office_id=?').get(id).c
       + db.prepare('SELECT COUNT(*) c FROM employee_offices WHERE office_id=?').get(id).c;

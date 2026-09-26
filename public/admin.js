@@ -841,38 +841,67 @@ function shiftModal(s) {
 }
 
 /* ---------- 4) CHI NHÁNH ---------- */
+let _officesShowHidden = false;
 async function pageOffices() {
   const addBtn = hasPerm('offices') ? el('button', { class: 'btn' }, '+ Thêm chi nhánh') : null;
   setMain(head('Chi nhánh / Vị trí', addBtn), loading());
   const { rows } = await api('/admin/offices');
+  const hidden = rows.filter(x => !x.active);
+  const toggleBtn = hidden.length ? el('button', { class: 'btn ghost sm' },
+    _officesShowHidden ? '🙈 Ẩn chi nhánh đã tắt' : `👁 Hiện chi nhánh đã tắt (${hidden.length})`) : null;
+  if (toggleBtn) toggleBtn.onclick = () => { _officesShowHidden = !_officesShowHidden; pageOffices(); };
+  const list = _officesShowHidden ? rows : rows.filter(x => x.active);
   const tbl = el('table', { class: 'data' });
   tbl.innerHTML = `<thead><tr><th>Tên</th><th>Địa chỉ</th><th>Toạ độ</th><th>Bán kính</th><th>Bản đồ</th><th>TT</th><th></th></tr></thead>`;
   const tb = el('tbody');
-  for (const o of rows.filter(x => x.active)) {   // ẩn chi nhánh đã tắt (đã "xoá")
-    tb.append(el('tr', {},
+  for (const o of list) {
+    const acts = !hasPerm('offices') ? '' : (o.active
+      ? el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
+          btnSm('👥 Nhân viên', () => officeEmpModal(o)),
+          btnSm('Sửa', () => officeModal(o)),
+          (() => { const d = btnSm('🗑 Xoá', () => delOffice(o), 'ghost'); d.style.color = '#c0392b'; return d; })())
+      : el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
+          btnSm('↩ Mở lại', () => reopenOffice(o), 'ghost'),
+          btnSm('👥 Nhân viên', () => officeEmpModal(o)),
+          (() => { const d = btnSm('🗑 Xoá hẳn', () => delOfficeForce(o), 'ghost'); d.style.color = '#c0392b'; return d; })()));
+    tb.append(el('tr', o.active ? {} : { style: 'opacity:.6' },
       el('td', {}, el('b', {}, o.name)),
       el('td', {}, o.address || '—'),
       el('td', {}, `${o.lat.toFixed(5)}, ${o.lng.toFixed(5)}`),
       el('td', {}, o.radius_m + ' m'),
       el('td', {}, el('a', { href: `https://www.google.com/maps?q=${o.lat},${o.lng}`, target: '_blank' }, 'Xem')),
-      el('td', {}, o.active ? el('span', { class: 'pill ok' }, 'Bật') : el('span', { class: 'pill bad' }, 'Tắt')),
-      el('td', {}, hasPerm('offices') ? el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
-        btnSm('👥 Nhân viên', () => officeEmpModal(o)),
-        btnSm('Sửa', () => officeModal(o)),
-        (() => { const d = btnSm('🗑 Xoá', () => delOffice(o), 'ghost'); d.style.color = '#c0392b'; return d; })(),
-      ) : ''),
+      el('td', {}, o.active ? el('span', { class: 'pill ok' }, 'Bật') : el('span', { class: 'pill bad' }, 'Đã tắt')),
+      el('td', {}, acts),
     ));
   }
   tbl.append(tb);
   if (addBtn) addBtn.onclick = () => officeModal(null);
-  setMain(head('Chi nhánh / Vị trí', addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+  const headArgs = ['Chi nhánh / Vị trí', addBtn, toggleBtn].filter(Boolean);
+  setMain(head(...headArgs), el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 // Xoá chi nhánh: chưa dùng → xoá hẳn; còn NV/lịch sử → tắt (ẩn khỏi danh sách, giữ dữ liệu)
 async function delOffice(o) {
   if (!confirm(`Xoá chi nhánh "${o.name}"?`)) return;
   try {
     const r = await api('/admin/offices/' + o.id, { method: 'DELETE' });
-    toast(r.hard ? 'Đã xoá chi nhánh' : `Chi nhánh ${r.reason} nên đã TẮT (ẩn khỏi danh sách, giữ lịch sử)`, 'ok');
+    toast(r.hard ? 'Đã xoá chi nhánh' : `Chi nhánh ${r.reason} nên đã TẮT. Bấm "Hiện chi nhánh đã tắt" để xoá hẳn.`, 'ok');
+    pageOffices();
+  } catch (e) { toast(e.message, 'err'); }
+}
+// Xoá HẲN chi nhánh đã tắt: gỡ mọi gán NV + bỏ liên kết lịch sử chấm rồi xoá khỏi CSDL
+async function delOfficeForce(o) {
+  if (!confirm(`XOÁ HẲN chi nhánh "${o.name}" khỏi hệ thống?\n\nSẽ gỡ chi nhánh này khỏi mọi nhân viên và bỏ liên kết ở lịch sử chấm công cũ (giữ giờ chấm, chỉ mất tên định vị). Không khôi phục được.`)) return;
+  try {
+    await api('/admin/offices/' + o.id + '?force=1', { method: 'DELETE' });
+    toast('Đã xoá hẳn chi nhánh', 'ok');
+    pageOffices();
+  } catch (e) { toast(e.message, 'err'); }
+}
+// Mở lại chi nhánh đã tắt
+async function reopenOffice(o) {
+  try {
+    await api('/admin/offices/' + o.id, { method: 'PUT', body: { name: o.name, address: o.address, lat: o.lat, lng: o.lng, radius_m: o.radius_m, active: 1 } });
+    toast('Đã mở lại chi nhánh', 'ok');
     pageOffices();
   } catch (e) { toast(e.message, 'err'); }
 }
