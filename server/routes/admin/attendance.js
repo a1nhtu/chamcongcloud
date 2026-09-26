@@ -132,7 +132,7 @@ export function registerAttendanceRoutes(r, { need }) {
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
         punches: punchMap.get(key) || [], late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
-        cong: Math.round((a.work_unit || 0) * 100) / 100, leave: lv ? lv.sym : '',
+        cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, leave: lv ? lv.sym : '',
         status: a.check_out_at ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
         att_id: a.id,
       });
@@ -141,7 +141,7 @@ export function registerAttendanceRoutes(r, { need }) {
       if (seen.has(key)) continue;
       const [eid, d] = key.split('|'); const e = empById.get(+eid); if (!e) continue;
       rows.push({ date: d, wd: WDVN[vnWd(d)], employee_id: +eid, code: e.code, name: e.full_name, dept: e.department || '',
-        shift: '', in: '', out: '', punches: [], late: 0, early: 0, ot: 0, cong: 0, leave: lv.sym, status: lv.type, att_id: null });
+        shift: '', in: '', out: '', punches: [], late: 0, early: 0, ot: 0, cong: 0, mins: 0, leave: lv.sym, status: lv.type, att_id: null });
     }
     rows.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return res.json({ mode, rows });

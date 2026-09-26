@@ -142,8 +142,17 @@ export function registerOrgRoutes(r, { need }) {
     res.json({ ok: true });
   });
   r.delete('/offices/:id', need('offices'), (req, res) => {
-    db.prepare('UPDATE offices SET active = 0 WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
+    const id = req.params.id;
+    // Còn NV đang gán / còn lịch sử chấm công → chỉ TẮT (giữ dữ liệu); chưa dùng → XÓA HẲN
+    const empCnt = db.prepare('SELECT COUNT(*) c FROM employees WHERE office_id=?').get(id).c
+      + db.prepare('SELECT COUNT(*) c FROM employee_offices WHERE office_id=?').get(id).c;
+    const attCnt = db.prepare('SELECT COUNT(*) c FROM attendance WHERE check_in_office_id=?').get(id).c;
+    if (empCnt === 0 && attCnt === 0) {
+      db.prepare('DELETE FROM offices WHERE id=?').run(id);
+      return res.json({ ok: true, hard: true });
+    }
+    db.prepare('UPDATE offices SET active = 0 WHERE id = ?').run(id);
+    res.json({ ok: true, hard: false, reason: empCnt ? 'còn nhân viên được gán' : 'còn lịch sử chấm công' });
   });
 
   // Nhân viên được phép chấm ở 1 định vị (quản lý từ phía định vị cho nhanh)

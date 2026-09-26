@@ -426,13 +426,19 @@ function buildReport(type, from, to, filter) {
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'first', label: 'Vào đầu', w: 9 }, { key: 'last', label: 'Ra cuối', w: 9 },
-        { key: 'gio', label: 'Số giờ', w: 8 },
+        { key: 'punches', label: 'Số lần chấm', w: 11 }, { key: 'phut', label: 'Số phút', w: 9 }, { key: 'gio', label: 'Số giờ', w: 8 },
       ];
+      // Số lần chấm: ưu tiên đếm từ máy (device_punches); NV chấm điện thoại thì đếm vào/ra
+      const pcMap = new Map();
+      for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM device_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
+        pcMap.set(p.employee_id + '|' + p.work_date, p.c);
       const rows = sortedResults().filter((c) => c.check_in_at).map((c) => {
-        const gio = c.check_out_at ? round2((new Date(c.check_out_at) - new Date(c.check_in_at)) / 3600000) : 0;
+        const mins = c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
+        const punches = pcMap.get(c.employee_id + '|' + c.work_date) || ((c.check_in_at ? 1 : 0) + (c.check_out_at ? 1 : 0));
         return {
           date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
-          first: isoToVnHM(c.check_in_at), last: isoToVnHM(c.check_out_at), gio,
+          first: isoToVnHM(c.check_in_at), last: isoToVnHM(c.check_out_at),
+          punches, phut: mins, gio: round2(mins / 60),
         };
       });
       return { title: `Giờ vào đầu & ra cuối ${PERIOD}`, columns, rows };

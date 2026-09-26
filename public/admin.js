@@ -848,7 +848,7 @@ async function pageOffices() {
   const tbl = el('table', { class: 'data' });
   tbl.innerHTML = `<thead><tr><th>Tên</th><th>Địa chỉ</th><th>Toạ độ</th><th>Bán kính</th><th>Bản đồ</th><th>TT</th><th></th></tr></thead>`;
   const tb = el('tbody');
-  for (const o of rows) {
+  for (const o of rows.filter(x => x.active)) {   // ẩn chi nhánh đã tắt (đã "xoá")
     tb.append(el('tr', {},
       el('td', {}, el('b', {}, o.name)),
       el('td', {}, o.address || '—'),
@@ -856,12 +856,25 @@ async function pageOffices() {
       el('td', {}, o.radius_m + ' m'),
       el('td', {}, el('a', { href: `https://www.google.com/maps?q=${o.lat},${o.lng}`, target: '_blank' }, 'Xem')),
       el('td', {}, o.active ? el('span', { class: 'pill ok' }, 'Bật') : el('span', { class: 'pill bad' }, 'Tắt')),
-      el('td', {}, hasPerm('offices') ? el('div', { style: 'display:flex;gap:6px' }, btnSm('👥 Nhân viên', () => officeEmpModal(o)), btnSm('Sửa', () => officeModal(o))) : ''),
+      el('td', {}, hasPerm('offices') ? el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
+        btnSm('👥 Nhân viên', () => officeEmpModal(o)),
+        btnSm('Sửa', () => officeModal(o)),
+        (() => { const d = btnSm('🗑 Xoá', () => delOffice(o), 'ghost'); d.style.color = '#c0392b'; return d; })(),
+      ) : ''),
     ));
   }
   tbl.append(tb);
   if (addBtn) addBtn.onclick = () => officeModal(null);
   setMain(head('Chi nhánh / Vị trí', addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+// Xoá chi nhánh: chưa dùng → xoá hẳn; còn NV/lịch sử → tắt (ẩn khỏi danh sách, giữ dữ liệu)
+async function delOffice(o) {
+  if (!confirm(`Xoá chi nhánh "${o.name}"?`)) return;
+  try {
+    const r = await api('/admin/offices/' + o.id, { method: 'DELETE' });
+    toast(r.hard ? 'Đã xoá chi nhánh' : `Chi nhánh ${r.reason} nên đã TẮT (ẩn khỏi danh sách, giữ lịch sử)`, 'ok');
+    pageOffices();
+  } catch (e) { toast(e.message, 'err'); }
 }
 
 // Chọn nhân viên được phép chấm ở 1 định vị (quản lý từ phía định vị)
@@ -1785,7 +1798,10 @@ async function pageEditAtt() {
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const rows = d.rows || [];
     const showNV = empPick.size !== 1;   // hiện cột NV trừ khi chọn đúng 1 người
-    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', 'Các lần chấm', 'Trễ(p)', 'Sớm(p)', 'OT(p)', 'Công', 'Nghỉ', 'Trạng thái', ''];
+    const hrly = hourlyMode();
+    // Chế độ tính theo GIỜ: bỏ Trễ/Sớm/OT/Công, hiện Tổng giờ + Tổng phút
+    const metricHeads = hrly ? ['Tổng giờ', 'Tổng phút'] : ['Trễ(p)', 'Sớm(p)', 'OT(p)', 'Công'];
+    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', 'Các lần chấm', ...metricHeads, 'Nghỉ', 'Trạng thái', ''];
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tb = el('tbody');
@@ -1799,10 +1815,15 @@ async function pageEditAtt() {
         el('td', {}, r.in || '—'),
         el('td', {}, r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')),
         el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : '—'),
-        el('td', {}, r.late > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.late)) : '—'),
-        el('td', {}, r.early > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.early)) : '—'),
-        el('td', {}, r.ot > 0 ? el('span', { style: 'color:#0a7;font-weight:600' }, String(r.ot)) : '—'),
-        el('td', { style: 'text-align:center;font-weight:600' }, String(r.cong ?? 0)),
+        ...(hrly ? [
+          el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
+          el('td', { style: 'text-align:center' }, r.mins ? (r.mins + ' phút') : '—'),
+        ] : [
+          el('td', {}, r.late > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.late)) : '—'),
+          el('td', {}, r.early > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.early)) : '—'),
+          el('td', {}, r.ot > 0 ? el('span', { style: 'color:#0a7;font-weight:600' }, String(r.ot)) : '—'),
+          el('td', { style: 'text-align:center;font-weight:600' }, String(r.cong ?? 0)),
+        ]),
         el('td', { style: 'text-align:center' }, r.leave ? el('span', { class: 'pill warn' }, r.leave) : '—'),
         el('td', {}, r.status || '—'),
         el('td', {}, r.att_id ? btnSm('Sửa', () => openEdit(r)) : ''),
