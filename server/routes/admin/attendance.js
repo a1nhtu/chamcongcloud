@@ -143,6 +143,21 @@ export function registerAttendanceRoutes(r, { need }) {
       rows.push({ date: d, wd: WDVN[vnWd(d)], employee_id: +eid, code: e.code, name: e.full_name, dept: e.department || '',
         shift: '', in: '', out: '', punches: [], late: 0, early: 0, ot: 0, cong: 0, mins: 0, leave: lv.sym, status: lv.type, att_id: null });
     }
+    // Cả công ty (kể cả chưa chấm): điền dòng trống cho ngày LÀM VIỆC không có bản ghi/nghỉ
+    if (req.query.all === '1' || req.query.all === 'true') {
+      const wkSet = new Set(getSetting('weekend_days', '7').split(',').map((s) => s.trim()));
+      const days = []; for (let d = from; d <= to; d = addDay(d)) days.push(d);
+      for (const e of emps) {
+        for (const dd of days) {
+          const key = e.id + '|' + dd;
+          if (seen.has(key)) continue;
+          if (wkSet.has(String(vnWd(dd)))) continue;   // bỏ ngày cuối tuần trống cho gọn
+          seen.add(key);
+          rows.push({ date: dd, wd: WDVN[vnWd(dd)], employee_id: e.id, code: e.code, name: e.full_name, dept: e.department || '',
+            shift: '', in: '', out: '', punches: [], late: 0, early: 0, ot: 0, cong: 0, mins: 0, leave: '', status: 'Chưa chấm', att_id: null });
+        }
+      }
+    }
     rows.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return res.json({ mode, rows });
   });

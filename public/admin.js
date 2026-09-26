@@ -1779,12 +1779,17 @@ async function pageEditAtt() {
   const addBtn = el('button', { class: 'btn sm' }, '+ Thêm giờ');
   const recalcBtn = el('button', { class: 'btn ghost sm' }, '↻ Tính lại');
   const roundBtn = el('button', { class: 'btn ghost sm' }, '⚙ Làm tròn');
+  // Tích để hiện CẢ CÔNG TY (kể cả ngày chưa chấm) — chỉ áp cho tab Chi tiết
+  const allChkInput = el('input', { type: 'checkbox', style: 'width:auto' });
+  allChkInput.onchange = () => load();
+  const allChk = el('label', { style: 'display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer', title: 'Hiện tất cả nhân viên, kể cả ngày làm việc chưa chấm công' }, allChkInput, 'Cả công ty (kể cả chưa chấm)');
   const wrap = el('div');
 
   const scope = () => {
     let p = `from=${fromI.value}&to=${toI.value}`;
     if (empPick.size) p += '&ids=' + [...empPick].join(',');
     else if (deptPick.size) p += '&depts=' + encodeURIComponent([...deptPick].join(','));
+    if (allChkInput.checked) p += '&all=1';
     return p;
   };
   const mkIso = (date, hm) => hm ? new Date(`${date}T${hm}:00+07:00`).toISOString() : null;
@@ -1891,7 +1896,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
-    addBtn, recalcBtn, roundBtn);
+    allChk, addBtn, recalcBtn, roundBtn);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }
@@ -1974,6 +1979,33 @@ async function pageDevReq() {
 }
 
 /* ---------- NHẬT KÝ THAO TÁC ---------- */
+// Đổi JSON chi tiết nhật ký → chữ dễ đọc (tiếng Việt), thay vì đổ code thô
+const LOG_KEY_VI = { name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', lng: 'Kinh độ', radius_m: 'Bán kính(m)',
+  code: 'Mã', full_name: 'Họ tên', role: 'Vai trò', username: 'Tài khoản', permissions: 'Quyền',
+  department: 'Bộ phận', position: 'Chức danh', phone: 'SĐT', device_pin: 'Số ID máy',
+  employee_ids: 'NV (ID)', active: 'Kích hoạt', shift_id: 'Ca', work_schedule_id: 'Lịch trình',
+  basic_salary: 'Lương cơ bản', allowance: 'Phụ cấp', name_new: 'Tên mới', parent_id: 'Thuộc bộ phận' };
+const LOG_ROLE_VI = { admin: 'Admin', manager: 'Quản lý', employee: 'Nhân viên', master: 'Tài khoản tổng' };
+function fmtLogDetail(raw) {
+  if (raw == null || raw === '' || raw === '{}') return '(không có chi tiết)';
+  let o; try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return String(raw); }
+  const flat = {};
+  const take = (obj) => { for (const [k, v] of Object.entries(obj || {})) { if (k === 'data' && v && typeof v === 'object') take(v); else flat[k] = v; } };
+  take(o);
+  const parts = [];
+  for (const [k, v] of Object.entries(flat)) {
+    if (k === 'id' || v == null || v === '') continue;
+    let val = v;
+    if (k === 'role') val = LOG_ROLE_VI[v] || v;
+    else if (k === 'password') val = '••••';
+    else if (k === 'permissions') { try { const a = Array.isArray(v) ? v : JSON.parse(v); val = a.length ? a.length + ' quyền' : 'không quyền'; } catch { val = String(v); } }
+    else if (Array.isArray(v)) val = v.join(', ');
+    else if (typeof v === 'object') val = JSON.stringify(v);
+    parts.push(`${LOG_KEY_VI[k] || k}: ${val}`);
+  }
+  return parts.length ? parts.join(' · ') : '(không có chi tiết)';
+}
+
 async function pageLogs() {
   let tab = 'admin';                 // 'admin' | 'device'
   const LIMIT = 200;
@@ -2050,7 +2082,7 @@ async function pageLogs() {
       el('td', {}, el('b', {}, x.user_name || x.username || '—'),
         el('div', { style: 'color:#999;font-size:11px' }, (x.username || '') + (x.role ? ' · ' + (roleVi[x.role] || x.role) : ''))),
       el('td', {}, el('span', { class: 'pill' }, x.action || '—')),
-      el('td', {}, el('div', { style: 'font-size:12px;color:var(--muted);max-width:360px;word-break:break-word', title: x.detail || '' }, x.detail || '')),
+      el('td', {}, el('div', { style: 'font-size:12px;color:var(--muted);max-width:360px;word-break:break-word', title: x.detail || '' }, fmtLogDetail(x.detail))),
       el('td', {}, el('span', { style: 'font-size:11px;color:#999' }, x.ip || '')),
     ));
     tbl.append(tb);

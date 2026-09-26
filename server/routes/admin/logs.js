@@ -5,6 +5,33 @@ import { oplogLabel } from '../../device-sync.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { LOG_FILE } from '../../logger.js';
 
+// Đổi JSON chi tiết nhật ký → chữ dễ đọc (dùng cho xuất Excel)
+const LOG_KEY_VI = { name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', lng: 'Kinh độ', radius_m: 'Bán kính(m)',
+  code: 'Mã', full_name: 'Họ tên', role: 'Vai trò', username: 'Tài khoản', permissions: 'Quyền',
+  department: 'Bộ phận', position: 'Chức danh', phone: 'SĐT', device_pin: 'Số ID máy',
+  employee_ids: 'NV (ID)', active: 'Kích hoạt', shift_id: 'Ca', work_schedule_id: 'Lịch trình',
+  basic_salary: 'Lương cơ bản', allowance: 'Phụ cấp', parent_id: 'Thuộc bộ phận' };
+const LOG_ROLE_VI = { admin: 'Admin', manager: 'Quản lý', employee: 'Nhân viên', master: 'Tài khoản tổng' };
+function fmtLogDetail(raw) {
+  if (raw == null || raw === '' || raw === '{}') return '(không có chi tiết)';
+  let o; try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return String(raw); }
+  const flat = {};
+  const take = (obj) => { for (const [k, v] of Object.entries(obj || {})) { if (k === 'data' && v && typeof v === 'object') take(v); else flat[k] = v; } };
+  take(o);
+  const parts = [];
+  for (const [k, v] of Object.entries(flat)) {
+    if (k === 'id' || v == null || v === '') continue;
+    let val = v;
+    if (k === 'role') val = LOG_ROLE_VI[v] || v;
+    else if (k === 'password') val = '••••';
+    else if (k === 'permissions') { try { const a = Array.isArray(v) ? v : JSON.parse(v); val = a.length ? a.length + ' quyền' : 'không quyền'; } catch { val = String(v); } }
+    else if (Array.isArray(v)) val = v.join(', ');
+    else if (typeof v === 'object') val = JSON.stringify(v);
+    parts.push(`${LOG_KEY_VI[k] || k}: ${val}`);
+  }
+  return parts.length ? parts.join(' · ') : '(không có chi tiết)';
+}
+
 export function registerLogRoutes(r, { need, adminOnly }) {
   // --- File log máy chủ (server.log) để gửi cho Digiplus khi cần tra lỗi — chỉ admin ---
   r.get('/logs/server/download', adminOnly, (req, res) => {
