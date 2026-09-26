@@ -187,21 +187,39 @@ function makeBigBtn(kind, ic, t, s, onClick) {
   return b;
 }
 
-// Đổi toạ độ GPS → địa chỉ (OpenStreetMap Nominatim). Có timeout + dự phòng (trả '' nếu lỗi).
+// Đổi toạ độ GPS → địa chỉ. Thử 2 nguồn: Nominatim (chi tiết đường/số nhà) → nếu lỗi/rỗng
+// thì BigDataCloud (miễn phí, không key, ổn định cho điện thoại). Trả '' nếu cả hai fail.
 async function reverseGeocode(lat, lng) {
+  // 1) Nominatim (OpenStreetMap) — chi tiết nhất nhưng hay bị giới hạn/chặn
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), 4500);
     const r = await fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&accept-language=vi&lat=${lat}&lon=${lng}`, { signal: ctrl.signal });
     clearTimeout(t);
-    const d = await r.json();
-    const a = d && d.address ? d.address : null;
-    if (a) {
-      const parts = [a.house_number, a.road, a.quarter || a.suburb || a.hamlet || a.village, a.city_district || a.district || a.county, a.city || a.town || a.state].filter(Boolean);
+    if (r.ok) {
+      const d = await r.json();
+      const a = d && d.address ? d.address : null;
+      if (a) {
+        const parts = [a.house_number, a.road, a.quarter || a.suburb || a.hamlet || a.village, a.city_district || a.district || a.county, a.city || a.town || a.state].filter(Boolean);
+        const s = [...new Set(parts)].slice(0, 4).join(', ');
+        if (s) return s;
+      }
+      if (d && d.display_name) return d.display_name.split(',').slice(0, 4).join(',').trim();
+    }
+  } catch {}
+  // 2) Dự phòng: BigDataCloud reverse-geocode-client (miễn phí, không key, CORS ok)
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4500);
+    const r = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lng}&localityLanguage=vi`, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (r.ok) {
+      const d = await r.json();
+      const road = (d.localityInfo && d.localityInfo.informative || []).map(x => x.name).find(n => /đường|phố|street|road/i.test(n || '')) || '';
+      const parts = [road, d.locality, d.city, d.principalSubdivision].filter(Boolean);
       const s = [...new Set(parts)].slice(0, 4).join(', ');
       if (s) return s;
     }
-    if (d && d.display_name) return d.display_name.split(',').slice(0, 4).join(',').trim();
   } catch {}
   return '';
 }
