@@ -160,8 +160,41 @@ const DS_LABEL = {
 };
 
 /* ================= Report builders ================= */
+// Báo cáo GIỜ SỬA/THÊM BẰNG TAY — lấy từ nhật ký thao tác (có vết ai sửa, khi nào)
+function buildManualTime(from, to) {
+  const columns = [
+    { key: 'at', label: 'Thời gian sửa', w: 18 }, { key: 'user', label: 'Người thực hiện', w: 20 },
+    { key: 'role', label: 'Vai trò', w: 13 }, { key: 'action', label: 'Thao tác', w: 16 },
+    { key: 'emp', label: 'Nhân viên', w: 22 }, { key: 'day', label: 'Ngày công', w: 11 },
+    { key: 'gio', label: 'Giờ vào – ra', w: 14 }, { key: 'note', label: 'Ghi chú', w: 18 },
+  ];
+  const acts = ['Thêm giờ chấm (tay)', 'Sửa giờ chấm', 'Xóa giờ chấm'];
+  const logs = db.prepare(`SELECT datetime(at,'+7 hours') at, user_name, username, role, action, detail
+    FROM audit_logs WHERE action IN (${acts.map(() => '?').join(',')})
+      AND date(at,'+7 hours') >= ? AND date(at,'+7 hours') <= ? ORDER BY at DESC`).all(...acts, from, to);
+  const empName = new Map(db.prepare('SELECT id, code, full_name FROM employees').all().map((e) => [e.id, `${e.full_name} (${e.code})`]));
+  const roleVi = { admin: 'Quản trị viên', manager: 'Quản lý', master: 'Tài khoản tổng' };
+  const rows = logs.map((l) => {
+    let emp = '', day = '', gio = '', note = '';
+    try {
+      const o = JSON.parse(l.detail || '{}'); const d = o.data || o;
+      let eid = d.employee_id;
+      if (!eid && o.id) { const a = db.prepare('SELECT employee_id, work_date FROM attendance WHERE id=?').get(o.id); if (a) { eid = a.employee_id; day = fmtDMY(a.work_date); } }
+      const dw = d.work_date || d.date;
+      if (dw) day = String(dw).length === 10 ? fmtDMY(dw) : String(dw);
+      emp = eid ? (empName.get(+eid) || ('NV#' + eid)) : '';
+      const ci = d.check_in || d.check_in_at || '', co = d.check_out || d.check_out_at || '';
+      gio = [ci, co].filter(Boolean).join(' – ');
+      note = d.note || '';
+    } catch {}
+    return { at: l.at, user: l.user_name || l.username || '—', role: roleVi[l.role] || l.role || '', action: l.action, emp, day, gio, note };
+  });
+  return { title: `Giờ sửa/thêm bằng tay ${periodLabel(from, to)}`, columns, rows };
+}
+
 // Trả về { title, columns:[{key,label,weekend?,w?}], rows:[obj] }
 function buildReport(type, from, to, filter) {
+  if (type === 'manualtime') return buildManualTime(from, to);
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);

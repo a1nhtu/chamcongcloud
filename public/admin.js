@@ -1812,6 +1812,10 @@ async function pageEditAtt() {
   const allChkInput = el('input', { type: 'checkbox', style: 'width:auto' });
   allChkInput.onchange = () => load();
   const allChk = el('label', { style: 'display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer', title: 'Hiện tất cả nhân viên, kể cả ngày làm việc chưa chấm công' }, allChkInput, 'Cả công ty (kể cả chưa chấm)');
+  // Tích để hiện dấu (*) ở dòng giờ sửa/thêm bằng tay (mặc định BẬT)
+  const markChkInput = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
+  markChkInput.onchange = () => load();
+  const markChk = el('label', { style: 'display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer', title: 'Đánh dấu (*) các dòng giờ được sửa/thêm bằng tay' }, markChkInput, 'Dấu (*) sửa tay');
   const wrap = el('div');
 
   const scope = () => {
@@ -1846,7 +1850,7 @@ async function pageEditAtt() {
         el('td', {}, r.wd),
         ...(showNV ? [el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || '—')] : []),
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
-        el('td', {}, r.in || '—'),
+        el('td', {}, r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : ''),
         el('td', {}, r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')),
         el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : '—'),
         ...(hrly ? [
@@ -1925,7 +1929,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
-    allChk, addBtn, recalcBtn, roundBtn);
+    allChk, markChk, addBtn, recalcBtn, roundBtn);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }
@@ -2491,6 +2495,9 @@ const REPORT_GROUPS = [
     ['absence', '🚫', 'Vắng mặt / nghỉ phép', 'Số ngày làm, vắng, nghỉ phép, nghỉ lễ, thiếu ra'],
     ['leave', '🌴', 'Nghỉ phép / đơn từ', 'Tổng nghỉ phép và chi tiết theo loại'],
     ['payroll', '💰', 'Bảng lương', 'Bảng lương tháng theo kỳ lương đã cấu hình'],
+  ]],
+  ['Kiểm soát', [
+    ['manualtime', '✍️', 'Giờ sửa/thêm bằng tay', 'Vết ai (quản trị/quản lý) sửa/thêm giờ, ngày giờ nào — theo thời gian sửa'],
   ]],
 ];
 
