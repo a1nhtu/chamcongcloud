@@ -20,6 +20,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
       self_shift_enabled: getSetting('self_shift_enabled', '0'), // NV tự chọn ca
       self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
+      punch_dedup_min: getSetting('punch_dedup_min', '0'),       // bỏ qua lần chấm trùng trong N phút
       setup_done: getSetting('setup_done', '0'),
       company_logo: getSetting('company_logo', ''),
       app_version: currentVersion(),
