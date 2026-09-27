@@ -668,7 +668,8 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
 
 /* ================= Routes ================= */
 r.get('/dashboard', (req, res) => {
-  const today = vnDateStr();
+  const q = String(req.query.date || '').slice(0, 10);
+  const today = /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : vnDateStr();  // xem lại ngày bất kỳ
   const totalEmp = db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1 AND role != 'admin'").get().c;
   const checkedIn = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_at IS NOT NULL').get(today).c;
   const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0').get(today).c;

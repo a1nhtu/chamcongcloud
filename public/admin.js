@@ -220,30 +220,34 @@ function time24(id, value = '') {
 
 /* ---------- 1) TỔNG QUAN ---------- */
 let dashTimer = null;
+let dashDate = '';   // '' = hôm nay; đặt ngày để xem lại tổng quan ngày trước (todayVN() có sẵn bên dưới)
 async function pageDashboard() {
   if (dashTimer) { clearInterval(dashTimer); dashTimer = null; }
   await renderDashboard(true);
   dashTimer = setInterval(() => {
     const active = document.querySelector('#nav button.active')?.dataset.k;
-    if (active === 'dashboard' && !$('#modal-bg').classList.contains('show')) renderDashboard(false);
-    else { clearInterval(dashTimer); dashTimer = null; }
+    // Chỉ tự cập nhật khi đang xem HÔM NAY (xem ngày cũ thì không refresh cho khỏi nhảy)
+    if (active === 'dashboard' && !$('#modal-bg').classList.contains('show') && (!dashDate || dashDate === todayVN())) renderDashboard(false);
+    else if (active !== 'dashboard') { clearInterval(dashTimer); dashTimer = null; }
   }, 20000);
 }
 
 async function renderDashboard(showLoading) {
   const refreshBtn = el('button', { class: 'btn ghost sm' }, '↻ Làm mới');
   refreshBtn.onclick = () => renderDashboard(true);
-  const autotag = el('span', { style: 'font-size:12px;color:var(--muted)' }, 'Tự cập nhật mỗi 20 giây');
-  if (showLoading) setMain(head('Tổng quan', autotag, refreshBtn), loading());
+  const dateI = el('input', { type: 'date', value: dashDate || todayVN(), title: 'Chọn ngày để xem lại tổng quan', style: 'width:auto' });
+  dateI.onchange = () => { dashDate = dateI.value; renderDashboard(true); };
+  const autotag = el('span', { style: 'font-size:12px;color:var(--muted)' }, dashDate && dashDate !== todayVN() ? 'Đang xem ngày cũ' : 'Tự cập nhật mỗi 20 giây');
+  if (showLoading) setMain(head('Tổng quan', dateI, autotag, refreshBtn), loading());
   try {
-    const d = await api('/reports/dashboard');
-    const rep = await api('/reports/attendance?month=' + todayMonth());
+    const d = await api('/reports/dashboard?date=' + (dashDate || ''));
+    const rep = await api('/reports/attendance?month=' + d.today.slice(0, 7));
     const today = rep.rows.filter(r => r.work_date === d.today);
     const hourly = hourlyMode();
     const person = (r, info) => ({ name: r.full_name, code: r.code, dept: r.department, info });
     const cards = el('div', { class: 'cards' },
       mcard('brand', d.totalEmp, 'Nhân viên', () => go('employees')),
-      mcard('green', d.checkedIn, 'Đã chấm vào', () => dashListModal('Đã chấm vào hôm nay',
+      mcard('green', d.checkedIn, 'Đã chấm vào', () => dashListModal('Đã chấm vào',
         today.filter(r => r.check_in_hm).map(r => person(r, r.check_in_hm)))),
       mcard('warn', d.notYet, 'Chưa chấm', async () => {
         let emps = [];
@@ -251,9 +255,9 @@ async function renderDashboard(showLoading) {
         const inCodes = new Set(today.filter(r => r.check_in_hm).map(r => r.code));
         const people = emps.filter(e => e.role !== 'admin' && e.active !== 0 && !inCodes.has(e.code))
           .map(e => ({ name: e.full_name, code: e.code, dept: e.department, info: 'Chưa chấm' }));
-        dashListModal('Chưa chấm hôm nay', people);
+        dashListModal('Chưa chấm', people);
       }),
-      ...(hourly ? [] : [mcard('warn', d.late, 'Đi muộn', () => dashListModal('Đi muộn hôm nay',
+      ...(hourly ? [] : [mcard('warn', d.late, 'Đi muộn', () => dashListModal('Đi muộn',
         today.filter(r => r.late_min > 0).map(r => person(r, r.late_min + ' phút'))))]),
       mcard('red', d.outside, 'Chấm ngoài VP', () => dashListModal('Chấm ngoài văn phòng',
         today.filter(r => r.check_in_outside).map(r => person(r, 'Ngoài ' + humanDistance(r.check_in_distance_m))))),
@@ -262,11 +266,11 @@ async function renderDashboard(showLoading) {
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vào</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vị trí</th><th>Ra</th><th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
     const tb = el('tbody');
-    if (!today.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 8 : 9 }, el('div', { class: 'empty' }, 'Chưa có ai chấm công hôm nay.'))));
+    if (!today.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 8 : 9 }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
     for (const r of today) tb.append(rowToday(r));
     tbl.append(tb);
     const clock = el('span', { style: 'font-size:12px;color:var(--muted)' }, 'Cập nhật lúc ' + new Date().toLocaleTimeString('vi-VN'));
-    setMain(head('Tổng quan · ' + d.today, clock, refreshBtn), cards, el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Tổng quan · ' + d.today, dateI, clock, refreshBtn), cards, el('div', { class: 'panel tbl-scroll' }, tbl));
   } catch (e) { if (showLoading) setMain(head('Tổng quan'), el('div', { class: 'empty' }, e.message)); }
 }
 function mcard(cls, n, l, onClick) {
