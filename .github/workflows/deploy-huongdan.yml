@@ -31,6 +31,8 @@ jobs:
           cp public/hd-worker.js _site/_worker.js
           # Các trang bán khách: bảng giá, giới thiệu, cẩm nang đại lý, hướng dẫn...
           cp HuongDan/*.html _site/ 2>/dev/null || true
+          # Ảnh minh hoạ cho các trang hướng dẫn
+          cp -r HuongDan/img _site/img 2>/dev/null || true
 
       - name: Deploy lên Cloudflare Pages
         uses: cloudflare/wrangler-action@v3

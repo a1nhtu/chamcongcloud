@@ -56,6 +56,10 @@ ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:3
 ol.steps li b{color:var(--ink)}
 ol.steps li span{color:var(--muted);display:block;font-size:14.5px;margin-top:2px}
 ul.plain{margin:14px 0 0;padding-left:20px}ul.plain li{margin:6px 0}
+figure.fig{margin:18px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow-sm);background:var(--surface)}
+figure.fig img{display:block;width:100%;height:auto}
+figure.fig figcaption{font-size:13px;color:var(--muted);padding:8px 13px;border-top:1px solid var(--line);background:var(--surface-2)}
+figure.fig.phone{max-width:300px;margin-left:auto;margin-right:auto;border-radius:20px}
 .note{display:flex;gap:11px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;padding:13px 16px;margin-top:16px;font-size:14.5px}
 .note.ok{border-left-color:var(--green)}.note.warn{border-left-color:var(--amber)}
 .note .ic{flex:0 0 auto;font-size:18px}
@@ -103,6 +107,8 @@ footer b{color:var(--ink)}
       <li><a href="#ca-lam">Khai báo ca làm</a></li>
       <li><a href="#phan-ca">Phân ca</a></li>
       <li><a href="#cham-cong">Nhân viên chấm công</a></li>
+      <li><a href="#cai-app">Cài app lên điện thoại</a></li>
+      <li><a href="#quyen">Bật lại quyền Camera / Vị trí</a></li>
       <li><a href="#sua-gio">Duyệt / sửa / xoá giờ</a></li>
       <li><a href="#tinh-cong">Tính công</a></li>
       <li><a href="#don-tu">Đơn từ / nghỉ phép</a></li>
@@ -122,6 +128,7 @@ footer b{color:var(--ink)}
       <li><b>Làm quen menu trái</b><span>Tổng quan · Nhân viên · Bộ phận · Ca làm · Phân ca · Tính công · Máy chấm công · Chi nhánh · Đơn từ · Lương · Báo cáo · Nhật ký · Cài đặt.</span></li>
     </ol>
     <div class="note"><span class="ic">🧭</span><div>Thứ tự khai báo nên theo: <b>Bộ phận/Chức danh → Ca làm → Nhân viên → Phân ca</b>, rồi mới chấm công &amp; xem báo cáo.</div></div>
+    <figure class="fig"><img src="img/tong-quan.jpg" alt="Màn hình Tổng quan" loading="lazy"><figcaption>Màn hình Tổng quan: ai đi làm / đi muộn / vắng, kèm giờ và vị trí.</figcaption></figure>
   </section>
 
   <section id="bo-phan">
@@ -145,6 +152,7 @@ footer b{color:var(--ink)}
       <li><b>Nhập bằng Excel (hàng loạt)</b><span>Bấm <b>📄 Tải mẫu Excel</b> → điền danh sách → <b>⬆ Nhập thêm mới</b> hoặc <b>🔄 Cập nhật từ Excel</b>. Bỏ trống Mật khẩu → mặc định <span class="kbd">123456</span>; bỏ trống Tài khoản → lấy theo Mã NV.</span></li>
     </ol>
     <div class="note"><span class="ic">🔑</span><div>Nhân viên đăng nhập <b>app điện thoại</b> bằng Tài khoản/Mật khẩu này để chấm công.</div></div>
+    <figure class="fig"><img src="img/nhan-vien.jpg" alt="Danh sách nhân viên" loading="lazy"><figcaption>Danh sách nhân viên: thêm/sửa, phân quyền, tải mẫu &amp; nhập từ Excel.</figcaption></figure>
   </section>
 
   <section id="ca-lam">
@@ -170,6 +178,7 @@ footer b{color:var(--ink)}
       <li><b>Phân ca bằng Excel (cả tháng)</b><span>Xuất Excel mẫu (lưới NV × ngày) → điền mã ca vào ô cần đổi (để trống = tự động) → nhập lên.</span></li>
     </ol>
     <div class="note ok"><span class="ic">🔁</span><div>Ô để trống = "tự động theo giờ chấm"; điền mã ca = gán cứng (được ưu tiên đè lên kết quả tự động).</div></div>
+    <figure class="fig"><img src="img/phan-ca.jpg" alt="Màn hình Phân ca" loading="lazy"><figcaption>Phân ca: chọn ca + khoảng ngày/thứ rồi "Áp dụng" cho cả nhóm.</figcaption></figure>
   </section>
 
   <section id="cham-cong">
@@ -185,6 +194,45 @@ footer b{color:var(--ink)}
     </ol>
     <p style="margin-top:16px"><b>Bằng máy chấm công:</b> nhân viên quẹt vân tay/khuôn mặt/thẻ trên máy — dữ liệu tự về phần mềm theo Số ID.</p>
     <div class="note"><span class="ic">📍</span><div>Có thể dùng <b>song song</b>: ở văn phòng quẹt máy, đi ngoài chấm điện thoại — tất cả gộp về một người.</div></div>
+    <figure class="fig phone"><img src="img/app-dien-thoai.jpg" alt="Màn hình chấm công trên điện thoại" loading="lazy"><figcaption>Màn chấm công trên điện thoại — nút "VÀO CA" chụp ảnh xác nhận.</figcaption></figure>
+  </section>
+
+  <section id="cai-app">
+    <div class="eyebrow"><span class="num">📱</span> Điện thoại</div>
+    <h2 class="sec">Cài app lên điện thoại &amp; đưa ra màn hình chính</h2>
+    <p class="lead">Không cần tải từ CH Play / App Store — mở link công ty cấp trên trình duyệt là chấm được. Muốn tiện như một app riêng thì "cài" ra màn hình chính:</p>
+    <p style="margin-top:16px;font-weight:700">📗 Android (Chrome)</p>
+    <ol class="steps">
+      <li><b>Mở link chấm công bằng Chrome</b><span>Đăng nhập tài khoản được cấp.</span></li>
+      <li><b>Bấm nút "📲 Cài app"</b><span>Nút hiện sẵn trong phần mềm — bấm là thêm ra màn hình chính (một chạm).</span></li>
+      <li><b>Hoặc dùng menu Chrome</b><span>Bấm dấu <b>⋮</b> (góc trên phải) → <b>Thêm vào Màn hình chính</b> → Thêm.</span></li>
+    </ol>
+    <p style="margin-top:18px;font-weight:700">📘 iPhone (Safari)</p>
+    <ol class="steps">
+      <li><b>Mở link bằng Safari</b><span>Phải là Safari (không phải Chrome trên iPhone).</span></li>
+      <li><b>Bấm nút Chia sẻ</b><span>Biểu tượng ô vuông có mũi tên hướng lên, ở thanh dưới.</span></li>
+      <li><b>Chọn "Thêm vào MH chính"</b><span>(Add to Home Screen) → Thêm. Biểu tượng xuất hiện như một ứng dụng.</span></li>
+    </ol>
+    <div class="note ok"><span class="ic">✅</span><div>Sau khi thêm, mở app từ màn hình chính là vào thẳng — đăng nhập một lần, dùng lâu dài.</div></div>
+  </section>
+
+  <section id="quyen">
+    <div class="eyebrow"><span class="num">🔓</span> Quyền truy cập</div>
+    <h2 class="sec">Bật lại quyền Camera / Vị trí nếu lỡ chặn</h2>
+    <p class="lead">App cần <b>Camera</b> (chụp ảnh chấm) và <b>Vị trí</b> (GPS). Nếu lỡ bấm "Không cho phép / Block", việc chấm công sẽ báo lỗi — bật lại như sau:</p>
+    <p style="margin-top:16px;font-weight:700">📗 Android (Chrome)</p>
+    <ol class="steps">
+      <li><b>Bấm ổ khoá 🔒 cạnh địa chỉ web</b><span>Trên trang chấm công → chọn <b>Quyền / Permissions</b>.</span></li>
+      <li><b>Bật Máy ảnh &amp; Vị trí</b><span>Gạt <b>Cho phép (Allow)</b> cho cả hai → tải lại trang.</span></li>
+      <li><b>Nếu không thấy mục đó</b><span>Cài đặt điện thoại → Ứng dụng → <b>Chrome</b> → Quyền → bật Máy ảnh + Vị trí. Đồng thời bật <b>Dịch vụ vị trí (GPS)</b> của máy.</span></li>
+    </ol>
+    <p style="margin-top:18px;font-weight:700">📘 iPhone (Safari)</p>
+    <ol class="steps">
+      <li><b>Camera</b><span>Cài đặt → <b>Safari</b> → Máy ảnh → chọn <b>Cho phép (Allow)</b>.</span></li>
+      <li><b>Vị trí</b><span>Cài đặt → Quyền riêng tư &amp; Bảo mật → <b>Dịch vụ định vị</b> → bật → kéo tới <b>Safari</b> → chọn "Khi dùng ứng dụng".</span></li>
+      <li><b>Tải lại trang</b><span>Mở lại trang chấm công; khi hỏi quyền bấm <b>Cho phép</b>.</span></li>
+    </ol>
+    <div class="note warn"><span class="ic">⚠️</span><div>Nhớ bật cả <b>GPS / Dịch vụ vị trí</b> của điện thoại (không chỉ quyền cho trình duyệt) thì mới lấy được vị trí.</div></div>
   </section>
 
   <section id="sua-gio">
@@ -210,6 +258,7 @@ footer b{color:var(--ink)}
       <li><b>Cấu hình làm tròn</b><span>Đặt số lẻ thập phân + kiểu làm tròn (lùi/tới/gần nhất) cho số công.</span></li>
     </ol>
     <div class="note"><span class="ic">🏢</span><div>Có tuỳ chọn hiển thị <b>cả công ty kể cả người chưa chấm</b> (để thấy ai vắng) — tích ô tương ứng.</div></div>
+    <figure class="fig"><img src="img/tinh-cong.jpg" alt="Màn hình Tính công" loading="lazy"><figcaption>Tính công: mỗi dòng 1 NV × 1 ngày; bấm "Sửa" để chỉnh/xoá giờ.</figcaption></figure>
   </section>
 
   <section id="don-tu">
@@ -238,6 +287,7 @@ footer b{color:var(--ink)}
       <tr><td><b>Bảng lương</b></td><td>Tính lương từ số công (xem mục dưới).</td></tr>
     </table>
     <div class="note ok"><span class="ic">📊</span><div>Muốn xuất cho <b>vài phòng ban / vài người</b> cụ thể: chọn nhiều phòng ban + nhiều NV trong bộ lọc rồi Xuất Excel.</div></div>
+    <figure class="fig"><img src="img/bao-cao.jpg" alt="Báo cáo chi tiết chấm công" loading="lazy"><figcaption>Ví dụ báo cáo Chi tiết chấm công — xem trước rồi bấm Xuất Excel.</figcaption></figure>
   </section>
 
   <section id="luong">
