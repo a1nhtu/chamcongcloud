@@ -39,3 +39,18 @@ data_video_demo/
 *.db
 *.db-shm
 *.db-wal
+
+# Script seed dev (chi chay cuc bo, khong can trong ban update)
+tools/seed-device-demo.mjs
+
+# File media / tai lieu LA - KHONG de lot vao repo (dat o folder NGOAI)
+# (repo chi chua code + HuongDan/*.html; file mau/video/nen de ngoai)
+*.mp4
+*.mov
+*.rar
+*.zip
+*.7z
+*.xlsx
+*.xls
+*.docx
+*.pptx
