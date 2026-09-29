@@ -3,6 +3,12 @@ import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
 import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
+import { verifyDeviceKey } from '../../license.js';
+
+// Máy đã có key hợp lệ (đúng serial) chưa?
+function deviceKeyOk(dev) {
+  return !!(dev && dev.dev_key && verifyDeviceKey(dev.dev_key, dev.serial).valid);
+}
 
 // IP LAN thật của máy chủ (để điền vào máy chấm công). Adapter ảo xếp cuối.
 function lanIPs() {
@@ -29,8 +35,10 @@ export function registerDeviceRoutes(r, { need }) {
       d.fp_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type=1').get(d.serial).c;
       d.face_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)').get(d.serial).c;
       d.card_count = db.prepare("SELECT COUNT(*) c FROM device_users_serial WHERE serial=? AND card<>''").get(d.serial).c;
+      d.key_ok = deviceKeyOk(d);          // đã có key hợp lệ chưa
+      delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
     }
-    res.json({ rows, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080) });
+    res.json({ rows, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080) });
   });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
   r.get('/server-ips', need('devices'), (req, res) => {
@@ -45,6 +53,12 @@ export function registerDeviceRoutes(r, { need }) {
     const b = req.body || {};
     const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    // Chặn DUYỆT máy (active 0→1) nếu bật "bắt buộc key" mà máy chưa có key hợp lệ.
+    // Máy ĐANG chạy (đã active) không bị ảnh hưởng — chỉ chặn lúc duyệt máy mới.
+    const willActivate = b.active != null && !!b.active && !d.active;
+    if (willActivate && getSetting('device_key_required', '0') === '1' && !deviceKeyOk(d)) {
+      return res.status(403).json({ error: 'Máy chưa có KEY bản quyền hợp lệ. Dán key Digiplus cấp cho serial ' + d.serial + ' rồi mới duyệt được.' });
+    }
     const newGroup = b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || '');
     db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=?, access_control=? WHERE id=?')
       .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active, newGroup,
@@ -62,6 +76,23 @@ export function registerDeviceRoutes(r, { need }) {
       } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
     }
     res.json({ ok: true, synced });
+  });
+  // Dán KEY bản quyền cho 1 máy (Digiplus cấp theo serial). Verify serial khớp mới lưu.
+  r.post('/devices/:id/key', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    const key = String((req.body && req.body.key) || '').trim();
+    const v = verifyDeviceKey(key, d.serial);
+    if (!v.valid) return res.status(400).json({ error: v.reason });
+    db.prepare('UPDATE push_devices SET dev_key=? WHERE id=?').run(key, d.id);
+    res.json({ ok: true, data: v.data });
+  });
+  // Gỡ key khỏi máy
+  r.delete('/devices/:id/key', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT id FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    db.prepare("UPDATE push_devices SET dev_key='' WHERE id=?").run(d.id);
+    res.json({ ok: true });
   });
   // Đọc lại thông tin từ máy: xóa số đếm hiện tại + yêu cầu máy đẩy lại thực tế (sửa số hiển thị sai)
   r.post('/devices/:id/relearn', need('devices'), (req, res) => {
@@ -90,10 +121,17 @@ export function registerDeviceRoutes(r, { need }) {
   r.get('/devices/:id/punches', need('devices'), (req, res) => {
     const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
-    const rows = db.prepare(`SELECT p.pin, p.punch_at, p.verify, p.employee_id, e.full_name
+    const rows = db.prepare(`SELECT p.id, p.pin, p.punch_at, p.verify, p.employee_id, e.full_name
       FROM device_punches p LEFT JOIN employees e ON e.id = p.employee_id
       WHERE p.serial=? ORDER BY p.punch_at DESC LIMIT 100`).all(d.serial);
     res.json({ rows });
+  });
+  // Xoá 1 LƯỢT QUẸT lẻ trên máy (quẹt nhầm / nghịch). Không đụng bản ghi công đã tính.
+  r.delete('/devices/:id/punch/:pid', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    const n = db.prepare('DELETE FROM device_punches WHERE id=? AND serial=?').run(req.params.pid, d.serial).changes;
+    res.json({ ok: true, deleted: n });
   });
   // Dựng lại chấm công từ toàn bộ punch (khi mới khớp thêm nhân viên với mã trên máy)
   r.post('/devices/rebuild', need('devices'), (req, res) => {

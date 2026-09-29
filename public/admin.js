@@ -1985,7 +1985,18 @@ function attEditModal(row, employeeId, reload) {
       toast('Đã lưu', 'ok'); closeModal(); reload();
     } catch (e) { toast(e.message, 'err'); }
   };
-  openModal(row ? 'Sửa giờ chấm' : 'Thêm giờ chấm', body, [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+  const footer = [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ')];
+  if (row) {
+    const del = el('button', { class: 'btn ghost', style: 'color:#c0392b' }, '🗑 Xoá giờ');
+    del.onclick = async () => {
+      if (!confirm('XOÁ hẳn giờ chấm ngày ' + (row.work_date || '') + ' của người này?\nDùng khi chấm nhầm / nghịch. Không hoàn tác.')) return;
+      try { await api('/admin/attendance/' + row.id, { method: 'DELETE' }); toast('Đã xoá giờ chấm', 'ok'); closeModal(); reload(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    footer.push(del);
+  }
+  footer.push(save);
+  openModal(row ? 'Sửa giờ chấm' : 'Thêm giờ chấm', body, footer);
 }
 
 /* ---------- DUYỆT ĐỔI THIẾT BỊ (chống chấm hộ) ---------- */
@@ -2191,10 +2202,11 @@ async function pageDevices() {
   // Bật/tắt dùng máy chấm công + tự tạo NV — CHỈ tài khoản tổng đổi được
   const enChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.enabled ? { checked: '' } : {}) });
   const autoChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.autocreate ? { checked: '' } : {}) });
+  const keyReqChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.key_required ? { checked: '' } : {}) });
   const saveEn = el('button', { class: 'btn sm' }, 'Lưu');
   saveEn.onclick = async () => {
     try {
-      await api('/admin/settings', { method: 'PUT', body: { device_enabled: enChk.checked, device_autocreate: autoChk.checked } });
+      await api('/admin/settings', { method: 'PUT', body: { device_enabled: enChk.checked, device_autocreate: autoChk.checked, device_key_required: keyReqChk.checked } });
       SETTINGS.device_enabled = enChk.checked ? '1' : '0';
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 600);
     } catch (e) { toast(e.message, 'err'); }
@@ -2208,10 +2220,14 @@ async function pageDevices() {
         el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, autoChk,
           el('div', {}, el('b', {}, 'Tự tạo nhân viên khi đăng ký vân tay trên máy'),
             el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: đăng ký vân tay/khuôn mặt cho Số ID mới trên máy → phần mềm tự tạo NV nháp (Số ID + tên máy gửi về), admin bổ sung sau. Tắt: chỉ ghi nhận, chờ admin gán tay.'))),
+        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, keyReqChk,
+          el('div', {}, el('b', {}, 'Bắt buộc KEY bản quyền theo máy'),
+            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: mỗi máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không bị ảnh hưởng. Tắt: máy nào cắm vào cũng duyệt được.'))),
         el('div', { style: 'margin-top:12px' }, saveEn))
     : el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
         el('div', {}, el('b', {}, 'Tính năng máy chấm công:'), stPill(d.enabled)),
         el('div', { style: 'margin-top:6px' }, el('b', {}, 'Tự tạo NV khi đăng ký vân tay:'), stPill(d.autocreate)),
+        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Bắt buộc key theo máy:'), stPill(d.key_required)),
         el('div', { class: 'map-hint', style: 'margin-top:8px' }, '🔒 Chỉ tài khoản tổng (Digiplus) mới bật/tắt được tính năng máy chấm công.'));
 
   // Hướng dẫn cấu hình máy + nút Refresh mạng (đổi mạng xong bấm để lấy IP mới)
@@ -2253,6 +2269,13 @@ async function pageDevices() {
   tbl.innerHTML = `<thead><tr><th>Serial</th><th>Tên máy</th><th>Trạng thái</th><th>👥 NV</th><th>👉 Vân tay</th><th>😊 Mặt</th><th>💳 Thẻ</th><th>IP</th><th>Lần cuối</th><th>Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
   const countCells = {};   // serial -> {nv,fp,face,card} để tự làm mới số liệu
+  // Dán KEY bản quyền cho 1 máy (Digiplus cấp theo Serial)
+  const pasteDeviceKey = async (m) => {
+    const k = prompt('Dán KEY máy chấm công (Digiplus cấp theo Serial ' + m.serial + '):', '');
+    if (k == null || !k.trim()) return;
+    try { await api('/admin/devices/' + m.id + '/key', { method: 'POST', body: { key: k.trim() } }); toast('Đã lưu key máy ✔', 'ok'); pageDevices(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
   if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
   for (const m of d.rows) {
     // Nút hay dùng để NGOÀI: Duyệt (khi đang chờ), Mở cửa, Xem quẹt; còn lại gom vào "⋯ Thêm"
@@ -2263,6 +2286,7 @@ async function pageDevices() {
       ? btnSm('🔓 Mở cửa', async () => { if (!confirm(`Mở cửa tại máy "${m.name || m.serial}" ngay?`)) return; try { const r = await api('/admin/devices/' + m.id + '/open-door', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh mở cửa', 'ok'); } catch (e) { toast(e.message, 'err'); } })
       : null;
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m), 'ghost');
+    const keyBtn = (d.key_required && !m.key_ok) ? btnSm('🔑 Dán key', () => pasteDeviceKey(m)) : null;
     const putDev = (body) => api('/admin/devices/' + m.id, { method: 'PUT', body });
     const moreBtn = rowMenu([
       { label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
@@ -2272,6 +2296,8 @@ async function pageDevices() {
       { label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
       { label: '🔢 Số máy (ghép log IDM)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
       hasPerm('devices') ? { label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null,
+      hasPerm('devices') ? { label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
+      (hasPerm('devices') && m.key_ok) ? { label: '🔑 Gỡ key bản quyền máy', fn: async () => { if (confirm('Gỡ key bản quyền khỏi máy này?')) { await api('/admin/devices/' + m.id + '/key', { method: 'DELETE' }); toast('Đã gỡ key', 'ok'); pageDevices(); } } } : null,
       { label: '🗑 Xóa dữ liệu máy', fn: () => deviceClearModal(m) },
       m.active ? { label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null,
       { danger: true, label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
@@ -2290,12 +2316,14 @@ async function pageDevices() {
     tb.append(el('tr', { style: online ? '' : 'opacity:.7' },
       el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, dot, m.serial)),
       el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : '', m.access_control ? el('div', { style: 'font-size:11px;color:#b45309' }, '🚪 Kiểm soát cửa') : ''),
-      el('td', {}, onlinePill, el('div', { style: 'margin-top:4px' }, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'))),
+      el('td', {}, onlinePill,
+        el('div', { style: 'margin-top:4px' }, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
+        d.key_required ? el('div', { style: 'margin-top:4px' }, m.key_ok ? el('span', { class: 'pill ok' }, '🔑 Có key') : el('span', { class: 'pill warn' }, '🔑 Chưa có key')) : ''),
       cNV, cFP, cFace, cCard,
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
-      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, approveInline, doorBtn, logBtn, moreBtn)),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, approveInline, keyBtn, doorBtn, logBtn, moreBtn)),
     ));
   }
   tbl.append(tb);
@@ -2451,14 +2479,22 @@ function devicePunchesModal(m) {
     box.innerHTML = '';
     if (!rows.length) { box.append(el('div', { class: 'empty' }, 'Chưa có lượt quẹt nào.')); return; }
     const t = el('table', { class: 'data' });
-    t.innerHTML = '<thead><tr><th>Mã</th><th>Nhân viên</th><th>Thời điểm</th><th>Kiểu</th></tr></thead>';
+    t.innerHTML = '<thead><tr><th>Mã</th><th>Nhân viên</th><th>Thời điểm</th><th>Kiểu</th><th></th></tr></thead>';
     const tb = el('tbody');
     const vName = { 1: 'Vân tay', 15: 'Khuôn mặt', 4: 'Thẻ', 0: 'Mật mã' };
-    for (const p of rows) tb.append(el('tr', {},
-      el('td', {}, p.pin),
-      el('td', {}, p.full_name || el('span', { class: 'pill warn' }, 'chưa khớp')),
-      el('td', {}, isoToHMS(p.punch_at) + ' ' + p.punch_at.slice(8, 10) + '/' + p.punch_at.slice(5, 7)),
-      el('td', {}, vName[p.verify] || ('#' + p.verify))));
+    for (const p of rows) {
+      const tr = el('tr', {},
+        el('td', {}, p.pin),
+        el('td', {}, p.full_name || el('span', { class: 'pill warn' }, 'chưa khớp')),
+        el('td', {}, isoToHMS(p.punch_at) + ' ' + p.punch_at.slice(8, 10) + '/' + p.punch_at.slice(5, 7)),
+        el('td', {}, vName[p.verify] || ('#' + p.verify)),
+        el('td', {}, btnSm('🗑', async () => {
+          if (!confirm('Xoá lượt quẹt này (quẹt nhầm/nghịch)?\nLưu ý: nếu bấm "Tính lại công" thì giờ tính từ các lượt quẹt còn lại.')) return;
+          try { await api('/admin/devices/' + m.id + '/punch/' + p.id, { method: 'DELETE' }); tr.remove(); toast('Đã xoá lượt quẹt', 'ok'); }
+          catch (e) { toast(e.message, 'err'); }
+        }, 'ghost')));
+      tb.append(tr);
+    }
     t.append(tb);
     box.append(el('div', { class: 'tbl-scroll' }, t));
   }).catch(e => { box.innerHTML = ''; box.append(el('div', { class: 'empty' }, e.message)); });

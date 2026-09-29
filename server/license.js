@@ -73,6 +73,30 @@ export function verifyLicense(keyString) {
   };
 }
 
+// Kiểm tra KEY THEO MÁY (bản quyền từng máy chấm công). Gắn theo serial máy.
+// payload: { t:'dev', s:'<serial>', c:'<công ty>', e:'<hạn|null>', i:'<ngày cấp>' }
+export function verifyDeviceKey(keyString, serial) {
+  if (!keyString || typeof keyString !== 'string' || !keyString.includes('.'))
+    return { valid: false, reason: 'Key rỗng hoặc sai định dạng' };
+  const [payloadB64, sigB64] = keyString.trim().split('.');
+  let ok = false;
+  try { ok = crypto.verify(null, Buffer.from(payloadB64), publicKey, Buffer.from(sigB64, 'base64')); }
+  catch { ok = false; }
+  if (!ok) return { valid: false, reason: 'Chữ ký key không hợp lệ (không phải do Digiplus cấp)' };
+  let p;
+  try { p = JSON.parse(Buffer.from(payloadB64, 'base64').toString('utf8')); }
+  catch { return { valid: false, reason: 'Nội dung key hỏng' }; }
+  if (p.t !== 'dev') return { valid: false, reason: 'Đây không phải key máy chấm công' };
+  const norm = (s) => String(s || '').trim().toUpperCase();
+  if (norm(p.s) !== norm(serial))
+    return { valid: false, reason: `Key cấp cho serial ${p.s || '?'} — không khớp máy ${serial}` };
+  if (p.e) {
+    const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
+    if (today > p.e) return { valid: false, reason: `Key đã hết hạn (${p.e})` };
+  }
+  return { valid: true, data: { serial: norm(p.s), company: p.c || '', exp: p.e || null } };
+}
+
 export function loadLicenseKey() {
   try { return existsSync(LICENSE_PATH) ? readFileSync(LICENSE_PATH, 'utf8').trim() : null; }
   catch { return null; }

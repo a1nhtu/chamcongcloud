@@ -17,6 +17,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
+      device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
       self_shift_enabled: getSetting('self_shift_enabled', '0'), // NV tự chọn ca
       self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
@@ -42,6 +43,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (req.user.master) {
       if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');
       if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
+      if (b.device_key_required != null) setSetting('device_key_required', b.device_key_required ? '1' : '0');
     }
     if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
     if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));

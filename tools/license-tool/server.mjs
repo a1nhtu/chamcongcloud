@@ -30,6 +30,20 @@ function genLicense({ machine, company, exp, max }) {
   return { license: payloadB64 + '.' + sig, payload };
 }
 
+// Key theo MÁY (bản quyền từng máy chấm công) — gắn theo serial.
+function genDeviceKey({ serial, company, exp }) {
+  const payload = {
+    t: 'dev',
+    s: (serial || '').replace(/\s/g, '').toUpperCase(),
+    c: company || '',
+    e: exp || null,
+    i: new Date().toISOString().slice(0, 10),
+  };
+  const payloadB64 = Buffer.from(JSON.stringify(payload)).toString('base64');
+  const sig = crypto.sign(null, Buffer.from(payloadB64), privateKey).toString('base64');
+  return { key: payloadB64 + '.' + sig, payload };
+}
+
 const HTML = `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Digiplus — Cấp License</title><style>
 *{box-sizing:border-box;font-family:'Segoe UI',system-ui,Arial,sans-serif}
@@ -72,6 +86,27 @@ textarea{font-family:monospace;font-size:13px}
   <textarea id="lic" rows="5" readonly></textarea>
   <button class="copy" id="copy">📋 Copy license</button>
  </div>
+ <div class="card">
+  <h2 style="margin:0 0 4px;font-size:18px">🖥️ Cấp KEY MÁY CHẤM CÔNG</h2>
+  <div class="hint">Gắn theo <b>Serial máy</b>. Khách lấy Serial trong phần mềm (mục Máy chấm công, cột Serial) gửi cho Anh.</div>
+  <label>Serial máy (khách gửi)</label>
+  <input id="dserial" placeholder="VD: CJHK230160XXXX" style="font-family:monospace;font-weight:700">
+  <label>Tên công ty khách (tuỳ chọn)</label>
+  <input id="dcompany" placeholder="VD: Công ty TNHH ABC">
+  <div class="row">
+   <div><label>Loại key</label>
+    <select id="dtype"><option value="perm">Vĩnh viễn</option><option value="exp">Có hạn</option></select></div>
+   <div><label>Ngày hết hạn</label><input id="dexp" type="date" disabled></div>
+  </div>
+  <button class="btn" id="dgo">Tạo key máy</button>
+ </div>
+ <div class="card out" id="dout">
+  <span class="pill">✓ Đã tạo key máy</span>
+  <div class="hint" id="dmeta"></div>
+  <label>Chuỗi key — gửi khách dán vào ĐÚNG máy đó</label>
+  <textarea id="dkey" rows="5" readonly></textarea>
+  <button class="copy" id="dcopy">📋 Copy key</button>
+ </div>
 </div>
 <script>
 const $=id=>document.getElementById(id);
@@ -90,6 +125,20 @@ $('go').onclick=async()=>{
   $('out').style.display='block';$('out').scrollIntoView({behavior:'smooth'});
 };
 $('copy').onclick=()=>{$('lic').select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText($('lic').value);$('copy').textContent='✓ Đã copy';setTimeout(()=>$('copy').textContent='📋 Copy license',1500);};
+$('dtype').onchange=()=>{$('dexp').disabled=$('dtype').value!=='exp';};
+$('dgo').onclick=async()=>{
+  const serial=$('dserial').value.trim();
+  if(!serial){alert('Nhập Serial máy');return;}
+  const exp=$('dtype').value==='exp'?$('dexp').value:'';
+  if($('dtype').value==='exp'&&!exp){alert('Chọn ngày hết hạn');return;}
+  const r=await fetch('/gen-device',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({serial,company:$('dcompany').value.trim(),exp})});
+  const d=await r.json();
+  if(!r.ok){alert(d.error||'Lỗi');return;}
+  $('dkey').value=d.key;
+  $('dmeta').textContent='Serial: '+d.payload.s+' · Công ty: '+(d.payload.c||'-')+' · Hạn: '+(d.payload.e||'vĩnh viễn');
+  $('dout').style.display='block';$('dout').scrollIntoView({behavior:'smooth'});
+};
+$('dcopy').onclick=()=>{$('dkey').select();document.execCommand('copy');navigator.clipboard&&navigator.clipboard.writeText($('dkey').value);$('dcopy').textContent='✓ Đã copy';setTimeout(()=>$('dcopy').textContent='📋 Copy key',1500);};
 </script></body></html>`;
 
 const server = http.createServer((req, res) => {
@@ -102,6 +151,19 @@ const server = http.createServer((req, res) => {
         const b = JSON.parse(body || '{}');
         if (!b.machine || !b.company) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Thiếu Mã máy hoặc công ty' })); return; }
         const out = genLicense(b);
+        res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(out));
+      } catch (e) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
+    });
+    return;
+  }
+  if (req.method === 'POST' && req.url === '/gen-device') {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      try {
+        const b = JSON.parse(body || '{}');
+        if (!b.serial) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Thiếu Serial máy' })); return; }
+        const out = genDeviceKey(b);
         res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(out));
       } catch (e) { res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); }
     });

@@ -462,6 +462,9 @@ function migrateColumns() {
   add('push_devices', 'sync_group', "TEXT DEFAULT ''");
   // Máy có chức năng kiểm soát cửa (access control) → hiện nút "Mở cửa từ xa" (lệnh ADMS AC_UNLOCK)
   add('push_devices', 'access_control', 'INTEGER NOT NULL DEFAULT 0');
+  // Key BẢN QUYỀN theo MÁY (Ed25519, Digiplus cấp theo serial): rỗng = chưa có key.
+  // Khi bật "device_key_required", máy phải có key hợp lệ mới DUYỆT được (chống khách tự mua máy ngoài).
+  add('push_devices', 'dev_key', "TEXT DEFAULT ''");
   // Lệnh đồng bộ mang theo "đối tượng" để CHỈ cộng số đếm khi máy XÁC NHẬN đã nhận (chống đếm khống)
   add('push_device_commands', 'pin',      "TEXT DEFAULT ''");
   add('push_device_commands', 'bio_type', 'INTEGER');
@@ -481,6 +484,8 @@ function migrateColumns() {
   if (getSetting('device_enabled') == null) setSetting('device_enabled', '0');
   // Tự tạo NV khi máy đăng ký vân tay: '1' = tự tạo NV nháp (mặc định), '0' = chỉ ghi nhận chờ gán tay
   if (getSetting('device_autocreate') == null) setSetting('device_autocreate', '1');
+  // Bắt buộc KEY theo máy: '0' = tắt (mặc định, giữ khách cũ chạy), '1' = máy phải có key Digiplus cấp mới duyệt được
+  if (getSetting('device_key_required') == null) setSetting('device_key_required', '0');
   // Khoá thiết bị chấm công điện thoại (chống chấm hộ): '0' = tắt (mặc định), '1' = mỗi tài khoản chỉ chấm trên 1 điện thoại đã duyệt
   if (getSetting('device_lock_enabled') == null) setSetting('device_lock_enabled', '0');
   // Bỏ qua lần chấm TRÙNG trong vòng N phút (chống double-tap app + máy quẹt liên tiếp). '0' = tắt.
