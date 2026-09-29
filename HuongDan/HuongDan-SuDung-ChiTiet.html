@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hướng dẫn sử dụng chi tiết — Digiplus Chấm Công</title>
+<meta name="description" content="Hướng dẫn sử dụng phần mềm Digiplus chấm công chi tiết cho khách: khai báo bộ phận, nhân viên, ca làm, phân ca, chấm công, sửa giờ, tính công, đơn từ, báo cáo và bảng lương." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --paper:#FBF4EF;--surface:#fff;--surface-2:#FDF7F3;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;
+  --brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--brand-wash:#FCEBE2;
+  --green:#15803D;--green-bg:#DCFCE7;--amber:#B45309;--amber-bg:#FDECCB;--blue:#1D4ED8;--blue-bg:#DBEAFE;--red:#DC2626;--red-bg:#FCE1E1;
+  --shadow:0 10px 34px rgba(80,30,10,.10);--shadow-sm:0 4px 14px rgba(80,30,10,.08);--radius:16px;--maxw:900px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}}
+:root[data-theme="dark"]{
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+a{color:var(--brand-ink)}
+h1,h2,h3{line-height:1.2;text-wrap:balance}
+header.top{background:radial-gradient(120% 140% at 90% -20%,rgba(225,29,35,.28),transparent 60%),linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:40px 0 44px}
+.brandrow{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.mark{width:42px;height:46px}
+.brandname{font-weight:800;font-size:18px}.brandname small{display:block;font-weight:500;font-size:11px;opacity:.85;letter-spacing:2px;text-transform:uppercase}
+header .tag{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:700;margin-bottom:14px}
+header h1{margin:0;font-size:clamp(26px,4.6vw,40px);font-weight:800;letter-spacing:-.4px;max-width:20ch}
+header p{margin:12px 0 0;font-size:16px;opacity:.95;max-width:58ch}
+main{padding:0 0 60px}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;margin:26px 0;box-shadow:var(--shadow-sm)}
+.toc b{display:block;font-size:12.5px;text-transform:uppercase;letter-spacing:1px;color:var(--brand-ink);margin-bottom:8px}
+.toc ol{margin:0;padding-left:20px;columns:2;column-gap:26px}
+@media(max-width:620px){.toc ol{columns:1}}
+.toc li{margin:4px 0}.toc a{text-decoration:none}
+section{padding:30px 0;border-bottom:1px solid var(--line)}
+section:last-child{border-bottom:none}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--brand-ink);margin-bottom:10px}
+.eyebrow .num{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:13px}
+h2.sec{font-size:clamp(21px,3vw,28px);font-weight:800;letter-spacing:-.3px;margin:0}
+.lead{color:var(--muted);font-size:16px;margin:8px 0 0}
+ol.steps{list-style:none;margin:18px 0 0;padding:0;counter-reset:s;display:flex;flex-direction:column;gap:14px}
+ol.steps li{position:relative;padding-left:44px;counter-increment:s}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px;box-shadow:var(--shadow-sm)}
+ol.steps li b{color:var(--ink)}
+ol.steps li span{color:var(--muted);display:block;font-size:14.5px;margin-top:2px}
+ul.plain{margin:14px 0 0;padding-left:20px}ul.plain li{margin:6px 0}
+.note{display:flex;gap:11px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;padding:13px 16px;margin-top:16px;font-size:14.5px}
+.note.ok{border-left-color:var(--green)}.note.warn{border-left-color:var(--amber)}
+.note .ic{flex:0 0 auto;font-size:18px}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:1px 7px;font-size:13.5px;font-weight:600;color:var(--brand-ink)}
+.faq{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:2px 18px;box-shadow:var(--shadow-sm)}
+details summary{cursor:pointer;font-weight:700;padding:14px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";color:var(--brand);font-weight:800;font-size:20px}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:0 0 15px;font-size:14.5px}
+table.t{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table.t th{text-align:left;background:var(--surface-2);color:var(--brand-ink);font-size:12.5px;text-transform:uppercase;letter-spacing:.4px;padding:10px 12px;border-bottom:1px solid var(--line)}
+table.t td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t tr:last-child td{border-bottom:none}
+table.t td b{color:var(--ink)}
+footer{background:var(--surface-2);border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px;margin-top:10px}
+footer b{color:var(--ink)}
+.crumb{font-size:13.5px;margin:18px 0 0}.crumb a{color:var(--brand-ink);text-decoration:none}
+.themebtn{position:fixed;right:14px;bottom:14px;z-index:50;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);font-family:inherit}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brandrow">
+    <svg class="mark" viewBox="0 0 44 48" fill="none" aria-hidden="true">
+      <path d="M4 24C4 12 12 4 22 4s18 8 18 20" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M9 24c0-8 6-13 13-13s13 5 13 13" stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".8"/>
+      <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="brandname">Digiplus<small>Chấm Công Thông Minh</small></div>
+  </div>
+  <div class="tag">📖 HƯỚNG DẪN SỬ DỤNG CHI TIẾT</div>
+  <h1>Dùng phần mềm từ A đến Z</h1>
+  <p>Từ khai báo nhân viên, cấu hình ca, chấm công, tính công đến xuất báo cáo &amp; bảng lương. Làm theo đúng thứ tự các bước dưới đây.</p>
+</div></header>
+
+<main class="wrap">
+  <div class="toc">
+    <b>Nội dung</b>
+    <ol>
+      <li><a href="#dang-nhap">Đăng nhập &amp; giao diện</a></li>
+      <li><a href="#bo-phan">Khai báo bộ phận, chức danh</a></li>
+      <li><a href="#nhan-vien">Khai báo nhân viên</a></li>
+      <li><a href="#ca-lam">Khai báo ca làm</a></li>
+      <li><a href="#phan-ca">Phân ca</a></li>
+      <li><a href="#cham-cong">Nhân viên chấm công</a></li>
+      <li><a href="#sua-gio">Duyệt / sửa / xoá giờ</a></li>
+      <li><a href="#tinh-cong">Tính công</a></li>
+      <li><a href="#don-tu">Đơn từ / nghỉ phép</a></li>
+      <li><a href="#bao-cao">Báo cáo &amp; xuất Excel</a></li>
+      <li><a href="#luong">Bảng lương</a></li>
+      <li><a href="#cai-dat">Cài đặt quan trọng</a></li>
+      <li><a href="#faq">Câu hỏi thường gặp</a></li>
+    </ol>
+  </div>
+
+  <section id="dang-nhap">
+    <div class="eyebrow"><span class="num">1</span> Bắt đầu</div>
+    <h2 class="sec">Đăng nhập &amp; giao diện quản lý</h2>
+    <ol class="steps">
+      <li><b>Mở trang quản lý</b><span>Trên máy tính, vào địa chỉ phần mềm rồi thêm <span class="kbd">/admin</span> (VD <span class="mono">http://192.168.1.50:8686/admin</span>).</span></li>
+      <li><b>Đăng nhập</b><span>Lần đầu dùng <span class="kbd">admin</span> / <span class="kbd">admin123</span>. Vào <b>Cài đặt</b> đổi mật khẩu ngay.</span></li>
+      <li><b>Làm quen menu trái</b><span>Tổng quan · Nhân viên · Bộ phận · Ca làm · Phân ca · Tính công · Máy chấm công · Chi nhánh · Đơn từ · Lương · Báo cáo · Nhật ký · Cài đặt.</span></li>
+    </ol>
+    <div class="note"><span class="ic">🧭</span><div>Thứ tự khai báo nên theo: <b>Bộ phận/Chức danh → Ca làm → Nhân viên → Phân ca</b>, rồi mới chấm công &amp; xem báo cáo.</div></div>
+  </section>
+
+  <section id="bo-phan">
+    <div class="eyebrow"><span class="num">2</span> Danh mục</div>
+    <h2 class="sec">Khai báo bộ phận &amp; chức danh</h2>
+    <ol class="steps">
+      <li><b>Vào mục Bộ phận</b><span>Thêm các phòng ban (VD Kinh doanh, Kỹ thuật, Kế toán). Có thể tạo bộ phận cha – con.</span></li>
+      <li><b>Thêm chức danh</b><span>VD Nhân viên, Trưởng nhóm, Kế toán trưởng — để chọn nhanh khi khai báo nhân viên.</span></li>
+    </ol>
+    <div class="note ok"><span class="ic">💡</span><div>Không bắt buộc tạo trước — khi nhập nhân viên bằng Excel, bộ phận/chức danh mới sẽ được tạo tự động.</div></div>
+  </section>
+
+  <section id="nhan-vien">
+    <div class="eyebrow"><span class="num">3</span> Nhân viên</div>
+    <h2 class="sec">Khai báo nhân viên</h2>
+    <p class="lead">Cách 1 — thêm từng người; Cách 2 — nhập hàng loạt bằng Excel.</p>
+    <ol class="steps">
+      <li><b>Thêm nhân viên</b><span>Mục <b>Nhân viên → + Thêm nhân viên</b>. Điền Mã NV, Họ tên, Bộ phận, Chức danh, Tài khoản/Mật khẩu đăng nhập app.</span></li>
+      <li><b>Số ID máy (nếu dùng máy chấm công)</b><span>Điền <b>Số ID máy</b> trùng số đăng ký vân tay trên máy để khớp đúng người.</span></li>
+      <li><b>Phân quyền (nếu là quản lý)</b><span>Chọn vai trò Quản lý/Admin và tích các chức năng được dùng (ẩn với nhân viên thường).</span></li>
+      <li><b>Nhập bằng Excel (hàng loạt)</b><span>Bấm <b>📄 Tải mẫu Excel</b> → điền danh sách → <b>⬆ Nhập thêm mới</b> hoặc <b>🔄 Cập nhật từ Excel</b>. Bỏ trống Mật khẩu → mặc định <span class="kbd">123456</span>; bỏ trống Tài khoản → lấy theo Mã NV.</span></li>
+    </ol>
+    <div class="note"><span class="ic">🔑</span><div>Nhân viên đăng nhập <b>app điện thoại</b> bằng Tài khoản/Mật khẩu này để chấm công.</div></div>
+  </section>
+
+  <section id="ca-lam">
+    <div class="eyebrow"><span class="num">4</span> Ca làm</div>
+    <h2 class="sec">Khai báo ca làm việc</h2>
+    <ol class="steps">
+      <li><b>Tạo ca</b><span>Mục <b>Ca làm</b>: đặt tên, giờ vào, giờ ra. VD Hành chính 08:00–17:30.</span></li>
+      <li><b>Cho phép muộn/sớm</b><span>Đặt ngưỡng đi muộn, về sớm (phút) — trong ngưỡng thì không tính lỗi.</span></li>
+      <li><b>Nghỉ giữa ca, tăng ca</b><span>Trừ giờ nghỉ trưa; bật tính tăng ca (ở lại tối thiểu bao nhiêu phút mới tính OT).</span></li>
+      <li><b>Ca qua đêm</b><span>Chỉ cần đặt giờ ra nhỏ hơn giờ vào (VD 22:00 → 06:00) — hệ thống tự hiểu qua ngày hôm sau.</span></li>
+      <li><b>Lịch trình (ca xoay)</b><span>Gom nhiều ca (sáng/chiều/đêm) thành 1 lịch trình để gán cho nhân viên làm ca xoay.</span></li>
+    </ol>
+    <div class="note"><span class="ic">⚙️</span><div>Đặt <b>cửa sổ nhận diện giờ vào/ra</b> cho mỗi ca để hệ thống <b>tự tìm đúng ca</b> theo giờ chấm (rất tiện cho ca xoay).</div></div>
+  </section>
+
+  <section id="phan-ca">
+    <div class="eyebrow"><span class="num">5</span> Phân ca</div>
+    <h2 class="sec">Phân ca cho nhân viên</h2>
+    <p class="lead">Mặc định hệ thống tự tìm ca theo giờ chấm. Khi cần chỉ định cứng thì phân ca.</p>
+    <ol class="steps">
+      <li><b>Ca mặc định trên hồ sơ</b><span>Gán 1 ca cố định cho nhân viên hành chính.</span></li>
+      <li><b>Phân ca hàng loạt</b><span>Mục <b>Phân ca</b>: chọn phòng ban → chọn ca → chọn khoảng ngày/thứ → <b>Áp dụng</b> cho cả nhóm chỉ vài cú nhấp.</span></li>
+      <li><b>Phân ca bằng Excel (cả tháng)</b><span>Xuất Excel mẫu (lưới NV × ngày) → điền mã ca vào ô cần đổi (để trống = tự động) → nhập lên.</span></li>
+    </ol>
+    <div class="note ok"><span class="ic">🔁</span><div>Ô để trống = "tự động theo giờ chấm"; điền mã ca = gán cứng (được ưu tiên đè lên kết quả tự động).</div></div>
+  </section>
+
+  <section id="cham-cong">
+    <div class="eyebrow"><span class="num">6</span> Chấm công</div>
+    <h2 class="sec">Nhân viên chấm công</h2>
+    <div style="display:flex;flex-direction:column;gap:6px">
+      <b>Bằng điện thoại (ảnh + GPS):</b>
+    </div>
+    <ol class="steps">
+      <li><b>Mở app, đăng nhập</b><span>Bằng tài khoản được cấp (cùng mạng nếu bản LAN).</span></li>
+      <li><b>Bấm "Vào ca" → chụp ảnh</b><span>App chụp selfie, ghi GPS, đóng dấu địa chỉ + giờ lên ảnh.</span></li>
+      <li><b>Hết ca bấm "Ra ca"</b><span>Chụp ảnh lần hai — hệ thống tự tính giờ &amp; công.</span></li>
+    </ol>
+    <p style="margin-top:16px"><b>Bằng máy chấm công:</b> nhân viên quẹt vân tay/khuôn mặt/thẻ trên máy — dữ liệu tự về phần mềm theo Số ID.</p>
+    <div class="note"><span class="ic">📍</span><div>Có thể dùng <b>song song</b>: ở văn phòng quẹt máy, đi ngoài chấm điện thoại — tất cả gộp về một người.</div></div>
+  </section>
+
+  <section id="sua-gio">
+    <div class="eyebrow"><span class="num">7</span> Sửa giờ</div>
+    <h2 class="sec">Duyệt / sửa / thêm / xoá giờ chấm</h2>
+    <p class="lead">Khi nhân viên quên chấm, chấm nhầm hoặc nghịch máy — quản lý chỉnh trong mục <b>Tính công</b>.</p>
+    <ol class="steps">
+      <li><b>Thêm giờ (quên chấm)</b><span>Mục Tính công → <b>+ Thêm giờ</b>: chọn NV, ngày, giờ vào/ra, ghi lý do.</span></li>
+      <li><b>Sửa giờ</b><span>Bấm <b>Sửa</b> ở dòng cần chỉnh → đổi giờ vào/ra → Lưu.</span></li>
+      <li><b>Xoá giờ chấm nhầm</b><span>Trong ô Sửa có nút <b>🗑 Xoá giờ</b> — xoá hẳn bản ghi ngày đó.</span></li>
+      <li><b>Xoá 1 lượt quẹt lẻ trên máy</b><span>Mục <b>Máy chấm công → Xem quẹt</b> → bấm 🗑 ở lượt quẹt nhầm/nghịch.</span></li>
+    </ol>
+    <div class="note warn"><span class="ic">✱</span><div>Giờ do quản lý sửa/thêm tay được đánh dấu <b>(*)</b> và có trong báo cáo "Giờ sửa/thêm bằng tay" (ai sửa, khi nào) — minh bạch, chống gian lận.</div></div>
+  </section>
+
+  <section id="tinh-cong">
+    <div class="eyebrow"><span class="num">8</span> Tính công</div>
+    <h2 class="sec">Tính công</h2>
+    <ol class="steps">
+      <li><b>Xem lưới công</b><span>Mục <b>Tính công</b>: mỗi dòng là 1 NV × 1 ngày, có giờ vào/ra, đi muộn, về sớm, tăng ca, số công.</span></li>
+      <li><b>Lọc theo phòng ban / nhân viên / khoảng ngày</b><span>Chọn để xem đúng nhóm cần.</span></li>
+      <li><b>Tính lại công</b><span>Sau khi đổi ca/cấu hình hoặc sửa giờ → bấm <b>↻ Tính lại</b> để cập nhật số công.</span></li>
+      <li><b>Cấu hình làm tròn</b><span>Đặt số lẻ thập phân + kiểu làm tròn (lùi/tới/gần nhất) cho số công.</span></li>
+    </ol>
+    <div class="note"><span class="ic">🏢</span><div>Có tuỳ chọn hiển thị <b>cả công ty kể cả người chưa chấm</b> (để thấy ai vắng) — tích ô tương ứng.</div></div>
+  </section>
+
+  <section id="don-tu">
+    <div class="eyebrow"><span class="num">9</span> Đơn từ</div>
+    <h2 class="sec">Đơn từ / nghỉ phép</h2>
+    <ol class="steps">
+      <li><b>Nhân viên gửi đơn</b><span>Trên app: xin nghỉ phép / không lương / công tác, chọn khoảng ngày + lý do.</span></li>
+      <li><b>Quản lý duyệt</b><span>Mục <b>Đơn từ</b>: duyệt hoặc từ chối. Đơn được duyệt sẽ hiện đúng ký hiệu (P/KL/CT) trong bảng công.</span></li>
+    </ol>
+  </section>
+
+  <section id="bao-cao">
+    <div class="eyebrow"><span class="num">10</span> Báo cáo</div>
+    <h2 class="sec">Báo cáo &amp; xuất Excel</h2>
+    <p class="lead">Mục <b>Báo cáo</b>: chọn loại + khoảng ngày (+ phòng ban / nhân viên cụ thể) → xem trước → <b>Xuất Excel</b>.</p>
+    <table class="t">
+      <tr><th>Báo cáo</th><th>Dùng để</th></tr>
+      <tr><td><b>Tổng quan</b></td><td>Xem nhanh hôm nay (hoặc ngày đã chọn): ai đi làm/đi muộn/vắng, chấm ngoài VP, kèm ảnh.</td></tr>
+      <tr><td><b>Bảng công ngang</b></td><td>Lưới NV × ngày cả tháng — nhìn tổng thể chấm công.</td></tr>
+      <tr><td><b>Chi tiết chấm công</b></td><td>Mỗi NV × mỗi ngày 1 dòng đầy đủ (vào/ra/trễ/sớm/công/tăng ca/ca).</td></tr>
+      <tr><td><b>Giờ công &amp; tăng ca</b></td><td>3 dòng/NV: giờ vào–ra / giờ công / giờ tăng ca theo từng ngày.</td></tr>
+      <tr><td><b>Giờ vào/ra đầu-cuối</b></td><td>Giờ vào sớm nhất, ra muộn nhất + số lần chấm mỗi ngày.</td></tr>
+      <tr><td><b>Đi muộn / về sớm · Tăng ca</b></td><td>Lọc riêng các trường hợp muộn/sớm hoặc tăng ca.</td></tr>
+      <tr><td><b>Vắng mặt / nghỉ phép</b></td><td>Thống kê vắng, phép, không lương theo NV.</td></tr>
+      <tr><td><b>Giờ sửa/thêm bằng tay</b></td><td>Vết các lần quản lý chỉnh giờ (ai, khi nào) — kiểm soát.</td></tr>
+      <tr><td><b>Bảng lương</b></td><td>Tính lương từ số công (xem mục dưới).</td></tr>
+    </table>
+    <div class="note ok"><span class="ic">📊</span><div>Muốn xuất cho <b>vài phòng ban / vài người</b> cụ thể: chọn nhiều phòng ban + nhiều NV trong bộ lọc rồi Xuất Excel.</div></div>
+  </section>
+
+  <section id="luong">
+    <div class="eyebrow"><span class="num">11</span> Bảng lương</div>
+    <h2 class="sec">Cấu hình &amp; xuất bảng lương</h2>
+    <ol class="steps">
+      <li><b>Khai lương từng người</b><span>Lương cơ bản/tháng, số ngày công chuẩn, phụ cấp, hệ số tăng ca (ngày thường / cuối tuần / lễ). Lương theo giờ nếu dùng chế độ tính theo giờ.</span></li>
+      <li><b>Đặt kỳ lương</b><span>Trong Cài đặt: ngày bắt đầu kỳ lương (VD chốt ngày 26).</span></li>
+      <li><b>Xuất bảng lương</b><span>Mục <b>Lương</b> / báo cáo Bảng lương: hệ thống tự tính Số công × đơn giá + tăng ca + phụ cấp → xuất Excel.</span></li>
+    </ol>
+  </section>
+
+  <section id="cai-dat">
+    <div class="eyebrow"><span class="num">12</span> Cài đặt</div>
+    <h2 class="sec">Các cài đặt quan trọng</h2>
+    <ul class="plain">
+      <li><b>Định vị (geofence):</b> bật "Chỉ cho chấm trong bán kính chi nhánh" để chặn chấm ngoài vùng; đặt bán kính cho từng chi nhánh.</li>
+      <li><b>Chống chấm hộ:</b> bật "Mỗi tài khoản chỉ chấm trên 1 điện thoại" — đổi máy phải admin duyệt.</li>
+      <li><b>Chế độ tính công:</b> "Theo ca" (đầy đủ muộn/sớm/tăng ca) hoặc "Chỉ tính theo giờ" (tổng giờ, hợp quán/cửa hàng).</li>
+      <li><b>Bỏ qua lần chấm trùng trong N phút:</b> chống double-tap / quẹt liên tiếp.</li>
+      <li><b>Ngày cuối tuần, nghỉ lễ:</b> khai để tính công &amp; tăng ca đúng.</li>
+      <li><b>Tự sao lưu:</b> bật sao lưu hằng ngày (giữ N bản gần nhất).</li>
+    </ul>
+    <p class="crumb">→ Cài đặt &amp; kết nối máy chấm công: xem <a href="HuongDan-CaiDat-LAN.html">Hướng dẫn cài đặt bản LAN</a>.</p>
+  </section>
+
+  <section id="faq">
+    <div class="eyebrow">Hỏi &amp; đáp</div>
+    <h2 class="sec">Câu hỏi thường gặp (sử dụng)</h2>
+    <div class="faq">
+      <details><summary>Nhân viên quên chấm thì làm sao?</summary><p>Quản lý vào Tính công → "+ Thêm giờ" cho ngày đó (ghi lý do). Bản ghi thêm tay được đánh dấu (*) và có vết ai thêm/khi nào.</p></details>
+      <details><summary>Chấm nhầm/nghịch, muốn xoá giờ đó?</summary><p>Vào Tính công → Sửa dòng đó → "🗑 Xoá giờ". Nếu là lượt quẹt nhầm trên máy: Máy chấm công → Xem quẹt → 🗑 từng lượt.</p></details>
+      <details><summary>Làm ca xoay/ca đêm tính công thế nào?</summary><p>Gom các ca vào một lịch trình rồi gán cho nhân viên; hệ thống tự chọn đúng ca theo giờ chấm, kể cả ca qua đêm (đặt giờ ra &lt; giờ vào).</p></details>
+      <details><summary>Nhân viên có xem được công của người khác không?</summary><p>Không. Mỗi nhân viên chỉ thấy dữ liệu của mình. Chỉ Admin/Quản lý (theo phân quyền) mới thấy toàn công ty.</p></details>
+      <details><summary>Xuất báo cáo cho riêng một phòng ban được không?</summary><p>Được. Trong bộ lọc báo cáo, chọn phòng ban (hoặc chọn nhiều người cụ thể) rồi Xuất Excel.</p></details>
+      <details><summary>"Chấm ngoài văn phòng" là ngoài đâu?</summary><p>Là ngoài bán kính của chi nhánh gần nhất mà nhân viên được phép chấm. Có bật chặn hay chỉ cảnh báo là tuỳ cài đặt geofence.</p></details>
+      <details><summary>Số công lẻ (VD 0.94) là gì?</summary><p>Là số công quy đổi theo giờ làm thực tế/độ dài ca và cấu hình làm tròn. Có thể chỉnh số lẻ &amp; kiểu làm tròn trong Tính công.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">
+  <div><b>Digiplus — Chấm công thông minh.</b> Hướng dẫn sử dụng chi tiết.</div>
+  <div style="margin-top:6px">Hỗ trợ · Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
+</div></footer>
+
+<button class="themebtn" id="tt">🌗 Giao diện</button>
+<script>
+(function(){var b=document.getElementById('tt');b.addEventListener('click',function(){var r=document.documentElement;var c=r.getAttribute('data-theme');if(!c){c=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}r.setAttribute('data-theme',c==='dark'?'light':'dark');});})();
+</script>
+</body>
+</html>

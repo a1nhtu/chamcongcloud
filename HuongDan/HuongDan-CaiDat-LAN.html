@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Hướng dẫn cài đặt bản LAN — Digiplus Chấm Công</title>
+<meta name="description" content="Hướng dẫn đại lý tự cài đặt phần mềm Digiplus chấm công bản LAN từ A đến Z: cài đặt, kích hoạt, kết nối máy chấm công, cập nhật và câu hỏi thường gặp." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --paper:#FBF4EF;--surface:#fff;--surface-2:#FDF7F3;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;
+  --brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--brand-wash:#FCEBE2;
+  --green:#15803D;--green-bg:#DCFCE7;--amber:#B45309;--amber-bg:#FDECCB;--blue:#1D4ED8;--blue-bg:#DBEAFE;--red:#DC2626;--red-bg:#FCE1E1;
+  --shadow:0 10px 34px rgba(80,30,10,.10);--shadow-sm:0 4px 14px rgba(80,30,10,.08);--radius:16px;--maxw:900px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}}
+:root[data-theme="dark"]{
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+a{color:var(--brand-ink)}
+h1,h2,h3{line-height:1.2;text-wrap:balance}
+header.top{background:radial-gradient(120% 140% at 90% -20%,rgba(225,29,35,.28),transparent 60%),linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:40px 0 44px}
+.brandrow{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.mark{width:42px;height:46px}
+.brandname{font-weight:800;font-size:18px}.brandname small{display:block;font-weight:500;font-size:11px;opacity:.85;letter-spacing:2px;text-transform:uppercase}
+header .tag{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:700;margin-bottom:14px}
+header h1{margin:0;font-size:clamp(26px,4.6vw,40px);font-weight:800;letter-spacing:-.4px;max-width:20ch}
+header p{margin:12px 0 0;font-size:16px;opacity:.95;max-width:56ch}
+main{padding:0 0 60px}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;margin:26px 0;box-shadow:var(--shadow-sm)}
+.toc b{display:block;font-size:12.5px;text-transform:uppercase;letter-spacing:1px;color:var(--brand-ink);margin-bottom:8px}
+.toc ol{margin:0;padding-left:20px;columns:2;column-gap:26px}
+@media(max-width:620px){.toc ol{columns:1}}
+.toc li{margin:4px 0}.toc a{text-decoration:none}
+section{padding:30px 0;border-bottom:1px solid var(--line)}
+section:last-child{border-bottom:none}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--brand-ink);margin-bottom:10px}
+.eyebrow .num{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:13px}
+h2.sec{font-size:clamp(21px,3vw,28px);font-weight:800;letter-spacing:-.3px;margin:0}
+.lead{color:var(--muted);font-size:16px;margin:8px 0 0}
+ol.steps{list-style:none;margin:18px 0 0;padding:0;counter-reset:s;display:flex;flex-direction:column;gap:14px}
+ol.steps li{position:relative;padding-left:44px;counter-increment:s}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px;box-shadow:var(--shadow-sm)}
+ol.steps li b{color:var(--ink)}
+ol.steps li span{color:var(--muted);display:block;font-size:14.5px;margin-top:2px}
+.dl{display:flex;gap:14px;align-items:center;flex-wrap:wrap;background:var(--brand-wash);border:1.5px dashed var(--brand);border-radius:var(--radius);padding:18px 20px;margin:20px 0}
+.dl .btn{background:var(--brand);color:#fff;text-decoration:none;font-weight:800;padding:12px 22px;border-radius:12px;font-size:15px;box-shadow:var(--shadow-sm)}
+.dl .t{font-weight:700}.dl .t small{display:block;color:var(--brand-ink);font-weight:500;font-size:13px}
+.note{display:flex;gap:11px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;padding:13px 16px;margin-top:16px;font-size:14.5px}
+.note.ok{border-left-color:var(--green)}.note.warn{border-left-color:var(--amber)}
+.note .ic{flex:0 0 auto;font-size:18px}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:1px 7px;font-size:13.5px;font-weight:600;color:var(--brand-ink)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+@media(max-width:620px){.grid2{grid-template-columns:1fr}}
+.fcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow-sm)}
+.fcard .vi{font-size:22px}.fcard h3{margin:6px 0 4px;font-size:16px}.fcard p{margin:0;color:var(--muted);font-size:14px}
+.faq{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:2px 18px;box-shadow:var(--shadow-sm)}
+details summary{cursor:pointer;font-weight:700;padding:14px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";color:var(--brand);font-weight:800;font-size:20px}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:0 0 15px;font-size:14.5px}
+footer{background:var(--surface-2);border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px;margin-top:10px}
+footer b{color:var(--ink)}
+.crumb{font-size:13.5px;margin:18px 0 0}.crumb a{color:var(--brand-ink);text-decoration:none}
+.themebtn{position:fixed;right:14px;bottom:14px;z-index:50;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);font-family:inherit}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brandrow">
+    <svg class="mark" viewBox="0 0 44 48" fill="none" aria-hidden="true">
+      <path d="M4 24C4 12 12 4 22 4s18 8 18 20" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M9 24c0-8 6-13 13-13s13 5 13 13" stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".8"/>
+      <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="brandname">Digiplus<small>Chấm Công Thông Minh</small></div>
+  </div>
+  <div class="tag">📦 DÀNH CHO ĐẠI LÝ · BẢN CÀI LAN</div>
+  <h1>Hướng dẫn cài đặt bản LAN từ A đến Z</h1>
+  <p>Tự cài phần mềm chấm công cho khách chạy trong mạng nội bộ (LAN) — không cần tên miền, không cần VPS. Làm theo đúng thứ tự bên dưới là chạy được.</p>
+</div></header>
+
+<main class="wrap">
+  <div class="toc">
+    <b>Nội dung</b>
+    <ol>
+      <li><a href="#lan-la-gi">Bản LAN là gì, khi nào dùng</a></li>
+      <li><a href="#chuan-bi">Chuẩn bị trước khi cài</a></li>
+      <li><a href="#cai-dat">Các bước cài đặt</a></li>
+      <li><a href="#kich-hoat">Kích hoạt bản quyền</a></li>
+      <li><a href="#ip-tinh">Đặt IP tĩnh (địa chỉ cố định)</a></li>
+      <li><a href="#dien-thoai">Cho nhân viên chấm bằng điện thoại</a></li>
+      <li><a href="#may-cham-cong">Kết nối máy chấm công</a></li>
+      <li><a href="#cap-nhat">Cập nhật phần mềm</a></li>
+      <li><a href="#go">Gỡ cài / chuyển máy</a></li>
+      <li><a href="#tinh-nang">Tính năng chính</a></li>
+      <li><a href="#faq">Câu hỏi thường gặp</a></li>
+    </ol>
+  </div>
+
+  <section id="lan-la-gi">
+    <div class="eyebrow"><span class="num">1</span> Tổng quan</div>
+    <h2 class="sec">Bản LAN là gì, khi nào dùng?</h2>
+    <p class="lead">Bản LAN chạy trên một máy tính Windows của khách. Điện thoại nhân viên và máy chấm công kết nối tới máy này <b>qua mạng nội bộ (cùng WiFi/LAN)</b> — không cần tên miền, không cần thuê máy chủ.</p>
+    <div class="grid2">
+      <div class="fcard"><div class="vi">🏢</div><h3>Hợp khi nào</h3><p>Chấm công tại 1 địa điểm: văn phòng, cửa hàng, nhà xưởng — máy tính, điện thoại, máy chấm công cùng một mạng.</p></div>
+      <div class="fcard"><div class="vi">🌐</div><h3>Cần Internet không?</h3><p>Việc <b>chấm công trong LAN không cần Internet</b>. Chỉ cần Internet khi <b>kích hoạt license</b> và <b>cập nhật phần mềm</b>.</p></div>
+    </div>
+    <div class="note"><span class="ic">💡</span><div>Nếu khách có nhiều chi nhánh xa nhau (máy chấm công một nơi, máy tính một nơi khác mạng) → dùng <b>bản domain/VPS</b> thay vì LAN.</div></div>
+  </section>
+
+  <section id="chuan-bi">
+    <div class="eyebrow"><span class="num">2</span> Chuẩn bị</div>
+    <h2 class="sec">Chuẩn bị trước khi cài</h2>
+    <ol class="steps">
+      <li><b>Máy tính Windows 10 hoặc 11</b><span>Máy này sẽ luôn bật khi cần chấm công (nó là "máy chủ" trong LAN).</span></li>
+      <li><b>Cùng mạng</b><span>Máy tính, điện thoại nhân viên và máy chấm công phải chung một WiFi/LAN.</span></li>
+      <li><b>Tắt bớt phần mềm diệt virus quá gắt (nếu có)</b><span>Vài phần mềm AV có thể chặn file .bat/cloudflared — cho phép thư mục cài để tránh bị xoá nhầm.</span></li>
+      <li><b>Có link tải bộ cài LAN</b><span>Do Digiplus cấp (mục bên dưới).</span></li>
+    </ol>
+  </section>
+
+  <section id="cai-dat">
+    <div class="eyebrow"><span class="num">3</span> Cài đặt</div>
+    <h2 class="sec">Các bước cài đặt</h2>
+    <div class="dl">
+      <a class="btn" href="#" id="dlink">⬇ Tải bộ cài LAN</a>
+      <div class="t">Bộ cài LAN (mới nhất)<small>Link do Digiplus cung cấp · giải nén là chạy, không cần cài Node hay gì thêm</small></div>
+    </div>
+    <ol class="steps">
+      <li><b>Giải nén ra ổ đĩa</b><span>Ví dụ <span class="kbd">C:\DigiplusChamCong</span>. <b>Không</b> để trong thư mục Downloads hay thư mục tạm.</span></li>
+      <li><b>Mở thư mục, chạy <span class="kbd">CaiDat.bat</span></b><span>Bấm đúp. Nếu Windows hỏi "Windows protected your PC" → bấm <b>More info → Run anyway</b>.</span></li>
+      <li><b>Đợi app tự chạy</b><span>Phần mềm tự khởi động và <b>tự bật mỗi khi mở máy</b>. Trình duyệt sẽ tự mở trang quản lý <span class="kbd">/admin</span>.</span></li>
+      <li><b>Đăng nhập quản lý</b><span>Mặc định <span class="kbd">admin</span> / <span class="kbd">admin123</span> — vào đổi mật khẩu ngay trong mục Cài đặt.</span></li>
+    </ol>
+    <div class="note ok"><span class="ic">✅</span><div>Cài xong là app đã chạy. Bước tiếp theo là <b>kích hoạt bản quyền</b> để dùng lâu dài.</div></div>
+  </section>
+
+  <section id="kich-hoat">
+    <div class="eyebrow"><span class="num">4</span> Bản quyền</div>
+    <h2 class="sec">Kích hoạt bản quyền (license)</h2>
+    <ol class="steps">
+      <li><b>Lấy Mã máy</b><span>Vào <b>Cài đặt → Bản quyền</b>, màn hình hiện <b>Mã máy</b> (dạng <span class="mono">103B-E555-114A-6CD3</span>).</span></li>
+      <li><b>Gửi Mã máy cho Digiplus</b><span>Kèm thông tin khách. Digiplus cấp chuỗi license khớp đúng máy đó.</span></li>
+      <li><b>Dán license → Kích hoạt</b><span>Dán chuỗi nhận được vào ô license, bấm Kích hoạt. Xong — dùng được đầy đủ.</span></li>
+    </ol>
+    <div class="note"><span class="ic">🔒</span><div>License <b>gắn theo máy</b> — không copy sang máy khác được. Đổi máy tính phải lấy Mã máy mới và xin cấp lại.</div></div>
+  </section>
+
+  <section id="ip-tinh">
+    <div class="eyebrow"><span class="num">5</span> Địa chỉ cố định</div>
+    <h2 class="sec">Đặt IP tĩnh để địa chỉ không đổi</h2>
+    <p class="lead">Điện thoại và máy chấm công truy cập máy chủ theo <b>địa chỉ IP nội bộ</b> (VD <span class="mono">192.168.1.50:8686</span>). Nếu IP đổi thì phải khai lại — nên đặt <b>IP tĩnh</b> cho máy chủ để dùng mãi.</p>
+    <ol class="steps">
+      <li><b>Xem IP hiện tại</b><span>Trong phần mềm mục <b>Máy chấm công</b> có ghi sẵn <b>Server IP + Port</b>. Hoặc mở CMD gõ <span class="kbd">ipconfig</span> xem "IPv4 Address".</span></li>
+      <li><b>Đặt IP tĩnh</b><span>Cách dễ nhất: vào <b>router</b> đặt IP cố định theo địa chỉ MAC của máy chủ (DHCP reservation). Hoặc đặt IP tĩnh trong Windows (Network → Properties → IPv4).</span></li>
+      <li><b>Ghi lại địa chỉ</b><span>VD <span class="mono">192.168.1.50:8686</span> — đây là địa chỉ nhân viên và máy chấm công sẽ dùng.</span></li>
+    </ol>
+    <div class="note warn"><span class="ic">⚠️</span><div>Tên gõ tắt kiểu <span class="mono">chamcong:8686</span> <b>chỉ máy tính Windows</b> cùng mạng mới nhận; <b>điện thoại thường không nhận</b>. Vì vậy dùng <b>IP tĩnh</b> cho chắc.</div></div>
+  </section>
+
+  <section id="dien-thoai">
+    <div class="eyebrow"><span class="num">6</span> Điện thoại</div>
+    <h2 class="sec">Cho nhân viên chấm bằng điện thoại</h2>
+    <ol class="steps">
+      <li><b>Gửi địa chỉ cho nhân viên</b><span>VD <span class="mono">http://192.168.1.50:8686</span> — nhân viên mở trên trình duyệt điện thoại (phải cùng WiFi công ty).</span></li>
+      <li><b>Đăng nhập</b><span>Bằng tài khoản quản lý cấp cho từng người.</span></li>
+      <li><b>Cài ra màn hình (tuỳ chọn)</b><span>Android: bấm nút "📲 Cài app". iPhone: Safari → Chia sẻ → "Thêm vào MH chính".</span></li>
+    </ol>
+    <div class="note"><span class="ic">📸</span><div>Mỗi lần vào/ra, app chụp ảnh selfie + ghi GPS + đóng dấu địa chỉ, giờ lên ảnh — chống chấm hộ.</div></div>
+  </section>
+
+  <section id="may-cham-cong">
+    <div class="eyebrow"><span class="num">7</span> Máy chấm công</div>
+    <h2 class="sec">Kết nối máy chấm công vân tay / khuôn mặt</h2>
+    <p class="lead">Máy ZKTeco (loại có ADMS/Cloud Server) tự đẩy dữ liệu về phần mềm qua mạng — <b>không cần cài SDK, không cắm USB</b>.</p>
+    <ol class="steps">
+      <li><b>Trên máy chấm công</b><span>Menu → <b>Comm / Kết nối → Cloud Server (ADMS)</b>. Điền <b>Server IP</b> = IP máy chủ, <b>Port</b> = <span class="mono">8686</span>, chọn giao thức <b>HTTP</b> (KHÔNG bật SSL/HTTPS). Lưu & khởi động lại máy.</span></li>
+      <li><b>Duyệt máy</b><span>Máy hiện ở mục <b>Máy chấm công</b> phần mềm, trạng thái "Chờ duyệt" → bấm <b>Duyệt</b>.</span></li>
+      <li><b>(Nếu bật khoá bản quyền máy) Dán key máy</b><span>Nếu khách yêu cầu kiểm soát theo máy: gửi <b>Serial máy</b> cho Digiplus lấy <b>key</b>, bấm <b>🔑 Dán key</b> rồi mới Duyệt được.</span></li>
+      <li><b>Khớp Số ID</b><span>Đặt <b>Số ID máy</b> trong hồ sơ nhân viên trùng số ID đăng ký trên máy để tính công đúng người.</span></li>
+    </ol>
+    <div class="note"><span class="ic">🔁</span><div>Nhiều máy → đặt cùng <b>"Nhóm đồng bộ"</b> để các máy tự chia sẻ nhân viên/vân tay/khuôn mặt cho nhau.</div></div>
+  </section>
+
+  <section id="cap-nhat">
+    <div class="eyebrow"><span class="num">8</span> Cập nhật</div>
+    <h2 class="sec">Cập nhật phần mềm lên bản mới</h2>
+    <p class="lead">Bản LAN <b>vẫn tự cập nhật</b> được, miễn máy tính có Internet (không liên quan LAN hay domain).</p>
+    <ol class="steps">
+      <li><b>Vào Cài đặt → Cập nhật phần mềm</b><span>Bấm <b>Kiểm tra cập nhật</b>.</span></li>
+      <li><b>Có bản mới → Cập nhật ngay</b><span>App tự tải, tự khởi động lại (khoảng 1 phút). <b>Dữ liệu giữ nguyên</b> và tự sao lưu trước.</span></li>
+    </ol>
+    <div class="note warn"><span class="ic">🌐</span><div>Nếu máy khách <b>hoàn toàn không có Internet</b> → không tự cập nhật được; khi đó Digiplus gửi bản cập nhật tay để chép đè.</div></div>
+  </section>
+
+  <section id="go">
+    <div class="eyebrow"><span class="num">9</span> Gỡ / chuyển máy</div>
+    <h2 class="sec">Gỡ cài đặt hoặc chuyển sang máy khác</h2>
+    <div class="grid2">
+      <div class="fcard"><div class="vi">🗑</div><h3>Gỡ cài</h3><p>Chạy <span class="kbd">GoCaiDat.bat</span> — gỡ tự chạy + dừng app. Dữ liệu trong <span class="mono">app\data</span> và <span class="mono">app\uploads</span> vẫn còn.</p></div>
+      <div class="fcard"><div class="vi">💾</div><h3>Sao lưu / chuyển máy</h3><p>Copy 2 thư mục <span class="mono">app\data</span> và <span class="mono">app\uploads</span> sang máy mới (cùng vị trí), rồi lấy Mã máy mới xin cấp lại license.</p></div>
+    </div>
+  </section>
+
+  <section id="tinh-nang">
+    <div class="eyebrow"><span class="num">10</span> Tính năng</div>
+    <h2 class="sec">Tính năng chính của phần mềm</h2>
+    <div class="grid2">
+      <div class="fcard"><div class="vi">📸</div><h3>Chấm bằng điện thoại</h3><p>Ảnh selfie + GPS, đóng dấu địa chỉ/giờ, cảnh báo chấm ngoài văn phòng.</p></div>
+      <div class="fcard"><div class="vi">🔌</div><h3>Kết nối máy chấm công</h3><p>ZKTeco vân tay/khuôn mặt/thẻ, đồng bộ nhiều máy, mở cửa từ xa.</p></div>
+      <div class="fcard"><div class="vi">🗓️</div><h3>Ca & phân ca</h3><p>Nhiều ca/ngày, ca xoay, ca đêm; tự tìm ca theo giờ; phân ca hàng loạt + Excel.</p></div>
+      <div class="fcard"><div class="vi">🧮</div><h3>Tính công tự động</h3><p>Công, đi muộn, về sớm, tăng ca — theo cấu hình ca; sửa/xoá giờ nhầm.</p></div>
+      <div class="fcard"><div class="vi">📊</div><h3>Báo cáo & lương</h3><p>Nhiều loại báo cáo + bảng lương, xuất Excel một chạm.</p></div>
+      <div class="fcard"><div class="vi">🛡️</div><h3>Chống chấm hộ</h3><p>Khoá thiết bị theo người, dấu ảnh, định vị khoanh vùng.</p></div>
+    </div>
+    <p class="crumb">→ Xem <a href="HuongDan-SuDung-ChiTiet.html">Hướng dẫn sử dụng chi tiết</a> để biết cách khai báo nhân viên, tính công, xuất báo cáo.</p>
+  </section>
+
+  <section id="faq">
+    <div class="eyebrow">Hỏi &amp; đáp</div>
+    <h2 class="sec">Câu hỏi thường gặp (kỹ thuật)</h2>
+    <div class="faq">
+      <details><summary>Mất mạng Internet có chấm công được không?</summary><p>Được. Chấm công trong LAN (điện thoại/máy chấm công ↔ máy chủ) chạy qua mạng nội bộ, không cần Internet. Chỉ cần Internet khi kích hoạt license và cập nhật phần mềm.</p></details>
+      <details><summary>Tắt máy tính thì sao?</summary><p>Máy tính cài phần mềm phải BẬT khi cần chấm công (nó là máy chủ). Tắt máy thì điện thoại/máy chấm công không gửi dữ liệu về được (máy chấm công sẽ giữ log và đẩy lại khi máy chủ bật lại).</p></details>
+      <details><summary>Điện thoại không cùng WiFi có chấm được không?</summary><p>Bản LAN thì không — điện thoại phải cùng mạng với máy chủ. Muốn chấm từ xa (4G, ngoài đường) thì dùng bản domain/VPS.</p></details>
+      <details><summary>Có cần đăng ký/cài SDK máy chấm công không?</summary><p>Không. Phần mềm nhận dữ liệu theo giao thức ADMS (máy tự đẩy về) — không cần zkemkeeper.dll, không cần cài SDK, không mở cổng 4370.</p></details>
+      <details><summary>Máy chấm công điền IP hay tên miền?</summary><p>Bản LAN điền IP máy chủ (nên đặt IP tĩnh) + Port 8686 + HTTP. Máy ZKTeco không nhận tên máy NetBIOS.</p></details>
+      <details><summary>Cập nhật có mất dữ liệu không?</summary><p>Không. Khi cập nhật, hệ thống tự sao lưu trước rồi mới thay code; dữ liệu chấm công/nhân viên giữ nguyên.</p></details>
+      <details><summary>Nhiều khách trên 1 máy/VPS được không?</summary><p>Được — mỗi khách một cổng khác nhau (8686, 8687…) và một thư mục riêng. CaiDat/GoCaiDat đã an toàn theo cổng, không đè nhau.</p></details>
+      <details><summary>Sao lưu dữ liệu thế nào?</summary><p>Copy 2 thư mục <b>app\data</b> (cơ sở dữ liệu) và <b>app\uploads</b> (ảnh chấm công). Phần mềm cũng có tự sao lưu hằng ngày trong Cài đặt.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">
+  <div><b>Digiplus — Chấm công thông minh.</b> Hướng dẫn cài đặt bản LAN cho đại lý.</div>
+  <div style="margin-top:6px">Hỗ trợ kỹ thuật · Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
+</div></footer>
+
+<button class="themebtn" id="tt">🌗 Giao diện</button>
+<script>
+(function(){var b=document.getElementById('tt');b.addEventListener('click',function(){var r=document.documentElement;var c=r.getAttribute('data-theme');if(!c){c=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}r.setAttribute('data-theme',c==='dark'?'light':'dark');});})();
+</script>
+</body>
+</html>
