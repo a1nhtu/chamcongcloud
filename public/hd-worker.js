@@ -198,7 +198,10 @@ async function handleProvision(request, env) {
       await cfProv(token, "POST", `/zones/${zoneId}/dns_records`, { type: "CNAME", name: fqdn, content, proxied: true });
 
     // 6) Nội dung config.txt (đúng định dạng launcher đọc) + số đã dùng
-    const configTxt = `PORT=${port}\nCUSTOMER=${slug}\nTUNNEL_TOKEN=${tunnelToken}\n`;
+    //    USE_DEVICE / USE_PHONE = chức năng chấm công đặt sẵn theo bộ cài (khỏi cần đăng nhập tài khoản tổng)
+    const useDevice = b.useDevice === false ? "0" : "1";
+    const usePhone = b.usePhone === false ? "0" : "1";
+    const configTxt = `PORT=${port}\nCUSTOMER=${slug}\nTUNNEL_TOKEN=${tunnelToken}\nUSE_DEVICE=${useDevice}\nUSE_PHONE=${usePhone}\n`;
     const used = await countCustomers(token, accountId);
     return jsonRes({
       ok: true, slug, mode, port, domain: `https://${fqdn}`,

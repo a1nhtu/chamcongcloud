@@ -2806,7 +2806,8 @@ async function pageSettings() {
   const modeShift = el('input', { type: 'radio', name: 'att-mode', value: 'shift', style: 'width:auto', ...(s.attendance_mode !== 'hourly' ? { checked: '' } : {}) });
   const modeHourly = el('input', { type: 'radio', name: 'att-mode', value: 'hourly', style: 'width:auto', ...(s.attendance_mode === 'hourly' ? { checked: '' } : {}) });
   const geoChk = el('input', { type: 'checkbox', id: 'st-geo', style: 'width:auto', ...(s.geofence_enforce === '1' ? { checked: '' } : {}) });
-  const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}) });
+  const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}), ...(s.use_device_locked ? { disabled: '' } : {}) });
+  const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}), ...(s.use_phone_locked ? { disabled: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
   const apprChk = el('input', { type: 'checkbox', id: 'st-appr', style: 'width:auto', ...(s.self_shift_approve !== '0' ? { checked: '' } : {}) });
@@ -2816,7 +2817,10 @@ async function pageSettings() {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value || 'shift';
     try {
       const body = { attendance_mode, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
-      if (isMaster()) body.device_enabled = devChk.checked;   // chỉ tài khoản tổng đổi được máy chấm công
+      if (isMaster()) {   // chỉ tài khoản tổng đổi được máy chấm công / chấm điện thoại
+        if (!s.use_device_locked) body.device_enabled = devChk.checked;
+        if (!s.use_phone_locked) body.phone_enabled = phoneChk.checked;
+      }
       await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
@@ -2844,12 +2848,23 @@ async function pageSettings() {
         el('div', {}, el('b', {}, 'Bỏ qua lần chấm trùng trong '), dedupI, el('b', {}, ' phút'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Đặt số phút (VD 10): lượt quẹt/chấm của cùng một người trong khoảng đó chỉ tính 1 lần — chống double-tap trên app và máy quẹt liên tiếp. Đặt 0 = tắt.'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
-      el('h3', { style: 'margin:0;font-size:15px' }, 'Máy chấm công (ZKTeco)'),
-      isMaster()
-        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, devChk,
-            el('div', {}, el('b', {}, 'Dùng máy chấm công'),
-              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật để nhận dữ liệu chấm công đẩy về từ máy ZKTeco (vân tay/khuôn mặt/thẻ). Cấu hình & duyệt máy ở menu “Máy chấm công”. Có thể dùng song song với chấm điện thoại.')))
-        : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.device_enabled === '1' ? 'Đang BẬT. ' : 'Đang TẮT. '), '🔒 Chỉ tài khoản tổng (Digiplus) bật/tắt được tính năng máy chấm công.'),
+      el('h3', { style: 'margin:0;font-size:15px' }, 'Hình thức chấm công'),
+      // Máy chấm công (ZKTeco)
+      s.use_device_locked
+        ? el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, '📟 Máy chấm công: ' + (s.device_enabled === '1' ? 'BẬT' : 'TẮT') + '. '), '🔧 Đặt sẵn theo bộ cài (config.txt) — muốn đổi thì sửa config.txt rồi khởi động lại phần mềm.')
+        : (isMaster()
+          ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, devChk,
+              el('div', {}, el('b', {}, '📟 Dùng máy chấm công (ZKTeco)'),
+                el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Nhận dữ liệu vân tay/khuôn mặt/thẻ đẩy về từ máy. Cấu hình & duyệt máy ở menu “Máy chấm công”.')))
+          : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.device_enabled === '1' ? '📟 Máy chấm công đang BẬT. ' : '📟 Máy chấm công đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.')),
+      // Chấm công điện thoại (selfie + GPS)
+      s.use_phone_locked
+        ? el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, '📱 Chấm công điện thoại: ' + (s.phone_enabled !== '0' ? 'BẬT' : 'TẮT') + '. '), '🔧 Đặt sẵn theo bộ cài (config.txt).')
+        : (isMaster()
+          ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, phoneChk,
+              el('div', {}, el('b', {}, '📱 Dùng chấm công điện thoại (ảnh + định vị)'),
+                el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Tắt nếu công ty chỉ dùng máy chấm công — nhân viên sẽ không thấy nút chấm công trên app điện thoại.')))
+          : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.phone_enabled !== '0' ? '📱 Chấm điện thoại đang BẬT. ' : '📱 Chấm điện thoại đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.')),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Nhân viên tự chọn ca'),
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, selfChk,

@@ -482,6 +482,8 @@ function migrateColumns() {
   if (getSetting('geofence_enforce') == null) setSetting('geofence_enforce', '0');
   // Máy chấm công (ZKTeco ADMS push): '0' = không dùng (mặc định), '1' = dùng máy chấm công
   if (getSetting('device_enabled') == null) setSetting('device_enabled', '0');
+  // Chấm công điện thoại (selfie + định vị GPS): '1' = dùng (mặc định), '0' = tắt (chỉ dùng máy chấm công)
+  if (getSetting('phone_enabled') == null) setSetting('phone_enabled', '1');
   // Tự tạo NV khi máy đăng ký vân tay: '1' = tự tạo NV nháp (mặc định), '0' = chỉ ghi nhận chờ gán tay
   if (getSetting('device_autocreate') == null) setSetting('device_autocreate', '1');
   // Bắt buộc KEY theo máy: '0' = tắt (mặc định, giữ khách cũ chạy), '1' = máy phải có key Digiplus cấp mới duyệt được
@@ -506,6 +508,16 @@ function migrateColumns() {
     const ins = db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)');
     for (const r of names) ins.run(r.department);
   }
+
+  // Chức năng chấm công đặt SẴN theo bộ cài (config.txt) — KHÔNG cần đăng nhập tài khoản tổng.
+  //   USE_DEVICE=1/0 -> bật/tắt máy chấm công ; USE_PHONE=1/0 -> bật/tắt chấm công điện thoại.
+  //   Chỉ áp khi config có ghi rõ '0' hoặc '1' (bản cũ không có 2 dòng này thì giữ nguyên như trước).
+  const applyEnvFlag = (envName, settingName) => {
+    const v = process.env[envName];
+    if (v === '0' || v === '1') setSetting(settingName, v);
+  };
+  applyEnvFlag('USE_DEVICE', 'device_enabled');
+  applyEnvFlag('USE_PHONE', 'phone_enabled');
 }
 
 export function getSetting(key, fallback = null) {

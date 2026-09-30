@@ -39,6 +39,9 @@ writeFileSync(join(OUT, 'config.txt'),
 `PORT=8686
 CUSTOMER=
 TUNNEL_TOKEN=
+# Hinh thuc cham cong dat san (1 la bat, 0 la tat) - khoi can dang nhap tai khoan tong
+USE_DEVICE=1
+USE_PHONE=1
 ${masterLines}`);
 
 // Launcher chạy ẩn (không hiện cửa sổ đen)

@@ -121,11 +121,13 @@ r.get('/today', (req, res) => {
     else device.state = 'mismatch';
   }
   res.json({ date, attendance: row || null, todayRows: rows, state, expected, completed, dayShiftNames,
-    todayShift: shift, dayOff, autoDetect, mode, geofence, device });
+    todayShift: shift, dayOff, autoDetect, mode, geofence, device,
+    phoneEnabled: getSetting('phone_enabled', '1') === '1' });
 });
 
 // Chấm VÀO CA
 r.post('/check-in', (req, res) => {
+  if (getSetting('phone_enabled', '1') !== '1') return res.status(403).json({ error: 'Chấm công điện thoại đã tắt. Vui lòng chấm công bằng máy chấm công.', code: 'phone_off' });
   const { lat, lng, photo, accuracy } = req.body || {};
   if (lat == null || lng == null) return res.status(400).json({ error: 'Không lấy được vị trí GPS' });
   if (!photo) return res.status(400).json({ error: 'Cần chụp ảnh xác nhận' });
@@ -201,6 +203,7 @@ r.post('/check-in', (req, res) => {
 
 // Chấm RA CA
 r.post('/check-out', (req, res) => {
+  if (getSetting('phone_enabled', '1') !== '1') return res.status(403).json({ error: 'Chấm công điện thoại đã tắt. Vui lòng chấm công bằng máy chấm công.', code: 'phone_off' });
   const { lat, lng, photo } = req.body || {};
   if (lat == null || lng == null) return res.status(400).json({ error: 'Không lấy được vị trí GPS' });
   if (!photo) return res.status(400).json({ error: 'Cần chụp ảnh xác nhận' });

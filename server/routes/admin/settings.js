@@ -16,6 +16,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
+      phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)
+      // Nếu bộ cài (config.txt) có đặt sẵn USE_DEVICE/USE_PHONE thì 2 mục này do bộ cài quyết (khoá UI)
+      use_device_locked: process.env.USE_DEVICE === '0' || process.env.USE_DEVICE === '1',
+      use_phone_locked: process.env.USE_PHONE === '0' || process.env.USE_PHONE === '1',
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
@@ -42,6 +46,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     // Bật/tắt tính năng MÁY CHẤM CÔNG: CHỈ tài khoản tổng mới đổi được
     if (req.user.master) {
       if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');
+      if (b.phone_enabled != null) setSetting('phone_enabled', b.phone_enabled ? '1' : '0');
       if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
       if (b.device_key_required != null) setSetting('device_key_required', b.device_key_required ? '1' : '0');
     }

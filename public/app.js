@@ -123,6 +123,13 @@ async function renderCham() {
   );
   c.append(grid);
 
+  // Chấm công điện thoại bị TẮT (công ty chỉ dùng máy chấm công) → không hiện nút chấm
+  if (data.phoneEnabled === false) {
+    c.append(el('div', { class: 'status-banner', style: 'background:#fef3c7;color:#92400e',
+      html: '🖐️ Công ty này chấm công bằng <b>máy chấm công</b>. Chấm công trên điện thoại đã tắt — bạn vui lòng quẹt vân tay/khuôn mặt tại máy.' }));
+    return;
+  }
+
   // Cảnh báo khoá thiết bị (chống chấm hộ)
   if (data.device && data.device.lock && data.device.state !== 'ok') {
     if (data.device.state === 'pending') {

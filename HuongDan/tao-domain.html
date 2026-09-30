@@ -67,6 +67,11 @@ input:focus,select:focus{border-color:var(--brand)}
       <div><label>Cổng app</label><input id="port" class="mono" value="8686" inputmode="numeric"></div>
     </div>
     <div class="note" style="margin-top:12px">📟 <span>Máy chấm công (nếu KHÔNG cùng mạng LAN với máy chạy phần mềm): vào máy → mục Cloud/ADMS/Comm → <b>Server address</b> = <span class="mono" id="preview2">…</span>.maychamcongcloud.com, <b>Port 443</b>, bật SSL/HTTPS. Nếu cùng LAN thì trỏ IP LAN của máy chạy app cho nhanh.</span></div>
+    <label style="margin-top:14px">Hình thức chấm công cho khách này</label>
+    <div class="rowck"><input type="checkbox" id="use-device" checked style="width:auto"> <label for="use-device" style="margin:0;font-weight:500">📟 Máy chấm công (ZKTeco vân tay/khuôn mặt)</label></div>
+    <div class="rowck"><input type="checkbox" id="use-phone" checked style="width:auto"> <label for="use-phone" style="margin:0;font-weight:500">📱 Định vị điện thoại (chụp ảnh + GPS)</label></div>
+    <div class="suffix">Tích 1 hoặc cả 2. Đặt sẵn vào bộ cài → khách/kỹ thuật KHỎI cần đăng nhập tài khoản tổng để bật.</div>
+
     <button class="btn" id="go">Tạo domain + Tải bộ cài</button>
     <div class="err" id="err"></div>
     <div class="status" id="status"></div>
@@ -111,15 +116,17 @@ $('go').onclick = async () => {
   const slug=$('slug').value.trim().toLowerCase();
   const mode=$('mode').value;
   const port=$('port').value.trim()||'8686';
+  const useDevice=$('use-device').checked, usePhone=$('use-phone').checked;
   err(''); $('out').style.display='none';
   if(!pass){ err('Nhập mật khẩu trước.'); return; }
   if(!/^[a-z0-9]([a-z0-9-]{0,40}[a-z0-9])?$/.test(slug)){ err('Tên công ty không hợp lệ (chỉ chữ thường, số, gạch ngang).'); return; }
+  if(!useDevice && !usePhone){ err('Chọn ít nhất 1 hình thức chấm công (máy hoặc điện thoại).'); return; }
   try { if($('remember').checked) sessionStorage.setItem('dp_dom_pass', pass); else sessionStorage.removeItem('dp_dom_pass'); } catch {}
 
   setBusy(true); progress(null);
   try {
     status('Đang tạo domain trên máy chủ…');
-    const r = await fetch('/api/tao-domain', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pass, slug, mode, port }) });
+    const r = await fetch('/api/tao-domain', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pass, slug, mode, port, useDevice, usePhone }) });
     const d = await r.json();
     if(!r.ok){ err(d.error || ('Lỗi '+r.status)); status(''); setBusy(false); return; }
 
@@ -137,7 +144,7 @@ $('go').onclick = async () => {
     $('o-domain').textContent = d.domain; $('o-domain').href = d.domain;
     $('o-file').textContent = slug + '_BoCai.zip';
     $('o-quota').textContent = 'Hạn mức: đã dùng ' + d.count + '/' + d.quota + ' — còn ' + d.remaining + ' domain' + (d.reused ? '  (domain đã có từ trước, không tính thêm)' : '');
-    $('o-device').textContent = '📟 Máy chấm công (nếu khác LAN): Server = ' + slug + '.maychamcongcloud.com, Port 443, bật SSL.';
+    $('o-device').textContent = (useDevice ? '📟 Máy chấm công (nếu khác LAN): Server = ' + slug + '.maychamcongcloud.com, Port 443, bật SSL. ' : '') + (usePhone ? '📱 Có chấm công điện thoại.' : '📱 Đã TẮT chấm điện thoại (chỉ dùng máy).');
     $('out').style.display='block';
     $('out').scrollIntoView({ behavior:'smooth' });
   } catch(e) {
