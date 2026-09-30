@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Cấp License — Digiplus (nội bộ)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{--paper:#FBF4EF;--surface:#fff;--surface-2:#FDF7F3;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;
+  --brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--brand-wash:#FCEBE2;--green:#15803D;--green-bg:#DCFCE7;
+  --shadow:0 10px 34px rgba(80,30,10,.10);--shadow-sm:0 4px 14px rgba(80,30,10,.08)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;--brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;--green:#4ADE80;--green-bg:#123222}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.6}
+.top{background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:22px 0}
+.wrap{max-width:640px;margin:0 auto;padding:0 18px}
+.top h1{margin:0;font-size:22px;font-weight:800}.top p{margin:4px 0 0;font-size:13.5px;opacity:.92}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-sm);padding:20px;margin:18px 0}
+.card h2{margin:0 0 4px;font-size:18px}
+.card .hint{font-size:13px;color:var(--muted);margin-bottom:6px}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:12px 0 6px}
+input,select{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:11px;font-size:15px;background:var(--surface);color:var(--ink);outline:none;font-family:inherit}
+input:focus,select:focus{border-color:var(--brand)}
+.mono{font-family:'JetBrains Mono',monospace}
+.row{display:flex;gap:12px}.row>div{flex:1}
+.btn{margin-top:16px;width:100%;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:13px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn:active{transform:translateY(1px)}
+.btn[disabled]{opacity:.6;cursor:default}
+textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:11px;font-family:'JetBrains Mono',monospace;font-size:12.5px;background:var(--surface-2);color:var(--ink)}
+.out{display:none;margin-top:14px}
+.pill{display:inline-block;background:var(--green-bg);color:var(--green);border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:700}
+.meta{font-size:12.5px;color:var(--muted);margin:8px 0}
+.copy{margin-top:8px;width:100%;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:11px;padding:10px;font-weight:700;cursor:pointer;font-family:inherit}
+.note{display:flex;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:11px;padding:12px 14px;font-size:13.5px;margin-top:8px}
+.err{color:var(--brand-2);font-size:13.5px;margin-top:8px;min-height:1em}
+.passbar{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm);margin:18px 0}
+.passbar label{margin-top:0}
+.rowck{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap"><h1>🔑 Cấp License — Digiplus</h1><p>Công cụ NỘI BỘ. Ký số trên máy chủ (Cloudflare) — khoá riêng không lộ. Không chia sẻ link này.</p></div></div>
+<div class="wrap">
+
+  <div class="passbar">
+    <label>Mật khẩu cấp license</label>
+    <input id="pass" type="password" placeholder="Nhập mật khẩu (chỉ Anh biết)" autocomplete="current-password">
+    <div class="rowck"><input type="checkbox" id="remember" style="width:auto"> <label for="remember" style="margin:0;font-weight:500">Nhớ trong phiên này</label></div>
+  </div>
+
+  <!-- LICENSE PHẦN MỀM -->
+  <div class="card">
+    <h2>🖥️ Cấp License phần mềm</h2>
+    <div class="hint">Gắn theo Mã máy của khách (khách gửi từ màn Kích hoạt).</div>
+    <label>Mã máy của khách</label>
+    <input id="l-machine" class="mono" placeholder="VD: 103B-E555-114A-6CD3" style="font-weight:700">
+    <label>Tên công ty khách</label>
+    <input id="l-company" placeholder="VD: Công ty TNHH ABC">
+    <div class="row">
+      <div><label>Loại bản quyền</label>
+        <select id="l-type"><option value="perm">Vĩnh viễn (mua đứt)</option><option value="exp">Có hạn (thuê bao)</option></select></div>
+      <div><label>Ngày hết hạn</label><input id="l-exp" type="date" disabled></div>
+    </div>
+    <label>Giới hạn số nhân viên (trống = không giới hạn)</label>
+    <input id="l-max" type="number" min="1" placeholder="VD: 50">
+    <button class="btn" id="l-go">Tạo License</button>
+    <div class="err" id="l-err"></div>
+    <div class="out" id="l-out">
+      <span class="pill">✓ Đã tạo license</span>
+      <div class="meta" id="l-meta"></div>
+      <textarea id="l-res" rows="5" readonly></textarea>
+      <button class="copy" id="l-copy">📋 Copy license</button>
+    </div>
+  </div>
+
+  <!-- KEY MÁY CHẤM CÔNG -->
+  <div class="card">
+    <h2>🖥️ Cấp KEY máy chấm công</h2>
+    <div class="hint">Gắn theo Serial máy (khách lấy trong mục Máy chấm công).</div>
+    <label>Serial máy</label>
+    <input id="d-serial" class="mono" placeholder="VD: CJHK230160XXXX" style="font-weight:700">
+    <label>Tên công ty khách (tuỳ chọn)</label>
+    <input id="d-company" placeholder="VD: Công ty TNHH ABC">
+    <div class="row">
+      <div><label>Loại key</label>
+        <select id="d-type"><option value="perm">Vĩnh viễn</option><option value="exp">Có hạn</option></select></div>
+      <div><label>Ngày hết hạn</label><input id="d-exp" type="date" disabled></div>
+    </div>
+    <button class="btn" id="d-go">Tạo key máy</button>
+    <div class="err" id="d-err"></div>
+    <div class="out" id="d-out">
+      <span class="pill">✓ Đã tạo key máy</span>
+      <div class="meta" id="d-meta"></div>
+      <textarea id="d-res" rows="5" readonly></textarea>
+      <button class="copy" id="d-copy">📋 Copy key</button>
+    </div>
+  </div>
+
+  <div class="note"><span>🔒</span><div>Nếu báo "Máy chủ chưa cấu hình khoá/mật khẩu": vào Cloudflare Pages (project huongdan) → Settings → Variables and Secrets, thêm 2 secret <b>LICENSE_PRIVATE_KEY</b> (nội dung file private.pem) và <b>LICENSE_ADMIN_PASS</b> (mật khẩu) rồi deploy lại.</div></div>
+  <div style="height:30px"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+// Nhớ mật khẩu trong phiên (tiện, không lưu vĩnh viễn)
+try { const p = sessionStorage.getItem('dp_lic_pass'); if (p) { $('pass').value = p; $('remember').checked = true; } } catch {}
+$('l-type').onchange = () => { $('l-exp').disabled = $('l-type').value !== 'exp'; };
+$('d-type').onchange = () => { $('d-exp').disabled = $('d-type').value !== 'exp'; };
+
+function savePass() {
+  try { if ($('remember').checked) sessionStorage.setItem('dp_lic_pass', $('pass').value); else sessionStorage.removeItem('dp_lic_pass'); } catch {}
+}
+
+async function call(endpoint, body, btn, errEl) {
+  const pass = $('pass').value.trim();
+  if (!pass) { errEl.textContent = 'Nhập mật khẩu trước.'; return null; }
+  savePass();
+  btn.disabled = true; const old = btn.textContent; btn.textContent = 'Đang tạo…'; errEl.textContent = '';
+  try {
+    const r = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass, ...body }) });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = d.error || ('Lỗi ' + r.status); return null; }
+    return d;
+  } catch (e) { errEl.textContent = 'Không gọi được máy chủ: ' + e.message; return null; }
+  finally { btn.disabled = false; btn.textContent = old; }
+}
+
+$('l-go').onclick = async () => {
+  const machine = $('l-machine').value.trim(), company = $('l-company').value.trim();
+  if (!machine || !company) { $('l-err').textContent = 'Nhập Mã máy và Tên công ty.'; return; }
+  const exp = $('l-type').value === 'exp' ? $('l-exp').value : '';
+  if ($('l-type').value === 'exp' && !exp) { $('l-err').textContent = 'Chọn ngày hết hạn.'; return; }
+  const d = await call('/api/gen-license', { machine, company, exp, max: $('l-max').value }, $('l-go'), $('l-err'));
+  if (!d) return;
+  $('l-res').value = d.license;
+  $('l-meta').textContent = 'Công ty: ' + d.payload.c + ' · Máy: ' + d.payload.m + ' · Hạn: ' + (d.payload.e || 'vĩnh viễn') + ' · Tối đa NV: ' + (d.payload.n || 'không giới hạn');
+  $('l-out').style.display = 'block'; $('l-out').scrollIntoView({ behavior: 'smooth' });
+};
+$('d-go').onclick = async () => {
+  const serial = $('d-serial').value.trim();
+  if (!serial) { $('d-err').textContent = 'Nhập Serial máy.'; return; }
+  const exp = $('d-type').value === 'exp' ? $('d-exp').value : '';
+  if ($('d-type').value === 'exp' && !exp) { $('d-err').textContent = 'Chọn ngày hết hạn.'; return; }
+  const d = await call('/api/gen-device', { serial, company: $('d-company').value.trim(), exp }, $('d-go'), $('d-err'));
+  if (!d) return;
+  $('d-res').value = d.key;
+  $('d-meta').textContent = 'Serial: ' + d.payload.s + ' · Công ty: ' + (d.payload.c || '-') + ' · Hạn: ' + (d.payload.e || 'vĩnh viễn');
+  $('d-out').style.display = 'block'; $('d-out').scrollIntoView({ behavior: 'smooth' });
+};
+function copyBox(taId, btn, label) {
+  const ta = $(taId); ta.select();
+  try { document.execCommand('copy'); } catch {}
+  if (navigator.clipboard) navigator.clipboard.writeText(ta.value).catch(() => {});
+  const old = btn.textContent; btn.textContent = '✓ Đã copy'; setTimeout(() => btn.textContent = old, 1500);
+}
+$('l-copy').onclick = () => copyBox('l-res', $('l-copy'));
+$('d-copy').onclick = () => copyBox('d-res', $('d-copy'));
+</script>
+</body>
+</html>
