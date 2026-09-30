@@ -98,6 +98,135 @@ async function handleSign(request, env, kind) {
   } catch (e) { return jsonRes({ error: "Lỗi ký: " + e.message }, 500); }
 }
 
+/* ============================================================
+   CẤP DOMAIN ONLINE cho KỸ THUẬT (có QUOTA + mật khẩu riêng)
+   → route /api/tao-domain. Token Cloudflare là SECRET (CF_PROVISION_TOKEN),
+     mật khẩu riêng DOMAIN_ADMIN_PASS (KHÁC mật khẩu cấp license),
+     hạn mức DOMAIN_QUOTA (mặc định 100) = đếm số tunnel digiplus-* đang sống.
+   Kỹ thuật nghỉ việc → đổi DOMAIN_ADMIN_PASS là khóa ngay, token CF không lộ.
+   ============================================================ */
+const CF_API = "https://api.cloudflare.com/client/v4";
+const slugOkProv = (s) => /^[a-z0-9]([a-z0-9-]{0,40}[a-z0-9])?$/.test(s);
+
+async function cfProv(token, method, path, body) {
+  const res = await fetch(CF_API + path, {
+    method,
+    headers: { Authorization: "Bearer " + token, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!data.success) {
+    const msg = (data.errors || []).map((e) => `${e.code} ${e.message}`).join("; ") || `HTTP ${res.status}`;
+    throw new Error(`Cloudflare API lỗi (${method} ${path}): ${msg}`);
+  }
+  return data.result;
+}
+
+// Đếm số khách (tunnel digiplus-*) đang sống — có phân trang
+async function countCustomers(token, accountId) {
+  let page = 1, total = 0;
+  for (;;) {
+    const list = await cfProv(token, "GET",
+      `/accounts/${accountId}/cfd_tunnel?is_deleted=false&per_page=100&page=${page}`);
+    if (!Array.isArray(list) || list.length === 0) break;
+    total += list.filter((t) => (t.name || "").startsWith("digiplus-")).length;
+    if (list.length < 100) break;
+    page++;
+    if (page > 50) break; // chặn vòng vô hạn
+  }
+  return total;
+}
+
+async function handleProvision(request, env) {
+  if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
+  if (!env.CF_PROVISION_TOKEN || !env.DOMAIN_ADMIN_PASS)
+    return jsonRes({ error: "Máy chủ chưa cấu hình cấp domain (đặt Secret CF_PROVISION_TOKEN + DOMAIN_ADMIN_PASS trong Cloudflare)." }, 503);
+
+  let b;
+  try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
+  if (!b || !safeEqual(b.pass || "", env.DOMAIN_ADMIN_PASS)) return jsonRes({ error: "Sai mật khẩu cấp domain" }, 401);
+
+  const slug = String(b.slug || "").toLowerCase().trim();
+  if (!slugOkProv(slug)) return jsonRes({ error: "Tên công ty không hợp lệ (chỉ chữ thường, số, gạch ngang; vd: congtyabc)." }, 400);
+  const mode = b.mode === "vps" ? "vps" : "office";
+  const port = parseInt(b.port || "8686", 10) || 8686;
+
+  const token = env.CF_PROVISION_TOKEN;
+  const zoneName = env.CF_ZONE || "maychamcongcloud.com";
+  const quota = parseInt(env.DOMAIN_QUOTA || "100", 10) || 100;
+  const fqdn = `${slug}.${zoneName}`;
+  const tname = `digiplus-${slug}`;
+
+  try {
+    // 1) Zone + account id
+    const zones = await cfProv(token, "GET", `/zones?name=${encodeURIComponent(zoneName)}`);
+    if (!zones.length) return jsonRes({ error: `Không tìm thấy zone "${zoneName}" trên Cloudflare.` }, 500);
+    const zoneId = zones[0].id;
+    let accountId = env.CF_ACCOUNT_ID || zones[0].account?.id;
+    if (!accountId) {
+      const accts = await cfProv(token, "GET", "/accounts");
+      if (!accts.length) return jsonRes({ error: "Không lấy được account id (đặt CF_ACCOUNT_ID)." }, 500);
+      accountId = accts[0].id;
+    }
+
+    // 2) Tunnel: dùng lại nếu đã có (không tính quota); nếu MỚI → kiểm tra hạn mức
+    const tunnels = await cfProv(token, "GET",
+      `/accounts/${accountId}/cfd_tunnel?name=${encodeURIComponent(tname)}&is_deleted=false`);
+    let tunnel = tunnels.find((t) => t.name === tname);
+    let reused = !!tunnel;
+    if (!tunnel) {
+      const used = await countCustomers(token, accountId);
+      if (used >= quota)
+        return jsonRes({ error: `Đã đạt hạn mức ${quota} domain (đang dùng ${used}). Liên hệ quản trị để nâng hạn mức.`, count: used, quota }, 403);
+      tunnel = await cfProv(token, "POST", `/accounts/${accountId}/cfd_tunnel`, { name: tname, config_src: "cloudflare" });
+    }
+
+    // 3) Token tunnel
+    const tunnelToken = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel/${tunnel.id}/token`);
+
+    // 4) Ingress fqdn → localhost:PORT
+    await cfProv(token, "PUT", `/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
+      config: { ingress: [{ hostname: fqdn, service: `http://localhost:${port}` }, { service: "http_status:404" }] },
+    });
+
+    // 5) DNS CNAME fqdn → <tunnelid>.cfargotunnel.com (proxied)
+    const content = `${tunnel.id}.cfargotunnel.com`;
+    const recs = await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(fqdn)}`);
+    if (recs.length)
+      await cfProv(token, "PUT", `/zones/${zoneId}/dns_records/${recs[0].id}`, { type: "CNAME", name: fqdn, content, proxied: true });
+    else
+      await cfProv(token, "POST", `/zones/${zoneId}/dns_records`, { type: "CNAME", name: fqdn, content, proxied: true });
+
+    // 6) Nội dung config.txt (đúng định dạng launcher đọc) + số đã dùng
+    const configTxt = `PORT=${port}\nCUSTOMER=${slug}\nTUNNEL_TOKEN=${tunnelToken}\n`;
+    const used = await countCustomers(token, accountId);
+    return jsonRes({
+      ok: true, slug, mode, port, domain: `https://${fqdn}`,
+      customer: slug, tunnelToken, configTxt,
+      reused, count: used, quota, remaining: Math.max(0, quota - used),
+    });
+  } catch (e) {
+    return jsonRes({ error: "Lỗi tạo domain: " + e.message }, 500);
+  }
+}
+
+// Proxy bộ cài BASE (neutral) từ link ngoài (GitHub Release...) qua CÙNG tên miền
+// → trang tao-domain.html tải về ghép config, KHÔNG dính lỗi CORS.
+async function handleBaseZip(request, env) {
+  if (!env.BASE_ZIP_URL)
+    return jsonRes({ error: "Chưa cấu hình BASE_ZIP_URL (link bộ cài base) trên Cloudflare." }, 503);
+  const upstream = await fetch(env.BASE_ZIP_URL, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 3600 } });
+  if (!upstream.ok || !upstream.body)
+    return jsonRes({ error: "Không tải được bộ cài base (HTTP " + upstream.status + ")." }, 502);
+  const headers = new Headers();
+  headers.set("content-type", "application/zip");
+  const len = upstream.headers.get("content-length");
+  if (len) headers.set("content-length", len);
+  headers.set("cache-control", "public, max-age=3600");
+  headers.set("access-control-allow-origin", "*");
+  return new Response(upstream.body, { status: 200, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -105,13 +234,15 @@ export default {
     // API cấp license / key máy (ký số phía server)
     if (url.pathname === "/api/gen-license") return handleSign(request, env, "license");
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
+    if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
+    if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
 
     const res = await env.ASSETS.fetch(request);
 
     const ct = res.headers.get("content-type") || "";
     if (!ct.includes("text/html")) return res;   // chỉ xử lý trang HTML
-    // Trang cấp license: KHÔNG tiêm quảng cáo/đại lý, giữ nguyên
-    if (url.pathname.startsWith("/cap-license")) return res;
+    // Trang nội bộ (cấp license / cấp domain): KHÔNG tiêm quảng cáo/đại lý, giữ nguyên
+    if (url.pathname.startsWith("/cap-license") || url.pathname.startsWith("/tao-domain")) return res;
 
     const code = (url.searchParams.get("dl") || url.searchParams.get("daily") || "").trim().toLowerCase();
     const d = (code && DAILY[code]) ? DAILY[code] : MAC_DINH;

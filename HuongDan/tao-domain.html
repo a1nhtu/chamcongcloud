@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Tạo khách — Digiplus (nội bộ)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+:root{--paper:#FBF4EF;--surface:#fff;--surface-2:#FDF7F3;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;
+  --brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--brand-wash:#FCEBE2;--green:#15803D;--green-bg:#DCFCE7;
+  --shadow-sm:0 4px 14px rgba(80,30,10,.08)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;--brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;--green:#4ADE80;--green-bg:#123222}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.6}
+.top{background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:22px 0}
+.wrap{max-width:640px;margin:0 auto;padding:0 18px}
+.top h1{margin:0;font-size:22px;font-weight:800}.top p{margin:4px 0 0;font-size:13.5px;opacity:.92}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-sm);padding:20px;margin:18px 0}
+.card h2{margin:0 0 4px;font-size:18px}
+.card .hint{font-size:13px;color:var(--muted);margin-bottom:6px}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:12px 0 6px}
+input,select{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius:11px;font-size:15px;background:var(--surface);color:var(--ink);outline:none;font-family:inherit}
+input:focus,select:focus{border-color:var(--brand)}
+.mono{font-family:'JetBrains Mono',monospace}
+.row{display:flex;gap:12px}.row>div{flex:1}
+.suffix{font-size:13px;color:var(--muted);margin-top:6px}
+.btn{margin-top:18px;width:100%;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn:active{transform:translateY(1px)}
+.btn[disabled]{opacity:.6;cursor:default}
+.passbar{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm);margin:18px 0}
+.passbar label{margin-top:0}
+.rowck{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;color:var(--muted)}
+.err{color:var(--brand-2);font-size:13.5px;margin-top:10px;min-height:1em}
+.status{display:none;margin-top:14px;font-size:14px;color:var(--brand-ink);font-weight:600}
+.bar{height:8px;background:var(--brand-wash);border-radius:999px;overflow:hidden;margin-top:8px;display:none}
+.bar>i{display:block;height:100%;width:0;background:var(--brand);transition:width .2s}
+.out{display:none;margin-top:16px;background:var(--green-bg);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.out .pill{display:inline-block;background:var(--green);color:#fff;border-radius:999px;padding:3px 12px;font-size:12.5px;font-weight:700}
+.out .line{font-size:14px;margin:8px 0 0}
+.out a{color:var(--brand-ink);font-weight:700;word-break:break-all}
+.quota{font-weight:700}
+.note{display:flex;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:11px;padding:12px 14px;font-size:13px;margin-top:10px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap"><h1>🏢 Tạo khách mới — Digiplus</h1><p>Gõ tên công ty → tạo domain → tải bộ cài hoàn chỉnh. Công cụ NỘI BỘ, không chia sẻ link.</p></div></div>
+<div class="wrap">
+
+  <div class="passbar">
+    <label>Mật khẩu cấp domain</label>
+    <input id="pass" type="password" placeholder="Nhập mật khẩu (do quản trị cấp)" autocomplete="current-password">
+    <div class="rowck"><input type="checkbox" id="remember" style="width:auto"> <label for="remember" style="margin:0;font-weight:500">Nhớ trong phiên này</label></div>
+  </div>
+
+  <div class="card">
+    <h2>Thông tin khách</h2>
+    <div class="hint">Tên viết liền không dấu (vd: congtyabc) → thành congtyabc.maychamcongcloud.com</div>
+    <label>Tên công ty</label>
+    <input id="slug" class="mono" placeholder="congtyabc" style="font-weight:700" autocapitalize="off" spellcheck="false">
+    <div class="suffix">→ <span id="preview" class="mono">…</span>.maychamcongcloud.com</div>
+    <div class="row">
+      <div><label>Chế độ cài</label>
+        <select id="mode"><option value="office">Văn phòng khách (chạy tại chỗ)</option><option value="vps">Server VPS bên Anh</option></select></div>
+      <div><label>Cổng app</label><input id="port" class="mono" value="8686" inputmode="numeric"></div>
+    </div>
+    <button class="btn" id="go">Tạo domain + Tải bộ cài</button>
+    <div class="err" id="err"></div>
+    <div class="status" id="status"></div>
+    <div class="bar" id="bar"><i></i></div>
+
+    <div class="out" id="out">
+      <span class="pill">✓ Đã tạo xong — bộ cài đang tải về</span>
+      <div class="line">Domain: <a id="o-domain" href="#" target="_blank"></a></div>
+      <div class="line">Bộ cài: <b id="o-file"></b> (kiểm tra thư mục Tải xuống)</div>
+      <div class="line quota" id="o-quota"></div>
+      <div class="note">Gửi file <b>_BoCai.zip</b> cho khách. Khách giải nén → bấm <b>CaiDat.bat</b> là chạy.</div>
+    </div>
+  </div>
+
+  <div style="height:24px"></div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+try { const p = sessionStorage.getItem('dp_dom_pass'); if (p) { $('pass').value = p; $('remember').checked = true; } } catch {}
+$('slug').addEventListener('input', () => { $('preview').textContent = ($('slug').value.trim().toLowerCase() || '…'); });
+
+function setBusy(b){ $('go').disabled = b; $('go').textContent = b ? 'Đang xử lý…' : 'Tạo domain + Tải bộ cài'; }
+function err(m){ $('err').textContent = m || ''; }
+function status(m){ $('status').style.display = m ? 'block' : 'none'; $('status').textContent = m || ''; }
+function progress(pct){ const bar=$('bar'); if(pct==null){bar.style.display='none';return;} bar.style.display='block'; bar.firstElementChild.style.width=Math.max(0,Math.min(100,pct))+'%'; }
+function download(blob, name){ const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download=name; document.body.appendChild(a); a.click(); setTimeout(()=>{URL.revokeObjectURL(a.href); a.remove();},3000); }
+
+async function fetchBase(){
+  const res = await fetch('/api/base-zip');
+  if(!res.ok){ let e='HTTP '+res.status; try{e=(await res.json()).error||e;}catch{} throw new Error('Tải bộ cài base lỗi: '+e); }
+  const total = +(res.headers.get('content-length')||0);
+  if(!res.body || !total) return await res.blob();
+  const reader=res.body.getReader(); const chunks=[]; let got=0;
+  for(;;){ const {done,value}=await reader.read(); if(done)break; chunks.push(value); got+=value.length; status('Đang tải bộ cài ('+(total/1048576).toFixed(0)+'MB)…'); progress(got/total*100); }
+  return new Blob(chunks,{type:'application/zip'});
+}
+
+$('go').onclick = async () => {
+  const pass=$('pass').value.trim();
+  const slug=$('slug').value.trim().toLowerCase();
+  const mode=$('mode').value;
+  const port=$('port').value.trim()||'8686';
+  err(''); $('out').style.display='none';
+  if(!pass){ err('Nhập mật khẩu trước.'); return; }
+  if(!/^[a-z0-9]([a-z0-9-]{0,40}[a-z0-9])?$/.test(slug)){ err('Tên công ty không hợp lệ (chỉ chữ thường, số, gạch ngang).'); return; }
+  try { if($('remember').checked) sessionStorage.setItem('dp_dom_pass', pass); else sessionStorage.removeItem('dp_dom_pass'); } catch {}
+
+  setBusy(true); progress(null);
+  try {
+    status('Đang tạo domain trên máy chủ…');
+    const r = await fetch('/api/tao-domain', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pass, slug, mode, port }) });
+    const d = await r.json();
+    if(!r.ok){ err(d.error || ('Lỗi '+r.status)); status(''); setBusy(false); return; }
+
+    const baseBlob = await fetchBase();
+    progress(null);
+    status('Đang ghép cấu hình vào bộ cài…');
+    const zip = await JSZip.loadAsync(baseBlob);
+    let key = Object.keys(zip.files).find(k => k.replace(/\\/g,'/').toLowerCase().endsWith('digipluschamcong/config.txt'));
+    if(key) zip.remove(key); else key = 'DigiplusChamCong\\config.txt';
+    zip.file(key, d.configTxt);
+    const outBlob = await zip.generateAsync({ type:'blob', compression:'DEFLATE' }, (m)=>{ status('Đang đóng gói bộ cài… '+Math.round(m.percent)+'%'); progress(m.percent); });
+
+    download(outBlob, slug + '_BoCai.zip');
+    progress(null); status('');
+    $('o-domain').textContent = d.domain; $('o-domain').href = d.domain;
+    $('o-file').textContent = slug + '_BoCai.zip';
+    $('o-quota').textContent = 'Hạn mức: đã dùng ' + d.count + '/' + d.quota + ' — còn ' + d.remaining + ' domain' + (d.reused ? '  (domain đã có từ trước, không tính thêm)' : '');
+    $('out').style.display='block';
+    $('out').scrollIntoView({ behavior:'smooth' });
+  } catch(e) {
+    status(''); progress(null); err('Lỗi: ' + e.message);
+  }
+  setBusy(false);
+};
+</script>
+</body>
+</html>
