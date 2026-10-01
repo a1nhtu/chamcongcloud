@@ -301,7 +301,7 @@ function rowToday(r) {
     el('td', {}, photoCell(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
-    el('td', {}, r.check_in_hm || '—'),
+    el('td', {}, (r.check_in_hm || '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
     ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
     el('td', {}, r.check_in_outside ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m)) : el('span', { class: 'pill ok' }, 'Trong VP')),
     el('td', {}, r.check_out_hm || el('span', { class: 'pill muted' }, 'chưa ra')),
