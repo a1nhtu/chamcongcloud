@@ -1,5 +1,5 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
-import { db, getSetting } from './db.js';
+import { db, getSetting, adminAttWhere } from './db.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const round0 = (n) => Math.round(n || 0);
@@ -102,7 +102,7 @@ export function computePayrollTable(year, month, filter) {
   const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
   const ids = (f.ids || []).map(Number).filter(Boolean);
   const depts = (f.depts || []).filter(Boolean);
-  let sql = "SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin'";
+  let sql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
   const args = [];
   if (ids.length) { sql += ` AND id IN (${ids.map(() => '?').join(',')})`; args.push(...ids); }
   else if (depts.length) { sql += ` AND department IN (${depts.map(() => '?').join(',')})`; args.push(...depts); }

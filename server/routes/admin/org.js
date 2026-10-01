@@ -1,5 +1,5 @@
 // Nhóm route DANH MỤC TỔ CHỨC: lịch trình ca, bộ phận, chức danh, chi nhánh/định vị, ca làm.
-import { db } from '../../db.js';
+import { db, adminAttWhere } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 
 export function registerOrgRoutes(r, { need }) {
@@ -166,7 +166,7 @@ export function registerOrgRoutes(r, { need }) {
   // Nhân viên được phép chấm ở 1 định vị (quản lý từ phía định vị cho nhanh)
   r.get('/offices/:id/employees', need('offices'), (req, res) => {
     const oid = +req.params.id;
-    const emps = db.prepare("SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin' ORDER BY department, full_name").all();
+    const emps = db.prepare("SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere() + " ORDER BY department, full_name").all();
     const picked = new Set(db.prepare('SELECT employee_id FROM employee_offices WHERE office_id=?').all(oid).map((r) => r.employee_id));
     // NV chưa cấu hình định vị nào = được chấm mọi nơi (mặc định)
     const restricted = new Set(db.prepare('SELECT DISTINCT employee_id FROM employee_offices').all().map((r) => r.employee_id));

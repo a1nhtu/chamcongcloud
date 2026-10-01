@@ -23,6 +23,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
+      payroll_include_admin: getSetting('payroll_include_admin', '0'), // tính công cho cả tài khoản Admin
       self_shift_enabled: getSetting('self_shift_enabled', '0'), // NV tự chọn ca
       self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
       punch_dedup_min: getSetting('punch_dedup_min', '0'),       // bỏ qua lần chấm trùng trong N phút
@@ -52,6 +53,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     }
     if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
     if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));
+    if (b.payroll_include_admin != null) setSetting('payroll_include_admin', b.payroll_include_admin ? '1' : '0');
     if (b.self_shift_enabled != null) setSetting('self_shift_enabled', b.self_shift_enabled ? '1' : '0');
     if (b.self_shift_approve != null) setSetting('self_shift_approve', b.self_shift_approve ? '1' : '0');
     if (b.setup_done != null) setSetting('setup_done', b.setup_done ? '1' : '0');

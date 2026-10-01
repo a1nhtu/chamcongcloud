@@ -1,5 +1,5 @@
 // Nhóm route CẤU HÌNH LƯƠNG + bảng lương + ngày lễ.
-import { db, getSetting } from '../../db.js';
+import { db, getSetting, adminAttWhere } from '../../db.js';
 import { computePayrollTable } from '../../payroll-calc.js';
 import { sendCaughtError } from '../../util.js';
 
@@ -11,7 +11,7 @@ export function registerPayrollRoutes(r, { need }) {
              c.basic_salary, c.daily_rate, c.working_days_per_month,
              c.ot_rate_weekday, c.ot_rate_weekend, c.ot_rate_holiday, c.allowance, c.hourly_rate
       FROM employees e LEFT JOIN salary_configs c ON c.employee_id = e.id
-      WHERE e.active = 1 AND e.role != 'admin'
+      WHERE e.active = 1${adminAttWhere('e.role')}
       ORDER BY e.department, e.full_name`).all();
     res.json({ rows });
   });

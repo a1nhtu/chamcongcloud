@@ -2808,6 +2808,7 @@ async function pageSettings() {
   const geoChk = el('input', { type: 'checkbox', id: 'st-geo', style: 'width:auto', ...(s.geofence_enforce === '1' ? { checked: '' } : {}) });
   const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}), ...(s.use_device_locked ? { disabled: '' } : {}) });
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}), ...(s.use_phone_locked ? { disabled: '' } : {}) });
+  const inclAdminChk = el('input', { type: 'checkbox', id: 'st-incladmin', style: 'width:auto', ...(s.payroll_include_admin === '1' ? { checked: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
   const apprChk = el('input', { type: 'checkbox', id: 'st-appr', style: 'width:auto', ...(s.self_shift_approve !== '0' ? { checked: '' } : {}) });
@@ -2816,7 +2817,7 @@ async function pageSettings() {
   saveMode.onclick = async () => {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value || 'shift';
     try {
-      const body = { attendance_mode, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
+      const body = { attendance_mode, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
       if (isMaster()) {   // chỉ tài khoản tổng đổi được máy chấm công / chấm điện thoại
         if (!s.use_device_locked) body.device_enabled = devChk.checked;
         if (!s.use_phone_locked) body.phone_enabled = phoneChk.checked;
@@ -2865,6 +2866,9 @@ async function pageSettings() {
               el('div', {}, el('b', {}, '📱 Dùng chấm công điện thoại (ảnh + định vị)'),
                 el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Tắt nếu công ty chỉ dùng máy chấm công — nhân viên sẽ không thấy nút chấm công trên app điện thoại.')))
           : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.phone_enabled !== '0' ? '📱 Chấm điện thoại đang BẬT. ' : '📱 Chấm điện thoại đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.')),
+      el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:4px' }, inclAdminChk,
+        el('div', {}, el('b', {}, '👑 Tính công cho cả tài khoản Admin'),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Mặc định người quyền Admin (chủ/quản trị) KHÔNG hiện ở Tính công / Báo cáo / Lương / Phân ca. Bật nếu Admin cũng là người đi làm cần chấm công.'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Nhân viên tự chọn ca'),
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, selfChk,

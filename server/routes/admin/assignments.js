@@ -1,6 +1,6 @@
 // Nhóm route PHÂN CA — theo ngày (lịch tuần), theo khoảng ngày (shift_assignments) và phân ca bằng Excel.
 import ExcelJS from 'exceljs';
-import { db } from '../../db.js';
+import { db, adminAttWhere } from '../../db.js';
 import { resolveShift } from '../../shift-resolver.js';
 import { vnWeekday } from '../../attendance-calc.js';
 import { sendCaughtError } from '../../util.js';
@@ -24,7 +24,7 @@ export function registerAssignmentRoutes(r, { need }) {
 
     let empSql = `SELECT e.id, e.code, e.full_name, e.department, e.shift_id, s.name AS shift_name
                   FROM employees e LEFT JOIN shifts s ON s.id = e.shift_id
-                  WHERE e.active = 1 AND e.role != 'admin'`;
+                  WHERE e.active = 1${adminAttWhere('e.role')}`;
     const args = [];
     if (dept) { empSql += ' AND e.department = ?'; args.push(dept); }
     empSql += ' ORDER BY e.department, e.full_name';
@@ -122,10 +122,10 @@ export function registerAssignmentRoutes(r, { need }) {
 
     // Xác định danh sách NV theo phạm vi áp dụng
     let emps;
-    if (scope === 'all') emps = db.prepare("SELECT id FROM employees WHERE active=1 AND role!='admin'").all();
+    if (scope === 'all') emps = db.prepare("SELECT id FROM employees WHERE active=1" + adminAttWhere()).all();
     else if (scope === 'dept') {
       if (!b.department) return res.status(400).json({ error: 'Chưa chọn phòng ban' });
-      emps = db.prepare("SELECT id FROM employees WHERE active=1 AND role!='admin' AND department=?").all(b.department);
+      emps = db.prepare("SELECT id FROM employees WHERE active=1" + adminAttWhere() + " AND department=?").all(b.department);
     } else {
       // Nhân viên cụ thể: nhận NHIỀU NV (employee_ids) hoặc 1 NV (employee_id) cho tương thích cũ
       const ids = Array.isArray(b.employee_ids) ? b.employee_ids.filter(Boolean) : (b.employee_id ? [b.employee_id] : []);
@@ -179,7 +179,7 @@ export function registerAssignmentRoutes(r, { need }) {
     if (!month) return res.status(400).json({ error: 'Thiếu tháng' });
     const days = monthDaysList(month);
 
-    let empSql = "SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin'";
+    let empSql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
     const args = [];
     if (dept) { empSql += ' AND department = ?'; args.push(dept); }
     empSql += ' ORDER BY department, full_name';

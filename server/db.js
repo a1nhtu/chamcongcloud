@@ -484,6 +484,8 @@ function migrateColumns() {
   if (getSetting('device_enabled') == null) setSetting('device_enabled', '0');
   // Chấm công điện thoại (selfie + định vị GPS): '1' = dùng (mặc định), '0' = tắt (chỉ dùng máy chấm công)
   if (getSetting('phone_enabled') == null) setSetting('phone_enabled', '1');
+  // Tính công cho cả tài khoản Admin: '0' = KHÔNG (mặc định, admin là chủ/quản trị), '1' = tính công cả admin
+  if (getSetting('payroll_include_admin') == null) setSetting('payroll_include_admin', '0');
   // Tự tạo NV khi máy đăng ký vân tay: '1' = tự tạo NV nháp (mặc định), '0' = chỉ ghi nhận chờ gán tay
   if (getSetting('device_autocreate') == null) setSetting('device_autocreate', '1');
   // Bắt buộc KEY theo máy: '0' = tắt (mặc định, giữ khách cũ chạy), '1' = máy phải có key Digiplus cấp mới duyệt được
@@ -528,6 +530,13 @@ export function getSetting(key, fallback = null) {
 export function setSetting(key, value) {
   db.prepare(`INSERT INTO settings(key, value) VALUES(?, ?)
               ON CONFLICT(key) DO UPDATE SET value = excluded.value`).run(key, String(value));
+}
+
+// Mệnh đề SQL loại tài khoản Admin khỏi tính công/báo cáo/lương/phân ca.
+// Mặc định bỏ Admin; bật setting 'payroll_include_admin'='1' thì TÍNH CÔNG cho cả Admin (trả '').
+// col: tên cột role (vd 'role' hoặc 'e.role' khi join có alias).
+export function adminAttWhere(col = 'role') {
+  return getSetting('payroll_include_admin', '0') === '1' ? '' : ` AND ${col}!='admin'`;
 }
 
 // Danh sách định vị (văn phòng) mà NV được phép chấm. Chưa cấu hình → TẤT CẢ định vị đang bật.

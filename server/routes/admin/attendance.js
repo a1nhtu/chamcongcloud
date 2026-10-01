@@ -1,5 +1,5 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
-import { db, getSetting } from '../../db.js';
+import { db, getSetting, adminAttWhere } from '../../db.js';
 import { resolveEffectiveShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 
@@ -81,7 +81,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
     const mode = req.query.mode === 'summary' ? 'summary' : 'detail';
 
-    let esql = "SELECT id, code, full_name, department FROM employees WHERE active=1 AND role!='admin'";
+    let esql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
     const eargs = [];
     if (ids.length) { esql += ` AND id IN (${ids.map(() => '?').join(',')})`; eargs.push(...ids); }
     else if (deptList.length) { esql += ` AND department IN (${deptList.map(() => '?').join(',')})`; eargs.push(...deptList); }
