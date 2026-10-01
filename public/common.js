@@ -25,7 +25,9 @@ export async function api(path, { method = 'GET', body, raw = false } = {}) {
   const res = await fetch('/api' + path, {
     method, headers, body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  if (res.status === 401) { clearToken(); location.reload(); throw new Error('Hết phiên'); }
+  // 401 khi ĐÃ đăng nhập = hết phiên → xoá token + tải lại. Nhưng 401 lúc ĐANG đăng nhập
+  // (/auth/login) = sai tài khoản/mật khẩu → để rơi xuống dưới báo lỗi cho người dùng thấy.
+  if (res.status === 401 && !path.startsWith('/auth/login')) { clearToken(); location.reload(); throw new Error('Hết phiên'); }
   if (raw) return res;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) { const e = new Error(data.error || 'Có lỗi xảy ra'); e.code = data.code; e.status = res.status; throw e; }
