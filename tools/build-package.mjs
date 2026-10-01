@@ -87,6 +87,13 @@ writeFileSync(join(OUT, 'CaiDat.bat'),
 `@echo off
 chcp 65001 >nul
 title Cai dat Digiplus Cham Cong
+net session >nul 2>&1
+if %errorlevel%==0 goto main
+powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs; exit 0 } catch { exit 1 }" >nul 2>&1
+if %errorlevel%==0 exit /b
+echo (Chua co quyen Admin - auto-start se chi chay khi co nguoi dang nhap may)
+:main
+cd /d "%~dp0"
 echo ============================================
 echo   DIGIPLUS CHAM CONG - CAI DAT
 echo ============================================
