@@ -377,12 +377,24 @@ function stat(n, l) { return el('div', { class: 'stat' }, el('div', { class: 'n'
 
 function monthTable(rows) {
   if (!rows.length) return el('div', { class: 'card' }, el('div', { class: 'empty' }, 'Chưa có dữ liệu chấm công.'));
+  const hasManual = rows.some((r) => r.manual);
   const t = el('table', { class: 'tbl' });
   t.innerHTML = '<thead><tr><th>Ngày</th><th>Vào</th><th>Ra</th><th>Giờ</th><th>Công</th><th>Muộn</th></tr></thead>';
   const tb = el('tbody');
   for (const r of rows) {
+    const dCell = el('td', {}, r.work_date.slice(8) + '/' + r.work_date.slice(5, 7));
+    if (r.manual) {
+      const badge = el('span', { class: 'pill', style: 'margin-left:5px;background:#fef3c7;color:#92400e;cursor:pointer', title: 'Giờ đã được quản lý điều chỉnh' }, '✏');
+      badge.onclick = () => {
+        const when = r.manual_at ? (' (lúc ' + isoToHM(r.manual_at) + ')') : '';
+        alert('⏱️ Giờ chấm ngày ' + r.work_date.slice(8) + '/' + r.work_date.slice(5, 7) + ' ĐÃ ĐƯỢC QUẢN LÝ ĐIỀU CHỈNH' + when + '.'
+          + (r.note ? '\n\nGhi chú: ' + r.note : '')
+          + '\n\nNếu thấy chưa đúng, vui lòng báo lại quản lý.');
+      };
+      dCell.append(badge);
+    }
     tb.append(el('tr', {},
-      el('td', {}, r.work_date.slice(8) + '/' + r.work_date.slice(5, 7)),
+      dCell,
       el('td', {}, isoToHM(r.check_in_at)),
       el('td', {}, r.check_out_at ? isoToHM(r.check_out_at) : el('span', { class: 'pill bad' }, 'chưa ra')),
       el('td', {}, humanMinutes(r.work_minutes)),
@@ -391,7 +403,9 @@ function monthTable(rows) {
     ));
   }
   t.append(tb);
-  return el('div', { class: 'card', style: 'overflow-x:auto' }, t);
+  const card = el('div', { class: 'card', style: 'overflow-x:auto' }, t);
+  if (hasManual) card.append(el('div', { style: 'font-size:12.5px;color:#92400e;margin-top:8px' }, '✏ = giờ đã được quản lý điều chỉnh (bấm vào dấu để xem).'));
+  return card;
 }
 
 /* ---------------- Tab ĐƠN TỪ ---------------- */

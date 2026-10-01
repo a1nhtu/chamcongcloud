@@ -2,8 +2,20 @@
 import { db, getSetting, adminAttWhere } from '../../db.js';
 import { resolveEffectiveShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
+import { nowIso } from '../../util.js';
+import { notifyEmployee } from '../../push.js';
 
 const WDVN = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
+// HH:MM giờ VN từ ISO (cho nội dung thông báo)
+const hmVN = (iso) => { if (!iso) return '--:--'; const t = new Date(new Date(iso).getTime() + 7 * 3600000); return String(t.getUTCHours()).padStart(2, '0') + ':' + String(t.getUTCMinutes()).padStart(2, '0'); };
+// Báo cho nhân viên biết giờ chấm của họ vừa bị quản lý điều chỉnh
+function notifyTimeEdited(eid, workDate, inIso, outIso, deleted = false) {
+  const d = workDate.slice(8) + '/' + workDate.slice(5, 7);
+  const body = deleted
+    ? `Ngày ${d}: bản ghi chấm công đã bị quản lý xoá.`
+    : `Ngày ${d}: Vào ${hmVN(inIso)} · Ra ${hmVN(outIso)} (do quản lý điều chỉnh).`;
+  notifyEmployee(eid, { title: '✏ Giờ chấm công của bạn được điều chỉnh', body, url: '/', tag: 'edit-' + eid + '-' + workDate }).catch(() => {});
+}
 const vnWd = (d) => { const dow = new Date(d + 'T12:00:00Z').getUTCDay(); return dow === 0 ? 7 : dow; };
 
 // Đổi 'YYYY-MM-DD' + 'HH:MM' (giờ VN) → ISO UTC
@@ -187,14 +199,16 @@ export function registerAttendanceRoutes(r, { need }) {
     const existing = db.prepare('SELECT id FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_id,0)=COALESCE(?,0)').get(eid, date, m.shiftId ?? null);
     if (existing) {
       db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
-        work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=? WHERE id=?`)
-        .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', existing.id);
+        work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=?, manual_at=?, manual_by=? WHERE id=?`)
+        .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý', existing.id);
+      notifyTimeEdited(eid, date, inIso, outIso);
       return res.json({ ok: true, id: existing.id, updated: true });
     }
     const info = db.prepare(`INSERT INTO attendance
-      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'manual', 1, ?)`)
-      .run(eid, date, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '');
+      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note, manual_at, manual_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'manual', 1, ?, ?, ?)`)
+      .run(eid, date, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý');
+    notifyTimeEdited(eid, date, inIso, outIso);
     res.json({ ok: true, id: info.lastInsertRowid });
   });
 
@@ -208,16 +222,18 @@ export function registerAttendanceRoutes(r, { need }) {
     if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();
     const m = computeManual(row.employee_id, row.work_date, inIso, outIso);
     db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
-      work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=? WHERE id=?`)
-      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note ?? row.note ?? '', row.id);
+      work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=?, manual_at=?, manual_by=? WHERE id=?`)
+      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note ?? row.note ?? '', nowIso(), req.user.full_name || 'Quản lý', row.id);
+    notifyTimeEdited(row.employee_id, row.work_date, inIso, outIso);
     res.json({ ok: true });
   });
 
   // Xoá 1 bản ghi chấm công
   r.delete('/attendance/:id', need('attendance_edit'), (req, res) => {
-    const row = db.prepare('SELECT id FROM attendance WHERE id=?').get(req.params.id);
+    const row = db.prepare('SELECT id, employee_id, work_date FROM attendance WHERE id=?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Không tìm thấy bản ghi' });
     db.prepare('DELETE FROM attendance WHERE id=?').run(row.id);
+    notifyTimeEdited(row.employee_id, row.work_date, null, null, true);
     res.json({ ok: true });
   });
 

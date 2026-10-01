@@ -102,3 +102,20 @@ export async function notifyManagers(payloadObj, excludeId = null) {
   }
   return { total: subs.length, sent, statuses };
 }
+
+// Gửi thông báo cho MỘT nhân viên cụ thể (vd quản lý sửa giờ chấm của họ).
+export async function notifyEmployee(employeeId, payloadObj) {
+  if (!employeeId) return { total: 0, sent: 0 };
+  let subs = [];
+  try { subs = db.prepare('SELECT * FROM push_subscriptions WHERE employee_id = ?').all(employeeId); }
+  catch { return { total: 0, sent: 0 }; }
+  let sent = 0;
+  for (const s of subs) {
+    try {
+      const code = await sendOne(s, payloadObj);
+      if (code >= 200 && code < 300) sent++;
+      if (code === 404 || code === 410) removeSubscription(s.endpoint);
+    } catch { /* bỏ qua sub lỗi */ }
+  }
+  return { total: subs.length, sent };
+}

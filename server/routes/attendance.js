@@ -334,6 +334,7 @@ r.get('/calendar', (req, res) => {
       check_in: c?.check_in_at || null, check_out: c?.check_out_at || null,
       work_minutes: c?.work_minutes || 0, work_unit: c?.work_unit || 0,
       late_min: c?.late_min || 0, early_min: c?.early_min || 0, ot_min: c?.ot_min || 0,
+      manual: c?.manual || 0, manual_at: c?.manual_at || null, note: c?.note || '',
     };
   });
   res.json({ month, days: out });

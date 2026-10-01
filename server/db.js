@@ -445,6 +445,8 @@ function migrateColumns() {
   // Đánh dấu bản ghi chấm công do admin thêm/sửa tay + ghi chú lý do
   add('attendance', 'manual', 'INTEGER NOT NULL DEFAULT 0');   // 1 = sửa/thêm bằng tay
   add('attendance', 'note',   "TEXT DEFAULT ''");               // lý do (quên chấm, công tác…)
+  add('attendance', 'manual_at', 'TEXT');                        // thời điểm quản lý sửa/thêm giờ (để báo NV biết)
+  add('attendance', 'manual_by', "TEXT DEFAULT ''");            // tên người sửa (quản lý/admin)
 
   // GĐ1: cấu hình tính công cho ca
   add('shifts', 'break_minutes',      'INTEGER NOT NULL DEFAULT 0');   // nghỉ giữa ca (phút)
