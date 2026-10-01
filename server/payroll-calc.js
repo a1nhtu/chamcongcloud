@@ -34,13 +34,14 @@ export function computePayrollForEmployee(employeeId, from, to) {
   const hourlyRate = dailyRate / 8;
 
   const rows = db.prepare(
-    'SELECT work_unit, work_minutes, ot_min, ot_type FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?'
+    'SELECT work_date, work_unit, work_minutes, ot_min, ot_type FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?'
   ).all(employeeId, from, to);
 
   // Chế độ tính công theo GIỜ: lương = tổng giờ làm × đơn giá giờ + phụ cấp
   if (getSetting('attendance_mode', 'shift') === 'hourly') {
     const totalMin = rows.reduce((s, r) => s + (r.work_minutes || 0), 0);
-    const daysWorked = rows.filter((r) => (r.work_minutes || 0) > 0).length;
+    // Nhiều phiên/ngày vẫn tính 1 NGÀY công (đếm theo ngày distinct, không theo số dòng)
+    const daysWorked = new Set(rows.filter((r) => (r.work_minutes || 0) > 0).map((r) => r.work_date)).size;
     const hrs = totalMin / 60;
     const rate = cfg.hourly_rate || 0;
     const workSalary = hrs * rate;

@@ -142,14 +142,23 @@ r.post('/check-in', (req, res) => {
   const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, date, at);
   const shift = rs.shift;
   const shiftKey = shift?.id ?? 0;
-  // Dòng công của ĐÚNG ca này hôm nay
-  const existing = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND COALESCE(shift_id,0) = ?')
-    .get(req.user.id, date, shiftKey);
   const shiftLabel = shift ? `ca ${shift.name}` : 'ca';
-  if (existing && existing.check_in_at && !existing.check_out_at)
-    return res.status(400).json({ error: `Bạn đang trong ${shiftLabel}, chưa chấm ra. Hãy chấm RA trước.` });
-  if (existing && existing.check_in_at && existing.check_out_at)
-    return res.status(400).json({ error: `Bạn đã hoàn thành ${shiftLabel} hôm nay rồi` });
+  // Dòng công của ĐÚNG ca này hôm nay
+  let existing;
+  if (hourly) {
+    // Chế độ theo GIỜ: CHO PHÉP chấm NHIỀU PHIÊN/ngày (vào-ra nhiều lần, cộng dồn tổng giờ).
+    // Chỉ chặn khi đang có phiên MỞ (đã vào, chưa ra) — phải chấm RA trước khi vào phiên mới.
+    const openRow = db.prepare('SELECT id FROM attendance WHERE employee_id=? AND work_date=? AND check_in_at IS NOT NULL AND check_out_at IS NULL LIMIT 1').get(req.user.id, date);
+    if (openRow) return res.status(400).json({ error: 'Bạn đang trong ca, chưa chấm ra. Hãy chấm RA trước.' });
+    existing = null; // luôn tạo PHIÊN MỚI
+  } else {
+    existing = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND COALESCE(shift_id,0) = ?')
+      .get(req.user.id, date, shiftKey);
+    if (existing && existing.check_in_at && !existing.check_out_at)
+      return res.status(400).json({ error: `Bạn đang trong ${shiftLabel}, chưa chấm ra. Hãy chấm RA trước.` });
+    if (existing && existing.check_in_at && existing.check_out_at)
+      return res.status(400).json({ error: `Bạn đã hoàn thành ${shiftLabel} hôm nay rồi` });
+  }
   // Chống bấm nhầm 2 lần liền: nếu vừa chấm (vào/ra) trong vòng N phút → chặn
   const dedupMinIn = parseInt(getSetting('punch_dedup_min', '0'), 10) || 0;
   if (dedupMinIn > 0) {
@@ -174,24 +183,26 @@ r.post('/check-in', (req, res) => {
   try { photoPath = savePhoto(photo, `in_${req.user.code}`); }
   catch (e) { return res.status(400).json({ error: e.message }); }
 
+  let rowId;
   if (existing) {
     db.prepare(`UPDATE attendance SET check_in_at=?, check_in_lat=?, check_in_lng=?, check_in_photo=?,
       check_in_office_id=?, check_in_distance_m=?, check_in_outside=?, late_min=?, day_status=?, ot_type=?,
       shift_id=?, shift_source=? WHERE id=?`)
       .run(at, lat, lng, photoPath, office?.id ?? null, distance, outside, late, 'thieu_ra', otType,
            shift?.id ?? null, rs.source, existing.id);
+    rowId = existing.id;
   } else {
-    db.prepare(`INSERT INTO attendance
+    const info = db.prepare(`INSERT INTO attendance
       (employee_id, work_date, check_in_at, check_in_lat, check_in_lng, check_in_photo,
        check_in_office_id, check_in_distance_m, check_in_outside, late_min, day_status, ot_type,
        shift_id, shift_source)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(req.user.id, date, at, lat, lng, photoPath, office?.id ?? null, distance, outside, late, 'thieu_ra', otType,
            shift?.id ?? null, rs.source);
+    rowId = info.lastInsertRowid;
   }
 
-  const row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND COALESCE(shift_id,0) = ?')
-    .get(req.user.id, date, shiftKey);
+  const row = db.prepare('SELECT * FROM attendance WHERE id = ?').get(rowId);
   res.json({ ok: true, attendance: row, meta: { distance, outside: !!outside, late } });
   // Thông báo cho quản lý (không chặn phản hồi)
   notifyManagers({

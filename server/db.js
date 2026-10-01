@@ -364,6 +364,18 @@ function migrateAttendanceMultiShift() {
   setSetting('att_multishift_migrated', '1');
 }
 
+// Cho phép NHIỀU PHIÊN chấm công / NGÀY (công nhân chấm 4-6 lần, nhất là chế độ theo giờ):
+// đổi unique index (NV, ngày, ca) → (NV, ngày, ca, giờ VÀO) để nhiều phiên cùng ngày + cùng
+// "không ca" (shift_id NULL → COALESCE 0) vẫn lưu được (phân biệt theo giờ check-in).
+function migrateAttendanceMultiSession() {
+  if (getSetting('att_multisession_migrated') === '1') return;
+  try {
+    db.exec('DROP INDEX IF EXISTS idx_att_emp_date_shift');
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_att_emp_date_shift ON attendance(employee_id, work_date, COALESCE(shift_id, 0), COALESCE(check_in_at, ''))");
+  } catch (e) { /* lỗi thì giữ index cũ, không chặn khởi động */ }
+  setSetting('att_multisession_migrated', '1');
+}
+
 // Dựng lại daily_shift_assignments để BỎ UNIQUE(employee_id, work_date) → cho NV có NHIỀU ca/ngày
 // (NV tự chọn 2-3 ca gãy). Giữ nguyên dữ liệu, thêm UNIQUE INDEX theo (NV, ngày, ca).
 function migrateDailyMultiShift() {
@@ -404,6 +416,7 @@ function migrateColumns() {
   add('attendance', 'shift_id',    'INTEGER');
   add('attendance', 'shift_source', "TEXT DEFAULT ''");
   migrateAttendanceMultiShift();
+  migrateAttendanceMultiSession();
   migrateDailyMultiShift();
 
   // GĐ5: mã ca + cửa sổ nhận diện giờ vào (để tự động tìm ca)
