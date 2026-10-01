@@ -95,6 +95,14 @@ set "PORT=8686"
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
 echo Dang cai dat va tao tu dong chay khi mo may (cong %PORT%)...
 powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut([Environment]::GetFolderPath('Startup')+'\\DigiplusChamCong-%PORT%.lnk'); $s.TargetPath='%~dp0start-hidden.vbs'; $s.WorkingDirectory='%~dp0'; $s.Save()"
+net session >nul 2>&1
+if %errorlevel%==0 (
+  schtasks /Create /TN "Digiplus-%PORT%" /TR "wscript.exe \\"%~dp0start-hidden.vbs\\"" /SC ONSTART /RU SYSTEM /RL HIGHEST /F >nul 2>&1
+  del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" >nul 2>&1
+  echo   + Da them auto-start khi KHOI DONG may - chay ca khi VPS chua dang nhap.
+) else (
+  echo   * Luu y VPS: de auto-start chay ca khi reboot chua dang nhap, chay lai file nay bang "Run as administrator".
+)
 echo Dang khoi dong ung dung...
 start "" "%~dp0start-hidden.vbs"
 timeout /t 4 >nul
@@ -120,6 +128,7 @@ set "PORT=8686"
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
 echo Dang go cai dat instance cong %PORT% (KHONG dung khach khac tren may/VPS)...
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" 2>nul
+schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
 for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
 echo Da go autostart + dung app cong %PORT%.
 echo LUU Y: neu chay nhieu khach tren 1 VPS, cloudflared cua khach nay van chay -
