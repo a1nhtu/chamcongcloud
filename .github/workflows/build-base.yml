@@ -1,0 +1,58 @@
+name: Build base installer → Release
+
+# Tự đóng gói BỘ CÀI BASE (neutral) rồi UP LÊN GitHub Release tag `base`
+# mỗi khi bump version (push package.json) hoặc bấm chạy tay.
+# → Khỏi phải re-upload base bằng tay mỗi lần sửa code.
+# Base này do trang tao-domain.html tải về (BASE_ZIP_URL trỏ asset này).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'tools/build-package.mjs'
+      - '.github/workflows/build-base.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # cần để up asset lên Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24 (runtime se ship cho khach)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Cai dependencies (chi prod)
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Tai cloudflared.exe (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force tools | Out-Null
+          Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'tools/cloudflared.exe'
+
+      - name: Dong goi staging (build-package.mjs)
+        run: node tools/build-package.mjs
+
+      - name: Zip base (top folder = DigiplusChamCong)
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $src = Join-Path $PWD 'dist-khach/DigiplusChamCong'
+          $out = Join-Path $PWD 'DigiplusChamCong-base.zip'
+          if (Test-Path $out) { Remove-Item $out -Force }
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($src, $out, 'Optimal', $true)
+          Write-Host ("Base: {0:N1} MB" -f ((Get-Item $out).Length/1MB))
+
+      - name: Up len Release tag base (ghi de asset cu)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload base DigiplusChamCong-base.zip --clobber
