@@ -2,7 +2,7 @@ import './logger.js';   // ghi log ra data/logs/server.log (phải import đầu
 import express from 'express';
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -139,6 +139,23 @@ httpServer.listen(PORT, '0.0.0.0', () => {
 // nếu cổng bị Windows/phần mềm khác chặn thì chỉ cảnh báo, app vẫn chạy bình thường qua HTTP + tunnel.
 const keyPath = join(CERT_DIR, 'key.pem');
 const certPath = join(CERT_DIR, 'cert.pem');
+// Tự sinh chứng chỉ tự ký theo IP LAN của MÁY KHÁCH nếu chưa có (bản LAN khỏi bake cert sẵn).
+// Dùng lib 'selfsigned' (thuần JS, không cần openssl ở máy khách). Best-effort: lỗi/thiếu lib → bỏ qua, app vẫn chạy HTTP.
+if (!existsSync(keyPath) || !existsSync(certPath)) {
+  try {
+    const { default: selfsigned } = await import('selfsigned');
+    mkdirSync(CERT_DIR, { recursive: true });
+    const ips = lanIPs();
+    const altNames = [{ type: 2, value: 'localhost' }, { type: 7, ip: '127.0.0.1' }, ...ips.map((ip) => ({ type: 7, ip }))];
+    const pems = await selfsigned.generate([{ name: 'commonName', value: 'Digiplus ChamCong' }],
+      { days: 3650, keySize: 2048, algorithm: 'sha256', extensions: [{ name: 'subjectAltName', altNames }] });
+    writeFileSync(keyPath, pems.private);
+    writeFileSync(certPath, pems.cert);
+    console.log('  [+] Đã tự tạo chứng chỉ HTTPS tự ký cho: localhost, 127.0.0.1' + (ips.length ? ', ' + ips.join(', ') : ''));
+  } catch (e) {
+    console.warn('  [!] Chưa tạo được chứng chỉ tự động (' + e.message + ') — app vẫn chạy HTTP; HTTPS điện thoại tạm chưa dùng.');
+  }
+}
 if (existsSync(keyPath) && existsSync(certPath)) {
   const httpsServer = createHttps({ key: readFileSync(keyPath), cert: readFileSync(certPath) }, app);
   httpsServer.on('error', (e) => {
