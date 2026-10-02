@@ -504,7 +504,9 @@ function migrateColumns() {
   // Tự tạo NV khi máy đăng ký vân tay: '1' = tự tạo NV nháp (mặc định), '0' = chỉ ghi nhận chờ gán tay
   if (getSetting('device_autocreate') == null) setSetting('device_autocreate', '1');
   // Bắt buộc KEY theo máy: '0' = tắt (mặc định, giữ khách cũ chạy), '1' = máy phải có key Digiplus cấp mới duyệt được
-  if (getSetting('device_key_required') == null) setSetting('device_key_required', '0');
+  // MẶC ĐỊNH BẬT yêu cầu key nếu bộ cài bật máy chấm công (USE_DEVICE=1) → chống khách mua máy ngoài.
+  // Chỉ đặt LẦN ĐẦU (khi null); tài khoản tổng vẫn tắt được sau. Bản cũ/không có USE_DEVICE → '0' như trước.
+  if (getSetting('device_key_required') == null) setSetting('device_key_required', process.env.USE_DEVICE === '1' ? '1' : '0');
   // Khoá thiết bị chấm công điện thoại (chống chấm hộ): '0' = tắt (mặc định), '1' = mỗi tài khoản chỉ chấm trên 1 điện thoại đã duyệt
   if (getSetting('device_lock_enabled') == null) setSetting('device_lock_enabled', '0');
   // Bỏ qua lần chấm TRÙNG trong vòng N phút (chống double-tap app + máy quẹt liên tiếp). '0' = tắt.
