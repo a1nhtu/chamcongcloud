@@ -230,6 +230,22 @@ async function handleBaseZip(request, env) {
   return new Response(upstream.body, { status: 200, headers });
 }
 
+// Tải BỘ CÀI LAN có thương hiệu: proxy file lan.zip từ GitHub Release → trình duyệt tải thẳng về.
+// File vẫn ở GitHub (khỏi tốn hosting), link hiện là maychamcongcloud.com.
+async function handleLanZip(request, env) {
+  const src = env.LAN_ZIP_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/base/DigiplusChamCong-lan.zip";
+  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 3600 } });
+  if (!upstream.ok || !upstream.body)
+    return jsonRes({ error: "Chưa tải được bộ cài LAN (HTTP " + upstream.status + "). Thử lại sau ít phút." }, 502);
+  const headers = new Headers();
+  headers.set("content-type", "application/zip");
+  const len = upstream.headers.get("content-length");
+  if (len) headers.set("content-length", len);
+  headers.set("content-disposition", 'attachment; filename="DigiplusChamCong-LAN.zip"');
+  headers.set("cache-control", "public, max-age=3600");
+  return new Response(upstream.body, { status: 200, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -239,6 +255,8 @@ export default {
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
     if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
+    // Link TẢI BỘ CÀI LAN có thương hiệu (proxy từ GitHub Release → tải thẳng về)
+    if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
 
     const res = await env.ASSETS.fetch(request);
 
