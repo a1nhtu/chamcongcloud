@@ -342,7 +342,10 @@ async function pageEmployees() {
   if (tmplBtn) tmplBtn.onclick = downloadEmpTemplate;
   if (impAddBtn) impAddBtn.onclick = () => importEmployees('add');
   if (impUpdBtn) impUpdBtn.onclick = () => importEmployees('update');
-  const headArgs = ['Nhân viên', addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
+  // Làm mới danh sách (NV tải từ máy chấm công về không tự hiện, trước đây phải F5 cả trang)
+  const refreshBtn = el('button', { class: 'btn ghost sm', title: 'Tải lại danh sách nhân viên' }, '↻ Làm mới');
+  refreshBtn.onclick = () => pageEmployees();
+  const headArgs = ['Nhân viên', refreshBtn, addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
   setMain(head(...headArgs), loading());
   try {
     await loadRefs();
@@ -371,7 +374,7 @@ async function pageEmployees() {
     }
     tbl.append(tb);
     if (addBtn) addBtn.onclick = () => empModal(null);
-    const headArgs2 = ['Nhân viên (' + rows.length + ')', addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
+    const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
     setMain(head(...headArgs2), el('div', { class: 'panel tbl-scroll' }, tbl));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
 }
