@@ -2271,9 +2271,23 @@ async function pageDevices() {
   tbl.innerHTML = `<thead><tr><th>Serial</th><th>Tên máy</th><th>Trạng thái</th><th>👥 NV</th><th>👉 Vân tay</th><th>😊 Mặt</th><th>💳 Thẻ</th><th>IP</th><th>Lần cuối</th><th>Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
   const countCells = {};   // serial -> {nv,fp,face,card} để tự làm mới số liệu
+  // Copy serial máy (để dán vào trang cấp key, khỏi gõ tay). Bản LAN chạy http → không có navigator.clipboard nên có dự phòng execCommand.
+  const copySerial = async (serial, quiet) => {
+    let ok = false;
+    try { await navigator.clipboard.writeText(serial); ok = true; } catch {}
+    if (!ok) {
+      const ta = el('textarea', { style: 'position:fixed;left:-9999px;top:0' });
+      ta.value = serial; document.body.append(ta); ta.select();
+      try { ok = document.execCommand('copy'); } catch {}
+      ta.remove();
+    }
+    if (!quiet) toast(ok ? 'Đã copy serial ' + serial : 'Không copy tự động được — bôi đen serial để copy', ok ? 'ok' : 'err');
+    return ok;
+  };
   // Dán KEY bản quyền cho 1 máy (Digiplus cấp theo Serial)
   const pasteDeviceKey = async (m) => {
-    const k = prompt('Dán KEY máy chấm công (Digiplus cấp theo Serial ' + m.serial + '):', '');
+    await copySerial(m.serial, true);   // copy sẵn serial để dán sang trang cấp key
+    const k = prompt('Dán KEY máy chấm công (Digiplus cấp theo Serial ' + m.serial + ').\nSerial đã được copy sẵn — dán sang trang cấp key để lấy key:', '');
     if (k == null || !k.trim()) return;
     try { await api('/admin/devices/' + m.id + '/key', { method: 'POST', body: { key: k.trim() } }); toast('Đã lưu key máy ✔', 'ok'); pageDevices(); }
     catch (e) { toast(e.message, 'err'); }
@@ -2324,7 +2338,8 @@ async function pageDevices() {
       ? el('span', { class: 'pill ok' }, '🟢 Online')
       : el('span', { class: 'pill', style: 'background:#eee;color:#8a8a8a' }, '⚪ Offline');
     tb.append(el('tr', { style: online ? '' : 'opacity:.7' },
-      el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, dot, m.serial)),
+      el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, dot, m.serial),
+        el('button', { class: 'btn ghost sm', title: 'Copy serial', style: 'margin-left:6px;padding:2px 6px', onclick: () => copySerial(m.serial) }, '📋')),
       el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : '', m.access_control ? el('div', { style: 'font-size:11px;color:#b45309' }, '🚪 Kiểm soát cửa') : ''),
       el('td', {}, onlinePill,
         el('div', { style: 'margin-top:4px' }, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
