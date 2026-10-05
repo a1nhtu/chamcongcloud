@@ -2324,6 +2324,7 @@ async function pageDevices() {
     const keyBtn = (d.key_required && !m.key_ok) ? btnSm('🔑 Dán key', () => pasteDeviceKey(m)) : null;
     const putDev = (body) => api('/admin/devices/' + m.id, { method: 'PUT', body });
     const moreBtn = rowMenu([
+      m.active ? { label: '🕒 Xem giờ trên máy', fn: () => deviceClockModal(m) } : null,
       { label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
       { label: '⬇ Tải lại log chấm công (theo ngày)', fn: () => deviceAttlogModal(m) },
       { label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại. Chờ chút rồi Làm mới.', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
@@ -2508,6 +2509,39 @@ async function deviceClearModal(m) {
       el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('span', {}, 'Từ'), fromI, el('span', {}, 'đến'), toI, rangeBtn)),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
   loadUsers();
+}
+// Xem giờ trên máy: gửi lệnh đọc đồng hồ rồi chờ máy trả lời (máy hỏi lệnh ~10 giây/lần). Chỉ đọc, không đổi gì trên máy.
+async function deviceClockModal(m) {
+  const box = el('div', {}, el('div', { class: 'empty' }, '⏳ Đang hỏi giờ máy "' + (m.name || m.serial) + '"… (chờ tối đa 45 giây)'));
+  let stop = false;
+  openModal('Giờ trên máy · ' + (m.name || m.serial), [box], [el('button', { class: 'btn', onclick: () => { stop = true; closeModal(); } }, 'Đóng')]);
+  const show = (...nodes) => { box.innerHTML = ''; box.append(...nodes); };
+  let since;
+  try { since = (await api('/admin/devices/' + m.id + '/read-clock', { method: 'POST' })).since; }
+  catch (e) { return show(el('div', { class: 'empty' }, e.message)); }
+  const toMs = (s) => { const [d, t] = s.split(' '); const [y, mo, da] = d.split('-').map(Number); const [h, mi, se] = t.split(':').map(Number); return Date.UTC(y, mo - 1, da, h, mi, se); };
+  for (let i = 0; i < 22 && !stop; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    let row;
+    try { row = ((await api('/admin/devices')).rows || []).find((x) => x.id === m.id); } catch { continue; }
+    if (!row || !row.clock_at || row.clock_at < since) continue;
+    if (!row.clock_text) {
+      return show(el('div', { class: 'empty' }, 'Máy có trả lời nhưng không đọc được giờ (dòng máy này có thể không hỗ trợ lệnh xem giờ).'),
+        el('div', { style: 'font-size:12px;color:var(--muted);word-break:break-all' }, 'Máy trả về: ' + (row.clock_raw || '(trống)')));
+    }
+    const diff = Math.round((toMs(row.clock_text) - toMs(row.clock_at)) / 1000);
+    const abs = Math.abs(diff), mins = Math.round(abs / 60);
+    const verdict = abs <= 90
+      ? el('b', { style: 'color:#1a7f37' }, '✓ Giờ máy khớp máy chủ (lệch ' + abs + ' giây)')
+      : el('b', { style: 'color:#c0392b' }, '⚠ Máy ' + (diff > 0 ? 'NHANH' : 'CHẬM') + ' hơn máy chủ khoảng ' + (mins >= 1 ? mins + ' phút' : abs + ' giây'));
+    return show(
+      el('div', { style: 'font-size:15px;line-height:2' },
+        el('div', {}, 'Giờ trên máy: ', el('b', { style: 'font-family:monospace' }, row.clock_text)),
+        el('div', {}, 'Giờ máy chủ lúc nhận: ', el('b', { style: 'font-family:monospace' }, row.clock_at)),
+        el('div', {}, verdict)),
+      el('div', { style: 'font-size:12px;color:var(--muted);margin-top:8px' }, 'Sai số vài giây là bình thường (thời gian truyền). Nếu lệch, bấm "🕒 Đồng bộ giờ" ở dòng máy đó.'));
+  }
+  if (!stop) show(el('div', { class: 'empty' }, 'Máy chưa trả lời sau 45 giây. Máy có thể đang offline, hoặc dòng máy này không hỗ trợ lệnh xem giờ từ xa.'));
 }
 function devicePunchesModal(m) {
   const box = el('div', {}, loading());

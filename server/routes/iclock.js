@@ -3,7 +3,7 @@
 // KHÔNG nằm sau cổng bản quyền — máy phải kết nối được. Chỉ XỬ LÝ khi bật "Dùng máy chấm công" + máy đã duyệt.
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult } from '../device-sync.js';
 
 const r = Router();
 // CHỈ parse text cho các route POST của máy (KHÔNG dùng r.use để tránh nuốt body /api)
@@ -142,7 +142,7 @@ function handleDeviceCmd(req, res) {
   const p = {};
   for (const pair of body.split('&')) { const i = pair.indexOf('='); if (i > 0) p[pair.slice(0, i).trim()] = pair.slice(i + 1).trim(); }
   const id = parseInt(p.ID || req.query.ID || '0', 10);
-  if (id) { try { ackCommand(id, p.Return ?? '?'); } catch (e) { console.error('[device] ack lỗi:', e.message); } }
+  if (id) { try { ackCommand(id, p.Return ?? '?'); storeClockResult(id, body); } catch (e) { console.error('[device] ack lỗi:', e.message); } }
   res.type('text/plain').send('OK');
 }
 

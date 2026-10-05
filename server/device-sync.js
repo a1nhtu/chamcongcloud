@@ -205,6 +205,21 @@ export function openDoor(serial) { queueCmd(serial, 'AC_UNLOCK'); return 1; }
 // để máy khởi động lại → bắt tay mới → lấy giờ máy chủ + múi giờ +7. (Không gửi lệnh đặt giờ trực tiếp
 // vì cách mã hoá giờ khác nhau theo firmware, gửi sai sẽ làm lệch giờ cả máy.)
 export function rebootDevice(serial) { queueCmd(serial, 'REBOOT'); return 1; }
+// XEM GIỜ TRÊN MÁY: hỏi đồng hồ máy bằng lệnh ADMS "SHELL date" (máy nền Linux chạy lệnh rồi trả kết quả
+// qua /devicecmd). Chỉ ĐỌC, không đổi gì trên máy. Máy không hỗ trợ SHELL sẽ không trả giờ.
+export const vnNowStr = () => new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+export function queryDeviceClock(serial) {
+  queueCmd(serial, 'SHELL date "+%Y-%m-%d %H:%M:%S"', { mkind: 'clock' });
+  return 1;
+}
+// Lưu kết quả lệnh đọc giờ (gọi từ /devicecmd với nguyên body máy gửi về)
+export function storeClockResult(id, body) {
+  const cmd = db.prepare('SELECT serial, mkind FROM push_device_commands WHERE id=?').get(id);
+  if (!cmd || cmd.mkind !== 'clock') return;
+  const m = /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/.exec(String(body || ''));
+  db.prepare('UPDATE push_devices SET clock_text=?, clock_at=?, clock_raw=? WHERE serial=?')
+    .run(m ? m[1] : '', vnNowStr(), String(body || '').slice(0, 300), cmd.serial);
+}
 // Xóa toàn bộ log chấm công trên máy
 export function clearDeviceLog(serial) { queueCmd(serial, 'CLEAR LOG'); return 1; }
 // Xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log) + dọn mirror local để đếm đúng
