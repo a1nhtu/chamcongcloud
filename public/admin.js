@@ -245,10 +245,12 @@ async function renderDashboard(showLoading) {
     const today = rep.rows.filter(r => r.work_date === d.today);
     const hourly = hourlyMode();
     const person = (r, info) => ({ name: r.full_name, code: r.code, dept: r.department, info });
+    // 1 NV chấm nhiều phiên/ngày chỉ hiện 1 dòng (giữ lần chấm vào ĐẦU) để khớp số trên thẻ
+    const uniqByCode = (rows) => { const s = new Set(); return rows.filter(r => (s.has(r.code) ? false : s.add(r.code))); };
     const cards = el('div', { class: 'cards' },
       mcard('brand', d.totalEmp, 'Nhân viên', () => go('employees')),
       mcard('green', d.checkedIn, 'Đã chấm vào', () => dashListModal('Đã chấm vào',
-        today.filter(r => r.check_in_hm).map(r => person(r, r.check_in_hm)))),
+        uniqByCode(today.filter(r => r.check_in_hm)).map(r => person(r, r.check_in_hm)))),
       mcard('warn', d.notYet, 'Chưa chấm', async () => {
         let emps = [];
         try { emps = (await api('/admin/employees')).rows || []; } catch {}

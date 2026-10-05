@@ -671,7 +671,11 @@ r.get('/dashboard', (req, res) => {
   const q = String(req.query.date || '').slice(0, 10);
   const today = /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : vnDateStr();  // xem lại ngày bất kỳ
   const totalEmp = db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1" + adminAttWhere()).get().c;
-  const checkedIn = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_at IS NOT NULL').get(today).c;
+  // Đếm SỐ NGƯỜI distinct đã chấm (1 NV chấm nhiều phiên/ngày vẫn tính 1), cùng bộ lọc vai trò với totalEmp
+  const checkedIn = db.prepare(
+    "SELECT COUNT(DISTINCT a.employee_id) c FROM attendance a JOIN employees e ON e.id = a.employee_id" +
+    " WHERE a.work_date = ? AND a.check_in_at IS NOT NULL AND e.active = 1" + adminAttWhere('e.role')
+  ).get(today).c;
   const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0').get(today).c;
   const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_outside = 1').get(today).c;
   const pendingLeaves = db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'").get().c;
