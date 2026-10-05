@@ -255,7 +255,7 @@ async function renderDashboard(showLoading) {
         let emps = [];
         try { emps = (await api('/admin/employees')).rows || []; } catch {}
         const inCodes = new Set(today.filter(r => r.check_in_hm).map(r => r.code));
-        const people = emps.filter(e => e.role !== 'admin' && e.active !== 0 && !inCodes.has(e.code))
+        const people = emps.filter(e => (d.includeAdmin || e.role !== 'admin') && e.active !== 0 && !inCodes.has(e.code))
           .map(e => ({ name: e.full_name, code: e.code, dept: e.department, info: 'Chưa chấm' }));
         dashListModal('Chưa chấm', people);
       }),

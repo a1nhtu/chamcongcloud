@@ -679,7 +679,8 @@ r.get('/dashboard', (req, res) => {
   const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0').get(today).c;
   const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_outside = 1').get(today).c;
   const pendingLeaves = db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'").get().c;
-  res.json({ today, totalEmp, checkedIn, notYet: Math.max(0, totalEmp - checkedIn), late, outside, pendingLeaves });
+  // includeAdmin: popup "Chưa chấm" phải dùng CÙNG bộ lọc vai trò với totalEmp (bật "Tính công cho cả Admin" thì kể cả admin)
+  res.json({ today, totalEmp, checkedIn, notYet: Math.max(0, totalEmp - checkedIn), late, outside, pendingLeaves, includeAdmin: adminAttWhere() === '' });
 });
 
 // Dùng cho trang Tổng quan (danh sách hôm nay có ảnh)
