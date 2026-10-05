@@ -2305,7 +2305,7 @@ async function pageDevices() {
             toast('Máy ' + m.serial + ' chưa có KEY bản quyền — dán key Digiplus cấp rồi mới duyệt được.', 'err');
             return pasteDeviceKey(m);
           }
-          try { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); toast('Đã duyệt máy ' + m.serial, 'ok'); pageDevices(); }
+          try { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); toast('Đã duyệt máy ' + m.serial + ' — máy sẽ tự khởi động lại để nhận cấu hình và giờ đúng.', 'ok'); pageDevices(); }
           catch (e) { toast(e.message || 'Không duyệt được máy', 'err'); }
         })
       : null;
@@ -2313,6 +2313,14 @@ async function pageDevices() {
       ? btnSm('🔓 Mở cửa', async () => { if (!confirm(`Mở cửa tại máy "${m.name || m.serial}" ngay?`)) return; try { const r = await api('/admin/devices/' + m.id + '/open-door', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh mở cửa', 'ok'); } catch (e) { toast(e.message, 'err'); } })
       : null;
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m), 'ghost');
+    // Đồng bộ giờ = ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt)
+    const timeBtn = (m.active && hasPerm('devices'))
+      ? btnSm('🕒 Đồng bộ giờ', async () => {
+          if (!confirm(`Đồng bộ giờ máy "${m.name || m.serial}" theo máy chủ?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 30 giây) rồi tự lấy giờ đúng. Trong lúc đó chưa chấm công được.\nLưu ý: giờ lấy theo đồng hồ của máy tính cài phần mềm — kiểm tra đồng hồ máy tính đúng trước.`)) return;
+          try { const r = await api('/admin/devices/' + m.id + '/sync-time', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh đồng bộ giờ', 'ok'); }
+          catch (e) { toast(e.message, 'err'); }
+        }, 'ghost')
+      : null;
     const keyBtn = (d.key_required && !m.key_ok) ? btnSm('🔑 Dán key', () => pasteDeviceKey(m)) : null;
     const putDev = (body) => api('/admin/devices/' + m.id, { method: 'PUT', body });
     const moreBtn = rowMenu([
@@ -2351,7 +2359,7 @@ async function pageDevices() {
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
       el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
-      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, approveInline, keyBtn, doorBtn, logBtn, moreBtn)),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, approveInline, keyBtn, doorBtn, timeBtn, logBtn, moreBtn)),
     ));
   }
   tbl.append(tb);

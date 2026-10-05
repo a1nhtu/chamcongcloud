@@ -201,6 +201,10 @@ export function queryDeviceUsers(serial) {
 // Mở cửa từ xa (máy kiểm soát cửa) — lệnh ADMS "AC_UNLOCK" (mục 12.7.2 Attendance PUSH Protocol),
 // máy kích relay mở khóa cửa; nextCommand bọc thành C:<id>:AC_UNLOCK. Máy phản hồi Return=0 nếu OK.
 export function openDoor(serial) { queueCmd(serial, 'AC_UNLOCK'); return 1; }
+// Đồng bộ lại GIỜ: máy ADMS chỉ nhận múi giờ (TimeZone) lúc BẮT TAY lại từ đầu, nên ra lệnh REBOOT
+// để máy khởi động lại → bắt tay mới → lấy giờ máy chủ + múi giờ +7. (Không gửi lệnh đặt giờ trực tiếp
+// vì cách mã hoá giờ khác nhau theo firmware, gửi sai sẽ làm lệch giờ cả máy.)
+export function rebootDevice(serial) { queueCmd(serial, 'REBOOT'); return 1; }
 // Xóa toàn bộ log chấm công trên máy
 export function clearDeviceLog(serial) { queueCmd(serial, 'CLEAR LOG'); return 1; }
 // Xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log) + dọn mirror local để đếm đúng

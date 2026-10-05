@@ -41,6 +41,25 @@ function initInfo(serial) {
     `PushProtVer=2.4.1\n` +
     `ServerName=Digiplus Server\n`;
 }
+// Máy CHƯA duyệt: chỉ gửi cấu hình tối thiểu để máy nhận ĐÚNG MÚI GIỜ (+7). Nếu không gửi, máy lấy giờ
+// máy chủ nhưng tính theo múi giờ mặc định của hãng (+8) → nhanh 1 tiếng. KHÔNG bật đẩy dữ liệu
+// (TransFlag rỗng, stamp lớn) — khi được duyệt máy sẽ khởi động lại và bắt tay đầy đủ bằng initInfo.
+function pendingInfo(serial) {
+  return `GET OPTION FROM:${serial}\n` +
+    `ATTLOGStamp=9999\n` +
+    `OPERLOGStamp=9999\n` +
+    `ErrorDelay=30\n` +
+    `Delay=10\n` +
+    `TimeZone=7\n` +
+    `TransTimes=00:00\n` +
+    `TransInterval=0\n` +
+    `TransFlag=\n` +
+    `Realtime=0\n` +
+    `Encrypt=0\n` +
+    `ServerVer=2.4.1\n` +
+    `PushProtVer=2.4.1\n` +
+    `ServerName=Digiplus Server\n`;
+}
 const clientIp = (req) => (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim();
 
 // /cdata + /iclock/cdata
@@ -57,6 +76,7 @@ function handleCData(req, res) {
         try { syncFillDevice(sn); } catch (e) { console.error('[device] fill lỗi:', e.message); } // xếp lệnh đồng bộ khi máy kết nối
         return res.type('text/plain').send(initInfo(sn));
       }
+      if (enabled() && sn) return res.type('text/plain').send(pendingInfo(sn));   // chờ duyệt: chỉ gửi múi giờ
       return res.type('text/plain').send('OK');
     }
     return res.type('text/plain').send('OK');

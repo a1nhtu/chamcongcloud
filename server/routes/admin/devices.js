@@ -1,7 +1,7 @@
 // Nhóm route MÁY CHẤM CÔNG (ZKTeco ADMS push) — tách khỏi admin.js.
 import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice } from '../../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 
@@ -75,7 +75,18 @@ export function registerDeviceRoutes(r, { need }) {
         if (groupSerials.length >= 2) { for (const s of groupSerials) syncFillDevice(s); synced = groupSerials.length; }
       } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
     }
-    res.json({ ok: true, synced });
+    // Vừa DUYỆT máy: lúc còn chờ duyệt máy chỉ nhận cấu hình tối thiểu → ra lệnh khởi động lại để máy
+    // bắt tay đầy đủ (bật đẩy dữ liệu real-time + nhận lại giờ/múi giờ đúng).
+    if (becameActive) { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
+    res.json({ ok: true, synced, rebooting: becameActive });
+  });
+  // Đồng bộ giờ: ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt mới nhận lệnh)
+  r.post('/devices/:id/sync-time', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT serial, active FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    if (!d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước rồi mới đồng bộ giờ được.' });
+    rebootDevice(d.serial);
+    res.json({ ok: true, msg: 'Đã gửi lệnh. Máy sẽ khởi động lại (khoảng 30 giây) rồi tự lấy giờ theo máy chủ.' });
   });
   // Dán KEY bản quyền cho 1 máy (Digiplus cấp theo serial). Verify serial khớp mới lưu.
   r.post('/devices/:id/key', need('devices'), (req, res) => {
