@@ -2282,7 +2282,15 @@ async function pageDevices() {
   for (const m of d.rows) {
     // Nút hay dùng để NGOÀI: Duyệt (khi đang chờ), Mở cửa, Xem quẹt; còn lại gom vào "⋯ Thêm"
     const approveInline = !m.active
-      ? btnSm('✅ Duyệt', async () => { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); pageDevices(); })
+      ? btnSm('✅ Duyệt', async () => {
+          // Bắt buộc key mà máy chưa có key → báo rõ + mở luôn ô dán key (trước đây bấm không thấy gì)
+          if (d.key_required && !m.key_ok) {
+            toast('Máy ' + m.serial + ' chưa có KEY bản quyền — dán key Digiplus cấp rồi mới duyệt được.', 'err');
+            return pasteDeviceKey(m);
+          }
+          try { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); toast('Đã duyệt máy ' + m.serial, 'ok'); pageDevices(); }
+          catch (e) { toast(e.message || 'Không duyệt được máy', 'err'); }
+        })
       : null;
     const doorBtn = (m.access_control && hasPerm('door_open'))
       ? btnSm('🔓 Mở cửa', async () => { if (!confirm(`Mở cửa tại máy "${m.name || m.serial}" ngay?`)) return; try { const r = await api('/admin/devices/' + m.id + '/open-door', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh mở cửa', 'ok'); } catch (e) { toast(e.message, 'err'); } })
