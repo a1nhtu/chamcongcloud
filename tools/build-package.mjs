@@ -112,7 +112,10 @@ if %errorlevel%==0 (
 )
 echo Dang khoi dong ung dung...
 start "" "%~dp0start-hidden.vbs"
-timeout /t 4 >nul
+rem --- Cho den khi app THAT SU nghe cong (lan dau phai tao CSDL + chung chi nen co the lau), toi da 90 giay ---
+echo Dang cho ung dung san sang (lan dau co the mat 1 phut)...
+powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 90;$i++){ try { $c=New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1',%PORT%); $c.Close(); $ok=$true; break } catch { Start-Sleep -Seconds 1 } }; if($ok){exit 0}else{exit 1}"
+if errorlevel 1 echo   * Ung dung chua len sau 90 giay - doi them roi bam Refresh. Neu van loi, xem app\\data\\logs\\server.log
 start "" "http://localhost:%PORT%/admin"
 echo.
 echo ============================================
