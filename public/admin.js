@@ -333,6 +333,9 @@ function deptOrdered(list = DEPARTMENTS) {
   walk(0, 0);
   return out;
 }
+// Trang Nhân viên: bộ phận đang chọn trên cây ('*' = tất cả), các nhánh đang gọn, ô tìm — giữ khi làm mới/sửa
+let empDeptSel = '*', empSearch = '';
+const empDeptClosed = new Set();
 async function pageEmployees() {
   const addBtn = hasPerm('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
   const canEdit = hasPerm('employees');
@@ -350,32 +353,98 @@ async function pageEmployees() {
   try {
     await loadRefs();
     const { rows } = await api('/admin/employees');
-    const tbl = el('table', { class: 'data' });
-    tbl.innerHTML = `<thead><tr><th>Mã</th><th>Họ tên</th><th>Bộ phận</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
-    const tb = el('tbody');
-    for (const e of rows) {
-      const delBtn = btnSm('🗑 Xóa', () => delEmp(e), 'ghost'); delBtn.style.color = '#c0392b';
-      const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
-        btnSm('Sửa', () => empModal(e)),
-        e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : btnSm('Mở khoá', () => unlockEmp(e), 'ghost'),
-        delBtn) : '';
-      tb.append(el('tr', {},
-        el('td', {}, e.code,
-          e.device_pin ? el('div', { style: 'color:#0a7;font-size:11px' }, '🔌 ID máy: ' + e.device_pin) : ''),
-        el('td', {}, el('b', {}, e.full_name),
-          e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px', title: 'Tự tạo khi đăng ký vân tay trên máy — bổ sung thông tin rồi lưu' }, 'nháp từ máy') : ''),
-        el('td', {}, e.department || '—'),
-        el('td', {}, e.position || '—'),
-        el('td', {}, e.username),
-        el('td', {}, roleLabel(e.role)),
-        el('td', {}, e.active ? el('span', { class: 'pill ok' }, 'Hoạt động') : el('span', { class: 'pill bad' }, 'Khoá')),
-        el('td', {}, actions),
-      ));
-    }
-    tbl.append(tb);
     if (addBtn) addBtn.onclick = () => empModal(null);
     const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, tmplBtn, impAddBtn, impUpdBtn].filter(Boolean);
-    setMain(head(...headArgs2), el('div', { class: 'panel tbl-scroll' }, tbl));
+
+    // ===== Cây BỘ PHẬN bên trái (bấm để lọc) + bảng nhân viên GỌN bên phải, xếp theo bộ phận =====
+    const NONE = '\u0000none';                       // khoá cho NV chưa có bộ phận
+    const kids = new Map();                          // id bộ phận → các bộ phận con trực tiếp
+    for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+    const namesUnder = (d) => [d.name, ...(kids.get(d.id) || []).flatMap(namesUnder)];   // tên bộ phận + mọi cấp con
+    const cnt = new Map();
+    for (const e of rows) { const k = e.department || NONE; cnt.set(k, (cnt.get(k) || 0) + 1); }
+    const known = new Set(DEPARTMENTS.map((d) => d.name));
+    const nodes = deptOrdered().map((d) => {
+      const names = namesUnder(d);
+      return { key: d.name, label: d.name, depth: d.depth, id: d.id, parent: d.parent_id || 0, names, hasKids: (kids.get(d.id) || []).length > 0,
+        count: names.reduce((n, x) => n + (cnt.get(x) || 0), 0) };
+    });
+    // Bộ phận NV đang mang nhưng không còn trong danh mục + nhóm "Chưa có bộ phận"
+    for (const k of [...cnt.keys()].filter((k) => k !== NONE && !known.has(k)).sort((x, y) => x.localeCompare(y, 'vi')))
+      nodes.push({ key: k, label: k + ' (cũ)', depth: 0, id: 0, parent: 0, names: [k], hasKids: false, count: cnt.get(k) });
+    if (cnt.has(NONE)) nodes.push({ key: NONE, label: 'Chưa có bộ phận', depth: 0, id: 0, parent: 0, names: [NONE], hasKids: false, count: cnt.get(NONE) });
+    if (empDeptSel !== '*' && !nodes.some((n) => n.key === empDeptSel)) empDeptSel = '*';
+    const orderOf = new Map(nodes.map((n, i) => [n.key, i]));
+
+    const tree = el('div', { class: 'emp-tree' });
+    const listBox = el('div', { class: 'panel tbl-scroll' });
+    const searchI = el('input', { type: 'search', placeholder: '🔍 Tìm mã, tên, tài khoản…', value: empSearch, style: 'max-width:280px' });
+    const countLbl = el('span', { style: 'font-size:12.5px;color:var(--muted)' });
+
+    const renderTree = () => {
+      tree.innerHTML = '';
+      const row = (key, label, count, depth, node) => {
+        const tog = node && node.hasKids
+          ? el('span', { class: 'tg', title: 'Mở/gọn', onclick: (ev) => { ev.stopPropagation(); empDeptClosed.has(key) ? empDeptClosed.delete(key) : empDeptClosed.add(key); renderTree(); } }, empDeptClosed.has(key) ? '▸' : '▾')
+          : el('span', { class: 'tg' }, '');
+        tree.append(el('div', { class: 'tn' + (empDeptSel === key ? ' on' : ''), style: 'padding-left:' + (6 + depth * 14) + 'px', onclick: () => { empDeptSel = key; renderTree(); renderList(); } },
+          tog, el('span', { class: 'nm' }, label), el('span', { class: 'ct' }, String(count))));
+      };
+      row('*', 'Tất cả nhân viên', rows.length, 0, null);
+      const hidden = new Set();   // id bộ phận đang bị gọn (ẩn toàn bộ cấp con)
+      for (const n of nodes) {
+        if (n.parent && hidden.has(n.parent)) { if (n.id) hidden.add(n.id); continue; }
+        if (n.id && empDeptClosed.has(n.key)) hidden.add(n.id);
+        row(n.key, n.label, n.count, n.depth, n);
+      }
+    };
+
+    const renderList = () => {
+      const sel = nodes.find((n) => n.key === empDeptSel);
+      const allow = sel ? new Set(sel.names) : null;
+      const q = empSearch.trim().toLowerCase();
+      const list = rows.filter((e) => (!allow || allow.has(e.department || NONE))
+        && (!q || [e.code, e.full_name, e.username, e.device_pin, e.position].some((v) => String(v || '').toLowerCase().includes(q))))
+        .sort((x, y) => (orderOf.get(x.department || NONE) ?? 9999) - (orderOf.get(y.department || NONE) ?? 9999) || x.full_name.localeCompare(y.full_name, 'vi'));
+      countLbl.textContent = list.length + ' nhân viên' + (sel ? ' · ' + sel.label : '');
+      const tbl = el('table', { class: 'data emp-compact' });
+      tbl.innerHTML = `<thead><tr><th>Mã</th><th>Họ tên</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
+      const tb = el('tbody');
+      let lastDept = null;
+      for (const e of list) {
+        const dk = e.department || NONE;
+        if (dk !== lastDept) {   // dòng tiêu đề nhóm bộ phận
+          lastDept = dk;
+          const n = list.filter((x) => (x.department || NONE) === dk).length;
+          tb.append(el('tr', { class: 'grp' }, el('td', { colspan: 7 }, (dk === NONE ? 'Chưa có bộ phận' : dk) + ' (' + n + ')')));
+        }
+        const delBtn = btnSm('🗑', () => delEmp(e), 'ghost'); delBtn.style.color = '#c0392b'; delBtn.title = 'Xóa nhân viên';
+        const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:4px;justify-content:flex-end' },
+          btnSm('Sửa', () => empModal(e)),
+          e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : btnSm('Mở khoá', () => unlockEmp(e), 'ghost'),
+          delBtn) : '';
+        tb.append(el('tr', {},
+          el('td', {}, e.code,
+            e.device_pin ? el('span', { style: 'color:#0a7;font-size:11px;margin-left:6px', title: 'Số ID trên máy chấm công' }, '🔌' + e.device_pin) : ''),
+          el('td', {}, el('b', {}, e.full_name),
+            e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px', title: 'Tự tạo khi đăng ký vân tay trên máy — bổ sung thông tin rồi lưu' }, 'nháp từ máy') : ''),
+          el('td', {}, e.position || '—'),
+          el('td', {}, e.username),
+          el('td', {}, roleLabel(e.role)),
+          el('td', {}, e.active ? el('span', { class: 'pill ok' }, 'Hoạt động') : el('span', { class: 'pill bad' }, 'Khoá')),
+          el('td', {}, actions),
+        ));
+      }
+      if (!list.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Không có nhân viên nào.'))));
+      tbl.append(tb);
+      listBox.innerHTML = ''; listBox.append(tbl);
+    };
+    searchI.oninput = () => { empSearch = searchI.value; renderList(); };
+    renderTree(); renderList();
+    setMain(head(...headArgs2),
+      el('div', { class: 'emp-wrap' },
+        el('div', { class: 'panel emp-side' }, el('div', { class: 'emp-side-h' }, 'Bộ phận'), tree),
+        el('div', { class: 'emp-main' }, el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap' }, searchI, countLbl), listBox)));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
 }
 // Tải file Excel mẫu nhập nhân viên
