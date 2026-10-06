@@ -2355,7 +2355,8 @@ async function pageDevices() {
       el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : '', m.access_control ? el('div', { style: 'font-size:11px;color:#b45309' }, '🚪 Kiểm soát cửa') : ''),
       el('td', {}, onlinePill,
         el('div', { style: 'margin-top:4px' }, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
-        d.key_required ? el('div', { style: 'margin-top:4px' }, m.key_ok ? el('span', { class: 'pill ok' }, '🔑 Có key') : el('span', { class: 'pill warn' }, '🔑 Chưa có key')) : ''),
+        // Máy đã có key thì ẩn nhãn cho đỡ rối; chỉ cảnh báo khi CHƯA có key
+        (d.key_required && !m.key_ok) ? el('div', { style: 'margin-top:4px' }, el('span', { class: 'pill warn' }, '🔑 Chưa có key')) : ''),
       cNV, cFP, cFace, cCard,
       el('td', {}, m.last_ip || '—'),
       el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
