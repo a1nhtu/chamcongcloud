@@ -70,10 +70,17 @@ export async function checkUpdate() {
   if (!/^[\w.-]+\/[\w.-]+$/.test(repo))
     throw new Error('Chưa cấu hình repo GitHub (dạng owner/repo) trong Cài đặt.');
 
+  // File raw của GitHub bị lưu đệm ~5 phút (vừa đẩy bản mới mà bấm kiểm tra vẫn báo "đang dùng bản mới nhất").
+  // → hỏi THÊM GitHub API (đệm ngắn hơn, nhưng giới hạn 60 lượt/giờ mỗi IP) rồi lấy số phiên bản CAO hơn;
+  //   API lỗi/hết lượt thì vẫn còn kết quả từ file raw.
   const url = `https://raw.githubusercontent.com/${repo}/${branch}/package.json`;
+  const headers = { 'Cache-Control': 'no-cache', 'User-Agent': 'Digiplus-Updater' };
+  const apiVersion = fetch(`https://api.github.com/repos/${repo}/contents/package.json?ref=${encodeURIComponent(branch)}`,
+    { headers: { ...headers, Accept: 'application/vnd.github.raw' } })
+    .then(async (r) => (r.ok ? JSON.parse(await r.text()).version || null : null)).catch(() => null);
   let res;
   try {
-    res = await fetch(url, { headers: { 'Cache-Control': 'no-cache', 'User-Agent': 'Digiplus-Updater' } });
+    res = await fetch(url, { headers });
   } catch { throw new Error('Không kết nối được GitHub (kiểm tra Internet).'); }
   if (res.status === 404)
     throw new Error(`Không thấy code ở ${repo} nhánh ${branch}. Kiểm tra tên repo/nhánh và đã push code lên chưa.`);
@@ -83,6 +90,8 @@ export async function checkUpdate() {
   try { latest = JSON.parse(await res.text()).version; }
   catch { throw new Error('package.json trên GitHub không hợp lệ.'); }
   if (!latest) throw new Error('package.json trên GitHub thiếu "version".');
+  const viaApi = await apiVersion;
+  if (viaApi && cmpVer(viaApi, latest) > 0) latest = viaApi;
 
   return { current, latest, hasUpdate: cmpVer(latest, current) > 0, repo, branch };
 }
