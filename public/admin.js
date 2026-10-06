@@ -463,7 +463,32 @@ function empModal(e) {
       ' '.repeat(d.depth * 3) + (d.depth ? '↳ ' : '') + d.name)));
   if (e?.department && !DEPARTMENTS.some(d => d.name === e.department))
     deptSel.append(el('option', { value: e.department, selected: '' }, e.department + ' (cũ)'));
-  const deptField = el('div', {}, el('label', {}, 'Bộ phận'), deptSel);
+  // Thêm nhanh bộ phận/chức danh NGAY trong form NV (khỏi phải ra tab "Bộ phận"); tab cũ vẫn giữ nguyên.
+  // Bộ phận thêm ở đây là cấp gốc — muốn xếp cha-con thì chỉnh ở tab "Bộ phận".
+  const quickAdd = (kind, sel) => {
+    if (!hasPerm('departments')) return '';
+    const label = kind === 'dept' ? 'bộ phận' : 'chức danh';
+    const btn = el('button', { type: 'button', class: 'btn ghost sm', title: 'Thêm ' + label + ' mới', style: 'white-space:nowrap' }, '+ Thêm');
+    btn.onclick = async () => {
+      const name = (prompt('Tên ' + label + ' mới:', '') || '').trim();
+      if (!name) return;
+      const list = kind === 'dept' ? DEPARTMENTS : POSITIONS;
+      const has = list.find(x => x.name.trim().toLowerCase() === name.toLowerCase());
+      try {
+        if (!has) {
+          if (kind === 'dept') { await api('/admin/departments', { method: 'POST', body: { name, parent_id: null } }); DEPARTMENTS = (await api('/admin/departments')).rows; }
+          else { await api('/admin/positions', { method: 'POST', body: { name } }); POSITIONS = (await api('/admin/positions')).rows; }
+          toast('Đã thêm ' + label + ' "' + name + '"', 'ok');
+        }
+        const val = has ? has.name : name;
+        if (![...sel.options].some(o => o.value === val)) sel.append(el('option', { value: val }, val));
+        sel.value = val;
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    return btn;
+  };
+  const withAdd = (sel, kind) => el('div', { style: 'display:flex;gap:6px;align-items:center' }, sel, quickAdd(kind, sel));
+  const deptField = el('div', {}, el('label', {}, 'Bộ phận'), withAdd(deptSel, 'dept'));
 
   // Chức danh: chọn từ danh mục đã khai báo (tab "Bộ phận" → Chức danh)
   const posSel = el('select', { id: 'e-position' },
@@ -471,7 +496,7 @@ function empModal(e) {
     ...POSITIONS.map(p => el('option', { value: p.name, ...(e?.position === p.name ? { selected: '' } : {}) }, p.name)));
   if (e?.position && !POSITIONS.some(p => p.name === e.position))
     posSel.append(el('option', { value: e.position, selected: '' }, e.position + ' (cũ)'));
-  const posField = el('div', {}, el('label', {}, 'Chức danh'), posSel);
+  const posField = el('div', {}, el('label', {}, 'Chức danh'), withAdd(posSel, 'pos'));
 
   // ----- Phân quyền chi tiết (chỉ áp cho Quản lý / Nhân viên; Admin toàn quyền) -----
   const permWrap = el('div', { id: 'e-perm-wrap', style: 'margin-top:4px' });
