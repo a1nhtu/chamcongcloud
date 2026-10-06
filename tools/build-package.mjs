@@ -4,6 +4,7 @@ import { cpSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, rea
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
+import { CHAY_APP_BAT } from '../server/autostart.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT = join(ROOT, 'dist-khach', 'DigiplusChamCong');
@@ -53,19 +54,9 @@ sh.CurrentDirectory = d
 sh.Run """" & d & "\\ChayApp.bat""", 0, False
 `);
 
-// ChayApp.bat: đọc config, chạy node + tunnel
-writeFileSync(join(OUT, 'ChayApp.bat'),
-`@echo off
-cd /d "%~dp0"
-set "PORT=8686"
-set "TUNNEL_TOKEN="
-for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
-rem --- App da chay (cong dang nghe) thi THOI: auto-start goi ca luc khoi dong lan luc dang nhap, khong bat trung ---
-powershell -NoProfile -Command "if(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue).Count -gt 0){exit 1}else{exit 0}" >nul 2>&1
-if errorlevel 1 exit /b
-start "" /b "%~dp0runtime\\node.exe" --no-warnings "%~dp0app\\server\\index.js"
-if not "%TUNNEL_TOKEN%"=="" start "" /b "%~dp0cloudflared.exe" tunnel run --token %TUNNEL_TOKEN%
-`);
+// ChayApp.bat: đọc config, chạy node + tunnel (nội dung lấy từ server/autostart.js — nguồn duy nhất,
+// vì app cũng tự ghi lại file này khi khởi động để khách cũ bấm Cập nhật là có bản mới)
+writeFileSync(join(OUT, 'ChayApp.bat'), CHAY_APP_BAT);
 
 // KiemTra-Tunnel.bat: chạy cloudflared FOREGROUND để xem log/chẩn đoán khi domain lỗi 1033
 writeFileSync(join(OUT, 'KiemTra-Tunnel.bat'),

@@ -133,6 +133,8 @@ httpServer.on('error', (e) => {
 httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`\n  === Digiplus Chấm công ===`);
   console.log(`  HTTP  (máy này):  http://localhost:${PORT}/  |  /admin`);
+  // Bản cài của khách: tự bảo đảm app tự bật khi mở máy/đăng nhập (khách cũ bấm Cập nhật là được sửa, khỏi chạy lại CaiDat.bat)
+  import('./autostart.js').then((m) => m.ensureAutostart()).catch((e) => console.error('[autostart] lỗi:', e.message));
 });
 
 // HTTPS (cho điện thoại dùng camera + GPS qua mạng LAN/wifi nội bộ) — KHÔNG bắt buộc:
