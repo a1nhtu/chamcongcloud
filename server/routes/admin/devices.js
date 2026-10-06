@@ -25,6 +25,13 @@ function lanIPs() {
   return [...real, ...virt];
 }
 
+// Tên miền của bản cài có tunnel (config.txt: CUSTOMER + TUNNEL_TOKEN) — để hướng dẫn điền vào máy ở chi nhánh khác.
+// Bản LAN (không có tunnel) trả ''.
+function tunnelDomain() {
+  const c = (process.env.CUSTOMER || '').trim().toLowerCase();
+  return c && process.env.TUNNEL_TOKEN ? c + '.maychamcongcloud.com' : '';
+}
+
 export function registerDeviceRoutes(r, { need }) {
   r.get('/devices', need('devices'), (req, res) => {
     const rows = db.prepare('SELECT * FROM push_devices ORDER BY created_at').all();
@@ -38,7 +45,7 @@ export function registerDeviceRoutes(r, { need }) {
       d.key_ok = deviceKeyOk(d);          // đã có key hợp lệ chưa
       delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
     }
-    res.json({ rows, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080) });
+    res.json({ rows, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
   r.get('/server-ips', need('devices'), (req, res) => {
