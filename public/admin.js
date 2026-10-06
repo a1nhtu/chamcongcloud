@@ -232,11 +232,14 @@ async function pageDashboard() {
   }, 20000);
 }
 
+// Tổng quan: trang đang xem + số dòng mỗi trang (0 = tất cả; nhớ theo trình duyệt)
+let dashPage = 1, dashPageSize = 20;
+try { const v = localStorage.getItem('dash_page_size'); if (v != null && [0, 10, 20, 50, 100].includes(+v)) dashPageSize = +v; } catch {}
 async function renderDashboard(showLoading) {
   const refreshBtn = el('button', { class: 'btn ghost sm' }, '↻ Làm mới');
   refreshBtn.onclick = () => renderDashboard(true);
   const dateI = el('input', { type: 'date', value: dashDate || todayVN(), title: 'Chọn ngày để xem lại tổng quan', style: 'width:auto' });
-  dateI.onchange = () => { dashDate = dateI.value; renderDashboard(true); };
+  dateI.onchange = () => { dashDate = dateI.value; dashPage = 1; renderDashboard(true); };
   const autotag = el('span', { style: 'font-size:12px;color:var(--muted)' }, dashDate && dashDate !== todayVN() ? 'Đang xem ngày cũ' : 'Tự cập nhật mỗi 20 giây');
   if (showLoading) setMain(head('Tổng quan', dateI, autotag, refreshBtn), loading());
   try {
@@ -268,11 +271,30 @@ async function renderDashboard(showLoading) {
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vào</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vị trí</th><th>Ra</th><th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
     const tb = el('tbody');
-    if (!today.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 8 : 9 }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
-    for (const r of today) tb.append(rowToday(r));
     tbl.append(tb);
+    // Phân trang: chọn số dòng/trang, giữ nguyên trang đang xem khi tự cập nhật mỗi 20 giây
+    const pager = el('div', { style: 'display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font-size:13px' });
+    const sizeSel = el('select', { style: 'width:auto;padding:4px 8px' },
+      ...[10, 20, 50, 100, 0].map(n => el('option', { value: n, ...(n === dashPageSize ? { selected: '' } : {}) }, n ? n + ' dòng' : 'Tất cả')));
+    const renderPage = () => {
+      const size = dashPageSize || today.length || 1;
+      const pages = Math.max(1, Math.ceil(today.length / size));
+      dashPage = Math.min(Math.max(1, dashPage), pages);
+      const from = (dashPage - 1) * size, part = today.slice(from, from + size);
+      tb.innerHTML = '';
+      if (!today.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 8 : 9 }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
+      for (const r of part) tb.append(rowToday(r));
+      const prev = el('button', { class: 'btn ghost sm', ...(dashPage <= 1 ? { disabled: '' } : {}), onclick: () => { dashPage--; renderPage(); } }, '‹ Trước');
+      const next = el('button', { class: 'btn ghost sm', ...(dashPage >= pages ? { disabled: '' } : {}), onclick: () => { dashPage++; renderPage(); } }, 'Sau ›');
+      pager.innerHTML = '';
+      pager.append(
+        el('span', { style: 'color:var(--muted);margin-right:auto' }, today.length ? `Hiện ${from + 1}–${from + part.length} / ${today.length} lượt chấm` : ''),
+        'Mỗi trang:', sizeSel, prev, el('b', {}, `Trang ${dashPage}/${pages}`), next);
+    };
+    sizeSel.onchange = () => { dashPageSize = +sizeSel.value; dashPage = 1; try { localStorage.setItem('dash_page_size', String(dashPageSize)); } catch {} renderPage(); };
+    renderPage();
     const clock = el('span', { style: 'font-size:12px;color:var(--muted)' }, 'Cập nhật lúc ' + new Date().toLocaleTimeString('vi-VN'));
-    setMain(head('Tổng quan · ' + d.today, dateI, clock, refreshBtn), cards, el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Tổng quan · ' + d.today, dateI, clock, refreshBtn), cards, el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll' }, tbl), pager));
   } catch (e) { if (showLoading) setMain(head('Tổng quan'), el('div', { class: 'empty' }, e.message)); }
 }
 function mcard(cls, n, l, onClick) {
