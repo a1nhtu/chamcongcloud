@@ -2289,11 +2289,27 @@ async function pageDevices() {
   };
   // Dán KEY bản quyền cho 1 máy (Digiplus cấp theo Serial)
   const pasteDeviceKey = async (m) => {
-    await copySerial(m.serial, true);   // copy sẵn serial để dán sang trang cấp key
-    const k = prompt('Dán KEY máy chấm công (Digiplus cấp theo Serial ' + m.serial + ').\nSerial đã được copy sẵn — dán sang trang cấp key để lấy key:', '');
-    if (k == null || !k.trim()) return;
-    try { await api('/admin/devices/' + m.id + '/key', { method: 'POST', body: { key: k.trim() } }); toast('Đã lưu key máy ✔', 'ok'); pageDevices(); }
-    catch (e) { toast(e.message, 'err'); }
+    copySerial(m.serial, true);   // copy sẵn serial để dán sang trang cấp key
+    // Hộp thoại riêng (không dùng prompt của trình duyệt) để serial BÔI ĐEN được + có nút copy lại bất cứ lúc nào
+    const serialI = el('input', { readonly: '', value: m.serial, style: 'font-family:monospace;font-weight:700;flex:1' });
+    serialI.onclick = () => serialI.select();
+    const copyBtn = el('button', { class: 'btn ghost', onclick: () => copySerial(m.serial) }, '📋 Copy serial');
+    const keyT = el('textarea', { rows: 4, placeholder: 'Dán key Digiplus cấp cho serial này…', style: 'width:100%;font-family:monospace' });
+    const save = el('button', { class: 'btn' }, 'Lưu key');
+    save.onclick = async () => {
+      const k = keyT.value.trim();
+      if (!k) return toast('Chưa dán key', 'err');
+      save.disabled = true;
+      try { await api('/admin/devices/' + m.id + '/key', { method: 'POST', body: { key: k } }); toast('Đã lưu key máy ✔', 'ok'); closeModal(); pageDevices(); }
+      catch (e) { toast(e.message, 'err'); save.disabled = false; }
+    };
+    openModal('Key bản quyền máy · ' + (m.name || m.serial), [
+      el('label', {}, 'Serial máy (đã copy sẵn — dán sang trang cấp key để lấy key)'),
+      el('div', { style: 'display:flex;gap:8px;margin:4px 0 14px' }, serialI, copyBtn),
+      el('label', {}, 'Key máy chấm công'),
+      keyT,
+    ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+    setTimeout(() => keyT.focus(), 50);
   };
   if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
   for (const m of d.rows) {
