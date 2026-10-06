@@ -2381,8 +2381,8 @@ async function pageDevices() {
     ipsHint);
 
   // Bảng danh sách máy
-  const tbl = el('table', { class: 'data' });
-  tbl.innerHTML = `<thead><tr><th>Serial</th><th>Tên máy</th><th>Trạng thái</th><th>👥 NV</th><th>👉 Vân tay</th><th>😊 Mặt</th><th>💳 Thẻ</th><th>IP</th><th>Lần cuối</th><th>Số quẹt</th><th></th></tr></thead>`;
+  const tbl = el('table', { class: 'data dev-tbl' });
+  tbl.innerHTML = `<thead><tr><th>Máy</th><th>Trạng thái</th><th class="c">Nhân viên</th><th class="c">Vân tay</th><th class="c">Khuôn mặt</th><th class="c">Thẻ</th><th>Kết nối gần nhất</th><th class="c">Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
   const countCells = {};   // serial -> {nv,fp,face,card} để tự làm mới số liệu
   // Copy serial máy (để dán vào trang cấp key, khỏi gõ tay). Bản LAN chạy http → không có navigator.clipboard nên có dự phòng execCommand.
@@ -2422,7 +2422,7 @@ async function pageDevices() {
     ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
     setTimeout(() => keyT.focus(), 50);
   };
-  if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
+  if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 9 }, el('div', { class: 'empty' }, 'Chưa có máy nào kết nối. Cấu hình máy theo hướng dẫn trên, máy sẽ tự hiện ở đây.'))));
   for (const m of d.rows) {
     // Nút hay dùng để NGOÀI: Duyệt (khi đang chờ), Mở cửa, Xem quẹt; còn lại gom vào "⋯ Thêm"
     const approveInline = !m.active
@@ -2465,30 +2465,36 @@ async function pageDevices() {
       m.active ? { label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null,
       { danger: true, label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
     ]);
-    const cNV = el('td', { style: 'text-align:center;font-weight:600;font-variant-numeric:tabular-nums' }, String(m.emp_count ?? 0));
-    const cFP = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.fp_count ?? 0));
-    const cFace = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.face_count ?? 0));
-    const cCard = el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums' }, String(m.card_count ?? 0));
+    const numTd = (v, bold) => el('td', { class: 'num' + (bold ? ' b' : '') + (v ? '' : ' zero') }, String(v));
+    const cNV = numTd(m.emp_count ?? 0, true);
+    const cFP = numTd(m.fp_count ?? 0);
+    const cFace = numTd(m.face_count ?? 0);
+    const cCard = numTd(m.card_count ?? 0);
     countCells[m.serial] = { cNV, cFP, cFace, cCard };
     // Online = máy có gọi server trong vòng 2,5 phút gần đây (máy ADMS gọi ~mỗi 10s)
     const online = !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
-    const dot = el('span', { title: online ? 'Đang online' : 'Offline', style: `display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:7px;vertical-align:middle;background:${online ? '#16a34a' : '#bbb'}${online ? ';box-shadow:0 0 0 3px rgba(22,163,74,.18)' : ''}` });
-    const onlinePill = online
-      ? el('span', { class: 'pill ok' }, '🟢 Online')
-      : el('span', { class: 'pill', style: 'background:#eee;color:#8a8a8a' }, '⚪ Offline');
-    tb.append(el('tr', { style: online ? '' : 'opacity:.7' },
-      el('td', {}, el('span', { class: 'mono', style: 'font-family:monospace' }, dot, m.serial),
-        el('button', { class: 'btn ghost sm', title: 'Copy serial', style: 'margin-left:6px;padding:2px 6px', onclick: () => copySerial(m.serial) }, '📋')),
-      el('td', {}, m.name || '—', m.sync_group ? el('div', { style: 'font-size:11px;color:#0a7' }, '🔁 Nhóm: ' + m.sync_group) : '', m.machine_number ? el('div', { style: 'font-size:11px;color:#666' }, '🔢 Số máy: ' + m.machine_number) : '', m.access_control ? el('div', { style: 'font-size:11px;color:#b45309' }, '🚪 Kiểm soát cửa') : ''),
-      el('td', {}, onlinePill,
-        el('div', { style: 'margin-top:4px' }, m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt')),
+    const chips = [
+      m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
+      m.machine_number ? el('span', { class: 'chip', title: 'Số máy' }, '№ ' + m.machine_number) : '',
+      m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
+    ].filter(Boolean);
+    const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';
+    tb.append(el('tr', { class: online ? '' : 'off' },
+      el('td', {},
+        el('div', { class: 'dv-name' }, m.name || el('span', { style: 'color:#9ca3af;font-weight:500' }, 'Chưa đặt tên')),
+        el('div', { class: 'dv-serial' }, m.serial,
+          el('button', { class: 'cp', title: 'Copy serial', onclick: () => copySerial(m.serial) }, '📋')),
+        chips.length ? el('div', { class: 'dv-chips' }, ...chips) : ''),
+      el('td', {}, el('div', { class: 'dv-st' },
+        el('span', { class: 'st ' + (online ? 'on' : 'offl'), title: online ? 'Máy đang kết nối' : 'Máy không gọi về trong 2,5 phút gần đây' }, el('i', {}), online ? 'Online' : 'Offline'),
+        m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'),
         // Máy đã có key thì ẩn nhãn cho đỡ rối; chỉ cảnh báo khi CHƯA có key
-        (d.key_required && !m.key_ok) ? el('div', { style: 'margin-top:4px' }, el('span', { class: 'pill warn' }, '🔑 Chưa có key')) : ''),
+        (d.key_required && !m.key_ok) ? el('span', { class: 'pill warn' }, '🔑 Chưa có key') : '')),
       cNV, cFP, cFace, cCard,
-      el('td', {}, m.last_ip || '—'),
-      el('td', {}, m.last_seen ? isoToHMS(m.last_seen) + ' ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '—'),
-      el('td', {}, `${m.punch_count}${m.unmatched ? ` · ${m.unmatched} mã chưa khớp` : ''}`),
-      el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end' }, approveInline, keyBtn, doorBtn, timeBtn, logBtn, moreBtn)),
+      el('td', {}, el('div', { class: 'dv-ip' }, m.last_ip || '—'), seen ? el('div', { class: 'dv-sub' }, seen) : ''),
+      el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
+        m.unmatched ? el('div', { class: 'dv-warn', title: 'Số ID trên máy chưa khớp với nhân viên nào trong phần mềm' }, m.unmatched + ' mã chưa khớp') : ''),
+      el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, doorBtn, timeBtn, logBtn, moreBtn)),
     ));
   }
   tbl.append(tb);
@@ -2499,10 +2505,9 @@ async function pageDevices() {
       const dd = await api('/admin/devices');
       for (const m of dd.rows) {
         const cc = countCells[m.serial]; if (!cc) continue;
-        cc.cNV.textContent = String(m.emp_count ?? 0);
-        cc.cFP.textContent = String(m.fp_count ?? 0);
-        cc.cFace.textContent = String(m.face_count ?? 0);
-        cc.cCard.textContent = String(m.card_count ?? 0);
+        for (const [cell, v] of [[cc.cNV, m.emp_count], [cc.cFP, m.fp_count], [cc.cFace, m.face_count], [cc.cCard, m.card_count]]) {
+          cell.textContent = String(v ?? 0); cell.classList.toggle('zero', !v);
+        }
       }
     } catch { /* bỏ qua, thử lại lần sau */ }
     if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
