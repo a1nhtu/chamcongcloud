@@ -60,6 +60,9 @@ cd /d "%~dp0"
 set "PORT=8686"
 set "TUNNEL_TOKEN="
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
+rem --- App da chay (cong dang nghe) thi THOI: auto-start goi ca luc khoi dong lan luc dang nhap, khong bat trung ---
+powershell -NoProfile -Command "if(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue).Count -gt 0){exit 1}else{exit 0}" >nul 2>&1
+if errorlevel 1 exit /b
 start "" /b "%~dp0runtime\\node.exe" --no-warnings "%~dp0app\\server\\index.js"
 if not "%TUNNEL_TOKEN%"=="" start "" /b "%~dp0cloudflared.exe" tunnel run --token %TUNNEL_TOKEN%
 `);
@@ -105,8 +108,13 @@ powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.Cr
 net session >nul 2>&1
 if %errorlevel%==0 (
   schtasks /Create /TN "Digiplus-%PORT%" /TR "wscript.exe \\"%~dp0start-hidden.vbs\\"" /SC ONSTART /RU SYSTEM /RL HIGHEST /F >nul 2>&1
+  rem Laptop/PC tat may kieu Fast Startup: mo lai KHONG tinh la "khoi dong" nen ONSTART khong chay
+  rem  - them task luc DANG NHAP, tre 30 giay; ChayApp.bat tu bo qua neu app da chay.
+  schtasks /Create /TN "Digiplus-%PORT%-logon" /TR "wscript.exe \\"%~dp0start-hidden.vbs\\"" /SC ONLOGON /DELAY 0000:30 /RU SYSTEM /RL HIGHEST /F >nul 2>&1
+  rem Mac dinh Windows KHONG chay task khi laptop dang dung pin - tat gioi han do.
+  powershell -NoProfile -Command "foreach($n in 'Digiplus-%PORT%','Digiplus-%PORT%-logon'){ try { $t=Get-ScheduledTask -TaskName $n -ErrorAction Stop; $t.Settings.DisallowStartIfOnBatteries=$false; $t.Settings.StopIfGoingOnBatteries=$false; Set-ScheduledTask -InputObject $t | Out-Null } catch {} }" >nul 2>&1
   del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" >nul 2>&1
-  echo   + Da them auto-start khi KHOI DONG may - chay ca khi VPS chua dang nhap.
+  echo   + Da them auto-start khi KHOI DONG may va khi DANG NHAP - chay ca khi VPS chua dang nhap.
 ) else (
   echo   * Luu y VPS: de auto-start chay ca khi reboot chua dang nhap, chay lai file nay bang "Run as administrator".
 )
@@ -139,6 +147,7 @@ for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b
 echo Dang go cai dat instance cong %PORT% (KHONG dung khach khac tren may/VPS)...
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" 2>nul
 schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
+schtasks /Delete /TN "Digiplus-%PORT%-logon" /F >nul 2>&1
 for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
 echo Da go autostart + dung app cong %PORT%.
 echo LUU Y: neu chay nhieu khach tren 1 VPS, cloudflared cua khach nay van chay -
