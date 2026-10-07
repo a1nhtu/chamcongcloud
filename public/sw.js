@@ -40,7 +40,9 @@ self.addEventListener('notificationclick', (e) => {
   e.notification.close();
   const url = (e.notification.data && e.notification.data.url) || '/admin';
   e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
-    for (const c of cs) { if (c.url.includes('/admin') && 'focus' in c) return c.focus(); }
+    // Ưu tiên cửa sổ đang mở đúng trang (quản lý /admin hoặc app nhân viên /)
+    const want = new URL(url, self.location.origin).pathname.startsWith('/admin');
+    for (const c of cs) { if (new URL(c.url).pathname.startsWith('/admin') === want && 'focus' in c) return c.focus(); }
     return clients.openWindow(url);
   }));
 });

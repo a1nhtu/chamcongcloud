@@ -5,7 +5,7 @@ import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit } from '../attendance-calc.js';
-import { notifyManagers } from '../push.js';
+import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 
 const r = Router();
 r.use(authRequired);
@@ -359,6 +359,20 @@ r.get('/summary', (req, res) => {
     otMinutes: otMin,
     lateCount, earlyCount,
   });
+});
+
+// ---- Thông báo đẩy cho CHÍNH nhân viên (vd quẹt vân tay ở máy chấm công thành công) ----
+// Đăng ký gắn với tài khoản đang đăng nhập → chỉ nhận thông báo về chính mình (notifyEmployee lọc theo employee_id).
+r.get('/push/vapid', (req, res) => res.json({ publicKey: getVapid().publicKey }));
+r.post('/push/subscribe', (req, res) => {
+  try { saveSubscription(req.user.id, req.body?.subscription); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+r.post('/push/unsubscribe', (req, res) => {
+  // chỉ gỡ được đăng ký của CHÍNH mình
+  const ep = String(req.body?.endpoint || '');
+  if (ep) db.prepare('DELETE FROM push_subscriptions WHERE endpoint=? AND employee_id=?').run(ep, req.user.id);
+  res.json({ ok: true });
 });
 
 export default r;

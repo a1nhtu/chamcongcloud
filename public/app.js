@@ -79,7 +79,15 @@ $('#login-form').addEventListener('submit', async (e) => {
   finally { btn.disabled = false; btn.textContent = 'Đăng nhập'; }
 });
 
-$('#btn-logout').addEventListener('click', () => { clearToken(); location.reload(); });
+$('#btn-logout').addEventListener('click', async () => {
+  // Đăng xuất = gỡ thông báo của tài khoản này khỏi điện thoại (điện thoại dùng chung không nhận thông báo của người khác)
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (sub) { try { await api('/attendance/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch {} await sub.unsubscribe(); }
+  } catch {}
+  clearToken(); location.reload();
+});
 
 function showApp() {
   $('#login-view').classList.add('hidden');
@@ -104,6 +112,56 @@ function renderTab(tab) {
   (map[tab] || renderCham)();
 }
 
+/* ---------- Thông báo đẩy: báo cho nhân viên khi chấm công ở máy chấm công thành công ---------- */
+function urlB64ToU8(b64) {
+  const s = (b64 + '='.repeat((4 - (b64.length % 4)) % 4)).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s); const arr = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+async function pushState() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return 'unsupported';
+  if (Notification.permission === 'denied') return 'denied';
+  try { const reg = await navigator.serviceWorker.ready; return (await reg.pushManager.getSubscription()) ? 'on' : 'off'; } catch { return 'off'; }
+}
+async function pushCard() {
+  const st = await pushState();
+  if (st === 'unsupported') {
+    // iPhone chỉ nhận thông báo khi đã "Thêm vào MH chính" (iOS 16.4+) — nhắc 1 dòng, không chặn gì
+    return isIOS() && !isStandalone() ? el('div', { class: 'status-banner', style: 'background:#f1f5f9;color:#475569;font-size:13px' },
+      '🔔 Muốn nhận thông báo khi chấm công ở máy: thêm app vào Màn hình chính rồi mở lại.') : null;
+  }
+  const btn = el('button', { class: 'btn sm' + (st === 'on' ? ' ghost' : ''), style: 'white-space:nowrap' }, st === 'on' ? 'Tắt' : 'Bật');
+  const txt = st === 'on' ? '🔔 Đang bật thông báo khi bạn chấm công ở máy chấm công'
+    : st === 'denied' ? '🔕 Thông báo đang bị chặn — mở cài đặt trình duyệt cho phép thông báo của trang này'
+    : '🔔 Bật thông báo để biết ngay khi bạn chấm công ở máy chấm công';
+  const box = el('div', { class: 'status-banner', style: 'background:#f1f5f9;color:#334155;display:flex;gap:10px;align-items:center;justify-content:space-between;font-size:13.5px' },
+    el('span', {}, txt), st === 'denied' ? '' : btn);
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      if (st === 'on') {
+        const sub = await reg.pushManager.getSubscription();
+        if (sub) { try { await api('/attendance/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }); } catch {} try { await sub.unsubscribe(); } catch {} }
+        toast('Đã tắt thông báo', 'ok');
+      } else {
+        if (await Notification.requestPermission() !== 'granted') throw new Error('Bạn chưa cho phép hiện thông báo');
+        const { publicKey } = await api('/attendance/push/vapid');
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToU8(publicKey) });
+        await api('/attendance/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } });
+        toast('Đã bật thông báo', 'ok');
+      }
+    } catch (e) { toast(e.message, 'err'); }
+    renderCham();
+  };
+  // Đang bật: đồng bộ lại đăng ký với máy chủ (phòng khi máy chủ mất/đổi tài khoản trên cùng điện thoại)
+  if (st === 'on') navigator.serviceWorker.ready.then((reg) => reg.pushManager.getSubscription())
+    .then((sub) => sub && api('/attendance/push/subscribe', { method: 'POST', body: { subscription: sub.toJSON() } })).catch(() => {});
+  return box;
+}
+
 /* ---------------- Tab CHẤM CÔNG ---------------- */
 async function renderCham() {
   const c = $('#content'); c.innerHTML = '<div class="empty"><span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span></div>';
@@ -116,6 +174,8 @@ async function renderCham() {
   c.innerHTML = '';
   // Nhắc cài app vào máy (Android 1 chạm / iPhone chỉ dẫn) — bỏ qua được
   const ib = installBanner(); if (ib) c.append(ib);
+  // Bật/tắt thông báo khi quẹt vân tay/khuôn mặt ở máy chấm công (chỉ báo về CHÍNH mình)
+  const nb = await pushCard(); if (nb) c.append(nb);
   // 2 ô Vào/Ra
   const grid = el('div', { class: 'io-grid' },
     el('div', { class: 'io-cell' }, el('div', { class: 'lbl' }, 'VÀO CA'), el('div', { class: 'val' }, hasIn ? isoToHM(a.check_in_at) : '--:--')),

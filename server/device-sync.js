@@ -4,6 +4,7 @@ import { db, getSetting } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts } from './shift-resolver.js';
 import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow, noShiftUnit } from './attendance-calc.js';
 import { hashPassword } from './auth.js';
+import { notifyEmployee } from './push.js';
 
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
 function findEmpByPin(pin) {
@@ -589,6 +590,7 @@ export function rebuildDay(employeeId, workDate) {
 export function ingestAttlog(serial, rawBody) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const touched = new Set();
+  const notifyNow = new Map();   // empId → lượt quẹt mới nhất cần báo
   let n = 0;
   const dedupMs = (parseInt(getSetting('punch_dedup_min', '0'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
@@ -612,7 +614,13 @@ export function ingestAttlog(serial, rawBody) {
     }
     const emp = findEmpByPin(pin);
     const empId = emp?.id ?? null;
-    try { ins.run(serial, pin, punchIso, workDate, status, verify, empId); } catch {}
+    let isNew = false;
+    try { isNew = ins.run(serial, pin, punchIso, workDate, status, verify, empId).changes > 0; } catch {}
+    // Báo cho CHÍNH nhân viên: chỉ lượt quẹt MỚI và vừa xảy ra (≤ 15 phút) — máy gửi bù log cũ thì không báo dồn
+    if (isNew && empId && Math.abs(Date.now() - d.getTime()) <= 15 * 60000) {
+      const prevN = notifyNow.get(empId);
+      if (!prevN || prevN.d < d) notifyNow.set(empId, { d, timeStr });
+    }
     if (!empId) askUserFromDevice(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
     n++;
     if (empId) touched.add(empId + '|' + workDate);
@@ -626,6 +634,12 @@ export function ingestAttlog(serial, rawBody) {
     toRebuild.add(eid + '|' + prev.toISOString().slice(0, 10));
   }
   for (const key of toRebuild) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
+  if (notifyNow.size) {
+    const dev = db.prepare('SELECT name FROM push_devices WHERE serial=?').get(serial);
+    const where = dev && dev.name ? 'tại máy ' + dev.name : 'tại máy chấm công';
+    for (const [empId, v] of notifyNow)
+      notifyEmployee(empId, { title: '✅ Chấm công thành công', body: `Lúc ${v.timeStr.slice(11, 16)} ngày ${v.timeStr.slice(8, 10)}/${v.timeStr.slice(5, 7)} ${where}`, url: '/', tag: 'dev-punch-' + empId }).catch(() => {});
+  }
   return n;
 }
 
