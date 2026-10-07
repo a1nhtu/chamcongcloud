@@ -136,3 +136,13 @@ table.dev-tbl td.num.zero { color: #cbd0d6; font-weight: 400; }
 .dv-warn { font-size: 11.5px; font-weight: 600; color: #b45309; white-space: nowrap; }
 .dv-act { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: nowrap; }
 .dv-act .btn { white-space: nowrap; }
+
+/* Menu "⋯ Thêm": gom nhóm, mục gọn; nhiều nhóm thì 2 cột */
+.rm-dd { position: fixed; z-index: 1000; background: #fff; border: 1px solid #e7e2dd; border-radius: 12px; box-shadow: 0 10px 28px rgba(0,0,0,.16); padding: 6px; min-width: 200px; flex-direction: column; gap: 2px; overflow: auto; }
+.rm-dd.two { display: grid !important; grid-template-columns: repeat(2, minmax(210px, 1fr)); column-gap: 6px; row-gap: 2px; width: 470px; }
+.rm-grp { display: flex; flex-direction: column; padding: 4px 0; }
+.rm-dd:not(.two) .rm-grp + .rm-grp { border-top: 1px solid #f0ebe6; }
+.rm-h { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: #9a8f88; padding: 4px 10px 3px; }
+.rm-it { all: unset; box-sizing: border-box; width: 100%; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; font-weight: 600; color: #1f2937; cursor: pointer; white-space: nowrap; }
+.rm-it:hover, .rm-it:focus-visible { background: #f6f1ec; }
+.rm-it.danger { color: #c0392b; }

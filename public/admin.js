@@ -519,21 +519,35 @@ function rowMenu(items, label = '⋯ Thêm') {
   btn.onclick = (e) => {
     e.stopPropagation();
     if (!_rowDD) {
-      _rowDD = el('div', { style: 'position:fixed;z-index:1000;background:#fff;border:1px solid #e5e5e5;border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:6px;min-width:170px;display:none;flex-direction:column;gap:2px' });
+      _rowDD = el('div', { class: 'rm-dd', style: 'display:none' });
       document.body.append(_rowDD);
       document.addEventListener('click', (ev) => { if (_rowDD && _rowDD.style.display === 'flex' && !_rowDD.contains(ev.target)) _rowDD.style.display = 'none'; }, true);
     }
     if (_rowDD.style.display === 'flex' && _rowDD._owner === btn) { _rowDD.style.display = 'none'; return; }
     _rowDD._owner = btn; _rowDD.innerHTML = '';
+    const groups = [];
     for (const it of list) {
-      const mi = el('button', { class: 'btn sm ghost', style: 'width:100%;justify-content:flex-start;text-align:left' + (it.danger ? ';color:#c0392b' : '') }, it.label);
-      mi.onclick = () => { _rowDD.style.display = 'none'; it.fn(); };
-      _rowDD.append(mi);
+      const g = it.group || '';
+      let grp = groups.find((x) => x.name === g);
+      if (!grp) { grp = { name: g, items: [] }; groups.push(grp); }
+      grp.items.push(it);
+    }
+    const twoCol = groups.length >= 3 && innerWidth >= 620;
+    _rowDD.className = 'rm-dd' + (twoCol ? ' two' : '');
+    for (const grp of groups) {
+      const box = el('div', { class: 'rm-grp' }, grp.name ? el('div', { class: 'rm-h' }, grp.name) : '');
+      for (const it of grp.items) {
+        const mi = el('button', { class: 'rm-it' + (it.danger ? ' danger' : ''), title: it.hint || '' }, it.label);
+        mi.onclick = () => { _rowDD.style.display = 'none'; it.fn(); };
+        box.append(mi);
+      }
+      _rowDD.append(box);
     }
     const r = btn.getBoundingClientRect();
     _rowDD.style.display = 'flex';
     const mw = _rowDD.offsetWidth || 180;
-    let left = r.right - mw; if (left < 8) left = 8;
+    if (_rowDD.offsetHeight > innerHeight - 16) _rowDD.style.maxHeight = (innerHeight - 16) + 'px';
+    let left = Math.min(r.right - mw, innerWidth - mw - 8); if (left < 8) left = 8;   // nút nằm khuất (bảng cuộn ngang) → vẫn hiện trong màn hình
     let top = r.bottom + 4; if (top + _rowDD.offsetHeight > innerHeight - 8) top = Math.max(8, r.top - _rowDD.offsetHeight - 4);
     _rowDD.style.left = left + 'px'; _rowDD.style.top = top + 'px';
   };
@@ -2510,25 +2524,25 @@ async function pageDevices() {
     const keyBtn = (d.key_required && !m.key_ok) ? btnSm('🔑 Dán key', () => pasteDeviceKey(m)) : null;
     const putDev = (body) => api('/admin/devices/' + m.id, { method: 'PUT', body });
     const moreBtn = rowMenu([
-      m.active ? { label: '🕒 Xem giờ trên máy', fn: () => deviceClockModal(m) } : null,
-      { label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
-      { label: '⬇ Tải lại log chấm công (theo ngày)', fn: () => deviceAttlogModal(m) },
-      { label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại. Chờ chút rồi Làm mới.', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
-      { label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
-      { label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
-      { label: '🔢 Số máy (ghép log IDM)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
-      hasPerm('devices') ? { label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null,
-      hasPerm('devices') ? { label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
-      (hasPerm('devices') && m.key_ok) ? { label: '🔑 Gỡ key bản quyền máy', fn: async () => { if (confirm('Gỡ key bản quyền khỏi máy này?')) { await api('/admin/devices/' + m.id + '/key', { method: 'DELETE' }); toast('Đã gỡ key', 'ok'); pageDevices(); } } } : null,
+      m.active ? { group: 'Dữ liệu từ máy', label: '🕒 Xem giờ trên máy', fn: () => deviceClockModal(m) } : null,
+      { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
+      { group: 'Dữ liệu từ máy', label: '⬇ Tải lại log chấm công', fn: () => deviceAttlogModal(m) },
+      { group: 'Dữ liệu từ máy', label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại. Chờ chút rồi Làm mới.', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
+      { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
+      { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
+      { group: 'Cài đặt máy', hint: 'Ghép log kiểu IDM: máy số lẻ = VÀO, máy chẵn = RA', label: '🔢 Số máy (ghép log)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
+      hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null,
+      hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
+      (hasPerm('devices') && m.key_ok) ? { group: 'Bản quyền & quản trị', label: '🔑 Gỡ key bản quyền máy', fn: async () => { if (confirm('Gỡ key bản quyền khỏi máy này?')) { await api('/admin/devices/' + m.id + '/key', { method: 'DELETE' }); toast('Đã gỡ key', 'ok'); pageDevices(); } } } : null,
       // Hạ quản trị trên máy về nhân viên (vd quản trị được đồng bộ từ cơ sở khác → không ai ở đây vào được menu máy)
-      hasPerm('devices') ? { label: '👤 Xóa quyền quản trị trên máy', fn: async () => {
+      hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: '👤 Xóa quyền quản trị', fn: async () => {
         if (!confirm(`Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy). Máy phải đang Online để nhận lệnh.`)) return;
         try { const r = await api('/admin/devices/' + m.id + '/clear-admins', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh', r.count ? 'ok' : 'err'); }
         catch (e) { toast(e.message, 'err'); }
       } } : null,
-      { label: '🗑 Xóa dữ liệu máy', fn: () => deviceClearModal(m) },
-      m.active ? { label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null,
-      { danger: true, label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
+      { group: 'Xóa / tạm dừng', label: '🗑 Xóa dữ liệu máy', fn: () => deviceClearModal(m) },
+      m.active ? { group: 'Xóa / tạm dừng', label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null,
+      { danger: true, group: 'Xóa / tạm dừng', label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
     ]);
     const numTd = (v, bold) => el('td', { class: 'num' + (bold ? ' b' : '') + (v ? '' : ' zero') }, String(v));
     const cNV = numTd(m.emp_count ?? 0, true);
