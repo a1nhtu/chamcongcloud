@@ -42,6 +42,17 @@ input:focus,select:focus{border-color:var(--brand)}
 .out .line{font-size:14px;margin:8px 0 0}
 .out a{color:var(--brand-ink);font-weight:700;word-break:break-all}
 .quota{font-weight:700}
+.klist{max-height:360px;overflow:auto;margin-top:10px;border:1px solid var(--line);border-radius:12px}
+.krow{display:flex;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid var(--line);font-size:14px}
+.krow:last-child{border-bottom:none}
+.krow .d{flex:1;min-width:0}
+.krow .d b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.krow .d span{font-size:12px;color:var(--muted)}
+.krow .pt{font-family:'JetBrains Mono',monospace;font-weight:700;color:var(--brand-ink);white-space:nowrap}
+.krow button{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:9px;padding:6px 10px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;font-family:inherit}
+.krow button:hover{border-color:var(--brand)}
+.lnk{background:none;border:none;color:var(--brand-ink);font-weight:700;cursor:pointer;padding:0;font-size:13.5px;font-family:inherit}
+.porthint{font-size:12.5px;color:var(--muted);margin-top:6px}
 .note{display:flex;gap:10px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:11px;padding:12px 14px;font-size:13px;margin-top:10px;color:var(--muted)}
 </style>
 </head>
@@ -55,6 +66,15 @@ input:focus,select:focus{border-color:var(--brand)}
     <div class="rowck"><input type="checkbox" id="remember" style="width:auto"> <label for="remember" style="margin:0;font-weight:500">Nhớ trong phiên này</label></div>
   </div>
 
+  <div class="card" id="kcard">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <h2 style="margin:0">Khách đã tạo</h2>
+      <button class="lnk" id="kload">↻ Tải danh sách</button>
+    </div>
+    <div class="hint" style="margin-top:4px">Mới nhất ở trên. Mất bộ cài hoặc cần tải ở máy khác → bấm <b>Tải lại</b> (giữ nguyên domain + cổng cũ).</div>
+    <div class="klist" id="klist"><div class="krow" style="color:var(--muted)">Nhập mật khẩu rồi bấm “Tải danh sách”.</div></div>
+  </div>
+
   <div class="card">
     <h2>Thông tin khách</h2>
     <div class="hint">Tên viết liền không dấu (vd: congtyabc) → thành congtyabc.maychamcongcloud.com</div>
@@ -64,7 +84,7 @@ input:focus,select:focus{border-color:var(--brand)}
     <div class="row">
       <div><label>Phần mềm chạy ở đâu?</label>
         <select id="mode"><option value="office">Máy tại văn phòng khách</option><option value="vps">VPS của Anh (chạy giúp khách)</option></select></div>
-      <div><label>Cổng app</label><input id="port" class="mono" value="8686" inputmode="numeric"></div>
+      <div><label>Cổng app</label><input id="port" class="mono" value="8686" inputmode="numeric"><div class="porthint" id="porthint"></div></div>
     </div>
     <div class="note" style="margin-top:12px">📟 <span>Máy chấm công (nếu KHÔNG cùng mạng LAN với máy chạy phần mềm): vào máy → mục Cloud/ADMS/Comm → <b>Server address</b> = <span class="mono" id="preview2">…</span>.maychamcongcloud.com, <b>Port 443</b>, bật SSL/HTTPS. Nếu cùng LAN thì trỏ IP LAN của máy chạy app cho nhanh.</span></div>
     <label style="margin-top:14px">Hình thức chấm công cho khách này</label>
@@ -111,7 +131,58 @@ async function fetchBase(){
   return new Blob(chunks,{type:'application/zip'});
 }
 
-$('go').onclick = async () => {
+let USED_PORTS = new Map();   // cổng → slug, để cảnh báo trùng ngay khi gõ
+
+function checkPortHint(){
+  const p = parseInt($('port').value, 10), owner = USED_PORTS.get(p), slug = $('slug').value.trim().toLowerCase();
+  $('porthint').textContent = owner && owner !== slug ? '⚠ Cổng ' + p + ' đã cấp cho "' + owner + '"' : '';
+  $('porthint').style.color = owner && owner !== slug ? 'var(--brand-2)' : '';
+}
+$('port').addEventListener('input', checkPortHint);
+$('slug').addEventListener('input', checkPortHint);
+
+async function loadCustomers(){
+  const pass = $('pass').value.trim();
+  if(!pass){ $('klist').innerHTML = '<div class="krow" style="color:var(--muted)">Nhập mật khẩu trước.</div>'; return; }
+  $('klist').innerHTML = '<div class="krow" style="color:var(--muted)">Đang tải…</div>';
+  try {
+    const r = await fetch('/api/ds-khach', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pass }) });
+    const d = await r.json();
+    if(!r.ok) throw new Error(d.error || ('Lỗi ' + r.status));
+    USED_PORTS = new Map(d.customers.filter(c => c.port).map(c => [c.port, c.slug]));
+    // Cổng gợi ý: chỉ tự điền khi ô cổng đang để mặc định hoặc đang trùng
+    const cur = parseInt($('port').value, 10);
+    if (!cur || cur === 8686 || USED_PORTS.has(cur)) $('port').value = d.nextPort;
+    $('porthint').textContent = 'Cổng trống gợi ý: ' + d.nextPort + ' · đã dùng ' + d.count + '/' + d.quota + ' domain';
+    const box = $('klist'); box.innerHTML = '';
+    if(!d.customers.length){ box.innerHTML = '<div class="krow" style="color:var(--muted)">Chưa có khách nào.</div>'; return; }
+    for (const c of d.customers) {
+      const row = document.createElement('div'); row.className = 'krow';
+      const info = document.createElement('div'); info.className = 'd';
+      const b = document.createElement('b'); b.textContent = c.slug + '.maychamcongcloud.com';
+      const sp = document.createElement('span'); sp.textContent = (c.created ? 'Tạo ' + new Date(c.created).toLocaleDateString('vi-VN') : '') + (c.mode === 'vps' ? ' · VPS' : c.mode === 'office' ? ' · máy văn phòng' : '');
+      info.append(b, sp);
+      const pt = document.createElement('div'); pt.className = 'pt'; pt.textContent = c.port ? ':' + c.port : ':?';
+      pt.title = c.port ? 'Cổng app' : 'Chưa đọc được cổng — bấm Tải danh sách lần nữa';
+      const btn = document.createElement('button'); btn.textContent = '⬇ Tải lại';
+      btn.onclick = () => {
+        $('slug').value = c.slug; $('slug').dispatchEvent(new Event('input'));
+        if (c.port) $('port').value = c.port;
+        if (c.mode) $('mode').value = c.mode;
+        $('use-device').checked = c.useDevice; $('use-phone').checked = c.usePhone;
+        checkPortHint();
+        buildInstaller();
+      };
+      row.append(info, pt, btn); box.append(row);
+    }
+  } catch(e) { $('klist').innerHTML = ''; const x = document.createElement('div'); x.className = 'krow'; x.style.color = 'var(--brand-2)'; x.textContent = e.message; $('klist').append(x); }
+}
+$('kload').onclick = loadCustomers;
+$('pass').addEventListener('change', loadCustomers);
+if ($('pass').value) loadCustomers();
+
+$('go').onclick = () => buildInstaller();
+async function buildInstaller() {
   const pass=$('pass').value.trim();
   const slug=$('slug').value.trim().toLowerCase();
   const mode=$('mode').value;
@@ -128,7 +199,11 @@ $('go').onclick = async () => {
     status('Đang tạo domain trên máy chủ…');
     const r = await fetch('/api/tao-domain', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ pass, slug, mode, port, useDevice, usePhone }) });
     const d = await r.json();
-    if(!r.ok){ err(d.error || ('Lỗi '+r.status)); status(''); setBusy(false); return; }
+    if(!r.ok){
+      if (d.nextPort) { $('port').value = d.nextPort; checkPortHint(); }
+      err(d.error || ('Lỗi '+r.status)); status(''); setBusy(false); return;
+    }
+    if (d.portKept) $('port').value = d.port;
 
     const baseBlob = await fetchBase();
     progress(null);
@@ -143,7 +218,7 @@ $('go').onclick = async () => {
     progress(null); status('');
     $('o-domain').textContent = d.domain; $('o-domain').href = d.domain;
     $('o-file').textContent = slug + '_BoCai.zip';
-    $('o-quota').textContent = 'Hạn mức: đã dùng ' + d.count + '/' + d.quota + ' — còn ' + d.remaining + ' domain' + (d.reused ? '  (domain đã có từ trước, không tính thêm)' : '');
+    $('o-quota').textContent = 'Cổng app: ' + d.port + (d.portKept ? ' (giữ cổng cũ của khách này)' : '') + ' · Hạn mức: đã dùng ' + d.count + '/' + d.quota + ' — còn ' + d.remaining + ' domain' + (d.reused ? '  (domain đã có từ trước, không tính thêm)' : '');
     $('o-device').textContent = (useDevice ? '📟 Máy chấm công (nếu khác LAN): Server = ' + slug + '.maychamcongcloud.com, Port 443, bật SSL. ' : '') + (usePhone ? '📱 Có chấm công điện thoại.' : '📱 Đã TẮT chấm điện thoại (chỉ dùng máy).');
     $('out').style.display='block';
     $('out').scrollIntoView({ behavior:'smooth' });
@@ -151,7 +226,8 @@ $('go').onclick = async () => {
     status(''); progress(null); err('Lỗi: ' + e.message);
   }
   setBusy(false);
-};
+  loadCustomers();
+}
 </script>
 </body>
 </html>

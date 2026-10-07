@@ -122,89 +122,153 @@ async function cfProv(token, method, path, body) {
   return data.result;
 }
 
-// Đếm số khách (tunnel digiplus-*) đang sống — có phân trang
-async function countCustomers(token, accountId) {
-  let page = 1, total = 0;
-  for (;;) {
-    const list = await cfProv(token, "GET",
-      `/accounts/${accountId}/cfd_tunnel?is_deleted=false&per_page=100&page=${page}`);
-    if (!Array.isArray(list) || list.length === 0) break;
-    total += list.filter((t) => (t.name || "").startsWith("digiplus-")).length;
+// Danh sách khách (tunnel digiplus-*) kèm CỔNG đã cấp. Cổng lưu ở "comment" của bản ghi DNS
+// (đọc 1 lần cho cả zone). Khách cũ chưa có comment → đọc cấu hình tunnel rồi ghi bù comment
+// (mỗi lần tối đa 15 khách, để không vượt giới hạn số request của Worker).
+const DNS_TAG = "digiplus";
+function parseComment(c) {
+  const m = {}; for (const kv of String(c || "").split(/\s+/)) { const i = kv.indexOf("="); if (i > 0) m[kv.slice(0, i)] = kv.slice(i + 1); }
+  return m;
+}
+async function listCustomers(token, accountId, zoneId, zoneName) {
+  const tunnels = [];
+  for (let page = 1; page <= 20; page++) {
+    const list = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel?is_deleted=false&per_page=100&page=${page}`);
+    if (!Array.isArray(list) || !list.length) break;
+    tunnels.push(...list.filter((t) => (t.name || "").startsWith("digiplus-")));
     if (list.length < 100) break;
-    page++;
-    if (page > 50) break; // chặn vòng vô hạn
   }
-  return total;
+  const recs = await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&per_page=1000`);
+  const byName = new Map((recs || []).map((r) => [r.name, r]));
+  const out = [];
+  let backfill = 0;
+  for (const t of tunnels) {
+    const slug = t.name.slice("digiplus-".length);
+    const fqdn = `${slug}.${zoneName}`;
+    const rec = byName.get(fqdn);
+    const meta = parseComment(rec && rec.comment);
+    let port = parseInt(meta.port || "", 10) || null;
+    if (!port && backfill < 15) {
+      backfill++;
+      try {
+        const cfg = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel/${t.id}/configurations`);
+        const svc = ((cfg && cfg.config && cfg.config.ingress) || []).map((i) => i.service || "").find((x) => /localhost:\d+/.test(x));
+        port = svc ? parseInt(svc.match(/localhost:(\d+)/)[1], 10) : null;
+        if (port && rec) await cfProv(token, "PATCH", `/zones/${zoneId}/dns_records/${rec.id}`, { comment: `${DNS_TAG} port=${port}` });
+      } catch { /* bỏ qua, lần sau đọc lại */ }
+    }
+    out.push({ slug, domain: `https://${fqdn}`, port, created: t.created_at || "", mode: meta.mode || "",
+      useDevice: meta.dev !== "0", usePhone: meta.phone !== "0", tunnelId: t.id, dnsId: rec ? rec.id : null });
+  }
+  out.sort((x, y) => String(y.created).localeCompare(String(x.created)));
+  return out;
+}
+const nextFreePort = (list) => {
+  const used = new Set(list.map((c) => c.port).filter(Boolean));
+  let p = Math.max(8685, ...used) + 1;
+  while (used.has(p)) p++;
+  return p;
+};
+async function zoneAndAccount(token, env) {
+  const zoneName = env.CF_ZONE || "maychamcongcloud.com";
+  const zones = await cfProv(token, "GET", `/zones?name=${encodeURIComponent(zoneName)}`);
+  if (!zones.length) throw new Error(`Không tìm thấy zone "${zoneName}" trên Cloudflare.`);
+  let accountId = env.CF_ACCOUNT_ID || zones[0].account?.id;
+  if (!accountId) {
+    const accts = await cfProv(token, "GET", "/accounts");
+    if (!accts.length) throw new Error("Không lấy được account id (đặt CF_ACCOUNT_ID).");
+    accountId = accts[0].id;
+  }
+  return { zoneName, zoneId: zones[0].id, accountId };
+}
+async function readProvBody(request, env) {
+  if (request.method !== "POST") return { res: jsonRes({ error: "Chỉ nhận POST" }, 405) };
+  if (!env.CF_PROVISION_TOKEN || !env.DOMAIN_ADMIN_PASS)
+    return { res: jsonRes({ error: "Máy chủ chưa cấu hình cấp domain (đặt Secret CF_PROVISION_TOKEN + DOMAIN_ADMIN_PASS trong Cloudflare)." }, 503) };
+  let b;
+  try { b = await request.json(); } catch { return { res: jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400) }; }
+  if (!b || !safeEqual(b.pass || "", env.DOMAIN_ADMIN_PASS)) return { res: jsonRes({ error: "Sai mật khẩu cấp domain" }, 401) };
+  return { b };
+}
+
+// Danh sách khách đã tạo + cổng gợi ý tiếp theo (trang tao-domain.html: chống trùng cổng + tải lại bộ cài)
+async function handleListCustomers(request, env) {
+  const { b, res } = await readProvBody(request, env);
+  if (res) return res;
+  try {
+    const token = env.CF_PROVISION_TOKEN;
+    const { zoneName, zoneId, accountId } = await zoneAndAccount(token, env);
+    const list = await listCustomers(token, accountId, zoneId, zoneName);
+    const quota = parseInt(env.DOMAIN_QUOTA || "100", 10) || 100;
+    return jsonRes({ ok: true, customers: list.map(({ tunnelId, dnsId, ...c }) => c), nextPort: nextFreePort(list), count: list.length, quota });
+  } catch (e) {
+    return jsonRes({ error: "Lỗi đọc danh sách khách: " + e.message }, 500);
+  }
 }
 
 async function handleProvision(request, env) {
-  if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
-  if (!env.CF_PROVISION_TOKEN || !env.DOMAIN_ADMIN_PASS)
-    return jsonRes({ error: "Máy chủ chưa cấu hình cấp domain (đặt Secret CF_PROVISION_TOKEN + DOMAIN_ADMIN_PASS trong Cloudflare)." }, 503);
-
-  let b;
-  try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
-  if (!b || !safeEqual(b.pass || "", env.DOMAIN_ADMIN_PASS)) return jsonRes({ error: "Sai mật khẩu cấp domain" }, 401);
+  const { b, res } = await readProvBody(request, env);
+  if (res) return res;
 
   const slug = String(b.slug || "").toLowerCase().trim();
   if (!slugOkProv(slug)) return jsonRes({ error: "Tên công ty không hợp lệ (chỉ chữ thường, số, gạch ngang; vd: congtyabc)." }, 400);
   const mode = b.mode === "vps" ? "vps" : "office";
-  const port = parseInt(b.port || "8686", 10) || 8686;
+  let port = parseInt(b.port || "8686", 10) || 8686;
+  if (port < 1024 || port > 65000) return jsonRes({ error: "Cổng app phải trong khoảng 1024–65000." }, 400);
+  const useDevice = b.useDevice === false ? "0" : "1";
+  const usePhone = b.usePhone === false ? "0" : "1";
 
   const token = env.CF_PROVISION_TOKEN;
-  const zoneName = env.CF_ZONE || "maychamcongcloud.com";
   const quota = parseInt(env.DOMAIN_QUOTA || "100", 10) || 100;
-  const fqdn = `${slug}.${zoneName}`;
-  const tname = `digiplus-${slug}`;
 
   try {
-    // 1) Zone + account id
-    const zones = await cfProv(token, "GET", `/zones?name=${encodeURIComponent(zoneName)}`);
-    if (!zones.length) return jsonRes({ error: `Không tìm thấy zone "${zoneName}" trên Cloudflare.` }, 500);
-    const zoneId = zones[0].id;
-    let accountId = env.CF_ACCOUNT_ID || zones[0].account?.id;
-    if (!accountId) {
-      const accts = await cfProv(token, "GET", "/accounts");
-      if (!accts.length) return jsonRes({ error: "Không lấy được account id (đặt CF_ACCOUNT_ID)." }, 500);
-      accountId = accts[0].id;
-    }
+    // 1) Zone + account + danh sách khách hiện có (kèm cổng)
+    const { zoneName, zoneId, accountId } = await zoneAndAccount(token, env);
+    const fqdn = `${slug}.${zoneName}`;
+    const tname = `digiplus-${slug}`;
+    const list = await listCustomers(token, accountId, zoneId, zoneName);
+    const existing = list.find((c) => c.slug === slug);
 
-    // 2) Tunnel: dùng lại nếu đã có (không tính quota); nếu MỚI → kiểm tra hạn mức
-    const tunnels = await cfProv(token, "GET",
-      `/accounts/${accountId}/cfd_tunnel?name=${encodeURIComponent(tname)}&is_deleted=false`);
-    let tunnel = tunnels.find((t) => t.name === tname);
-    let reused = !!tunnel;
-    if (!tunnel) {
-      const used = await countCustomers(token, accountId);
-      if (used >= quota)
-        return jsonRes({ error: `Đã đạt hạn mức ${quota} domain (đang dùng ${used}). Liên hệ quản trị để nâng hạn mức.`, count: used, quota }, 403);
-      tunnel = await cfProv(token, "POST", `/accounts/${accountId}/cfd_tunnel`, { name: tname, config_src: "cloudflare" });
+    // 2) Tunnel: dùng lại nếu đã có (không tính quota, GIỮ NGUYÊN cổng cũ để khỏi làm hỏng khách đang chạy);
+    //    nếu MỚI → kiểm tra hạn mức + cổng không trùng khách khác
+    let tunnelId, reused = !!existing, portKept = false;
+    if (existing) {
+      tunnelId = existing.tunnelId;
+      if (existing.port && existing.port !== port) { port = existing.port; portKept = true; }
+    } else {
+      if (list.length >= quota)
+        return jsonRes({ error: `Đã đạt hạn mức ${quota} domain (đang dùng ${list.length}). Liên hệ quản trị để nâng hạn mức.`, count: list.length, quota }, 403);
+      const clash = list.find((c) => c.port === port);
+      if (clash)
+        return jsonRes({ error: `Cổng ${port} đã cấp cho khách "${clash.slug}". Dùng cổng trống tiếp theo: ${nextFreePort(list)}.`, nextPort: nextFreePort(list) }, 409);
+      const t = await cfProv(token, "POST", `/accounts/${accountId}/cfd_tunnel`, { name: tname, config_src: "cloudflare" });
+      tunnelId = t.id;
     }
 
     // 3) Token tunnel
-    const tunnelToken = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel/${tunnel.id}/token`);
+    const tunnelToken = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel/${tunnelId}/token`);
 
     // 4) Ingress fqdn → localhost:PORT
-    await cfProv(token, "PUT", `/accounts/${accountId}/cfd_tunnel/${tunnel.id}/configurations`, {
+    await cfProv(token, "PUT", `/accounts/${accountId}/cfd_tunnel/${tunnelId}/configurations`, {
       config: { ingress: [{ hostname: fqdn, service: `http://localhost:${port}` }, { service: "http_status:404" }] },
     });
 
-    // 5) DNS CNAME fqdn → <tunnelid>.cfargotunnel.com (proxied)
-    const content = `${tunnel.id}.cfargotunnel.com`;
-    const recs = await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(fqdn)}`);
-    if (recs.length)
-      await cfProv(token, "PUT", `/zones/${zoneId}/dns_records/${recs[0].id}`, { type: "CNAME", name: fqdn, content, proxied: true });
-    else
-      await cfProv(token, "POST", `/zones/${zoneId}/dns_records`, { type: "CNAME", name: fqdn, content, proxied: true });
+    // 5) DNS CNAME fqdn → <tunnelid>.cfargotunnel.com (proxied) + comment lưu cổng/cấu hình để lần sau tra lại
+    const dns = { type: "CNAME", name: fqdn, content: `${tunnelId}.cfargotunnel.com`, proxied: true,
+      comment: `${DNS_TAG} port=${port} mode=${mode} dev=${useDevice} phone=${usePhone}` };
+    if (existing && existing.dnsId) await cfProv(token, "PUT", `/zones/${zoneId}/dns_records/${existing.dnsId}`, dns);
+    else {
+      const recs = await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(fqdn)}`);
+      if (recs.length) await cfProv(token, "PUT", `/zones/${zoneId}/dns_records/${recs[0].id}`, dns);
+      else await cfProv(token, "POST", `/zones/${zoneId}/dns_records`, dns);
+    }
 
-    // 6) Nội dung config.txt (đúng định dạng launcher đọc) + số đã dùng
+    // 6) Nội dung config.txt (đúng định dạng launcher đọc)
     //    USE_DEVICE / USE_PHONE = chức năng chấm công đặt sẵn theo bộ cài (khỏi cần đăng nhập tài khoản tổng)
-    const useDevice = b.useDevice === false ? "0" : "1";
-    const usePhone = b.usePhone === false ? "0" : "1";
     const configTxt = `PORT=${port}\nCUSTOMER=${slug}\nTUNNEL_TOKEN=${tunnelToken}\nUSE_DEVICE=${useDevice}\nUSE_PHONE=${usePhone}\n`;
-    const used = await countCustomers(token, accountId);
+    const used = list.length + (reused ? 0 : 1);
     return jsonRes({
-      ok: true, slug, mode, port, domain: `https://${fqdn}`,
+      ok: true, slug, mode, port, portKept, domain: `https://${fqdn}`,
       customer: slug, tunnelToken, configTxt,
       reused, count: used, quota, remaining: Math.max(0, quota - used),
     });
@@ -254,6 +318,7 @@ export default {
     if (url.pathname === "/api/gen-license") return handleSign(request, env, "license");
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
     if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
+    if (url.pathname === "/api/ds-khach") return handleListCustomers(request, env);
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
     // Link TẢI BỘ CÀI LAN có thương hiệu (proxy từ GitHub Release → tải thẳng về)
     if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
