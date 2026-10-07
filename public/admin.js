@@ -2483,6 +2483,12 @@ async function pageDevices() {
       hasPerm('devices') ? { label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null,
       hasPerm('devices') ? { label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
       (hasPerm('devices') && m.key_ok) ? { label: '🔑 Gỡ key bản quyền máy', fn: async () => { if (confirm('Gỡ key bản quyền khỏi máy này?')) { await api('/admin/devices/' + m.id + '/key', { method: 'DELETE' }); toast('Đã gỡ key', 'ok'); pageDevices(); } } } : null,
+      // Hạ quản trị trên máy về nhân viên (vd quản trị được đồng bộ từ cơ sở khác → không ai ở đây vào được menu máy)
+      hasPerm('devices') ? { label: '👤 Xóa quyền quản trị trên máy', fn: async () => {
+        if (!confirm(`Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy). Máy phải đang Online để nhận lệnh.`)) return;
+        try { const r = await api('/admin/devices/' + m.id + '/clear-admins', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh', r.count ? 'ok' : 'err'); }
+        catch (e) { toast(e.message, 'err'); }
+      } } : null,
       { label: '🗑 Xóa dữ liệu máy', fn: () => deviceClearModal(m) },
       m.active ? { label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null,
       { danger: true, label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
