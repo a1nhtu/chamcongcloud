@@ -19,11 +19,15 @@ cd /d "%~dp0"
 set "PORT=8686"
 set "TUNNEL_TOKEN="
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
-rem --- App da chay (cong dang nghe) thi THOI: auto-start goi ca luc khoi dong lan luc dang nhap, khong bat trung ---
+rem --- Kiem tra RIENG tung phan, phan nao chua chay thi bat phan do (khong bat trung, ma cung khong bo sot tunnel) ---
+rem 1) Phan mem: chi bat khi cong chua nghe
 powershell -NoProfile -Command "if(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue).Count -gt 0){exit 1}else{exit 0}" >nul 2>&1
-if errorlevel 1 exit /b
-start "" /b "%~dp0runtime\node.exe" --no-warnings "%~dp0app\server\index.js"
-if not "%TUNNEL_TOKEN%"=="" start "" /b "%~dp0cloudflared.exe" tunnel run --token %TUNNEL_TOKEN%
+if not errorlevel 1 start "" /b "%~dp0runtime\node.exe" --no-warnings "%~dp0app\server\index.js"
+rem 2) Tunnel: chi bat khi cloudflared cua CHINH thu muc nay chua chay (khach khac tren cung VPS khong anh huong)
+if "%TUNNEL_TOKEN%"=="" exit /b
+set "CF_EXE=%~dp0cloudflared.exe"
+powershell -NoProfile -Command "if(@(Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:CF_EXE }).Count -gt 0){exit 1}else{exit 0}" >nul 2>&1
+if not errorlevel 1 start "" /b "%~dp0cloudflared.exe" tunnel run --token %TUNNEL_TOKEN%
 `;
 
 const run = (file, args) => new Promise((resolve) => {

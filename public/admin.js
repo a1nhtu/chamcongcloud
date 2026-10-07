@@ -667,9 +667,9 @@ function empModal(e) {
     // Không gửi shift_id/work_schedule_id/office_ids → giữ nguyên phân ca & định vị đã gán ở màn riêng
     if (body.role !== 'admin') body.permissions = [...permState];
     try {
-      if (e) await api('/admin/employees/' + e.id, { method: 'PUT', body });
-      else await api('/admin/employees', { method: 'POST', body });
-      toast('Đã lưu', 'ok'); closeModal(); pageEmployees();
+      const r = e ? await api('/admin/employees/' + e.id, { method: 'PUT', body }) : await api('/admin/employees', { method: 'POST', body });
+      toast(r && r.relinked ? `Đã lưu — gán ${r.relinked} lượt quẹt cũ của Số ID máy và tính lại công` : 'Đã lưu', 'ok');
+      closeModal(); pageEmployees();
     } catch (err) { toast(err.message, 'err'); }
   };
   // ----- 2 tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) -----

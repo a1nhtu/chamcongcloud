@@ -5,6 +5,12 @@ import { hashPassword, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
+import { relinkPunchesForPin } from '../../device-sync.js';
+
+// Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
+function relinkSafe(empId, pin) {
+  try { return relinkPunchesForPin(empId, pin); } catch (e) { console.error('[relink punches]', e.message); return 0; }
+}
 
 const PERM_KEYS = PERMISSIONS.map(([k]) => k);
 // Chuẩn hoá quyền để lưu: admin = null (toàn quyền); còn lại = JSON mảng key hợp lệ.
@@ -96,7 +102,8 @@ export function registerEmployeeRoutes(r, { need }) {
         b.shift_id || null, b.work_schedule_id || null, normPerms(guard.role, guard.permissions),
         (b.device_pin || '').trim());
       setEmpOffices(info.lastInsertRowid, b.office_ids);
-      res.json({ ok: true, id: info.lastInsertRowid });
+      const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
+      res.json({ ok: true, id: info.lastInsertRowid, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
       sendCaughtError(res, 'POST /admin/employees', e, { status: 400 });
@@ -206,6 +213,7 @@ export function registerEmployeeRoutes(r, { need }) {
               code, name, dept, pos, phone, role, username, hashPassword(password),
               normPerms(role, role === 'admin' ? null : []), pinOk);
             empByCode.set(CODE, { id: info.lastInsertRowid, code, role, device_pin: pinOk });
+            relinkSafe(info.lastInsertRowid, pinOk);
             if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
             if (role !== 'admin') activeCount++;
             added++;
@@ -227,6 +235,7 @@ export function registerEmployeeRoutes(r, { need }) {
           // Số ID: chỉ đặt khi NV chưa có ID và ID chưa bị NV khác dùng
           if (pin && !(existing.device_pin || '').trim() && !pinUsed.get(pin, existing.id)) { sets.push('device_pin=?'); args.push(pin); }
           if (sets.length) { args.push(existing.id); db.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE id=?`).run(...args); }
+          if (sets.includes('device_pin=?')) relinkSafe(existing.id, pin);
           if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(cellStr(row, 10)), existing.id);
           if (basic > 0) setBasicSalary(existing.id, basic);
           updated++;
@@ -252,6 +261,7 @@ export function registerEmployeeRoutes(r, { need }) {
     try {
       const newRole = roleGuard.role;
       const newPerms = b.permissions !== undefined ? normPerms(newRole, roleGuard.permissions) : emp.permissions;
+      let relinked = 0;   // số lượt quẹt cũ vừa gán lại cho NV khi khai Số ID máy
       // SỐ ID (device_pin): chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
       if (b.device_pin !== undefined && !(emp.device_pin || '').trim()) {
         const pin1 = (b.device_pin || '').trim();
@@ -259,6 +269,7 @@ export function registerEmployeeRoutes(r, { need }) {
           if (db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?").get(pin1, emp.id))
             return res.status(400).json({ error: `Số ID máy chấm công "${pin1}" đã có nhân viên dùng` });
           db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin1, emp.id);
+          relinked = relinkSafe(emp.id, pin1);
         }
       }
       db.prepare(`UPDATE employees SET code=?, full_name=?, department=?, position=?, phone=?,
@@ -273,7 +284,7 @@ export function registerEmployeeRoutes(r, { need }) {
         b.active != null ? (b.active ? 1 : 0) : emp.active, emp.id);
       if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
       if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
-      res.json({ ok: true });
+      res.json({ ok: true, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
       sendCaughtError(res, 'PUT /admin/employees/:id', e, { status: 400 });

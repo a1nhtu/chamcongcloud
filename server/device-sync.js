@@ -39,6 +39,7 @@ export function upsertEmployeeFromDevice(pin, name, force = false) {
   const byCode = db.prepare("SELECT id FROM employees WHERE code=? AND (device_pin IS NULL OR device_pin='')").get(pin);
   if (byCode) {
     db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin, byCode.id);
+    relinkQuiet(byCode.id, pin);
     return byCode.id;
   }
 
@@ -51,7 +52,12 @@ export function upsertEmployeeFromDevice(pin, name, force = false) {
     (code, full_name, department, position, phone, role, username, password_hash, device_pin, from_device, active)
     VALUES (?,?, '', '', '', 'employee', ?, ?, ?, 1, 1)`)
     .run(code, fullName, username, hashPassword('123456'), pin);
+  relinkQuiet(Number(info.lastInsertRowid), pin);   // lượt quẹt có trước khi NV được tạo → gán luôn
   return Number(info.lastInsertRowid);
+}
+// Gán lượt quẹt cũ cho NV vừa có Số ID (lỗi chỉ ghi log, không làm hỏng việc nhận dữ liệu từ máy)
+function relinkQuiet(empId, pin) {
+  try { relinkPunchesForPin(empId, pin); } catch (e) { console.error('[device] gán lượt quẹt cũ lỗi:', e.message); }
 }
 
 // Parse khối dữ liệu USER/USERINFO/FP (đăng ký vân tay real-time) → tạo/cập nhật NV.
@@ -493,6 +499,23 @@ function upsertRow(employeeId, workDate, shiftId, inIso, outIso, m, existingId) 
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'device')`)
       .run(employeeId, workDate, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId);
   }
+}
+
+// Vừa khai Số ID máy cho 1 NV: gán các lượt quẹt CŨ đang "chưa khớp" của Số ID đó cho NV này
+// rồi dựng lại công những ngày đó (không đổi gì trên máy chấm công). Trả số lượt quẹt đã gán.
+export function relinkPunchesForPin(employeeId, pin) {
+  pin = String(pin || '').trim();
+  if (!employeeId || !pin) return 0;
+  const days = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE pin=? AND employee_id IS NULL').all(pin);
+  if (!days.length) return 0;
+  // SAVEPOINT (không dùng BEGIN) để gọi được cả khi đang nằm trong 1 giao dịch khác
+  db.exec('SAVEPOINT relink');
+  try {
+    const n = db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(employeeId, pin).changes;
+    for (const d of days) rebuildDay(employeeId, d.work_date);
+    db.exec('RELEASE relink');
+    return n;
+  } catch (e) { db.exec('ROLLBACK TO relink'); db.exec('RELEASE relink'); throw e; }
 }
 
 // Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay).

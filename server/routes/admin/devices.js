@@ -161,10 +161,11 @@ export function registerDeviceRoutes(r, { need }) {
   });
   // Dựng lại chấm công từ toàn bộ punch (khi mới khớp thêm nhân viên với mã trên máy)
   r.post('/devices/rebuild', need('devices'), (req, res) => {
-    // gán lại employee_id cho punch chưa khớp (mã trùng employees.code)
+    // gán lại employee_id cho punch chưa khớp: ưu tiên NV có Số ID máy trùng mã trên máy, sau đó mới tới Mã NV trùng
     const un = db.prepare('SELECT DISTINCT pin FROM device_punches WHERE employee_id IS NULL').all();
     for (const { pin } of un) {
-      const emp = db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
+      const emp = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>'' AND active=1").get(pin)
+        || db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
       if (emp) db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(emp.id, pin);
     }
     const days = db.prepare('SELECT DISTINCT employee_id, work_date FROM device_punches WHERE employee_id IS NOT NULL').all();
