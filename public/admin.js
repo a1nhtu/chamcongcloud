@@ -521,9 +521,12 @@ function rowMenu(items, label = '⋯ Thêm') {
     if (!_rowDD) {
       _rowDD = el('div', { class: 'rm-dd', style: 'display:none' });
       document.body.append(_rowDD);
-      document.addEventListener('click', (ev) => { if (_rowDD && _rowDD.style.display === 'flex' && !_rowDD.contains(ev.target)) _rowDD.style.display = 'none'; }, true);
+      // Bấm ra ngoài (trừ chính nút đang mở — nút tự xử lý bật/tắt) hoặc Esc / cuộn trang → đóng menu
+      document.addEventListener('click', (ev) => { if (_rowDD && _rowDD.style.display !== 'none' && !_rowDD.contains(ev.target) && !(_rowDD._owner && _rowDD._owner.contains(ev.target))) _rowDD.style.display = 'none'; }, true);
+      document.addEventListener('keydown', (ev) => { if (ev.key === 'Escape' && _rowDD) _rowDD.style.display = 'none'; });
+      window.addEventListener('scroll', (ev) => { if (_rowDD && !_rowDD.contains(ev.target)) _rowDD.style.display = 'none'; }, true);
     }
-    if (_rowDD.style.display === 'flex' && _rowDD._owner === btn) { _rowDD.style.display = 'none'; return; }
+    if (_rowDD.style.display !== 'none' && _rowDD._owner === btn) { _rowDD.style.display = 'none'; return; }
     _rowDD._owner = btn; _rowDD.innerHTML = '';
     const groups = [];
     for (const it of list) {
@@ -544,7 +547,7 @@ function rowMenu(items, label = '⋯ Thêm') {
       _rowDD.append(box);
     }
     const r = btn.getBoundingClientRect();
-    _rowDD.style.display = 'flex';
+    _rowDD.style.display = twoCol ? 'grid' : 'flex';   // hiện/ẩn chỉ bằng style.display (CSS không được ép display)
     const mw = _rowDD.offsetWidth || 180;
     if (_rowDD.offsetHeight > innerHeight - 16) _rowDD.style.maxHeight = (innerHeight - 16) + 'px';
     let left = Math.min(r.right - mw, innerWidth - mw - 8); if (left < 8) left = 8;   // nút nằm khuất (bảng cuộn ngang) → vẫn hiện trong màn hình
