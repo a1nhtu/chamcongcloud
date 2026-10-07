@@ -84,14 +84,9 @@ export function registerDeviceRoutes(r, { need }) {
     }
     // Vừa DUYỆT máy: lúc còn chờ duyệt máy chỉ nhận cấu hình tối thiểu → ra lệnh khởi động lại để máy
     // bắt tay đầy đủ (bật đẩy dữ liệu real-time + nhận lại giờ/múi giờ đúng).
-    if (becameActive) {
-      try {
-        rebootDevice(d.serial);
-        // Máy mới duyệt: tự tải danh sách NV + vân tay có sẵn trên máy (người đăng ký TRƯỚC khi nối phần mềm),
-        // lệnh nằm sau REBOOT nên máy nhận khi đã khởi động lại xong
-        if (getSetting('device_autocreate', '1') === '1') queryDeviceUsers(d.serial);
-      } catch (e) { console.error('[device] lệnh sau duyệt lỗi:', e.message); }
-    }
+    // KHÔNG tự tải toàn bộ NV từ máy (máy có thể cả nghìn người → nặng). NV đăng ký trước khi nối phần mềm
+    // sẽ được hỏi RIÊNG từng người khi họ quẹt mà chưa khớp (askUserFromDevice); cần tải hết thì bấm tay.
+    if (becameActive) { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
     res.json({ ok: true, synced, rebooting: becameActive });
   });
   // Đồng bộ giờ: ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt mới nhận lệnh)
