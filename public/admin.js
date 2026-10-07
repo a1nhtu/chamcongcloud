@@ -742,6 +742,12 @@ async function empDeviceRoles(e) {
         el('span', { style: 'font-size:12px;color:var(--muted);margin-left:6px' }, (dv.online ? '🟢 online' : '⚪ offline') + (dv.onDevice ? '' : ' · chưa có trên máy'))),
       sel));
   }
+  // Chọn nhanh: quản trị TẤT CẢ máy (quản trị tổng chuỗi) / đưa về nhân viên ở tất cả máy — bấm xong vẫn phải Lưu
+  const setAll = (v) => { for (const [, s] of sels) s.value = v; };
+  const allAdm = el('button', { class: 'btn ghost sm', style: 'margin-top:10px' }, '👑 Quản trị tất cả máy');
+  allAdm.onclick = () => { setAll('1'); toast('Đã chọn quản trị ở tất cả máy — bấm "Lưu quyền trên máy" để gửi', 'ok'); };
+  const allEmp = el('button', { class: 'btn ghost sm', style: 'margin-top:10px' }, 'Nhân viên tất cả máy');
+  allEmp.onclick = () => setAll('0');
   const save = el('button', { class: 'btn sm', style: 'margin-top:10px' }, 'Lưu quyền trên máy');
   save.onclick = async () => {
     const admins = sels.filter(([, s]) => s.value === '1').map(([dv]) => dv.serial);
@@ -751,7 +757,7 @@ async function empDeviceRoles(e) {
     catch (err) { toast(err.message, 'err'); }
     save.disabled = false;
   };
-  if (hasPerm('devices')) wrap.append(save);
+  if (hasPerm('devices')) wrap.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, allAdm, allEmp, save));
   return wrap;
 }
 async function toggleEmp(e) { if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return; await api('/admin/employees/' + e.id, { method: 'DELETE' }); pageEmployees(); }
