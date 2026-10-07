@@ -204,6 +204,17 @@ export function queryDeviceUsers(serial) {
   queueCmd(serial, 'DATA QUERY BIODATA');
   return 1;
 }
+// Máy đẩy lượt quẹt của Số ID chưa có NV nào (thường do đăng ký vân tay TRƯỚC khi máy nối phần mềm):
+// hỏi máy gửi lại thông tin + vân tay của đúng người đó → upsertEmployeeFromDevice tự tạo NV nháp và gán lượt quẹt cũ.
+// Mỗi máy × mỗi Số ID chỉ hỏi tối đa 1 lần/24 giờ (máy không trả lời thì không hỏi dồn dập).
+export function askUserFromDevice(serial, pin) {
+  if (!serial || !pin || getSetting('device_autocreate', '1') !== '1') return;
+  const content = `DATA QUERY USERINFO PIN=${pin}`;
+  const recent = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND content=? AND created_at > datetime('now','-1 day')").get(serial, content);
+  if (recent) return;
+  queueCmd(serial, content);
+  queueCmd(serial, `DATA QUERY FINGERTMP PIN=${pin}`);
+}
 // Mở cửa từ xa (máy kiểm soát cửa) — lệnh ADMS "AC_UNLOCK" (mục 12.7.2 Attendance PUSH Protocol),
 // máy kích relay mở khóa cửa; nextCommand bọc thành C:<id>:AC_UNLOCK. Máy phản hồi Return=0 nếu OK.
 export function openDoor(serial) { queueCmd(serial, 'AC_UNLOCK'); return 1; }
@@ -602,6 +613,7 @@ export function ingestAttlog(serial, rawBody) {
     const emp = findEmpByPin(pin);
     const empId = emp?.id ?? null;
     try { ins.run(serial, pin, punchIso, workDate, status, verify, empId); } catch {}
+    if (!empId) askUserFromDevice(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
     n++;
     if (empId) touched.add(empId + '|' + workDate);
   }
