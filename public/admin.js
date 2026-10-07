@@ -449,7 +449,8 @@ async function pageEmployees() {
           el('td', {}, e.code,
             e.device_pin ? el('span', { style: 'color:#0a7;font-size:11px;margin-left:6px', title: 'Số ID trên máy chấm công' }, '🔌' + e.device_pin) : ''),
           el('td', {}, el('b', {}, e.full_name),
-            e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px', title: 'Tự tạo khi đăng ký vân tay trên máy — bổ sung thông tin rồi lưu' }, 'nháp từ máy') : ''),
+            e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px', title: 'Tự tạo khi đăng ký vân tay trên máy — bổ sung thông tin rồi lưu' }, 'nháp từ máy') : '',
+            (e.device_admin_on || []).length ? el('span', { class: 'pill', style: 'margin-left:6px;background:#fdf0df;color:#a25a08', title: 'Quản trị MÁY chấm công (vào được menu máy) tại: ' + e.device_admin_on.join(', ') }, '👑 QT máy') : ''),
           el('td', {}, e.position || '—'),
           el('td', {}, e.username),
           el('td', {}, roleLabel(e.role)),
@@ -722,6 +723,36 @@ async function loadEmpBio(e, box) {
     box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Chưa thấy đăng ký trên máy nào (Số ID máy: ' + d.pin + ').'));
   }
   box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Dữ liệu lấy từ máy chấm công đã đồng bộ về. Đăng ký thêm vân tay/khuôn mặt trực tiếp trên máy.'));
+  box.append(await empDeviceRoles(e));
+}
+// Quyền trên TỪNG máy chấm công: Nhân viên / Quản trị máy (vào được menu máy). Đổi → phần mềm gửi lệnh xuống máy.
+async function empDeviceRoles(e) {
+  const wrap = el('div', { style: 'margin-top:18px;border-top:1px solid var(--line);padding-top:14px' },
+    el('div', { style: 'font-weight:700' }, '👑 Quyền trên máy chấm công'),
+    el('div', { style: 'font-size:12.5px;color:var(--muted);margin:2px 0 8px' }, 'Quản trị máy = vào được menu trên máy chấm công. Khác với quyền Admin của phần mềm. Quản trị ở máy này không tự lan sang máy khác.'));
+  let d; try { d = await api('/admin/employees/' + e.id + '/device-roles'); } catch (err) { wrap.append(el('div', { class: 'map-hint' }, err.message)); return wrap; }
+  if (!d.devices.length) { wrap.append(el('div', { class: 'map-hint' }, 'Chưa có máy chấm công nào đang hoạt động.')); return wrap; }
+  const sels = [];
+  for (const dv of d.devices) {
+    const sel = el('select', { style: 'width:auto;padding:4px 8px' },
+      el('option', { value: '0' }, 'Nhân viên'), el('option', { value: '1', ...(dv.admin ? { selected: '' } : {}) }, 'Quản trị máy'));
+    sels.push([dv, sel]);
+    wrap.append(el('div', { style: 'display:flex;gap:10px;align-items:center;padding:6px 2px;border-bottom:1px solid #f1efec;font-size:14px' },
+      el('span', { style: 'flex:1' }, dv.name,
+        el('span', { style: 'font-size:12px;color:var(--muted);margin-left:6px' }, (dv.online ? '🟢 online' : '⚪ offline') + (dv.onDevice ? '' : ' · chưa có trên máy'))),
+      sel));
+  }
+  const save = el('button', { class: 'btn sm', style: 'margin-top:10px' }, 'Lưu quyền trên máy');
+  save.onclick = async () => {
+    const admins = sels.filter(([, s]) => s.value === '1').map(([dv]) => dv.serial);
+    if (!confirm('Lưu và gửi quyền xuống máy chấm công?\nMáy đang offline sẽ nhận khi kết nối lại.')) return;
+    save.disabled = true;
+    try { const r = await api('/admin/employees/' + e.id + '/device-roles', { method: 'PUT', body: { admins } }); toast(r.changed ? `Đã gửi lệnh đổi quyền tới ${r.changed} máy` : 'Không có thay đổi', 'ok'); }
+    catch (err) { toast(err.message, 'err'); }
+    save.disabled = false;
+  };
+  if (hasPerm('devices')) wrap.append(save);
+  return wrap;
 }
 async function toggleEmp(e) { if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return; await api('/admin/employees/' + e.id, { method: 'DELETE' }); pageEmployees(); }
 async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }

@@ -82,9 +82,9 @@ export function ingestUserData(serial, table, rawBody) {
     if (name.includes('=') || name.length > 80) name = ''; // tên rác (firmware nhét FileName=/Content=)
     const card = kv.card && kv.card !== '0' ? kv.card : '';
     const passwd = kv.passwd && kv.passwd !== '0' ? kv.passwd : '';
-    const pri = parseInt(kv.pri || '0', 10) || 0;
+    const pri = kv.pri !== undefined ? (parseInt(kv.pri, 10) || 0) : null;   // null = dòng không ghi quyền → giữ nguyên
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
-    upsertDeviceUserSerial(serial, pin, name, card);  // ghi theo từng máy (đếm NV/thẻ)
+    upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
     const id = upsertEmployeeFromDevice(pin, name);
     if (id) seen.add(pin);
   }
@@ -100,7 +100,7 @@ function upsertDeviceUser(pin, name, card, passwd, pri) {
       name=CASE WHEN ?<>'' THEN ? ELSE name END,
       card=CASE WHEN ?<>'' THEN ? ELSE card END,
       passwd=CASE WHEN ?<>'' THEN ? ELSE passwd END,
-      privilege=?, updated_at=datetime('now') WHERE pin=?`)
+      privilege=COALESCE(?, privilege), updated_at=datetime('now') WHERE pin=?`)
       .run(name, name, card, card, passwd, passwd, pri, pin);
   } else {
     db.prepare('INSERT INTO device_users(pin,name,card,passwd,privilege) VALUES(?,?,?,?,?)')
@@ -109,13 +109,16 @@ function upsertDeviceUser(pin, name, card, passwd, pri) {
 }
 
 // Ghi/nhật ký user theo TỪNG máy (đếm số NV/thẻ mỗi máy). Chỉ cập nhật name/card khi có giá trị mới.
-function upsertDeviceUserSerial(serial, pin, name, card) {
-  db.prepare(`INSERT INTO device_users_serial(serial,pin,name,card) VALUES(?,?,?,?)
+// pri: quyền trên máy này (undefined/null = không đổi quyền đang lưu).
+function upsertDeviceUserSerial(serial, pin, name, card, pri) {
+  const p = pri == null ? null : (pri > 0 ? pri : 0);
+  db.prepare(`INSERT INTO device_users_serial(serial,pin,name,card,privilege) VALUES(?,?,?,?,COALESCE(?,0))
     ON CONFLICT(serial,pin) DO UPDATE SET
       name=CASE WHEN excluded.name<>'' THEN excluded.name ELSE device_users_serial.name END,
       card=CASE WHEN excluded.card<>'' THEN excluded.card ELSE device_users_serial.card END,
+      privilege=COALESCE(?, device_users_serial.privilege),
       updated_at=datetime('now')`)
-    .run(serial, pin, name || '', card || '');
+    .run(serial, pin, name || '', card || '', p, p);
 }
 
 // Ghi nhận máy đích ĐÃ có template này (mirror) để bảng đếm phản ánh đúng ngay sau khi đồng bộ.
@@ -174,10 +177,39 @@ function queueCmd(serial, content, meta = {}) {
     .run(serial, content, meta.pin ?? null, meta.bio_type ?? null, meta.idx ?? null, meta.mkind ?? null);
 }
 
-function buildUserCommand(pin) {
+// Quyền ghi xuống = quyền của user TRÊN MÁY ĐÍCH (targetSerial), mặc định nhân viên (0) — không mang quyền
+// quản trị của máy nguồn sang máy khác. pri truyền vào thì dùng đúng giá trị đó.
+function buildUserCommand(pin, targetSerial, pri) {
   const u = db.prepare('SELECT * FROM device_users WHERE pin=?').get(pin) || {};
+  if (pri == null) {
+    const s = targetSerial ? db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(targetSerial, pin) : null;
+    pri = (s && s.privilege) || 0;
+  }
   const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
-  return `DATA UPDATE USERINFO PIN=${pin}\tName=${u.name || pin}\tPasswd=${u.passwd || ''}${card}\tPri=${u.privilege || 0}\tGrp=1\tTZ=1\tVerify=0`;
+  return `DATA UPDATE USERINFO PIN=${pin}\tName=${u.name || pin}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=1\tVerify=0`;
+}
+
+// Quyền của 1 Số ID trên các máy đang hoạt động: [{ serial, name, online, onDevice, admin }]
+export function deviceRolesForPin(pin) {
+  const devs = db.prepare('SELECT serial, name, last_seen FROM push_devices WHERE active=1 ORDER BY name, serial').all();
+  return devs.map((d) => {
+    const s = db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(d.serial, pin);
+    return { serial: d.serial, name: d.name || d.serial, online: !!(d.last_seen && Date.now() - Date.parse(d.last_seen) < 150000),
+      onDevice: !!s, admin: !!(s && s.privilege > 0) };
+  });
+}
+// Đặt quyền quản trị/nhân viên cho 1 Số ID trên 1 máy → lưu + gửi lệnh xuống máy. Trả true nếu có thay đổi.
+export function setDeviceAdmin(pin, serial, isAdmin, fallbackName = '') {
+  const cur = db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(serial, pin);
+  const want = isAdmin ? 14 : 0;
+  if (cur && (cur.privilege > 0) === !!isAdmin) return false;
+  if (!cur && !isAdmin) return false;            // chưa có trên máy + để nhân viên → không cần làm gì
+  if (!db.prepare('SELECT 1 FROM device_users WHERE pin=?').get(pin))
+    db.prepare('INSERT INTO device_users(pin,name,card,passwd,privilege) VALUES(?,?,?,?,0)').run(pin, fallbackName || pin, '', '');
+  const u = db.prepare('SELECT name, card FROM device_users WHERE pin=?').get(pin);
+  upsertDeviceUserSerial(serial, pin, u.name, u.card, want);
+  queueCmd(serial, buildUserCommand(pin, serial, want), { pin, mkind: 'user' });
+  return true;
 }
 
 /* ============================ XÓA DỮ LIỆU TRÊN MÁY (ADMS) ============================ */
@@ -261,18 +293,16 @@ export function deleteDeviceUsers(serial, pins) {
 }
 // Xóa quyền quản trị: hạ tất cả user đang là admin (Pri>0) trên máy về user thường (Pri=0)
 export function clearDeviceAdmins(serial) {
-  const onDevice = db.prepare('SELECT pin FROM device_users_serial WHERE serial=?').all(serial).map((r) => r.pin);
-  const set = new Set(onDevice);
-  const admins = db.prepare('SELECT pin, name, passwd, card FROM device_users WHERE privilege>0').all()
-    .filter((u) => !set.size || set.has(u.pin));
-  let n = 0;
-  for (const u of admins) {
-    const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
-    queueCmd(serial, `DATA UPDATE USERINFO PIN=${u.pin}\tName=${u.name || u.pin}\tPasswd=${u.passwd || ''}${card}\tPri=0\tGrp=1\tTZ=1\tVerify=0`);
-    db.prepare('UPDATE device_users SET privilege=0 WHERE pin=?').run(u.pin);
-    n++;
+  let pins = db.prepare('SELECT pin FROM device_users_serial WHERE serial=? AND privilege>0').all(serial).map((r) => r.pin);
+  if (!pins.length) {   // dữ liệu cũ (chưa ghi quyền theo máy): ai từng là quản trị ở bất kỳ máy nào và có trên máy này
+    const set = new Set(db.prepare('SELECT pin FROM device_users_serial WHERE serial=?').all(serial).map((r) => r.pin));
+    pins = db.prepare('SELECT pin FROM device_users WHERE privilege>0').all().map((r) => r.pin).filter((p) => !set.size || set.has(p));
   }
-  return n;
+  for (const pin of pins) {
+    queueCmd(serial, buildUserCommand(pin, serial, 0), { pin, mkind: 'user' });
+    db.prepare('UPDATE device_users_serial SET privilege=0 WHERE serial=? AND pin=?').run(serial, pin);
+  }
+  return pins.length;
 }
 function buildBioCommand(t) {
   if (t.bio_type === 1 && (t.major_ver || 10) < 10) // vân tay ZKFinger 9.0
@@ -365,7 +395,7 @@ export function syncPinsToGroup(sourceSerial, pins) {
   let n = 0;
   for (const t of targets) {
     for (const pin of pins) {
-      queueCmd(t.serial, buildUserCommand(pin), { pin, mkind: 'user' });
+      queueCmd(t.serial, buildUserCommand(pin, t.serial), { pin, mkind: 'user' });
       const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
       for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp), { pin: tp.pin, bio_type: tp.bio_type, idx: tp.idx, mkind: 'bio' }); n++; }
       const pc = buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc, { pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
@@ -393,7 +423,7 @@ export function syncFillDevice(serial, force = false) {
     const key = `${t.pin}|${t.bio_type}|${t.idx}`;
     if (mine.has(key)) continue;
     if (!pushedPins.has(t.pin)) {
-      queueCmd(serial, buildUserCommand(t.pin), { pin: t.pin, mkind: 'user' });
+      queueCmd(serial, buildUserCommand(t.pin, serial), { pin: t.pin, mkind: 'user' });
       const pc = buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc, { pin: t.pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
       pushedPins.add(t.pin);
     }
@@ -405,7 +435,7 @@ export function syncFillDevice(serial, force = false) {
   for (const r of photoPins) {
     if (pushedPins.has(r.pin)) continue;
     const pc = buildPhotoCommand(r.pin); if (!pc) continue;
-    queueCmd(serial, buildUserCommand(r.pin), { pin: r.pin, mkind: 'user' });
+    queueCmd(serial, buildUserCommand(r.pin, serial), { pin: r.pin, mkind: 'user' });
     queueCmd(serial, pc, { pin: r.pin, mkind: 'photo' });
     pushedPins.add(r.pin);
   }

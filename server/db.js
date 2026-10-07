@@ -480,6 +480,8 @@ function migrateColumns() {
   // Key BẢN QUYỀN theo MÁY (Ed25519, Digiplus cấp theo serial): rỗng = chưa có key.
   // Khi bật "device_key_required", máy phải có key hợp lệ mới DUYỆT được (chống khách tự mua máy ngoài).
   add('push_devices', 'dev_key', "TEXT DEFAULT ''");
+  // Quyền của user TRÊN TỪNG MÁY (0 = nhân viên, >0 = quản trị máy). Quản trị cơ sở này KHÔNG tự lan sang máy khác.
+  add('device_users_serial', 'privilege', 'INTEGER DEFAULT 0');
   // Giờ đọc từ máy (nút "Xem giờ trên máy"): clock_text = giờ máy trả về, clock_at = giờ máy chủ (VN) lúc nhận
   add('push_devices', 'clock_text', "TEXT DEFAULT ''");
   add('push_devices', 'clock_at',   "TEXT DEFAULT ''");

@@ -5,7 +5,7 @@ import { hashPassword, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
-import { relinkPunchesForPin } from '../../device-sync.js';
+import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin } from '../../device-sync.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
@@ -69,6 +69,14 @@ export function registerEmployeeRoutes(r, { need }) {
       eoMap.get(x.employee_id).push(x.office_id);
     }
     for (const e of rows) e.office_ids = eoMap.get(e.id) || [];
+    // Máy chấm công mà NV là QUẢN TRỊ máy (tên máy) — hiện nhãn trên danh sách
+    const admOn = new Map();
+    for (const x of db.prepare(`SELECT s.pin, COALESCE(NULLIF(d.name,''), s.serial) AS dev FROM device_users_serial s
+        JOIN push_devices d ON d.serial = s.serial WHERE s.privilege > 0 AND d.active = 1`).all()) {
+      if (!admOn.has(x.pin)) admOn.set(x.pin, []);
+      admOn.get(x.pin).push(x.dev);
+    }
+    for (const e of rows) e.device_admin_on = (e.device_pin && admOn.get(String(e.device_pin).trim())) || [];
     // Không có quyền "employees" (chỉ vào xem qua Tổng quan/Báo cáo/Tính công): bớt trường nhạy cảm
     // (tài khoản, quyền, thông tin thiết bị) — vẫn đủ id/mã/tên/bộ phận để đổ dropdown/bộ lọc.
     res.json({ rows: filterEmployeeFields(req.user, rows) });
@@ -331,6 +339,26 @@ export function registerEmployeeRoutes(r, { need }) {
         (SELECT COUNT(DISTINCT b.idx) FROM device_bio_templates b WHERE b.serial=s.serial AND b.pin=s.pin AND b.bio_type IN (2,9)) AS face
       FROM device_users_serial s LEFT JOIN push_devices d ON d.serial=s.serial WHERE s.pin=?`).all(pin);
     res.json({ pin, fp, face, card, password, photo, photoData, byDevice });
+  });
+  // Quyền của NV trên TỪNG máy chấm công (nhân viên / quản trị máy — vào được menu máy)
+  r.get('/employees/:id/device-roles', need('employees'), (req, res) => {
+    const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
+    if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    const pin = (emp.device_pin || '').trim();
+    res.json({ pin, devices: pin ? deviceRolesForPin(pin) : [] });
+  });
+  // Lưu: body { admins: [serial...] } = các máy NV này là QUẢN TRỊ; máy còn lại → nhân viên. Gửi lệnh xuống máy thay đổi.
+  r.put('/employees/:id/device-roles', need('devices'), (req, res) => {
+    const emp = db.prepare('SELECT device_pin, full_name FROM employees WHERE id=?').get(req.params.id);
+    if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    const pin = (emp.device_pin || '').trim();
+    if (!pin) return res.status(400).json({ error: 'Nhân viên chưa có Số ID máy chấm công.' });
+    const admins = new Set(Array.isArray(req.body?.admins) ? req.body.admins.map(String) : []);
+    let changed = 0;
+    try {
+      for (const d of deviceRolesForPin(pin)) if (setDeviceAdmin(pin, d.serial, admins.has(d.serial), emp.full_name)) changed++;
+    } catch (e) { return sendCaughtError(res, 'PUT /admin/employees/:id/device-roles', e, { status: 400 }); }
+    res.json({ ok: true, changed });
   });
   // Ảnh người dùng/khuôn mặt của NV (lấy từ máy) → trả JPG để hiện avatar
   r.get('/employees/:id/photo', need('employees'), (req, res) => {
