@@ -212,11 +212,11 @@ async function handleProvision(request, env) {
 
   const slug = String(b.slug || "").toLowerCase().trim();
   if (!slugOkProv(slug)) return jsonRes({ error: "Tên công ty không hợp lệ (chỉ chữ thường, số, gạch ngang; vd: congtyabc)." }, 400);
-  const mode = b.mode === "vps" ? "vps" : "office";
+  let mode = b.mode === "vps" ? "vps" : "office";
   let port = parseInt(b.port || "8686", 10) || 8686;
   if (port < 1024 || port > 65000) return jsonRes({ error: "Cổng app phải trong khoảng 1024–65000." }, 400);
-  const useDevice = b.useDevice === false ? "0" : "1";
-  const usePhone = b.usePhone === false ? "0" : "1";
+  let useDevice = b.useDevice === false ? "0" : "1";
+  let usePhone = b.usePhone === false ? "0" : "1";
 
   const token = env.CF_PROVISION_TOKEN;
   const quota = parseInt(env.DOMAIN_QUOTA || "100", 10) || 100;
@@ -232,6 +232,16 @@ async function handleProvision(request, env) {
     // 2) Tunnel: dùng lại nếu đã có (không tính quota, GIỮ NGUYÊN cổng cũ để khỏi làm hỏng khách đang chạy);
     //    nếu MỚI → kiểm tra hạn mức + cổng không trùng khách khác
     let tunnelId, reused = !!existing, portKept = false;
+    // Setup.exe: chỉ LẤY cấu hình của khách đã tạo trên trang Tạo khách (không tự tạo khách mới ở đây)
+    if (!existing && b.onlyExisting)
+      return jsonRes({ error: `Chưa có khách "${slug}". Tạo khách trên trang Tạo khách trước.` }, 404);
+    if (existing && b.onlyExisting) {
+      // giữ nguyên cổng + lựa chọn máy/điện thoại đã lưu lúc tạo
+      if (existing.port) port = existing.port;
+      useDevice = existing.useDevice ? "1" : "0";
+      usePhone = existing.usePhone ? "1" : "0";
+      if (existing.mode) mode = existing.mode;
+    }
     if (existing) {
       tunnelId = existing.tunnelId;
       if (existing.port && existing.port !== port) { port = existing.port; portKept = true; }
@@ -266,6 +276,7 @@ async function handleProvision(request, env) {
     // 6) Nội dung config.txt (đúng định dạng launcher đọc)
     //    USE_DEVICE / USE_PHONE = chức năng chấm công đặt sẵn theo bộ cài (khỏi cần đăng nhập tài khoản tổng)
     const configTxt = `PORT=${port}\nCUSTOMER=${slug}\nTUNNEL_TOKEN=${tunnelToken}\nUSE_DEVICE=${useDevice}\nUSE_PHONE=${usePhone}\n`;
+    if (b.plain) return new Response(configTxt, { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
     const used = list.length + (reused ? 0 : 1);
     return jsonRes({
       ok: true, slug, mode, port, portKept, domain: `https://${fqdn}`,
@@ -323,6 +334,21 @@ async function handleLanZip(request, env) {
   return new Response(upstream.body, { status: 200, headers });
 }
 
+// Tải TRÌNH CÀI ĐẶT (Setup.exe kiểu Next-Next, dùng chung cho mọi khách + bản LAN): proxy từ GitHub Release.
+async function handleSetupExe(request, env) {
+  const src = env.SETUP_EXE_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/base/DigiplusChamCong-Setup.exe";
+  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 600 } });
+  if (!upstream.ok || !upstream.body)
+    return jsonRes({ error: "Chưa tải được bộ cài (HTTP " + upstream.status + "). Thử lại sau ít phút." }, 502);
+  const headers = new Headers();
+  headers.set("content-type", "application/octet-stream");
+  const len = upstream.headers.get("content-length");
+  if (len) headers.set("content-length", len);
+  headers.set("content-disposition", 'attachment; filename="DigiplusChamCong-Setup.exe"');
+  headers.set("cache-control", "public, max-age=600");
+  return new Response(upstream.body, { status: 200, headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -336,6 +362,7 @@ export default {
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
     // Link TẢI BỘ CÀI LAN có thương hiệu (proxy từ GitHub Release → tải thẳng về)
     if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
+    if (url.pathname === "/tai-bo-cai" || url.pathname === "/tai-bo-cai.exe") return handleSetupExe(request, env);
 
     const res = await env.ASSETS.fetch(request);
 

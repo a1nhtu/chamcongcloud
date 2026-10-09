@@ -55,3 +55,4 @@ tools/seed-device-demo.mjs
 *.xls
 *.docx
 *.pptx
+dist-setup/

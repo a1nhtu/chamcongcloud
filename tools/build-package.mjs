@@ -7,11 +7,12 @@ import { execSync } from 'node:child_process';
 import { CHAY_APP_BAT } from '../server/autostart.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT = join(ROOT, 'dist-khach', 'DigiplusChamCong');
+const DIST = process.env.DIST_DIR || join(ROOT, 'dist-khach');   // DIST_DIR: đóng gói ra chỗ khác (không đụng dist-khach)
+const OUT = join(DIST, 'DigiplusChamCong');
 const APP = join(OUT, 'app');
 
 console.log('Dọn thư mục đóng gói...');
-rmSync(join(ROOT, 'dist-khach'), { recursive: true, force: true });
+rmSync(DIST, { recursive: true, force: true });
 mkdirSync(join(OUT, 'runtime'), { recursive: true });
 mkdirSync(APP, { recursive: true });
 
@@ -81,6 +82,13 @@ writeFileSync(join(OUT, 'CaiDat.bat'),
 `@echo off
 chcp 65001 >nul
 title Cai dat Digiplus Cham Cong
+rem Tham so: silent = Setup.exe goi (khong hoi quyen lai, khong mo trinh duyet, khong pause); noauto = khong dang ky tu bat
+set "SILENT=" & set "NOAUTO="
+for %%x in (%*) do (
+  if /i "%%~x"=="silent" set "SILENT=1"
+  if /i "%%~x"=="noauto" set "NOAUTO=1"
+)
+if defined SILENT goto main
 net session >nul 2>&1
 if %errorlevel%==0 goto main
 powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs; exit 0 } catch { exit 1 }" >nul 2>&1
@@ -95,6 +103,7 @@ echo.
 set "PORT=8686"
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
 echo Dang cai dat va tao tu dong chay khi mo may (cong %PORT%)...
+if defined NOAUTO goto startapp
 powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut([Environment]::GetFolderPath('Startup')+'\\DigiplusChamCong-%PORT%.lnk'); $s.TargetPath='%~dp0start-hidden.vbs'; $s.WorkingDirectory='%~dp0'; $s.Save()"
 net session >nul 2>&1
 if %errorlevel%==0 (
@@ -109,12 +118,14 @@ if %errorlevel%==0 (
 ) else (
   echo   * Luu y VPS: de auto-start chay ca khi reboot chua dang nhap, chay lai file nay bang "Run as administrator".
 )
+:startapp
 echo Dang khoi dong ung dung...
 start "" "%~dp0start-hidden.vbs"
 rem --- Cho den khi app THAT SU nghe cong (lan dau phai tao CSDL + chung chi nen co the lau), toi da 90 giay ---
 echo Dang cho ung dung san sang (lan dau co the mat 1 phut)...
 powershell -NoProfile -Command "$ok=$false; for($i=0;$i -lt 90;$i++){ try { $c=New-Object Net.Sockets.TcpClient; $c.Connect('127.0.0.1',%PORT%); $c.Close(); $ok=$true; break } catch { Start-Sleep -Seconds 1 } }; if($ok){exit 0}else{exit 1}"
 if errorlevel 1 echo   * Ung dung chua len sau 90 giay - doi them roi bam Refresh. Neu van loi, xem app\\data\\logs\\server.log
+if defined SILENT exit /b 0
 start "" "http://localhost:%PORT%/admin"
 echo.
 echo ============================================
@@ -140,10 +151,12 @@ del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamC
 schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
 schtasks /Delete /TN "Digiplus-%PORT%-logon" /F >nul 2>&1
 for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
+rem Dung cloudflared cua CHINH thu muc nay (khach khac tren cung may khong bi dung)
+set "CF_EXE=%~dp0cloudflared.exe"
+powershell -NoProfile -Command "Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:CF_EXE } | Stop-Process -Force -ErrorAction SilentlyContinue" >nul 2>&1
 echo Da go autostart + dung app cong %PORT%.
-echo LUU Y: neu chay nhieu khach tren 1 VPS, cloudflared cua khach nay van chay -
-echo        dong cua so cloudflared tuong ung, hoac reboot may. KHONG taskkill cloudflared tong the.
 echo Du lieu trong app\\data va app\\uploads van con.
+if /i "%~1"=="silent" exit /b 0
 pause
 `);
 

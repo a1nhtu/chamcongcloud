@@ -11,6 +11,7 @@ on:
     paths:
       - 'package.json'
       - 'tools/build-package.mjs'
+      - 'tools/installer/**'
       - '.github/workflows/build-base.yml'
   workflow_dispatch: {}
 
@@ -65,8 +66,19 @@ jobs:
           [System.IO.Compression.ZipFile]::CreateFromDirectory($lanApp, $out, 'Optimal', $true)
           Write-Host ("LAN: {0:N1} MB" -f ((Get-Item $out).Length/1MB))
 
-      - name: Up ca 2 ban (tunnel + LAN) len Release tag base (ghi de asset cu)
+      - name: Bien dich trinh cai dat Setup.exe (Inno Setup, kieu Next-Next)
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $ver = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $src = Join-Path $PWD 'dist-khach\DigiplusChamCong'
+          & $iscc "/DSrc=$src" "/DAppVer=$ver" "/DOutDir=$PWD" 'tools\installer\DigiplusSetup.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC loi $LASTEXITCODE" }
+          Write-Host ("Setup: {0:N1} MB" -f ((Get-Item 'DigiplusChamCong-Setup.exe').Length/1MB))
+
+      - name: Up 3 ban (tunnel zip + LAN zip + Setup.exe) len Release tag base (ghi de asset cu)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload base DigiplusChamCong-base.zip DigiplusChamCong-lan.zip --clobber
+        run: gh release upload base DigiplusChamCong-base.zip DigiplusChamCong-lan.zip DigiplusChamCong-Setup.exe --clobber
