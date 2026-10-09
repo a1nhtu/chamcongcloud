@@ -140,11 +140,28 @@ function go(key) {
   ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, logs: pageLogs, settings: pageSettings }[key])();
 }
 
+/* ---------- Lựa chọn phụ khi chấm "Theo giờ": đầu–cuối (FILO) / theo cặp vào–ra ----------
+ * Chỉ hiện khi radio "Theo giờ" đang được chọn. Trả { box, value(), sync() }. */
+function hourlyRulePicker(name, current, hourlyRadio, radios) {
+  const rFilo = el('input', { type: 'radio', name, value: 'filo', style: 'width:auto', ...(current !== 'pairs' ? { checked: '' } : {}) });
+  const rPairs = el('input', { type: 'radio', name, value: 'pairs', style: 'width:auto', ...(current === 'pairs' ? { checked: '' } : {}) });
+  const sub = (radio, title, desc) => el('label', { style: 'display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line,#eee);border-radius:10px;cursor:pointer;background:var(--surface,#fff)' },
+    radio, el('div', {}, el('b', { style: 'font-size:14px' }, title), el('div', { style: 'font-size:12.5px;color:var(--muted)' }, desc)));
+  const box = el('div', { style: 'display:flex;flex-direction:column;gap:6px;margin:-2px 0 0 28px' },
+    el('div', { style: 'font-size:12.5px;color:var(--muted)' }, 'Khi một ngày chấm nhiều lần, tính giờ làm theo:'),
+    sub(rFilo, 'Đầu – cuối (FILO)', 'Từ lần chấm đầu đến lần chấm cuối trong ngày.'),
+    sub(rPairs, 'Theo cặp vào / ra', 'Chấm 1–2 là một cặp, 3–4 là cặp tiếp…; giờ làm = tổng các cặp, thời gian ra ngoài bị trừ.'));
+  const sync = () => { box.style.display = hourlyRadio.checked ? 'flex' : 'none'; };
+  for (const r of radios) r.addEventListener('change', sync);
+  sync();
+  return { box, value: () => (rPairs.checked ? 'pairs' : 'filo') };
+}
+
 /* ---------- Thiết lập lần đầu ---------- */
 function setupWizard() {
   const mShift = el('input', { type: 'radio', name: 'sw-mode', value: 'shift', checked: '', style: 'width:auto' });
   const mHourly = el('input', { type: 'radio', name: 'sw-mode', value: 'hourly', style: 'width:auto' });
-  const mHourlyPairs = el('input', { type: 'radio', name: 'sw-mode', value: 'hourly_pairs', style: 'width:auto' });
+  const swRule = hourlyRulePicker('sw-hrule', 'filo', mHourly, [mShift, mHourly]);
   const geo = el('input', { type: 'checkbox', id: 'sw-geo', style: 'width:auto' });
   const opt = (radio, title, desc) => el('label', { style: 'display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line,#e5e5e5);border-radius:12px;cursor:pointer' },
     radio, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
@@ -152,17 +169,16 @@ function setupWizard() {
     el('p', { style: 'color:var(--muted);margin-top:0' }, 'Chọn cách doanh nghiệp của bạn muốn chấm công. Có thể đổi lại sau trong Cài đặt.'),
     el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
       opt(mShift, '🕐 Theo ca làm việc', 'Có khai báo ca, tính đi muộn / về sớm / tăng ca và báo cáo đầy đủ. Phù hợp văn phòng, nhà máy.'),
-      opt(mHourly, '⏱️ Theo giờ — đầu đến cuối (FILO)', 'Không cần ca. Giờ làm = từ lần chấm đầu đến lần chấm cuối trong ngày. Đơn giản cho cửa hàng, quán ăn.'),
-      opt(mHourlyPairs, '⏱️ Theo giờ — theo cặp vào/ra', 'Không cần ca. Chấm 1–2 là một cặp, 3–4 là cặp tiếp…; giờ làm = tổng các cặp, thời gian ra ngoài bị trừ.'),
+      opt(mHourly, '⏱️ Chỉ tính công theo giờ', 'Không cần ca, chỉ tính tổng giờ làm để trả lương theo giờ. Đơn giản cho cửa hàng, quán ăn.'),
+      swRule.box,
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px dashed var(--line,#e5e5e5);border-radius:12px;cursor:pointer;margin-top:4px' },
         geo, el('div', {}, el('b', {}, 'Chỉ cho chấm trong bán kính chi nhánh (GPS)'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật nếu muốn nhân viên phải có mặt tại văn phòng mới chấm được. Bỏ trống = chấm tự do mọi nơi.')))),
   ];
   const save = el('button', { class: 'btn' }, 'Bắt đầu sử dụng →');
   save.onclick = async () => {
-    const pick = document.querySelector('input[name=sw-mode]:checked')?.value || 'shift';
-    const attendance_mode = pick === 'shift' ? 'shift' : 'hourly';
-    const hourly_merge_rule = pick === 'hourly_pairs' ? 'pairs' : 'filo';
+    const attendance_mode = document.querySelector('input[name=sw-mode]:checked')?.value === 'hourly' ? 'hourly' : 'shift';
+    const hourly_merge_rule = swRule.value();
     save.disabled = true;
     try {
       await api('/admin/settings', { method: 'PUT', body: { attendance_mode, hourly_merge_rule, geofence_enforce: geo.checked, setup_done: true } });
@@ -3096,8 +3112,8 @@ async function pageSettings() {
 
   // ----- Kiểu chấm công + Phạm vi chấm công -----
   const modeShift = el('input', { type: 'radio', name: 'att-mode', value: 'shift', style: 'width:auto', ...(s.attendance_mode !== 'hourly' ? { checked: '' } : {}) });
-  const modeHourly = el('input', { type: 'radio', name: 'att-mode', value: 'hourly', style: 'width:auto', ...(s.attendance_mode === 'hourly' && s.hourly_merge_rule !== 'pairs' ? { checked: '' } : {}) });
-  const modeHourlyPairs = el('input', { type: 'radio', name: 'att-mode', value: 'hourly_pairs', style: 'width:auto', ...(s.attendance_mode === 'hourly' && s.hourly_merge_rule === 'pairs' ? { checked: '' } : {}) });
+  const modeHourly = el('input', { type: 'radio', name: 'att-mode', value: 'hourly', style: 'width:auto', ...(s.attendance_mode === 'hourly' ? { checked: '' } : {}) });
+  const stRule = hourlyRulePicker('att-hrule', s.hourly_merge_rule, modeHourly, [modeShift, modeHourly]);
   const geoChk = el('input', { type: 'checkbox', id: 'st-geo', style: 'width:auto', ...(s.geofence_enforce === '1' ? { checked: '' } : {}) });
   const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}), ...(s.use_device_locked ? { disabled: '' } : {}) });
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}), ...(s.use_phone_locked ? { disabled: '' } : {}) });
@@ -3108,9 +3124,8 @@ async function pageSettings() {
   const dedupI = el('input', { type: 'number', min: '0', style: 'width:70px', value: s.punch_dedup_min || '0' });
   const saveMode = el('button', { class: 'btn' }, 'Lưu cấu hình chấm công');
   saveMode.onclick = async () => {
-    const pick = document.querySelector('input[name=att-mode]:checked')?.value || 'shift';
-    const attendance_mode = pick === 'shift' ? 'shift' : 'hourly';
-    const hourly_merge_rule = pick === 'hourly_pairs' ? 'pairs' : 'filo';
+    const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value === 'hourly' ? 'hourly' : 'shift';
+    const hourly_merge_rule = stRule.value();
     try {
       const body = { attendance_mode, hourly_merge_rule, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
       if (isMaster()) {   // chỉ tài khoản tổng đổi được máy chấm công / chấm điện thoại
@@ -3127,8 +3142,8 @@ async function pageSettings() {
     el('h3', { style: 'margin-top:0' }, 'Kiểu chấm công'),
     el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
       modeRow(modeShift, '🕐 Theo ca làm việc', 'Có ca, tính đi muộn / về sớm / tăng ca, báo cáo đầy đủ. Phù hợp văn phòng, nhà máy.'),
-      modeRow(modeHourly, '⏱️ Theo giờ — đầu đến cuối (FILO)', 'Không cần khai báo ca. Giờ làm = từ lần chấm đầu đến lần chấm cuối trong ngày. Đơn giản cho cửa hàng, quán.'),
-      modeRow(modeHourlyPairs, '⏱️ Theo giờ — theo cặp vào/ra', 'Không cần khai báo ca. Chấm 1–2 là một cặp, 3–4 là cặp tiếp…; giờ làm = tổng các cặp, thời gian ra ngoài bị trừ. Báo cáo hiện từng cặp.'),
+      modeRow(modeHourly, '⏱️ Chỉ tính công theo giờ', 'Không cần khai báo ca, chỉ tính tổng giờ làm để trả lương theo giờ. Đơn giản cho cửa hàng, quán.'),
+      stRule.box,
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Phạm vi chấm công (GPS)'),
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, geoChk,
