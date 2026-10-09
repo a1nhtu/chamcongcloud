@@ -38,6 +38,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const month = (req.query.month || '').slice(0, 7);
     // Đọc cấu hình + ngày lễ MỘT LẦN cho cả mẻ (thay vì query mỗi dòng)
     const ctx = payrollCtx(getSetting, db);
+    const hourlyPairs = getSetting('hourly_merge_rule', 'filo') === 'pairs';
 
     // Phạm vi: ids (vài NV) > depts (nhiều phòng ban) > dept (1 phòng ban) > cả công ty
     const dept = (req.query.dept || '').trim();
@@ -65,9 +66,12 @@ export function registerAttendanceRoutes(r, { need }) {
       for (const row of rows) {
         // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định
         const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
-        // Ca dùng quy tắc "Nhiều lần vào/ra": tính lại theo các cặp lượt quẹt (giờ sửa tay thì tính như cũ)
-        const pairs = (eff.mergeRule === 'pairs' && !row.manual && !ctx.hourly) ? dayPairsFor(row.employee_id, row.work_date, eff.shift) : null;
-        const m = computeDayMetrics(ctx, eff.shift, row.work_date, row.check_in_at, row.check_out_at || null, pairs);
+        // Chế độ theo GIỜ: không dùng ca (giống khi máy đẩy log). Quy tắc "Nhiều lần vào/ra" (ca chọn pairs,
+        // hoặc theo giờ chọn "theo cặp"): tính theo các cặp lượt quẹt; giờ sửa tay thì tính như cũ.
+        const calcShift = ctx.hourly ? null : eff.shift;
+        const usePairs = !row.manual && (ctx.hourly ? hourlyPairs : eff.mergeRule === 'pairs');
+        const pairs = usePairs ? dayPairsFor(row.employee_id, row.work_date, calcShift) : null;
+        const m = computeDayMetrics(ctx, calcShift, row.work_date, row.check_in_at, row.check_out_at || null, pairs);
         if (!row.check_out_at) {
           // Chưa chấm ra: chỉ cập nhật muộn/trạng thái/ca — GIỮ NGUYÊN giờ công cũ (như trước)
           updNoOut.run(m.late, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);

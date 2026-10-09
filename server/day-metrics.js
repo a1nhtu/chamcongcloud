@@ -1,7 +1,7 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, isWeekendDay, noShiftUnit } from './attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, noShiftUnit, sumPairsMinutes } from './attendance-calc.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -42,7 +42,9 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     if (shift) {
       c = computeCheckout(shift, inIso, outIso, workDate, flags);
     } else {
-      const wm = Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000));
+      // Không ca (chế độ theo giờ): "theo cặp" ≥ 2 cặp → cộng từng cặp; còn lại = ra − vào (FILO)
+      const wm = (pairs && pairs.length >= 2) ? sumPairsMinutes(pairs)
+        : Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000));
       c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, flags), ot_type: otType, day_status: 'lam_viec' };
     }
   } else {

@@ -5,6 +5,7 @@ import { authRequired, permRequired } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
+import { resolveEffectiveShift } from '../shift-resolver.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -92,8 +93,33 @@ function dayTimesLoader(from, to, empIds) {
 }
 // [t0,t1,t2,t3,t4] → [[t0,t1],[t2,t3],[t4,null]]
 const toPairs = (ts) => { const r = []; for (let i = 0; i < ts.length; i += 2) r.push([ts[i], ts[i + 1] || null]); return r; };
-// Chuỗi hiển thị 1 ô: mỗi cặp 'HH:MM-HH:MM', nhiều cặp xuống dòng
-const pairsText = (ts) => toPairs(ts).map(([a, b]) => isoToVnHM(a) + '-' + (b ? isoToVnHM(b) : '?')).join('\n');
+
+// Giờ vào/ra HIỂN THỊ của 1 ô NV×ngày theo quy tắc ghép log đang áp dụng (báo cáo "đầu/cuối" không dùng hàm này):
+//  - quy tắc "Nhiều lần vào/ra" (ca chọn "pairs", hoặc chế độ theo giờ chọn "theo cặp") và ngày có > 2 lần chấm
+//    → liệt kê từng cặp: cin/cout nhiều dòng, pairs = [[vào, ra], ...]
+//  - còn lại (FILO, IDM…) → giờ vào/ra của bản ghi công (đầu–cuối), pairs = null
+function inOutResolver(employees, from, to) {
+  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const hourlyRule = getSetting('hourly_merge_rule', 'filo');
+  let timesOf = null;
+  const memo = new Map();   // empId|date → kết quả (nhiều cột cùng gọi 1 ô)
+  return (empId, date, c) => {
+    const mk = empId + '|' + date;
+    if (!memo.has(mk)) memo.set(mk, calc(empId, date, c));
+    return memo.get(mk);
+  };
+  function calc(empId, date, c) {
+    const single = { cin: c && c.check_in_at ? isoToVnHM(c.check_in_at) : '', cout: c && c.check_out_at ? isoToVnHM(c.check_out_at) : '', pairs: null };
+    if (!c || !c.check_in_at) return single;
+    if (!timesOf) timesOf = dayTimesLoader(from, to, new Set(employees.map((e) => e.id)));
+    const ts = timesOf(empId, date);
+    if (ts.length <= 2) return single;
+    const rule = hourly ? hourlyRule : (resolveEffectiveShift(empId, date, c.check_in_at, c.check_out_at || null).mergeRule || 'filo');
+    if (rule !== 'pairs') return single;
+    const ps = toPairs(ts);
+    return { cin: ps.map(([a]) => isoToVnHM(a)).join('\n'), cout: ps.map(([, b]) => (b ? isoToVnHM(b) : '?')).join('\n'), pairs: ps };
+  }
+}
 
 // Nạp toàn bộ dữ liệu 1 khoảng ngày [from, to] để các báo cáo dùng chung
 function loadRange(from, to, filter) {
@@ -229,6 +255,7 @@ function buildReport(type, from, to, filter) {
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
+  const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1]);   // giờ vào/ra theo quy tắc ghép log
   const sortedResults = () => [...ctx.cell.values()].sort((a, b) =>
     a.full_name === b.full_name ? (a.work_date < b.work_date ? -1 : 1) : (a.full_name < b.full_name ? -1 : 1));
 
@@ -286,15 +313,14 @@ function buildReport(type, from, to, filter) {
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
         { key: 'total', label: 'Tổng công', w: 10 },
       ];
-      const timesOf = dayTimesLoader(days[0], days[days.length - 1], new Set(ctx.employees.map((e) => e.id)));
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '' };
         let total = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           if (c && c.check_in_at) {
-            const ts = timesOf(e.id, d);
-            row['d' + d] = ts.length > 2 ? pairsText(ts) : isoToVnHM(c.check_in_at) + '-' + (c.check_out_at ? isoToVnHM(c.check_out_at) : '?');
+            const io = ioOf(e.id, d, c);
+            row['d' + d] = io.pairs ? io.pairs.map(([a, b]) => isoToVnHM(a) + '-' + (b ? isoToVnHM(b) : '?')).join('\n') : io.cin + '-' + (io.cout || '?');
             total += c.work_unit || 0;
           } else row['d' + d] = '';
         }
@@ -327,8 +353,9 @@ function buildReport(type, from, to, filter) {
         let totalMin = 0, otMin = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
-          rIn['d' + d + 'i'] = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
-          rIn['d' + d + 'o'] = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+          const io = ioOf(e.id, d, c);
+          rIn['d' + d + 'i'] = io.cin;
+          rIn['d' + d + 'o'] = io.cout;
           rCong['d' + d + 'i'] = c ? round2((c.work_minutes || 0) / 60) : ''; rCong['d' + d + 'o'] = '';
           rOt['d' + d + 'i'] = c ? round2((c.ot_min || 0) / 60) : ''; rOt['d' + d + 'o'] = '';
           if (c) { totalMin += c.work_minutes || 0; otMin += c.ot_min || 0; }
@@ -396,7 +423,7 @@ function buildReport(type, from, to, filter) {
         date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)],
         code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
         inCa: c.shift_start || '', outCa: c.shift_end || '',
-        inReal: isoToVnHM(c.check_in_at), outReal: isoToVnHM(c.check_out_at),
+        inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         late: c.late_min || 0, early: c.early_min || 0, ot: c.ot_min || 0,
         cong: round2(c.work_unit), status: c.check_out_at ? (c.late_min > 0 ? 'Đi muộn' : c.early_min > 0 ? 'Về sớm' : 'Đủ công') : 'Thiếu ra',
       }));
@@ -428,7 +455,7 @@ function buildReport(type, from, to, filter) {
           rows.push({
             stt, code: e.code, name: e.full_name, dept: e.department || '',
             date: fmtDMY(d), wd: WD[vnWeekday(d)],
-            cin: c ? isoToVnHM(c.check_in_at) : '', cout: c ? isoToVnHM(c.check_out_at) : '',
+            cin: ioOf(e.id, d, c).cin, cout: ioOf(e.id, d, c).cout,
             late: c ? (c.late_min || 0) : 0, early: c ? (c.early_min || 0) : 0,
             cong: c ? round2(c.work_unit) : 0, gio: c ? round2((c.work_minutes || 0) / 60) : 0,
             ot: c ? round2((c.ot_min || 0) / 60) : 0, gross,
@@ -451,7 +478,6 @@ function buildReport(type, from, to, filter) {
       columns.push({ key: 'late', label: 'Trễ', w: 7 }, { key: 'early', label: 'Sớm', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
         { key: 'cong', label: 'Công', w: 7 }, { key: 'ot', label: 'Tăng ca', w: 9 });
 
-      const timesOfDay = dayTimesLoader(days[0], days[days.length - 1], new Set(ctx.employees.map((e) => e.id)));
 
       const rows = [];
       let stt = 0;
@@ -463,7 +489,8 @@ function buildReport(type, from, to, filter) {
           if (!c && !ctx.isScheduled(e.id, d) && !isLeave) continue; // bỏ ngày không lịch, không chấm, không nghỉ
           stt++;
           const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)] };
-          const ts = c ? timesOfDay(e.id, d) : [];
+          const io = c ? ioOf(e.id, d, c) : null;
+          const ts = !io ? [] : io.pairs ? io.pairs.flat().filter(Boolean) : [c.check_in_at, c.check_out_at].filter(Boolean);
           for (let i = 0; i < PAIRS * 2; i++) row[(i % 2 ? 'out' : 'in') + (Math.floor(i / 2) + 1)] = ts[i] ? isoToVnHM(ts[i]) : '';
           Object.assign(row, {
             late: c ? (c.late_min || 0) : 0, early: c ? (c.early_min || 0) : 0,
@@ -486,7 +513,7 @@ function buildReport(type, from, to, filter) {
       ];
       const rows = sortedResults().map((c) => ({
         date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
-        inReal: isoToVnHM(c.check_in_at), outReal: isoToVnHM(c.check_out_at),
+        inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         place: c.check_in_outside ? 'Ngoài VP' : 'Trong VP',
         late: c.late_min || 0, early: c.early_min || 0, gio: round2((c.work_minutes || 0) / 60),
         ot: c.ot_min || 0, cong: round2(c.work_unit),
@@ -503,7 +530,7 @@ function buildReport(type, from, to, filter) {
       ];
       const rows = sortedResults().filter((c) => c.late_min > 0 || c.early_min > 0).map((c) => ({
         date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
-        inReal: isoToVnHM(c.check_in_at), outReal: isoToVnHM(c.check_out_at),
+        inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         late: c.late_min || 0, early: c.early_min || 0,
       }));
       return { title: `Đi muộn / về sớm ${PERIOD}`, columns, rows };
@@ -518,7 +545,7 @@ function buildReport(type, from, to, filter) {
       ];
       const rows = sortedResults().filter((c) => c.ot_min > 0).map((c) => ({
         date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
-        inReal: isoToVnHM(c.check_in_at), outReal: isoToVnHM(c.check_out_at),
+        inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         otp: c.ot_min || 0, oth: round2((c.ot_min || 0) / 60), loai: OT_LABEL[c.ot_type] || '',
       }));
       return { title: `Tăng ca chi tiết ${PERIOD}`, columns, rows };
@@ -595,6 +622,7 @@ const WD_LABEL = { 0: 'CN', 1: 'T.2', 2: 'T.3', 3: 'T.4', 4: 'T.5', 5: 'T.6', 6:
 async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
+  const ioOf = inOutResolver(ctx.employees, from, to);   // giờ vào/ra theo quy tắc ghép log
   const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
   const totalCols = FIXED + days.length * 2;
@@ -641,8 +669,11 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
       const d = days[di], c1 = FIXED + di * 2 + 1;
       const c = ctx.cell.get(e.id + '|' + d);
       const weekend = ctx.isWeekend(d);
-      ws.getCell(rIn, c1).value = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
-      ws.getCell(rIn, c1 + 1).value = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+      const io = ioOf(e.id, d, c);
+      ws.getCell(rIn, c1).value = io.cin;
+      ws.getCell(rIn, c1 + 1).value = io.cout;
+      if (io.pairs) { ws.getCell(rIn, c1).alignment = ws.getCell(rIn, c1 + 1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        ws.getRow(rIn).height = Math.max(ws.getRow(rIn).height || 15, 15 * io.pairs.length); }
       ws.mergeCells(rCong, c1, rCong, c1 + 1); ws.getCell(rCong, c1).value = c && c.work_minutes ? round2(c.work_minutes / 60) : 0;
       ws.mergeCells(rOt, c1, rOt, c1 + 1); ws.getCell(rOt, c1).value = c && c.ot_min ? round2(c.ot_min / 60) : 0;
       for (const [rr, cc] of [[rIn, c1], [rIn, c1 + 1], [rCong, c1], [rOt, c1]]) {
@@ -703,7 +734,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
     cell.border = border;
   }
 
-  const timesOf = dayTimesLoader(from, to, new Set(ctx.employees.map((e) => e.id)));
+  const ioOf = inOutResolver(ctx.employees, from, to);
   let r = H + 2, stt = 0;
   for (const e of ctx.employees) {
     stt++;
@@ -717,16 +748,10 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
       const d = days[di], c1 = FIXED + di * 2 + 1;
       const c = ctx.cell.get(e.id + '|' + d);
       const weekend = ctx.isWeekend(d);
-      const ts = c && c.check_in_at ? timesOf(e.id, d) : [];
-      if (ts.length > 2) {   // nhiều lần vào/ra: liệt kê từng lần, mỗi lần 1 dòng trong ô
-        const ps = toPairs(ts);
-        ws.getCell(r, c1).value = ps.map(([a]) => isoToVnHM(a)).join('\n');
-        ws.getCell(r, c1 + 1).value = ps.map(([, b]) => (b ? isoToVnHM(b) : '?')).join('\n');
-        lines = Math.max(lines, ps.length);
-      } else {
-        ws.getCell(r, c1).value = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
-        ws.getCell(r, c1 + 1).value = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
-      }
+      const io = ioOf(e.id, d, c);   // theo quy tắc ghép log: nhiều cặp → mỗi lần 1 dòng trong ô
+      ws.getCell(r, c1).value = io.cin;
+      ws.getCell(r, c1 + 1).value = io.cout;
+      if (io.pairs) lines = Math.max(lines, io.pairs.length);
       if (c) cong += c.work_unit || 0;
       for (const cc of [c1, c1 + 1]) { const x = ws.getCell(r, cc); x.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; x.border = border; if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } }; }
     }
@@ -841,12 +866,16 @@ r.get('/export.xlsx', async (req, res) => {
 
   for (const row of rows) {
     const r2 = ws.addRow(columns.map((c) => row[c.key] ?? ''));
+    let lines = 1;
     r2.eachCell((cell, col) => {
       const meta = columns[col - 1];
       cell.border = allBorder;
       if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
-      if (col > 3) cell.alignment = { horizontal: 'center' };
+      const multi = typeof cell.value === 'string' && cell.value.includes('\n');
+      if (multi) lines = Math.max(lines, cell.value.split('\n').length);
+      if (col > 3 || multi) cell.alignment = { horizontal: col > 3 ? 'center' : 'left', vertical: 'middle', wrapText: multi };
     });
+    if (lines > 1) r2.height = 15 * lines;
   }
   ws.columns.forEach((col, i) => { col.width = columns[i]?.w || 12; });
   ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 2 }];

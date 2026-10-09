@@ -15,6 +15,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
+      hourly_merge_rule: getSetting('hourly_merge_rule', 'filo'), // theo giờ: filo | pairs (nhiều lần vào/ra)
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
       phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)
       // Nếu bộ cài (config.txt) có đặt sẵn USE_DEVICE/USE_PHONE thì 2 mục này do bộ cài quyết (khoá UI)
@@ -44,6 +45,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);
     if (b.geofence_enforce != null) setSetting('geofence_enforce', b.geofence_enforce ? '1' : '0');
     if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');
+    if (b.hourly_merge_rule != null) setSetting('hourly_merge_rule', b.hourly_merge_rule === 'pairs' ? 'pairs' : 'filo');
     // Bật/tắt tính năng MÁY CHẤM CÔNG: CHỈ tài khoản tổng mới đổi được
     if (req.user.master) {
       if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');

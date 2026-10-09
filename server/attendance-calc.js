@@ -191,6 +191,13 @@ export function punchPairs(isoList) {
   return out;
 }
 
+// Tổng phút của các cặp vào–ra (chế độ theo giờ, quy tắc "theo cặp")
+export function sumPairsMinutes(pairs) {
+  let m = 0;
+  for (const [a, b] of pairs || []) if (a && b) m += Math.max(0, Math.round((new Date(b) - new Date(a)) / 60000));
+  return m;
+}
+
 // Thứ trong tuần của ngày lịch (workDate = 'YYYY-MM-DD'): 1=T2 .. 7=CN.
 // Dùng 12:00 UTC để tránh lệch ngày do múi giờ.
 export function vnWeekday(workDate) {
