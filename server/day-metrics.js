@@ -26,12 +26,13 @@ export function payrollCtx(getSetting, db) {
  * work_minutes, work_unit, ot_type, day_status }.
  * Công thức giữ NGUYÊN so với code cũ — chỉ gom một chỗ.
  */
-export function computeDayMetrics(ctx, shift, workDate, inIso, outIso) {
+export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = null) {
   const flags = {
     isHoliday: ctx.isHoliday(workDate),
     isWeekend: isWeekendDay(workDate, ctx.weekend),
     roundingDecimals: ctx.roundingDecimals,
     roundingMode: ctx.roundingMode,
+    pairs,   // quy tắc "Nhiều lần vào/ra": các cặp vào–ra trong ngày (null = tính như cũ)
   };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
   const late = (shift && inIso) ? computeLate(shift, inIso, workDate) : 0;

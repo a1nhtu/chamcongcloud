@@ -52,7 +52,7 @@ export function noShiftUnit(work_minutes, opts = {}) {
 }
 
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0 } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null } = opts;
   const ci = new Date(checkInIso);
   const co = new Date(checkOutIso);
   const { start, end } = shiftBounds(workDate, shift);
@@ -68,8 +68,20 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   const inShift = Math.max(0, mins(effIn, effOut));
   const shiftLen = mins(start, end);
   const halfShift = Math.floor(shiftLen / 2);
-  const breakDed = inShift >= halfShift ? (shift.break_minutes || 0) : 0;
-  const work_minutes = Math.max(0, inShift - breakDed);
+  let work_minutes;
+  if (pairs && pairs.length >= 2) {
+    // Quy tắc "Nhiều lần vào/ra": cộng từng cặp vào–ra (kẹp trong khung ca); thời gian ra ngoài giữa các cặp
+    // chính là giờ nghỉ nên KHÔNG trừ thêm nghỉ giữa ca.
+    work_minutes = 0;
+    for (const [pi, po] of pairs) {
+      if (!pi || !po) continue;
+      const a = new Date(pi), b = new Date(po);
+      work_minutes += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
+    }
+  } else {
+    const breakDed = inShift >= halfShift ? (shift.break_minutes || 0) : 0;
+    work_minutes = Math.max(0, inShift - breakDed);
+  }
 
   // Tăng ca: ở lại sau tan ca >= ngưỡng
   let ot_min = 0;
@@ -98,6 +110,8 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
  *   tdhc — Theo cửa sổ thời gian: VÀO trong cửa sổ vào; RA = log kế tiếp, phải nằm trong cửa sổ ra.
  *   idm  — Máy lẻ vào / máy chẵn ra: VÀO = log máy lẻ sớm nhất; RA = log máy chẵn muộn nhất.
  *   tdqd — Qua đêm: cửa sổ xuyên đêm; con: pair (như filo) hoặc idm.
+ *   pairs — Nhiều lần vào/ra: giờ Vào/Ra như FILO, kèm danh sách cặp (lượt 1-2, 3-4…) để tính giờ công
+ *           = tổng các cặp (lượt lẻ cuối không có cặp thì bỏ).
  * punches: [{ punch_at: ISO, serial }] (đã lấy trong cửa sổ rộng). machineMap: { serial: số máy }.
  */
 const HH = 3600000;
@@ -162,7 +176,19 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate)
   const ci = inWin[0];
   if (!ci) return { inIso: null, outIso: null };
   const co = inWin.length > 1 ? inWin[inWin.length - 1] : null;
-  return { inIso: iso(ci), outIso: iso(co && co !== ci ? co : null) };
+  const res = { inIso: iso(ci), outIso: iso(co && co !== ci ? co : null) };
+  if (rule === 'pairs') res.pairs = punchPairs(inWin.map((p) => p.punch_at));
+  return res;
+}
+
+// Chia lượt quẹt thành cặp vào–ra: bỏ lượt trùng trong 1 phút, ghép (1,2), (3,4)…; lượt lẻ cuối không có cặp → bỏ.
+export function punchPairs(isoList) {
+  const ts = [...(isoList || [])].filter(Boolean).sort();
+  const uniq = [];
+  for (const t of ts) if (!uniq.length || new Date(t) - new Date(uniq[uniq.length - 1]) >= 60000) uniq.push(t);
+  const out = [];
+  for (let i = 0; i + 1 < uniq.length; i += 2) out.push([uniq[i], uniq[i + 1]]);
+  return out;
 }
 
 // Thứ trong tuần của ngày lịch (workDate = 'YYYY-MM-DD'): 1=T2 .. 7=CN.

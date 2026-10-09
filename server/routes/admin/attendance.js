@@ -2,6 +2,7 @@
 import { db, getSetting, adminAttWhere } from '../../db.js';
 import { resolveEffectiveShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
+import { dayPairsFor } from '../../device-sync.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
 
@@ -64,7 +65,9 @@ export function registerAttendanceRoutes(r, { need }) {
       for (const row of rows) {
         // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định
         const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
-        const m = computeDayMetrics(ctx, eff.shift, row.work_date, row.check_in_at, row.check_out_at || null);
+        // Ca dùng quy tắc "Nhiều lần vào/ra": tính lại theo các cặp lượt quẹt (giờ sửa tay thì tính như cũ)
+        const pairs = (eff.mergeRule === 'pairs' && !row.manual && !ctx.hourly) ? dayPairsFor(row.employee_id, row.work_date, eff.shift) : null;
+        const m = computeDayMetrics(ctx, eff.shift, row.work_date, row.check_in_at, row.check_out_at || null, pairs);
         if (!row.check_out_at) {
           // Chưa chấm ra: chỉ cập nhật muộn/trạng thái/ca — GIỮ NGUYÊN giờ công cũ (như trước)
           updNoOut.run(m.late, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);

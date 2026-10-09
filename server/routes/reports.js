@@ -64,6 +64,37 @@ export function empFilterSql(filter) {
   return { where: '', args: [] };
 }
 
+// Các lần chấm trong ngày của từng NV (dùng cho báo cáo hiện NHIỀU lần vào/ra):
+//  - ngày có giờ admin SỬA TAY → theo bản ghi công (tôn trọng chỉnh sửa)
+//  - có lượt quẹt máy → từng lượt quẹt theo thời gian
+//  - còn lại (chấm điện thoại) → mỗi phiên = 1 cặp vào/ra
+// Bỏ lượt trùng trong vòng 1 phút. Trả hàm timesOf(empId, date) → [iso...] đã sắp xếp.
+function dayTimesLoader(from, to, empIds) {
+  const punches = new Map(), sessions = new Map();
+  const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
+  for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to))
+    if (empIds.has(p.employee_id)) push(punches, p.employee_id + '|' + p.work_date, p.punch_at);
+  for (const a of db.prepare('SELECT employee_id, work_date, check_in_at, check_out_at, manual FROM attendance WHERE work_date >= ? AND work_date <= ? ORDER BY check_in_at').all(from, to))
+    if (empIds.has(a.employee_id)) push(sessions, a.employee_id + '|' + a.work_date, a);
+  return (empId, date) => {
+    const k = empId + '|' + date;
+    const ss = sessions.get(k) || [];
+    let list;
+    if (ss.some((x) => x.manual) || !punches.has(k)) {
+      list = [];
+      for (const x of ss) { if (x.check_in_at) list.push(x.check_in_at); if (x.check_out_at) list.push(x.check_out_at); }
+    } else list = punches.get(k).slice();
+    list.sort();
+    const out = [];
+    for (const t of list) if (!out.length || new Date(t) - new Date(out[out.length - 1]) >= 60000) out.push(t);
+    return out;
+  };
+}
+// [t0,t1,t2,t3,t4] → [[t0,t1],[t2,t3],[t4,null]]
+const toPairs = (ts) => { const r = []; for (let i = 0; i < ts.length; i += 2) r.push([ts[i], ts[i + 1] || null]); return r; };
+// Chuỗi hiển thị 1 ô: mỗi cặp 'HH:MM-HH:MM', nhiều cặp xuống dòng
+const pairsText = (ts) => toPairs(ts).map(([a, b]) => isoToVnHM(a) + '-' + (b ? isoToVnHM(b) : '?')).join('\n');
+
 // Nạp toàn bộ dữ liệu 1 khoảng ngày [from, to] để các báo cáo dùng chung
 function loadRange(from, to, filter) {
   const weekend = getSetting('weekend_days', '7');
@@ -255,13 +286,15 @@ function buildReport(type, from, to, filter) {
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
         { key: 'total', label: 'Tổng công', w: 10 },
       ];
+      const timesOf = dayTimesLoader(days[0], days[days.length - 1], new Set(ctx.employees.map((e) => e.id)));
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '' };
         let total = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           if (c && c.check_in_at) {
-            row['d' + d] = isoToVnHM(c.check_in_at) + '-' + (c.check_out_at ? isoToVnHM(c.check_out_at) : '?');
+            const ts = timesOf(e.id, d);
+            row['d' + d] = ts.length > 2 ? pairsText(ts) : isoToVnHM(c.check_in_at) + '-' + (c.check_out_at ? isoToVnHM(c.check_out_at) : '?');
             total += c.work_unit || 0;
           } else row['d' + d] = '';
         }
@@ -418,39 +451,7 @@ function buildReport(type, from, to, filter) {
       columns.push({ key: 'late', label: 'Trễ', w: 7 }, { key: 'early', label: 'Sớm', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
         { key: 'cong', label: 'Công', w: 7 }, { key: 'ot', label: 'Tăng ca', w: 9 });
 
-      // Các lần chấm trong ngày của từng NV:
-      //  - ngày có giờ admin SỬA TAY → lấy theo bản ghi công (tôn trọng chỉnh sửa)
-      //  - có lượt quẹt máy → lấy từng lượt quẹt theo thứ tự thời gian
-      //  - còn lại (chấm điện thoại) → mỗi phiên = 1 cặp vào/ra
-      const empIds = new Set(ctx.employees.map((e) => e.id));
-      const punches = new Map();   // empId|date -> [iso...]
-      for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at')
-        .all(days[0], days[days.length - 1])) {
-        if (!empIds.has(p.employee_id)) continue;
-        const k = p.employee_id + '|' + p.work_date;
-        if (!punches.has(k)) punches.set(k, []);
-        punches.get(k).push(p.punch_at);
-      }
-      const sessions = new Map();  // empId|date -> [{in,out,manual}]
-      for (const a of db.prepare('SELECT employee_id, work_date, check_in_at, check_out_at, manual FROM attendance WHERE work_date >= ? AND work_date <= ? ORDER BY check_in_at')
-        .all(days[0], days[days.length - 1])) {
-        if (!empIds.has(a.employee_id)) continue;
-        const k = a.employee_id + '|' + a.work_date;
-        if (!sessions.has(k)) sessions.set(k, []);
-        sessions.get(k).push(a);
-      }
-      const timesOf = (k) => {
-        const ss = sessions.get(k) || [];
-        let list;
-        if (ss.some((s) => s.manual) || !punches.has(k)) {
-          list = [];
-          for (const s of ss) { if (s.check_in_at) list.push(s.check_in_at); if (s.check_out_at) list.push(s.check_out_at); }
-        } else list = punches.get(k).slice();
-        list.sort();
-        const out = [];   // bỏ lượt quẹt trùng trong vòng 1 phút
-        for (const t of list) if (!out.length || new Date(t) - new Date(out[out.length - 1]) >= 60000) out.push(t);
-        return out;
-      };
+      const timesOfDay = dayTimesLoader(days[0], days[days.length - 1], new Set(ctx.employees.map((e) => e.id)));
 
       const rows = [];
       let stt = 0;
@@ -462,7 +463,7 @@ function buildReport(type, from, to, filter) {
           if (!c && !ctx.isScheduled(e.id, d) && !isLeave) continue; // bỏ ngày không lịch, không chấm, không nghỉ
           stt++;
           const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)] };
-          const ts = c ? timesOf(k) : [];
+          const ts = c ? timesOfDay(e.id, d) : [];
           for (let i = 0; i < PAIRS * 2; i++) row[(i % 2 ? 'out' : 'in') + (Math.floor(i / 2) + 1)] = ts[i] ? isoToVnHM(ts[i]) : '';
           Object.assign(row, {
             late: c ? (c.late_min || 0) : 0, early: c ? (c.early_min || 0) : 0,
@@ -702,9 +703,11 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
     cell.border = border;
   }
 
+  const timesOf = dayTimesLoader(from, to, new Set(ctx.employees.map((e) => e.id)));
   let r = H + 2, stt = 0;
   for (const e of ctx.employees) {
     stt++;
+    let lines = 1;
     [stt, e.department || '', e.code, e.full_name, ''].forEach((v, i) => {
       const cell = ws.getCell(r, i + 1); cell.value = v; cell.border = border;
       cell.alignment = { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' };
@@ -714,12 +717,21 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
       const d = days[di], c1 = FIXED + di * 2 + 1;
       const c = ctx.cell.get(e.id + '|' + d);
       const weekend = ctx.isWeekend(d);
-      ws.getCell(r, c1).value = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
-      ws.getCell(r, c1 + 1).value = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+      const ts = c && c.check_in_at ? timesOf(e.id, d) : [];
+      if (ts.length > 2) {   // nhiều lần vào/ra: liệt kê từng lần, mỗi lần 1 dòng trong ô
+        const ps = toPairs(ts);
+        ws.getCell(r, c1).value = ps.map(([a]) => isoToVnHM(a)).join('\n');
+        ws.getCell(r, c1 + 1).value = ps.map(([, b]) => (b ? isoToVnHM(b) : '?')).join('\n');
+        lines = Math.max(lines, ps.length);
+      } else {
+        ws.getCell(r, c1).value = c && c.check_in_at ? isoToVnHM(c.check_in_at) : '';
+        ws.getCell(r, c1 + 1).value = c && c.check_out_at ? isoToVnHM(c.check_out_at) : '';
+      }
       if (c) cong += c.work_unit || 0;
-      for (const cc of [c1, c1 + 1]) { const x = ws.getCell(r, cc); x.alignment = { horizontal: 'center' }; x.border = border; if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } }; }
+      for (const cc of [c1, c1 + 1]) { const x = ws.getCell(r, cc); x.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; x.border = border; if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } }; }
     }
     const cc = ws.getCell(r, congCol); cc.value = round2(cong); cc.alignment = { horizontal: 'center' }; cc.border = border;
+    if (lines > 1) ws.getRow(r).height = 15 * lines;
     r++;
   }
   if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }

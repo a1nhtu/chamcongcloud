@@ -996,7 +996,7 @@ function shiftModal(s) {
         el('select', { id: 's-tdqd' },
           el('option', { value: 'pair', ...((s?.tdqd_mode || 'pair') === 'pair' ? { selected: '' } : {}) }, 'Thời gian (vào trước/ra sau)'),
           el('option', { value: 'idm', ...(s?.tdqd_mode === 'idm' ? { selected: '' } : {}) }, 'Máy lẻ/chẵn (IDM)')))),
-    el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, 'Quy tắc ghép log = cách gộp nhiều lần quẹt máy thành giờ Vào/Ra. FILO hợp đa số. IDM cần đặt "số máy" cho từng máy (lẻ=Vào, chẵn=Ra). Có thể ghi đè khi phân ca.'),
+    el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, 'Quy tắc ghép log = cách gộp nhiều lần quẹt máy thành giờ Vào/Ra. FILO hợp đa số. IDM cần đặt "số máy" cho từng máy (lẻ=Vào, chẵn=Ra). "Nhiều lần vào/ra": quẹt 1-2 là một cặp, 3-4 là cặp tiếp…, giờ công = tổng các cặp (giờ ra ngoài giữa chừng bị trừ, không trừ thêm nghỉ giữa ca). Có thể ghi đè khi phân ca.'),
     el('div', {}, el('label', {}, 'Ngày làm việc'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...dayBoxes)),
   ];
   const save = el('button', { class: 'btn' }, 'Lưu');
@@ -1505,6 +1505,7 @@ const MERGE_RULES = [
   ['tdhc', 'TĐ-HC — Theo cửa sổ thời gian'],
   ['idm', 'IDM — Máy lẻ vào / máy chẵn ra'],
   ['tdqd', 'TĐ-QĐ — Qua đêm'],
+  ['pairs', 'Nhiều lần vào/ra — cộng từng cặp, trừ thời gian ra ngoài'],
 ];
 const RULE_LABEL = Object.fromEntries(MERGE_RULES);
 
@@ -2932,7 +2933,8 @@ async function pageReport() {
           const v = row[c.key];
           const isSym = type === 'symbol' && SYMBOL_COLOR[v];
           tr.append(el('td', {
-            style: (c.weekend ? 'background:#fffaf3;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center' : '')),
+            // white-space:pre-line: ô có nhiều lần vào/ra (máy chủ nối bằng xuống dòng) hiện mỗi cặp một dòng
+            style: (c.weekend ? 'background:#fffaf3;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : '')),
           }, v === '' || v == null ? '' : String(v)));
         }
         tb.append(tr);
