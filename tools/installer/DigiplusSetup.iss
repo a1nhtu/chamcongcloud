@@ -5,6 +5,9 @@
 ;     TẠO MỚI tên miền ngay (cổng tự lấy cổng trống tiếp theo)
 ;   - Bản LAN: chỉ hỏi cổng, không cần tên khách / mật khẩu
 ;   - Cài đè lên bản đang có: mặc định GIỮ cấu hình + dữ liệu cũ
+;   - NHIỀU BẢN TRÊN 1 MÁY (VPS nhiều khách): máy đã có bản Digiplus thì trình cài hỏi "cập nhật bản nào" hay "cài thêm bản mới";
+;     mỗi bản một AppId riêng (hậu tố -2, -3...) → mỗi bản một thư mục, một mục gỡ cài đặt, một lối tắt.
+; Cài im lặng: thêm /INSTANCE=2 để chỉ định bản (bỏ trống = bản đầu tiên).
 ; Cài im lặng (thử nghiệm/tự động): /VERYSILENT /MODE=lan|domain|keep /PORT=8686 /SLUG=... /PASS=... /CREATE=1 /DEVICE=1 /PHONE=1 /SKIPAUTO=1 /DIR="..."
 
 #ifndef Src
@@ -19,12 +22,13 @@
 #define ApiUrl "https://huongdan.maychamcongcloud.com/api/tao-domain"
 
 [Setup]
-AppId={{6C6B0B7E-4F0B-4B43-9C2A-D1G1PLU5CC01}
+AppId={code:GetAppId}
+UsePreviousLanguage=no
 AppName=Digiplus Chấm Công
 AppVersion={#AppVer}
 AppPublisher=Digiplus
 AppPublisherURL=https://digiplus.vn
-DefaultDirName={sd}\DigiplusChamCong
+DefaultDirName={code:DefDir}
 DisableProgramGroupPage=yes
 DisableReadyPage=no
 DirExistsWarning=no
@@ -37,7 +41,7 @@ Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=no
-UninstallDisplayName=Digiplus Chấm Công
+UninstallDisplayName={code:DispName}
 VersionInfoVersion={#AppVer}
 VersionInfoCompany=Digiplus
 VersionInfoDescription=Trình cài đặt Digiplus Chấm Công
@@ -84,7 +88,7 @@ Filename: "{code:AdminUrl}"; Description: "Mở trang quản lý Digiplus Chấm
 Filename: "{app}\GoCaiDat.bat"; Parameters: "silent"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "DigiplusStop"
 
 [UninstallDelete]
-Type: files; Name: "{autodesktop}\Digiplus Cham Cong.url"
+Type: files; Name: "{autodesktop}\{code:ShortcutName}"
 
 [Code]
 const
@@ -99,6 +103,99 @@ var
   LanPage: TInputQueryWizardPage;
   NewConfig: String;      { nội dung config.txt sẽ ghi ('' = giữ cấu hình cũ) }
   HasOldConfig: Boolean;
+
+  Instance: String;       { '' = bản đầu tiên; '2', '3'... = các bản cài thêm trên cùng máy }
+
+const
+  BASE_ID = '{6C6B0B7E-4F0B-4B43-9C2A-D1G1PLU5CC01}';
+  UNINS_ROOT = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
+
+function ReadCfg(const FileName, Key: String): String; forward;
+
+function InstSuffix: String;
+begin
+  if Instance = '' then Result := '' else Result := '-' + Instance;
+end;
+
+function GetAppId(Param: String): String;
+begin
+  Result := BASE_ID + InstSuffix;
+end;
+
+function DefDir(Param: String): String;
+begin
+  Result := ExpandConstant('{sd}\DigiplusChamCong') + InstSuffix;
+end;
+
+function ShortcutName(Param: String): String;
+begin
+  if Instance = '' then Result := 'Digiplus Cham Cong.url' else Result := 'Digiplus Cham Cong ' + Instance + '.url';
+end;
+
+{ Tên hiện trong danh sách gỡ cài đặt: kèm tên khách hoặc cổng để phân biệt các bản }
+function DispName(Param: String): String;
+var Cust, Port: String;
+begin
+  Cust := ReadCfg(ExpandConstant('{app}\config.txt'), 'CUSTOMER');
+  Port := ReadCfg(ExpandConstant('{app}\config.txt'), 'PORT');
+  Result := 'Digiplus Chấm Công';
+  if Cust <> '' then Result := Result + ' (' + Cust + ')'
+  else if (Instance <> '') and (Port <> '') then Result := Result + ' (cổng ' + Port + ')';
+end;
+
+{ Đọc thư mục cài của 1 bản đã có (tìm ở cả HKLM lẫn HKCU). Trả '' nếu bản đó chưa cài. }
+function InstalledDir(const Inst: String): String;
+var Key, Sfx: String;
+begin
+  Result := '';
+  if Inst = '' then Sfx := '' else Sfx := '-' + Inst;
+  Key := UNINS_ROOT + '\' + BASE_ID + Sfx + '_is1';
+  if not RegQueryStringValue(HKLM, Key, 'InstallLocation', Result) then
+    if not RegQueryStringValue(HKCU, Key, 'InstallLocation', Result) then Result := '';
+end;
+
+function InstLabel(const Inst: String): String;
+var Dir, Cust, Port: String;
+begin
+  Dir := InstalledDir(Inst);
+  Cust := ReadCfg(AddBackslash(Dir) + 'config.txt', 'CUSTOMER');
+  Port := ReadCfg(AddBackslash(Dir) + 'config.txt', 'PORT');
+  Result := RemoveBackslash(Dir);
+  if Cust <> '' then Result := Result + '  (khách ' + Cust + ', cổng ' + Port + ')'
+  else if Port <> '' then Result := Result + '  (cổng ' + Port + ')';
+end;
+
+{ Trước khi hiện trình cài: máy đã có bản nào chưa → cập nhật bản đó hay cài thêm bản mới }
+function InitializeSetup: Boolean;
+var I, N, Free: Integer; Found: array of String; Txt, Inst: String;
+begin
+  Result := True;
+  Instance := ExpandConstant('{param:INSTANCE|}');
+  if WizardSilent or (Instance <> '') then Exit;   { cài im lặng / đã chỉ định bản: không hỏi }
+
+  N := 0; Free := 0; SetArrayLength(Found, 30);
+  for I := 1 to 30 do begin
+    if I = 1 then Inst := '' else Inst := IntToStr(I);
+    if InstalledDir(Inst) <> '' then begin Found[N] := Inst; N := N + 1; end
+    else if (Free = 0) and (I > 1) then Free := I;
+  end;
+  if N = 0 then Exit;                               { máy chưa có bản nào → cài bản đầu tiên như thường }
+  if Free = 0 then Free := 31;
+
+  { Hỏi lần lượt từng bản đang có: CÓ = cập nhật bản đó; KHÔNG = sang bản kế; hết danh sách = cài thêm bản mới }
+  for I := 0 to N - 1 do begin
+    if I < N - 1 then Txt := 'KHÔNG = xem bản tiếp theo.'
+    else Txt := 'KHÔNG = cài THÊM một bản mới cho khách khác (VPS chạy nhiều khách).';
+    case MsgBox('Máy này đã có Digiplus Chấm Công (bản ' + IntToStr(I + 1) + '/' + IntToStr(N) + ') tại:' + #13#10 + '    ' + InstLabel(Found[I]) + #13#10 + #13#10 +
+                'CÓ = cập nhật / cài lại bản này (giữ nguyên dữ liệu).' + #13#10 + Txt, mbConfirmation, MB_YESNOCANCEL) of
+      IDYES: begin Instance := Found[I]; Exit; end;
+      IDNO: ;
+    else
+      begin Result := False; Exit; end;
+    end;
+  end;
+  Instance := IntToStr(Free);
+end;
 
 function Param(const Name, Def: String): String;
 begin
@@ -209,6 +306,15 @@ begin
   Result := (N >= 1024) and (N <= 65000);
 end;
 
+{ Cổng đang có chương trình nào nghe không (để bản LAN cài thêm không trùng cổng bản khác) }
+function PortBusy(const Port: String): Boolean;
+var RC: Integer;
+begin
+  Result := False;
+  if Exec('powershell.exe', '-NoProfile -Command "if(@(Get-NetTCPConnection -LocalPort ' + Port + ' -State Listen -ErrorAction SilentlyContinue).Count -gt 0){exit 1}else{exit 0}"',
+          '', SW_HIDE, ewWaitUntilTerminated, RC) then Result := RC = 1;
+end;
+
 procedure InitializeWizard;
 begin
   ModePage := CreateInputOptionPage(wpSelectDir, 'Kiểu cài đặt', 'Chọn cách phần mềm sẽ chạy trên máy này',
@@ -297,6 +403,10 @@ begin
     if not ValidPort(LanPage.Values[0]) then begin
       MsgBox('Cổng phải là số từ 1024 đến 65000.', mbError, MB_OK); Result := False; Exit;
     end;
+    if (Trim(LanPage.Values[0]) <> ReadCfg(OldConfigPath, 'PORT')) and PortBusy(Trim(LanPage.Values[0])) then begin
+      MsgBox('Cổng ' + Trim(LanPage.Values[0]) + ' đang có chương trình khác dùng trên máy này (có thể là một bản Digiplus khác). Chọn cổng khác, ví dụ ' +
+             IntToStr(StrToIntDef(Trim(LanPage.Values[0]), 8686) + 1) + '.', mbError, MB_OK); Result := False; Exit;
+    end;
     NewConfig := LanConfig(Trim(LanPage.Values[0]));
   end;
 end;
@@ -364,6 +474,6 @@ procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
     { Lối tắt ngoài Desktop mở trang quản lý }
-    SaveStringToFile(ExpandConstant('{autodesktop}\Digiplus Cham Cong.url'),
+    SaveStringToFile(ExpandConstant('{autodesktop}\') + ShortcutName(''),
       '[InternetShortcut]' + #13#10 + 'URL=http://localhost:' + CurrentPort + '/admin' + #13#10, False);
 end;
