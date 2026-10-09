@@ -362,8 +362,10 @@ export default {
     if (url.pathname === "/api/noibo") return handleNoiBo(request, env);
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
     // Link TẢI BỘ CÀI LAN có thương hiệu (proxy từ GitHub Release → tải thẳng về)
-    if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
-    if (url.pathname === "/tai-bo-cai" || url.pathname === "/tai-bo-cai.exe") return handleSetupExe(request, env);
+    // Link cũ /tai-ban-lan (đã phát ra ngoài, trang cũ còn nằm trong bộ nhớ trình duyệt) giờ cũng trả Setup.exe;
+    // file zip bản LAN chỉ còn ở /tai-ban-lan.zip để dự phòng.
+    if (url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
+    if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-bo-cai" || url.pathname === "/tai-bo-cai.exe") return handleSetupExe(request, env);
 
     const res = await env.ASSETS.fetch(request);
 
