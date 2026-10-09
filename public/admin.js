@@ -2819,7 +2819,7 @@ const REPORT_TYPES = [
   ['firstlast', 'Giờ vào-ra đầu/cuối'],
   ['payroll', 'Bảng lương 💰'],
 ];
-const SYMBOL_COLOR = { X: '#166534', T: '#b45309', P: '#1d4ed8', L: '#7c3aed', V: '#dc2626', O: '#b45309' };
+const SYMBOL_COLOR = { X: '#166534', T: '#b45309', P: '#1d4ed8', KL: '#475569', CT: '#0e7490', K: '#6b21a8', L: '#7c3aed', V: '#dc2626', O: '#b45309' };
 // Nhóm báo cáo cho giao diện dạng thẻ: [nhóm, [ [type, icon, tên, mô tả] ... ]]
 const REPORT_GROUPS = [
   ['Bản ghi chấm công', [
@@ -2829,11 +2829,14 @@ const REPORT_GROUPS = [
   ['Chi tiết chấm công', [
     ['detail', '📆', 'Chi tiết theo ngày', 'Chi tiết chấm công từng ngày của từng nhân viên'],
     ['detaillist', '🧾', 'Chi tiết chấm công (danh sách)', 'Danh sách mỗi NV × mỗi ngày: vào/ra, trễ, sớm, công, tăng ca, ca'],
+    ['empsheet', '🖨️', 'Bảng chi tiết từng nhân viên (in A4)', 'Mỗi nhân viên 1 trang A4: tổng giờ/công/trễ/sớm/vắng + chi tiết từng ngày + chỗ ký tên. Bấm Xuất Excel để in'],
+    ['empsheetlate', '⏰', 'Đi muộn / về sớm theo nhân viên (in A4)', 'Chỉ nhân viên có đi muộn/về sớm, chỉ những ngày đó; mỗi người 1 trang A4 có chỗ ký tên. Bấm Xuất Excel để in'],
     ['detailmulti', '🔁', 'Chi tiết chấm công (nhiều lần vào/ra)', 'Mỗi NV × mỗi ngày: Giờ vào 1 → Giờ ra 4 theo từng lần chấm, trễ, sớm, giờ, công, tăng ca'],
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: công, giờ, trễ, sớm, tăng ca'],
-    ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · L=lễ · V=vắng · O=thiếu ra'],
+    ['hourstat', '🕒', 'Bảng thống kê chấm công (giờ)', 'Ma trận ngày × NV theo SỐ GIỜ mỗi ngày + giờ công, tăng ca TC1–TC3, vắng, nghỉ từng loại, trễ, sớm'],
+    ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · KL=không lương · CT=công tác · K=nghỉ khác · L=lễ · V=vắng · O=thiếu ra'],
     ['late', '⏰', 'Đi muộn / về sớm', 'Danh sách đi muộn, về sớm và số phút'],
     ['ot', '➕', 'Tăng ca', 'Chi tiết giờ tăng ca theo ngày'],
   ]],
@@ -2943,7 +2946,8 @@ async function pageReport() {
       catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
       const tbl = el('table', { class: 'data' });
       const thead = el('tr', {});
-      for (const c of data.columns) thead.append(el('th', { style: c.weekend ? 'background:#fff4e6;color:#b45309' : '' }, c.label));
+      for (const c of data.columns) thead.append(el('th', { style: (c.weekend ? 'background:#fff4e6;color:#b45309;' : '') + (c.sub || c.grp ? 'text-align:center;white-space:pre-line' : '') },
+        c.sub ? c.label + '\n' + c.sub : c.grp ? c.grp + '\n' + c.label : c.label));
       tbl.append(el('thead', {}, thead));
       const tb = el('tbody');
       if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
@@ -2961,8 +2965,23 @@ async function pageReport() {
       }
       tbl.append(tb);
       wrap.innerHTML = '';
-      wrap.append(el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title),
-        el('div', { class: 'panel tbl-scroll' }, tbl));
+      // Khung bảng cao vừa màn hình, tự cuộn bên trong → thanh kéo ngang luôn nằm ở đáy khung (không phải kéo xuống cuối trang);
+      // dòng tiêu đề + 2 cột đầu (mã, tên) đứng yên khi cuộn.
+      const box = el('div', { class: 'panel rep-scroll' }, tbl);
+      wrap.append(el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title), box);
+      const pinCols = data.columns.some(c => c.key.startsWith('d20')) ? (data.columns[0].key === 'stt' ? 4 : 2) : 0;
+      setTimeout(() => {
+        box.style.maxHeight = Math.max(300, innerHeight - box.getBoundingClientRect().top - 16) + 'px';
+        if (!pinCols) return;
+        const ths = [...tbl.querySelectorAll('thead th')].slice(0, pinCols);
+        let left = 0;
+        ths.forEach((th, i) => {
+          const L = left;
+          th.classList.add('pin'); th.style.left = L + 'px';
+          tbl.querySelectorAll(`tbody tr > td:nth-child(${i + 1})`).forEach(td => { td.classList.add('pin'); td.style.left = L + 'px'; });
+          left += th.getBoundingClientRect().width;
+        });
+      });
     };
     const snapAndLoad = () => { snapMonth(); load(); };
     monthI.onchange = snapAndLoad; fromI.onchange = load; toI.onchange = load; onFilterChange = load;

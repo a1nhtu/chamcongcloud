@@ -146,3 +146,9 @@ table.dev-tbl td.num.zero { color: #cbd0d6; font-weight: 400; }
 .rm-it { all: unset; box-sizing: border-box; width: 100%; padding: 6px 10px; border-radius: 8px; font-size: 13.5px; font-weight: 600; color: #1f2937; cursor: pointer; white-space: nowrap; }
 .rm-it:hover, .rm-it:focus-visible { background: #f6f1ec; }
 .rm-it.danger { color: #c0392b; }
+/* Báo cáo: khung tự cuộn (thanh kéo ngang luôn thấy), tiêu đề + cột mã/tên đứng yên */
+.rep-scroll { overflow: auto; max-height: calc(100vh - 230px); }
+.rep-scroll table.data thead th { position: sticky; top: 0; z-index: 3; box-shadow: inset 0 -1px 0 var(--line); }
+.rep-scroll table.data td.pin { position: sticky; z-index: 1; background: #fff; }
+.rep-scroll table.data th.pin { z-index: 4; }
+.rep-scroll table.data tr:hover td.pin { background: #fcfbfa; }
