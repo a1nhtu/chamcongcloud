@@ -406,6 +406,75 @@ function buildReport(type, from, to, filter) {
       return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
     }
 
+    /* --- Chi tiết chấm công NHIỀU LẦN VÀO/RA: mỗi NV × mỗi ngày 1 dòng, các lần chấm xếp vào Vào1/Ra1 … Vào4/Ra4 --- */
+    case 'detailmulti': {
+      const PAIRS = 4;
+      const columns = [
+        { key: 'stt', label: 'STT', w: 6 }, { key: 'code', label: 'Mã nhân viên', w: 12 },
+        { key: 'name', label: 'Tên nhân viên', w: 22 }, { key: 'dept', label: 'Phòng ban', w: 14 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 },
+      ];
+      for (let i = 1; i <= PAIRS; i++) columns.push({ key: 'in' + i, label: 'Giờ vào ' + i, w: 9 }, { key: 'out' + i, label: 'Giờ ra ' + i, w: 9 });
+      columns.push({ key: 'late', label: 'Trễ', w: 7 }, { key: 'early', label: 'Sớm', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
+        { key: 'cong', label: 'Công', w: 7 }, { key: 'ot', label: 'Tăng ca', w: 9 });
+
+      // Các lần chấm trong ngày của từng NV:
+      //  - ngày có giờ admin SỬA TAY → lấy theo bản ghi công (tôn trọng chỉnh sửa)
+      //  - có lượt quẹt máy → lấy từng lượt quẹt theo thứ tự thời gian
+      //  - còn lại (chấm điện thoại) → mỗi phiên = 1 cặp vào/ra
+      const empIds = new Set(ctx.employees.map((e) => e.id));
+      const punches = new Map();   // empId|date -> [iso...]
+      for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at')
+        .all(days[0], days[days.length - 1])) {
+        if (!empIds.has(p.employee_id)) continue;
+        const k = p.employee_id + '|' + p.work_date;
+        if (!punches.has(k)) punches.set(k, []);
+        punches.get(k).push(p.punch_at);
+      }
+      const sessions = new Map();  // empId|date -> [{in,out,manual}]
+      for (const a of db.prepare('SELECT employee_id, work_date, check_in_at, check_out_at, manual FROM attendance WHERE work_date >= ? AND work_date <= ? ORDER BY check_in_at')
+        .all(days[0], days[days.length - 1])) {
+        if (!empIds.has(a.employee_id)) continue;
+        const k = a.employee_id + '|' + a.work_date;
+        if (!sessions.has(k)) sessions.set(k, []);
+        sessions.get(k).push(a);
+      }
+      const timesOf = (k) => {
+        const ss = sessions.get(k) || [];
+        let list;
+        if (ss.some((s) => s.manual) || !punches.has(k)) {
+          list = [];
+          for (const s of ss) { if (s.check_in_at) list.push(s.check_in_at); if (s.check_out_at) list.push(s.check_out_at); }
+        } else list = punches.get(k).slice();
+        list.sort();
+        const out = [];   // bỏ lượt quẹt trùng trong vòng 1 phút
+        for (const t of list) if (!out.length || new Date(t) - new Date(out[out.length - 1]) >= 60000) out.push(t);
+        return out;
+      };
+
+      const rows = [];
+      let stt = 0;
+      for (const e of ctx.employees) {
+        for (const d of days) {
+          const k = e.id + '|' + d;
+          const c = ctx.cell.get(k);
+          const isLeave = ctx.leaveDays.has(k);
+          if (!c && !ctx.isScheduled(e.id, d) && !isLeave) continue; // bỏ ngày không lịch, không chấm, không nghỉ
+          stt++;
+          const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)] };
+          const ts = c ? timesOf(k) : [];
+          for (let i = 0; i < PAIRS * 2; i++) row[(i % 2 ? 'out' : 'in') + (Math.floor(i / 2) + 1)] = ts[i] ? isoToVnHM(ts[i]) : '';
+          Object.assign(row, {
+            late: c ? (c.late_min || 0) : 0, early: c ? (c.early_min || 0) : 0,
+            gio: c ? round2((c.work_minutes || 0) / 60) : 0, cong: c ? round2(c.work_unit) : 0,
+            ot: c ? round2((c.ot_min || 0) / 60) : 0,
+          });
+          rows.push(row);
+        }
+      }
+      return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
+    }
+
     /* --- Chấm công (mọi bản ghi) --- */
     case 'attendance': {
       const columns = [

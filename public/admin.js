@@ -2808,6 +2808,7 @@ const REPORT_GROUPS = [
   ['Chi tiết chấm công', [
     ['detail', '📆', 'Chi tiết theo ngày', 'Chi tiết chấm công từng ngày của từng nhân viên'],
     ['detaillist', '🧾', 'Chi tiết chấm công (danh sách)', 'Danh sách mỗi NV × mỗi ngày: vào/ra, trễ, sớm, công, tăng ca, ca'],
+    ['detailmulti', '🔁', 'Chi tiết chấm công (nhiều lần vào/ra)', 'Mỗi NV × mỗi ngày: Giờ vào 1 → Giờ ra 4 theo từng lần chấm, trễ, sớm, giờ, công, tăng ca'],
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: công, giờ, trễ, sớm, tăng ca'],
