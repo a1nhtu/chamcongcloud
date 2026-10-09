@@ -248,6 +248,7 @@ async function handleProvision(request, env) {
     } else {
       if (list.length >= quota)
         return jsonRes({ error: `Đã đạt hạn mức ${quota} domain (đang dùng ${list.length}). Liên hệ quản trị để nâng hạn mức.`, count: list.length, quota }, 403);
+      if (b.autoPort) port = nextFreePort(list);   // Setup.exe: khách mới tự lấy cổng trống tiếp theo
       const clash = list.find((c) => c.port === port);
       if (clash)
         return jsonRes({ error: `Cổng ${port} đã cấp cho khách "${clash.slug}". Dùng cổng trống tiếp theo: ${nextFreePort(list)}.`, nextPort: nextFreePort(list) }, 409);

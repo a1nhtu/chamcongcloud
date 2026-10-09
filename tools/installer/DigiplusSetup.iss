@@ -1,10 +1,11 @@
 ﻿; Trình cài đặt Digiplus Chấm Công (kiểu Next-Next) — biên dịch bằng Inno Setup 6:
 ;   ISCC /DSrc="<thư mục dist>\DigiplusChamCong" /DAppVer=1.15.66 /DOutDir="<nơi xuất>" tools\installer\DigiplusSetup.iss
 ; Một file Setup.exe dùng cho MỌI khách:
-;   - Bản có tên miền: hỏi tên khách + mật khẩu cấp domain → tự lấy config.txt từ máy chủ (khách phải được tạo trước ở trang Tạo khách)
+;   - Bản có tên miền: hỏi tên khách + mật khẩu cấp domain → tự lấy config.txt từ máy chủ; khách CHƯA có thì hỏi xác nhận rồi
+;     TẠO MỚI tên miền ngay (cổng tự lấy cổng trống tiếp theo)
 ;   - Bản LAN: chỉ hỏi cổng, không cần tên khách / mật khẩu
 ;   - Cài đè lên bản đang có: mặc định GIỮ cấu hình + dữ liệu cũ
-; Cài im lặng (thử nghiệm/tự động): /VERYSILENT /MODE=lan|domain|keep /PORT=8686 /SLUG=... /PASS=... /SKIPAUTO=1 /DIR="..."
+; Cài im lặng (thử nghiệm/tự động): /VERYSILENT /MODE=lan|domain|keep /PORT=8686 /SLUG=... /PASS=... /CREATE=1 /DEVICE=1 /PHONE=1 /SKIPAUTO=1 /DIR="..."
 
 #ifndef Src
   #define Src "..\..\dist-khach\DigiplusChamCong"
@@ -94,6 +95,7 @@ const
 var
   ModePage: TInputOptionWizardPage;
   DomainPage: TInputQueryWizardPage;
+  ChkDevice, ChkPhone: TNewCheckBox;   { chỉ áp dụng khi TẠO khách mới }
   LanPage: TInputQueryWizardPage;
   NewConfig: String;      { nội dung config.txt sẽ ghi ('' = giữ cấu hình cũ) }
   HasOldConfig: Boolean;
@@ -159,16 +161,25 @@ begin
 end;
 
 { Lấy config.txt của khách ĐÃ tạo từ máy chủ Digiplus. Err = thông báo cho người cài khi thất bại. }
-function FetchConfig(const Slug, Pass: String; var Cfg, Err: String): Boolean;
-var W: Variant; St: Integer;
+function BoolJson(B: Boolean): String;
 begin
-  Result := False; Cfg := ''; Err := '';
+  if B then Result := 'true' else Result := 'false';
+end;
+
+{ CreateNew=False: chỉ lấy cấu hình khách đã có (NotFound=True nếu chưa có). CreateNew=True: chưa có thì tạo mới, cổng tự động. }
+function FetchConfig(const Slug, Pass: String; CreateNew, UseDevice, UsePhone: Boolean; var Cfg, Err: String; var NotFound: Boolean): Boolean;
+var W: Variant; St: Integer; Body: String;
+begin
+  Result := False; Cfg := ''; Err := ''; NotFound := False;
+  Body := '{"pass":"' + JsonEsc(Pass) + '","slug":"' + JsonEsc(Slug) + '","plain":true,';
+  if CreateNew then Body := Body + '"autoPort":true,"mode":"office","useDevice":' + BoolJson(UseDevice) + ',"usePhone":' + BoolJson(UsePhone) + '}'
+  else Body := Body + '"onlyExisting":true}';
   try
     W := CreateOleObject('WinHttp.WinHttpRequest.5.1');
     W.SetTimeouts(15000, 15000, 30000, 60000);
     W.Open('POST', '{#ApiUrl}', False);
     W.SetRequestHeader('Content-Type', 'application/json');
-    W.Send('{"pass":"' + JsonEsc(Pass) + '","slug":"' + JsonEsc(Slug) + '","onlyExisting":true,"plain":true}');
+    W.Send(Body);
     St := W.Status;
     if St = 200 then begin
       Cfg := W.ResponseText;
@@ -176,7 +187,9 @@ begin
       else Err := 'Máy chủ trả về cấu hình không hợp lệ. Thử lại sau ít phút.';
     end
     else if St = 401 then Err := 'Sai mật khẩu cấp domain.'
-    else if St = 404 then Err := 'Chưa có khách "' + Slug + '". Hãy tạo khách này ở trang Tạo khách trước (mục Nội bộ), rồi cài lại.'
+    else if St = 404 then begin NotFound := True; Err := 'Chưa có khách "' + Slug + '".'; end
+    else if St = 403 then Err := 'Đã hết hạn mức số tên miền được tạo. Liên hệ quản trị Digiplus.'
+    else if St = 409 then Err := 'Cổng tự chọn bị trùng. Bấm Tiếp tục lần nữa để thử lại.'
     else if St = 400 then Err := 'Tên khách không hợp lệ (chỉ chữ thường, số, gạch ngang; ví dụ: congtyabc).'
     else Err := 'Máy chủ báo lỗi (mã ' + IntToStr(St) + '). Thử lại sau ít phút.';
   except
@@ -201,13 +214,25 @@ begin
   ModePage := CreateInputOptionPage(wpSelectDir, 'Kiểu cài đặt', 'Chọn cách phần mềm sẽ chạy trên máy này',
     'Chọn một kiểu rồi bấm Tiếp tục.', True, False);
   ModePage.Add('Giữ cấu hình đang có trên máy này (cập nhật / cài lại, giữ nguyên dữ liệu)');
-  ModePage.Add('Bản có tên miền — xem được từ xa qua Internet (khách đã được tạo ở trang Tạo khách)');
+  ModePage.Add('Bản có tên miền — xem được từ xa qua Internet (nhập tên khách + mật khẩu)');
   ModePage.Add('Bản LAN — chỉ dùng trong mạng nội bộ, không cần tên miền');
 
   DomainPage := CreateInputQueryPage(ModePage.ID, 'Thông tin khách', 'Bản có tên miền',
-    'Nhập tên khách đã tạo ở trang Tạo khách và mật khẩu cấp domain. Máy này cần có Internet.');
+    'Nhập tên khách (viết liền không dấu) và mật khẩu cấp domain. Khách chưa có sẽ được tạo mới. Hai ô chọn bên dưới chỉ áp dụng khi tạo khách mới. Máy này cần có Internet.');
   DomainPage.Add('Tên khách (ví dụ: congtyabc):', False);
   DomainPage.Add('Mật khẩu cấp domain:', True);
+  ChkDevice := TNewCheckBox.Create(DomainPage);
+  ChkDevice.Parent := DomainPage.Surface;
+  ChkDevice.Top := DomainPage.Edits[1].Top + DomainPage.Edits[1].Height + ScaleY(18);
+  ChkDevice.Width := DomainPage.SurfaceWidth; ChkDevice.Height := ScaleY(20);
+  ChkDevice.Caption := 'Khách dùng máy chấm công (vân tay / khuôn mặt)';
+  ChkDevice.Checked := True;
+  ChkPhone := TNewCheckBox.Create(DomainPage);
+  ChkPhone.Parent := DomainPage.Surface;
+  ChkPhone.Top := ChkDevice.Top + ScaleY(24);
+  ChkPhone.Width := DomainPage.SurfaceWidth; ChkPhone.Height := ScaleY(20);
+  ChkPhone.Caption := 'Khách chấm công bằng điện thoại (chụp ảnh + định vị)';
+  ChkPhone.Checked := True;
 
   LanPage := CreateInputQueryPage(DomainPage.ID, 'Cổng phần mềm', 'Bản LAN',
     'Phần mềm sẽ mở tại http://localhost:<cổng>/admin. Để nguyên 8686 nếu máy này chỉ cài một bản.');
@@ -233,7 +258,7 @@ begin
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
-var Cfg, Err, Slug: String;
+var Cfg, Err, Slug, Pass: String; NotFound: Boolean;
 begin
   Result := True;
   if CurPageID = ModePage.ID then begin
@@ -247,9 +272,22 @@ begin
     if Trim(DomainPage.Values[1]) = '' then begin
       MsgBox('Nhập mật khẩu cấp domain.', mbError, MB_OK); Result := False; Exit;
     end;
+    if not ChkDevice.Checked and not ChkPhone.Checked then begin
+      MsgBox('Chọn ít nhất một hình thức chấm công (máy hoặc điện thoại).', mbError, MB_OK); Result := False; Exit;
+    end;
+    Pass := Trim(DomainPage.Values[1]);
     WizardForm.NextButton.Enabled := False;
     try
-      if FetchConfig(Slug, Trim(DomainPage.Values[1]), Cfg, Err) then NewConfig := Cfg
+      { 1) khách đã có → lấy cấu hình cũ (giữ cổng + lựa chọn cũ) }
+      if FetchConfig(Slug, Pass, False, True, True, Cfg, Err, NotFound) then NewConfig := Cfg
+      else if NotFound then begin
+        { 2) chưa có → hỏi xác nhận rồi tạo mới (tránh gõ nhầm tên thành tạo tên miền thừa) }
+        if MsgBox('Chưa có khách "' + Slug + '".' + #13#10 + #13#10 + 'Tạo MỚI tên miền ' + Slug + '.maychamcongcloud.com cho khách này?' + #13#10 +
+                  '(Nếu khách đã có mà hiện thông báo này thì có thể đã gõ sai tên — bấm Không để sửa.)', mbConfirmation, MB_YESNO) = IDYES then begin
+          if FetchConfig(Slug, Pass, True, ChkDevice.Checked, ChkPhone.Checked, Cfg, Err, NotFound) then NewConfig := Cfg
+          else begin MsgBox(Err, mbError, MB_OK); Result := False; end;
+        end else Result := False;
+      end
       else begin MsgBox(Err, mbError, MB_OK); Result := False; end;
     finally
       WizardForm.NextButton.Enabled := True;
@@ -277,7 +315,7 @@ end;
 
 { Cài im lặng: lấy lựa chọn từ tham số dòng lệnh (không có trang hỏi) }
 function SilentSetup(var Err: String): Boolean;
-var M, Cfg: String;
+var M, Cfg: String; NotFound: Boolean;
 begin
   Result := True; Err := '';
   M := Lowercase(Param('MODE', ''));
@@ -291,7 +329,10 @@ begin
     else begin Err := 'PORT không hợp lệ.'; Result := False; end;
   end
   else if M = 'domain' then begin
-    if FetchConfig(Lowercase(Param('SLUG', '')), Param('PASS', ''), Cfg, Err) then NewConfig := Cfg else Result := False;
+    if FetchConfig(Lowercase(Param('SLUG', '')), Param('PASS', ''), False, True, True, Cfg, Err, NotFound) then NewConfig := Cfg
+    else if NotFound and (Param('CREATE', '0') = '1') then begin
+      if FetchConfig(Lowercase(Param('SLUG', '')), Param('PASS', ''), True, Param('DEVICE', '1') <> '0', Param('PHONE', '1') <> '0', Cfg, Err, NotFound) then NewConfig := Cfg else Result := False;
+    end else Result := False;
   end
   else begin Err := 'MODE phải là lan, domain hoặc keep.'; Result := False; end;
 end;
