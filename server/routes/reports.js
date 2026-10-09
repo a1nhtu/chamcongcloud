@@ -72,7 +72,7 @@ export function empFilterSql(filter) {
 //  - còn lại (chấm điện thoại) → mỗi phiên = 1 cặp vào/ra
 // Bỏ lượt trùng trong vòng 1 phút. Trả hàm timesOf(empId, date) → [iso...] đã sắp xếp.
 function dayTimesLoader(from, to, empIds) {
-  const dupMin = Math.max(1, parseInt(getSetting('pair_dup_min', '5'), 10) || 5);
+  const dupMin = parseInt(getSetting('punch_dedup_min', '15'), 10) || 5;   // cùng ngưỡng với lúc tính công
   const punches = new Map(), sessions = new Map();
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to))

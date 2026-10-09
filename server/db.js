@@ -531,8 +531,13 @@ function migrateColumns() {
   // Khoá thiết bị chấm công điện thoại (chống chấm hộ): '0' = tắt (mặc định), '1' = mỗi tài khoản chỉ chấm trên 1 điện thoại đã duyệt
   if (getSetting('device_lock_enabled') == null) setSetting('device_lock_enabled', '0');
   // Bỏ qua lần chấm TRÙNG trong vòng N phút (chống double-tap app + máy quẹt liên tiếp). '0' = tắt.
-  if (getSetting('punch_dedup_min') == null) setSetting('punch_dedup_min', '0');
-  if (getSetting('pair_dup_min') == null) setSetting('pair_dup_min', '5');   // ghép cặp vào/ra: lượt cách lượt trước < N phút = quẹt lặp
+  // Bỏ lần chấm trùng trong N phút: mặc định 15. Bản cũ mặc định 0 (tắt) → chuyển MỘT LẦN sang 15;
+  // sau đó quản trị tự đặt lại 0 thì vẫn được giữ.
+  if (getSetting('punch_dedup_default15') == null) {
+    const cur = getSetting('punch_dedup_min');
+    if (cur == null || String(cur).trim() === '' || String(cur) === '0') setSetting('punch_dedup_min', '15');
+    setSetting('punch_dedup_default15', '1');
+  }
   // Nhân viên tự chọn ca: '0' = tắt (mặc định), '1' = cho nhân viên tự đăng ký ca trên app
   if (getSetting('self_shift_enabled') == null) setSetting('self_shift_enabled', '0');
   // Chọn ca có cần duyệt không: '1' = phải admin/quản lý duyệt (mặc định), '0' = tự động áp dụng

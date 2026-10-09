@@ -509,8 +509,9 @@ function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null)
   return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs);
 }
 
-// Ngưỡng quẹt lặp khi ghép cặp vào/ra (phút) — Cài đặt > Chống chấm trùng
-const pairDup = () => Math.max(1, parseInt(getSetting('pair_dup_min', '5'), 10) || 5);
+// Ngưỡng quẹt lặp khi ghép cặp vào/ra (phút) = ô "Bỏ qua lần chấm trùng trong N phút" ở Cài đặt;
+// quản trị đặt 0 (lưu đủ mọi lượt quẹt) thì lúc ghép cặp vẫn lọc lượt lặp dưới 5 phút để không lệch cặp.
+export const pairDup = () => parseInt(getSetting('punch_dedup_min', '15'), 10) || 5;
 // Ca NGÀY chạy 1 ca/ngày: nhận lượt quẹt tới hết ngày (về rất muộn vẫn có giờ ra)
 const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
 
@@ -631,7 +632,7 @@ export function ingestAttlog(serial, rawBody) {
   const touched = new Set();
   const notifyNow = new Map();   // empId → lượt quẹt mới nhất cần báo
   let n = 0;
-  const dedupMs = (parseInt(getSetting('punch_dedup_min', '0'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
+  const dedupMs = (parseInt(getSetting('punch_dedup_min', '15'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
   for (const line of lines) {
     const p = line.split('\t');

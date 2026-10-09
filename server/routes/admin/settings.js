@@ -27,8 +27,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       payroll_include_admin: getSetting('payroll_include_admin', '0'), // tính công cho cả tài khoản Admin
       self_shift_enabled: getSetting('self_shift_enabled', '0'), // NV tự chọn ca
       self_shift_approve: getSetting('self_shift_approve', '1'), // chọn ca cần duyệt
-      punch_dedup_min: getSetting('punch_dedup_min', '0'),
-      pair_dup_min: getSetting('pair_dup_min', '5'),             // ghép cặp vào/ra: ngưỡng quẹt lặp (phút)       // bỏ qua lần chấm trùng trong N phút
+      punch_dedup_min: getSetting('punch_dedup_min', '15'),       // bỏ qua lần chấm trùng trong N phút
       setup_done: getSetting('setup_done', '0'),
       company_logo: getSetting('company_logo', ''),
       app_version: currentVersion(),
@@ -56,7 +55,6 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     }
     if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
     if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));
-    if (b.pair_dup_min != null) setSetting('pair_dup_min', String(Math.min(120, Math.max(1, parseInt(b.pair_dup_min, 10) || 5))));
     if (b.payroll_include_admin != null) setSetting('payroll_include_admin', b.payroll_include_admin ? '1' : '0');
     if (b.self_shift_enabled != null) setSetting('self_shift_enabled', b.self_shift_enabled ? '1' : '0');
     if (b.self_shift_approve != null) setSetting('self_shift_approve', b.self_shift_approve ? '1' : '0');

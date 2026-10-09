@@ -160,7 +160,7 @@ r.post('/check-in', (req, res) => {
       return res.status(400).json({ error: `Bạn đã hoàn thành ${shiftLabel} hôm nay rồi` });
   }
   // Chống bấm nhầm 2 lần liền: nếu vừa chấm (vào/ra) trong vòng N phút → chặn
-  const dedupMinIn = parseInt(getSetting('punch_dedup_min', '0'), 10) || 0;
+  const dedupMinIn = parseInt(getSetting('punch_dedup_min', '15'), 10) || 0;
   if (dedupMinIn > 0) {
     const last = db.prepare(`SELECT MAX(t) mt FROM (
       SELECT check_in_at t FROM attendance WHERE employee_id=? AND work_date=?
@@ -231,7 +231,7 @@ r.post('/check-out', (req, res) => {
   }
   if (!row) return res.status(400).json({ error: 'Chưa có ca nào đang mở để chấm ra (hôm nay hoặc ca đêm hôm qua)' });
   // Chống bấm nhầm: chấm RA quá sát giờ chấm VÀO (trong N phút) → chặn
-  const dedupMinOut = parseInt(getSetting('punch_dedup_min', '0'), 10) || 0;
+  const dedupMinOut = parseInt(getSetting('punch_dedup_min', '15'), 10) || 0;
   if (dedupMinOut > 0 && (Date.now() - new Date(row.check_in_at)) < dedupMinOut * 60000)
     return res.status(400).json({ error: `Bạn vừa chấm vào cách đây chưa tới ${dedupMinOut} phút — chưa thể chấm ra ngay (chống bấm nhầm).` });
 

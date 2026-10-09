@@ -3175,14 +3175,13 @@ async function pageSettings() {
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
   const apprChk = el('input', { type: 'checkbox', id: 'st-appr', style: 'width:auto', ...(s.self_shift_approve !== '0' ? { checked: '' } : {}) });
-  const dedupI = el('input', { type: 'number', min: '0', style: 'width:70px', value: s.punch_dedup_min || '0' });
-  const pairDupI = el('input', { type: 'number', min: '1', max: '120', style: 'width:70px', value: s.pair_dup_min || '5' });
+  const dedupI = el('input', { type: 'number', min: '0', style: 'width:70px', value: s.punch_dedup_min ?? '15' });
   const saveMode = el('button', { class: 'btn' }, 'Lưu cấu hình chấm công');
   saveMode.onclick = async () => {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value === 'hourly' ? 'hourly' : 'shift';
     const hourly_merge_rule = stRule.value();
     try {
-      const body = { attendance_mode, hourly_merge_rule, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value, pair_dup_min: pairDupI.value };
+      const body = { attendance_mode, hourly_merge_rule, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
       if (isMaster()) {   // chỉ tài khoản tổng đổi được máy chấm công / chấm điện thoại
         if (!s.use_device_locked) body.device_enabled = devChk.checked;
         if (!s.use_phone_locked) body.phone_enabled = phoneChk.checked;
@@ -3213,10 +3212,7 @@ async function pageSettings() {
       el('h3', { style: 'margin:0;font-size:15px' }, 'Chống chấm trùng liên tiếp'),
       el('label', { style: 'display:flex;gap:10px;align-items:center' },
         el('div', {}, el('b', {}, 'Bỏ qua lần chấm trùng trong '), dedupI, el('b', {}, ' phút'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Đặt số phút (VD 10): lượt quẹt/chấm của cùng một người trong khoảng đó chỉ tính 1 lần — chống double-tap trên app và máy quẹt liên tiếp. Đặt 0 = tắt.'))),
-      el('label', { style: 'display:flex;gap:10px;align-items:center' },
-        el('div', {}, el('b', {}, 'Khi ghép cặp vào/ra: lượt cách lượt trước dưới '), pairDupI, el('b', {}, ' phút là quẹt lặp'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Dùng cho quy tắc "Nhiều lần vào/ra" và chế độ theo giờ "theo cặp". Lượt quẹt lặp bị bỏ khi ghép cặp (lượt quẹt vẫn được lưu). VD 5: quẹt 08:00 rồi 08:02 → chỉ tính 08:00, không thành một cặp vào–ra 2 phút làm lệch các cặp sau. Nếu nhân viên có nghỉ giữa giờ ngắn hơn số này thì giảm xuống.'))),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Lượt quẹt/chấm của cùng một người cách lượt trước dưới số phút này chỉ tính 1 lần — chống bấm 2 lần trên app, quẹt máy liên tiếp, và không để lượt lặp làm lệch các cặp vào/ra. Mặc định 15. Nếu nhân viên có nghỉ giữa giờ ngắn hơn số này (và có quẹt) thì giảm xuống. Đặt 0 = lưu đủ mọi lượt quẹt (khi ghép cặp vào/ra vẫn tự bỏ lượt lặp dưới 5 phút).'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Hình thức chấm công'),
       // Máy chấm công (ZKTeco)
