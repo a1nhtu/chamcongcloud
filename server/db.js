@@ -468,6 +468,8 @@ function migrateColumns() {
   add('shifts', 'holiday_as_ot',   'INTEGER NOT NULL DEFAULT 0');    // 1 = làm ca này ngày lễ → cả ca là tăng ca
   add('shifts', 'compensate_late', 'INTEGER NOT NULL DEFAULT 0');    // 1 = bù trừ: đi trễ thì về trễ bù lại, không bị trừ giờ
   add('shifts', 'no_out_credit',   'INTEGER NOT NULL DEFAULT 0');    // 1 = thiếu giờ ra vẫn tính công (trừ phần đi trễ)
+  add('shifts', 'grace_deduct',    'INTEGER NOT NULL DEFAULT 0');    // 1 = trễ/sớm chỉ tính phần VƯỢT số phút cho phép
+  add('shifts', 'shift_as_ot',     'INTEGER NOT NULL DEFAULT 0');    // 1 = ca này là ca tăng ca (cả ca tính tăng ca, 0 công)
 
   // Phân ca làm việc: quy tắc ghép log máy + ca đêm (dùng cho ghép punch máy ZKTeco)
   add('shifts', 'merge_rule',    "TEXT NOT NULL DEFAULT 'filo'");   // filo|tdhc|idm|tdqd — quy tắc ghép log mặc định của ca
@@ -530,6 +532,7 @@ function migrateColumns() {
   if (getSetting('device_lock_enabled') == null) setSetting('device_lock_enabled', '0');
   // Bỏ qua lần chấm TRÙNG trong vòng N phút (chống double-tap app + máy quẹt liên tiếp). '0' = tắt.
   if (getSetting('punch_dedup_min') == null) setSetting('punch_dedup_min', '0');
+  if (getSetting('pair_dup_min') == null) setSetting('pair_dup_min', '5');   // ghép cặp vào/ra: lượt cách lượt trước < N phút = quẹt lặp
   // Nhân viên tự chọn ca: '0' = tắt (mặc định), '1' = cho nhân viên tự đăng ký ca trên app
   if (getSetting('self_shift_enabled') == null) setSetting('self_shift_enabled', '0');
   // Chọn ca có cần duyệt không: '1' = phải admin/quản lý duyệt (mặc định), '0' = tự động áp dụng

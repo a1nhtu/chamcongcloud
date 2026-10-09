@@ -509,6 +509,11 @@ function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null)
   return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs);
 }
 
+// Ngưỡng quẹt lặp khi ghép cặp vào/ra (phút) — Cài đặt > Chống chấm trùng
+const pairDup = () => Math.max(1, parseInt(getSetting('pair_dup_min', '5'), 10) || 5);
+// Ca NGÀY chạy 1 ca/ngày: nhận lượt quẹt tới hết ngày (về rất muộn vẫn có giờ ra)
+const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
+
 // Map serial → số máy (IDM: máy lẻ VÀO / chẵn RA)
 function deviceMachineMap() {
   const map = {};
@@ -569,7 +574,7 @@ export function rebuildDay(employeeId, workDate) {
       if (!punches.length) continue;
       // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
       const rule = (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || shift.merge_rule || 'filo');
-      const { inIso, outIso, pairs } = mergeDayPunches(punches, shift, rule, machineMap, workDate);
+      const { inIso, outIso, pairs } = mergeDayPunches(punches, shift, rule, machineMap, workDate, { dupMin: pairDup() });
       if (!inIso) continue;
       if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
       upsertRow(employeeId, workDate, shift.id, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs));
@@ -583,10 +588,11 @@ export function rebuildDay(employeeId, workDate) {
   if (!shift && !hourly) { const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at); shift = eff.shift; mergeRule = eff.mergeRule; }
   let inIso, outIso, pairs = null;
   if (shift) {
-    const { winStart, winEnd } = ruleWindow(workDate, shift);
+    const wopts = { toDayEnd: !isNightShift(shift), dupMin: pairDup() };
+    const { winStart, winEnd } = ruleWindow(workDate, shift, wopts);
     let punches = punchesInWin(winStart, winEnd);
     if (!punches.length) punches = prov;
-    ({ inIso, outIso, pairs = null } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate));
+    ({ inIso, outIso, pairs = null } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate, wopts));
     if (!inIso) {
       // Ca đêm: punch lẻ (thường là giờ RA sáng hôm sau) thuộc ca đêm NGÀY TRƯỚC → không tạo dòng rác ở ngày này
       const night = shift.cross_midnight || shift.end_time <= shift.start_time;
@@ -598,7 +604,7 @@ export function rebuildDay(employeeId, workDate) {
     outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null;
     // Chế độ theo giờ chọn "tính theo cặp", HOẶC chế độ theo ca mà không tìm được ca nào khớp:
     // giờ làm = tổng các cặp lượt quẹt trong ngày (1-2, 3-4…) thay vì lấy đầu–cuối
-    if (hourly ? getSetting('hourly_merge_rule', 'filo') === 'pairs' : true) pairs = punchPairs(prov.map((p) => p.punch_at));
+    if (hourly ? getSetting('hourly_merge_rule', 'filo') === 'pairs' : true) pairs = punchPairs(prov.map((p) => p.punch_at), pairDup());
   }
   const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
   if (existing && existing.manual) return; // tôn trọng sửa tay của admin
@@ -610,12 +616,12 @@ export function rebuildDay(employeeId, workDate) {
 export function dayPairsFor(employeeId, workDate, shift) {
   if (!shift) {
     const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
-    return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at)) : null;
+    return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), pairDup()) : null;
   }
-  const { winStart, winEnd } = ruleWindow(workDate, shift);
+  const { winStart, winEnd } = ruleWindow(workDate, shift, { toDayEnd: !isNightShift(shift) });
   const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, winStart.toISOString(), winEnd.toISOString());
-  return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at)) : null;
+  return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), pairDup()) : null;
 }
 
 // Nạp khối ATTLOG (nhiều dòng), mỗi dòng: PIN \t Time \t Status \t Verify \t WorkCode

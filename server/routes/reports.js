@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { db, getSetting, adminAttWhere } from '../db.js';
 import { authRequired, permRequired } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
-import { isWeekendDay, vnWeekday, splitOtTiers } from '../attendance-calc.js';
+import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
 
@@ -72,6 +72,7 @@ export function empFilterSql(filter) {
 //  - còn lại (chấm điện thoại) → mỗi phiên = 1 cặp vào/ra
 // Bỏ lượt trùng trong vòng 1 phút. Trả hàm timesOf(empId, date) → [iso...] đã sắp xếp.
 function dayTimesLoader(from, to, empIds) {
+  const dupMin = Math.max(1, parseInt(getSetting('pair_dup_min', '5'), 10) || 5);
   const punches = new Map(), sessions = new Map();
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to))
@@ -86,10 +87,8 @@ function dayTimesLoader(from, to, empIds) {
       list = [];
       for (const x of ss) { if (x.check_in_at) list.push(x.check_in_at); if (x.check_out_at) list.push(x.check_out_at); }
     } else list = punches.get(k).slice();
-    list.sort();
-    const out = [];
-    for (const t of list) if (!out.length || new Date(t) - new Date(out[out.length - 1]) >= 60000) out.push(t);
-    return out;
+    // bỏ lượt quẹt lặp theo CÙNG ngưỡng với lúc tính công → các cặp hiện trên báo cáo khớp với giờ đã tính
+    return dropRepeatPunches(list, dupMin);
   };
 }
 // [t0,t1,t2,t3,t4] → [[t0,t1],[t2,t3],[t4,null]]

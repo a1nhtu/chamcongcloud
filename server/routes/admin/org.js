@@ -7,6 +7,7 @@ const SHIFT_EXTRA = {
   ot_before: 'bool', ot_before_min: 'int', ot_tier1_min: 'int', ot_tier2_min: 'int', ot_tier3_min: 'int',
   ot_tier2_rate: 'num', ot_tier3_rate: 'num', ot_tier4_rate: 'num',
   weekend_as_ot: 'bool', holiday_as_ot: 'bool', compensate_late: 'bool', no_out_credit: 'bool',
+  grace_deduct: 'bool', shift_as_ot: 'bool',
 };
 function saveShiftExtra(id, b, old) {
   const keys = Object.keys(SHIFT_EXTRA).filter((k) => b[k] !== undefined);

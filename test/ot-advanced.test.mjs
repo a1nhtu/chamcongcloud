@@ -79,3 +79,51 @@ test('5. thiếu giờ ra: mặc định 0 công; bật tùy chọn → đủ c�
   assert.equal(late.work_unit, 0.95);     // floor(460/480 × 100)/100
   assert.equal(computeNoOut(null, iso(WD, '08:00'), WD, {}).work_unit, 0);   // không ca → 0
 });
+
+/* ---------- So sánh cách ghép cặp / tính giờ với Ronald Jack ---------- */
+import { computeLate, punchPairs, mergeDayPunches, sumPairsMinutes } from '../server/attendance-calc.js';
+const isoS = (d, hms) => new Date(`${d}T${hms}+07:00`).toISOString();
+
+test('giây lẻ: giờ chấm chỉ tính tới phút (08:05:40 là 08:05, không thành trễ 6 phút)', () => {
+  assert.equal(computeLate(base, isoS(WD, '08:05:40'), WD), 0);     // 5' ≤ cho phép 5'
+  assert.equal(computeLate(base, isoS(WD, '08:06:10'), WD), 6);
+  const c = computeCheckout(base, isoS(WD, '07:59:50'), isoS(WD, '16:44:59'), WD, {});   // ra 16:44 → sớm 16' > 15'
+  assert.equal(c.early_min, 16);
+  assert.equal(sumPairsMinutes([[isoS(WD, '08:00:50'), isoS(WD, '12:00:10')]]), 240);
+});
+
+test('ghép cặp: bỏ lượt quẹt lặp, không để 1 lần quẹt 2 phát làm lệch các cặp sau', () => {
+  const t = (hm) => iso(WD, hm);
+  const p = punchPairs([t('08:00'), t('08:02'), t('12:00'), t('13:00'), t('17:00')]);   // mặc định 5 phút
+  assert.deepEqual(p, [[t('08:00'), t('12:00')], [t('13:00'), t('17:00')]]);
+  assert.equal(sumPairsMinutes(p), 480);
+  // lặp ở lượt ra + nghỉ ngắn 10 phút vẫn là 1 cặp thật
+  const p2 = punchPairs([t('08:00'), t('10:00'), t('10:03'), t('10:10'), t('17:00')]);
+  assert.deepEqual(p2, [[t('08:00'), t('10:00')], [t('10:10'), t('17:00')]]);
+  // ngưỡng tùy chỉnh 30 phút như mặc định của Ronald Jack
+  assert.deepEqual(punchPairs([t('08:00'), t('08:20'), t('12:00')], 30), [[t('08:00'), t('12:00')]]);
+});
+
+test('FILO ca ngày: về rất muộn (quá 4h sau tan ca) vẫn lấy được giờ ra khi nhận tới hết ngày', () => {
+  const pun = [{ punch_at: iso(WD, '08:00'), serial: 'A' }, { punch_at: iso(WD, '21:30'), serial: 'A' }];
+  assert.equal(mergeDayPunches(pun, base, 'filo', {}, WD).outIso, null);                              // cửa sổ cũ: mất giờ ra
+  assert.equal(mergeDayPunches(pun, base, 'filo', {}, WD, { toDayEnd: true }).outIso, iso(WD, '21:30'));
+  // ca đêm không mở rộng (tránh nuốt lượt quẹt của ngày hôm sau)
+  const night = { ...base, start_time: '22:00', end_time: '06:00' };
+  const w1 = ruleWindow(WD, night), w2 = ruleWindow(WD, night, { toDayEnd: true });
+  assert.equal(w1.winEnd.getTime(), w2.winEnd.getTime());
+});
+
+test('tùy chọn: trễ/sớm chỉ tính phần vượt số phút cho phép', () => {
+  const s = { ...base, grace_deduct: 1 };
+  assert.equal(computeLate(s, iso(WD, '08:12'), WD), 7);     // 12' − 5'
+  assert.equal(computeLate(s, iso(WD, '08:04'), WD), 0);
+  const c = computeCheckout(s, iso(WD, '08:12'), iso(WD, '16:30'), WD, {});   // sớm 30' − 15' = 15'
+  assert.equal(c.early_min, 15);
+  assert.equal(c.work_minutes, 480 - 7 - 15);                // giờ công cũng chỉ trừ phần vượt
+});
+
+test('tùy chọn: ca này là ca tăng ca (mọi ngày)', () => {
+  const c = computeCheckout({ ...base, shift_as_ot: 1 }, iso(WD, '08:00'), iso(WD, '17:00'), WD, {});
+  assert.equal(c.work_unit, 0); assert.equal(c.ot_min, 480); assert.equal(c.ot_type, 'thuong');
+});
