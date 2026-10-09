@@ -179,7 +179,7 @@ test('Nhân viên chưa có ca — resolveEffectiveShift tự dò toàn cục nh
   const eff = resolveEffectiveShift(id.M, D, iso(D, '03:00'));
   assert.equal(eff.source, 'none');
   assert.equal(eff.shift, null);
-  assert.equal(eff.mergeRule, null);
+  assert.equal(eff.mergeRule, 'pairs');   // không tìm được ca → tính theo các cặp vào/ra
 });
 
 test('Nhân viên chưa có ca — resolveEffectiveShift tự dò ra ca khi giờ chấm khớp cửa sổ VÀO của một ca đang hoạt động', () => {

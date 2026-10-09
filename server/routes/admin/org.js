@@ -2,6 +2,25 @@
 import { db, adminAttWhere } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 
+// Lưu các tùy chọn tăng ca nâng cao / bù trừ / thiếu giờ ra của ca (trường nào không gửi thì giữ giá trị cũ)
+const SHIFT_EXTRA = {
+  ot_before: 'bool', ot_before_min: 'int', ot_tier1_min: 'int', ot_tier2_min: 'int', ot_tier3_min: 'int',
+  ot_tier2_rate: 'num', ot_tier3_rate: 'num', ot_tier4_rate: 'num',
+  weekend_as_ot: 'bool', holiday_as_ot: 'bool', compensate_late: 'bool', no_out_credit: 'bool',
+};
+function saveShiftExtra(id, b, old) {
+  const keys = Object.keys(SHIFT_EXTRA).filter((k) => b[k] !== undefined);
+  if (!keys.length) return;
+  const val = (k) => {
+    const t = SHIFT_EXTRA[k], v = b[k];
+    if (t === 'bool') return v ? 1 : 0;
+    const n = Number(v);
+    if (!Number.isFinite(n) || n < 0) return old[k] ?? 0;
+    return t === 'int' ? Math.round(n) : n;
+  };
+  db.prepare(`UPDATE shifts SET ${keys.map((k) => k + '=?').join(', ')} WHERE id=?`).run(...keys.map(val), id);
+}
+
 export function registerOrgRoutes(r, { need }) {
   /* ----------------------------- LỊCH TRÌNH CA ----------------------------- */
   r.get('/schedules', (req, res) => {
@@ -205,6 +224,7 @@ export function registerOrgRoutes(r, { need }) {
         b.allow_ot ? 1 : 0, b.ot_start_after_min ?? 30, b.ot_rounding_unit || 0,
         (b.code || '').trim(), b.check_in_start || null, b.check_in_end || null, b.check_out_start || null, b.check_out_end || null,
         b.merge_rule || 'filo', b.cross_midnight ? 1 : 0, b.tdqd_mode || 'pair');
+    saveShiftExtra(info.lastInsertRowid, b, {});
     res.json({ ok: true, id: info.lastInsertRowid });
   });
   r.put('/shifts/:id', need('shifts'), (req, res) => {
@@ -226,6 +246,7 @@ export function registerOrgRoutes(r, { need }) {
       b.check_out_end !== undefined ? (b.check_out_end || null) : s.check_out_end,
       b.merge_rule ?? s.merge_rule, b.cross_midnight != null ? (b.cross_midnight ? 1 : 0) : s.cross_midnight,
       b.tdqd_mode ?? s.tdqd_mode, s.id);
+    saveShiftExtra(s.id, b, s);
     res.json({ ok: true });
   });
   r.delete('/shifts/:id', need('shifts'), (req, res) => {

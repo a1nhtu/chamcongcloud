@@ -129,7 +129,8 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOut
   if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shift: s, source: 'default', mergeRule: effectiveMergeRule(s, null) }; }
   const auto = autoDetectShift(checkInIso, null, checkOutIso);
   if (auto) return { off: false, shift: auto, source: 'auto', mergeRule: effectiveMergeRule(auto, null) };
-  return { off: false, shift: null, source: 'none', mergeRule: null };
+  // Không tìm được ca nào → tính theo các cặp vào/ra (1-2, 3-4…) thay vì đầu–cuối
+  return { off: false, shift: null, source: 'none', mergeRule: 'pairs' };
 }
 
 // DANH SÁCH ca của 1 ngày (để tách nhiều ca/ngày khi gán lịch trình). Ưu tiên như resolveEffectiveShift.

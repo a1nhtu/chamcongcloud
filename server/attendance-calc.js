@@ -91,25 +91,84 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
     work_minutes = Math.max(0, inShift - breakDed);
   }
 
-  // Tăng ca: ở lại sau tan ca >= ngưỡng
+  // Tăng ca SAU giờ tan ca: ở lại >= ngưỡng
+  let otAfterRaw = Math.max(0, mins(end, co));
+  // Bù trừ (tùy chọn của ca): đi trễ quá dung sai thì phần ở lại sau giờ tan ca được BÙ vào giờ công
+  // (tối đa bằng số phút trễ; phần dùng để bù KHÔNG tính tăng ca; giờ công không vượt giờ chuẩn của ca)
+  const standard = Math.max(1, shiftLen - (shift.break_minutes || 0));
+  let compensated = 0;
+  if (shift.compensate_late) {
+    const lateRaw = mins(start, ci);
+    if (lateRaw > lateGrace && otAfterRaw > 0) {
+      compensated = Math.min(lateRaw, otAfterRaw, Math.max(0, standard - work_minutes));
+      work_minutes += compensated;
+      otAfterRaw -= compensated;
+    }
+  }
   let ot_min = 0;
   if (shift.allow_ot) {
-    const otRaw = mins(end, co);
     const after = shift.ot_start_after_min ?? 30;
-    if (otRaw >= after) ot_min = roundOt(otRaw, shift.ot_rounding_unit || 0);
+    if (otAfterRaw >= after && otAfterRaw > 0) ot_min += roundOt(otAfterRaw, shift.ot_rounding_unit || 0);
+    // Tăng ca TRƯỚC giờ vào ca (tùy chọn): đến sớm >= ngưỡng
+    if (shift.ot_before) {
+      const beforeRaw = Math.max(0, mins(ci, start));
+      if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) ot_min += roundOt(beforeRaw, shift.ot_rounding_unit || 0);
+    }
   }
 
   // Số công
-  const standard = Math.max(1, shiftLen - (shift.break_minutes || 0));
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);
   const rawUnit = baseUnit * work_minutes / standard;
   const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor; // 0=lùi,1=tới,2=gần nhất
-  const work_unit = Math.min(baseUnit, roundFn(rawUnit * factor) / factor);
+  let work_unit = Math.min(baseUnit, roundFn(rawUnit * factor) / factor);
 
   const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
 
-  return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec' };
+  // "Xem cả ca là tăng ca" khi làm ca này vào ngày lễ / cuối tuần (tùy chọn của ca):
+  // không tính công, toàn bộ giờ làm trong ca + giờ tăng ca → tăng ca loại lễ / cuối tuần.
+  if ((isHoliday && shift.holiday_as_ot) || (!isHoliday && isWeekend && shift.weekend_as_ot)) {
+    ot_min += work_minutes;
+    work_minutes = 0;
+    work_unit = 0;
+  }
+
+  return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec', compensated };
+}
+
+// Chỉ có giờ VÀO, thiếu giờ RA. Mặc định 0 công (trạng thái "thiếu ra").
+// Ca bật "thiếu giờ ra vẫn tính công": tính đủ giờ chuẩn của ca TRỪ phần đi trễ (vượt dung sai) — như Ronald Jack.
+export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0 } = opts;
+  const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
+  const base = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type, day_status: 'thieu_ra' };
+  if (!shift || !checkInIso || !shift.no_out_credit) return base;
+  const { start, end } = shiftBounds(workDate, shift);
+  const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
+  const late = computeLate(shift, checkInIso, workDate);
+  const work_minutes = Math.max(0, standard - late);
+  const baseUnit = shift.work_unit_value ?? 1.0;
+  const factor = Math.pow(10, roundingDecimals);
+  const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor;
+  const work_unit = Math.min(baseUnit, roundFn(baseUnit * work_minutes / standard * factor) / factor);
+  if ((isHoliday && shift.holiday_as_ot) || (!isHoliday && isWeekend && shift.weekend_as_ot))
+    return { ...base, ot_min: work_minutes };
+  return { ...base, work_minutes, work_unit };
+}
+
+// Chia số phút tăng ca NGÀY THƯỜNG thành 4 mức TC1→TC4 theo giới hạn của ca (như Ronald Jack):
+// TC1 tối đa ot_tier1_min phút, tiếp theo TC2 tối đa ot_tier2_min, TC3 tối đa ot_tier3_min, còn dư → TC4.
+// Giới hạn = 0 nghĩa là mức đó nhận hết phần còn lại. Ca không đặt giới hạn → tất cả là TC1.
+export function splitOtTiers(otMin, shift) {
+  const out = [0, 0, 0, 0];
+  let left = Math.max(0, otMin || 0);
+  const lim = [shift?.ot_tier1_min || 0, shift?.ot_tier2_min || 0, shift?.ot_tier3_min || 0];
+  for (let i = 0; i < 3 && left > 0; i++) {
+    const take = lim[i] > 0 ? Math.min(left, lim[i]) : left;
+    out[i] = take; left -= take;
+  }
+  out[3] = left;
+  return out;
 }
 
 /* ===================== GHÉP LOG MÁY → GIỜ VÀO / RA (4 quy tắc) =====================
@@ -134,7 +193,8 @@ export function ruleWindow(workDate, shift) {
   } else {
     winEnd = new Date(end.getTime() + 4 * HH);
   }
-  return { winStart: new Date(start.getTime() - 2 * HH), winEnd, start, end };
+  const before = shift.allow_ot && shift.ot_before ? 4 * HH : 2 * HH;   // có tăng ca trước giờ vào → nhận log sớm hơn
+  return { winStart: new Date(start.getTime() - before), winEnd, start, end };
 }
 
 export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate) {

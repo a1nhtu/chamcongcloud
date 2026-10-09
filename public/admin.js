@@ -979,6 +979,8 @@ function scheduleFormModal(w, onSaved) {
       el('div', { class: 'map-hint' }, 'Nên đặt "cửa sổ nhận diện giờ vào" cho từng ca (trong Ca làm) để tự chọn ca chính xác theo giờ chấm.')),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
+// Ô tick nhỏ dùng trong form ca
+const chk = (id, on) => el('input', { type: 'checkbox', id, style: 'width:auto', ...(on ? { checked: '' } : {}) });
 function shiftModal(s) {
   const days = (s?.work_days || '1,2,3,4,5,6').split(',');
   const dayBoxes = [1, 2, 3, 4, 5, 6, 7].map(d => {
@@ -1009,6 +1011,29 @@ function shiftModal(s) {
       field('OT: ở lại tối thiểu (phút)', input('s-otafter', { type: 'number', value: s?.ot_start_after_min ?? 30, min: 0 })),
       field('OT: làm tròn theo (phút, 0=không)', input('s-otround', { type: 'number', value: s?.ot_rounding_unit ?? 0, min: 0 }))),
     el('div', { class: 'two-col' },
+      el('label', { style: 'display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:600' }, chk('s-otbefore', s?.ot_before), 'Tính cả tăng ca TRƯỚC giờ vào ca (đến sớm)'),
+      field('Đến sớm tối thiểu (phút) mới tính', input('s-otbeforemin', { type: 'number', value: s?.ot_before_min ?? 30, min: 0 }))),
+    el('div', {}, el('label', {}, 'Chia mức tăng ca ngày thường TC1 → TC4 (để 0 = không chia, tất cả là TC1)'),
+      el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px' },
+        field('TC1 tối đa (phút)', input('s-t1', { type: 'number', value: s?.ot_tier1_min ?? 0, min: 0 })),
+        field('TC2 tối đa (phút)', input('s-t2', { type: 'number', value: s?.ot_tier2_min ?? 0, min: 0 })),
+        field('TC3 tối đa (phút)', input('s-t3', { type: 'number', value: s?.ot_tier3_min ?? 0, min: 0 })),
+        field('Hệ số lương TC2', input('s-r2', { type: 'number', step: '0.1', value: s?.ot_tier2_rate ?? 0, min: 0 })),
+        field('Hệ số lương TC3', input('s-r3', { type: 'number', step: '0.1', value: s?.ot_tier3_rate ?? 0, min: 0 })),
+        field('Hệ số lương TC4', input('s-r4', { type: 'number', step: '0.1', value: s?.ot_tier4_rate ?? 0, min: 0 }))),
+      el('div', { class: 'map-hint' }, 'VD TC1 = 120, TC2 = 120: tăng ca 5 tiếng → 2h TC1, 2h TC2, 1h TC3 (TC3 để 0 = nhận hết phần còn lại; dư nữa → TC4). TC1 tính theo hệ số OT ngày thường của nhân viên (trang Lương); hệ số TC2–TC4 để 0 = cũng như ngày thường.')),
+    el('div', {}, el('label', {}, 'Xem CẢ CA là tăng ca khi làm ca này vào'),
+      el('div', { style: 'display:flex;gap:18px;flex-wrap:wrap' },
+        el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, chk('s-weekendot', s?.weekend_as_ot), 'Ngày cuối tuần'),
+        el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, chk('s-holidayot', s?.holiday_as_ot), 'Ngày lễ')),
+      el('div', { class: 'map-hint' }, 'Bật thì ngày đó không tính công; toàn bộ giờ làm thành tăng ca loại cuối tuần / ngày lễ (tính lương theo hệ số cuối tuần / lễ).')),
+    el('label', { style: 'display:flex;align-items:flex-start;gap:8px;color:var(--ink);font-weight:600' }, chk('s-comp', s?.compensate_late),
+      el('span', {}, 'Tính bù trừ: đi trễ thì về trễ bù lại, không bị trừ giờ ', el('span', { style: 'font-weight:400;color:var(--muted)' }, '(phút ở lại để bù không tính tăng ca; vẫn ghi nhận số phút đi trễ)'))),
+    field('Khi chỉ có giờ VÀO, thiếu giờ RA',
+      el('select', { id: 's-noout' },
+        el('option', { value: '0', ...(!s?.no_out_credit ? { selected: '' } : {}) }, 'Không tính công (mặc định)'),
+        el('option', { value: '1', ...(s?.no_out_credit ? { selected: '' } : {}) }, 'Vẫn tính đủ công của ca, trừ phần đi trễ'))),
+    el('div', { class: 'two-col' },
       field('Quy tắc ghép log máy (mặc định của ca)',
         el('select', { id: 's-rule' }, ...MERGE_RULES.filter(([v]) => v !== 'default').map(([v, t]) =>
           el('option', { value: v, ...(String(s?.merge_rule || 'filo') === v ? { selected: '' } : {}) }, t)))),
@@ -1032,6 +1057,11 @@ function shiftModal(s) {
       allow_ot: otChk.checked, ot_start_after_min: +$('#s-otafter').value || 0,
       ot_rounding_unit: +$('#s-otround').value || 0, work_days,
       merge_rule: $('#s-rule').value || 'filo', tdqd_mode: $('#s-tdqd').value || 'pair',
+      ot_before: $('#s-otbefore').checked, ot_before_min: +$('#s-otbeforemin').value || 0,
+      ot_tier1_min: +$('#s-t1').value || 0, ot_tier2_min: +$('#s-t2').value || 0, ot_tier3_min: +$('#s-t3').value || 0,
+      ot_tier2_rate: +$('#s-r2').value || 0, ot_tier3_rate: +$('#s-r3').value || 0, ot_tier4_rate: +$('#s-r4').value || 0,
+      weekend_as_ot: $('#s-weekendot').checked, holiday_as_ot: $('#s-holidayot').checked,
+      compensate_late: $('#s-comp').checked, no_out_credit: $('#s-noout').value === '1',
     };
     try { if (s) await api('/admin/shifts/' + s.id, { method: 'PUT', body: b }); else await api('/admin/shifts', { method: 'POST', body: b }); toast('Đã lưu', 'ok'); closeModal(); pageShifts(); }
     catch (err) { toast(err.message, 'err'); }
@@ -2834,7 +2864,7 @@ const REPORT_GROUPS = [
     ['detailmulti', '🔁', 'Chi tiết chấm công (nhiều lần vào/ra)', 'Mỗi NV × mỗi ngày: Giờ vào 1 → Giờ ra 4 theo từng lần chấm, trễ, sớm, giờ, công, tăng ca'],
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
-    ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: công, giờ, trễ, sớm, tăng ca'],
+    ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: mỗi ô là SỐ CÔNG trong ngày + tổng công, tăng ca, trễ, sớm, vắng, nghỉ (xem số giờ ở Bảng thống kê chấm công (giờ))'],
     ['hourstat', '🕒', 'Bảng thống kê chấm công (giờ)', 'Ma trận ngày × NV theo SỐ GIỜ mỗi ngày + giờ công, tăng ca TC1–TC3, vắng, nghỉ từng loại, trễ, sớm'],
     ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · KL=không lương · CT=công tác · K=nghỉ khác · L=lễ · V=vắng · O=thiếu ra'],
     ['late', '⏰', 'Đi muộn / về sớm', 'Danh sách đi muộn, về sớm và số phút'],

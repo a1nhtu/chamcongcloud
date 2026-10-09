@@ -2,7 +2,8 @@
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { db, getSetting } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts } from './shift-resolver.js';
-import { computeLate, computeCheckout, isWeekendDay, mergeDayPunches, ruleWindow, noShiftUnit, punchPairs, sumPairsMinutes } from './attendance-calc.js';
+import { mergeDayPunches, ruleWindow, punchPairs } from './attendance-calc.js';
+import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { hashPassword } from './auth.js';
 import { notifyEmployee } from './push.js';
 
@@ -502,24 +503,10 @@ export function relearnDevice(serial) {
 // Tính chỉ số công cho 1 ngày (giống computeManual ở admin.js).
 // presetShift: nếu truyền (kể cả null) thì dùng luôn, không tự dò lại ca (dùng khi tách nhiều ca/ngày).
 function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null) {
-  const weekend = getSetting('weekend_days', '7');
-  const roundingDecimals = parseInt(getSetting('workunit_rounding', '2'), 10) || 2;
-  const isHol = (d) => !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date=?').get(d);
-  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
-  const shift = presetShift !== undefined ? presetShift
-    : (hourly ? null : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
-  const roundingMode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
-  const flags = { isHoliday: isHol(workDate), isWeekend: isWeekendDay(workDate, weekend), roundingDecimals, roundingMode, pairs };
-  const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
-  const late = (!hourly && shift && inIso) ? computeLate(shift, inIso, workDate) : 0;
-  let c;
-  if (inIso && outIso) {
-    if (shift && !hourly) c = computeCheckout(shift, inIso, outIso, workDate, flags);
-    else { const wm = (pairs && pairs.length >= 2) ? sumPairsMinutes(pairs) : Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000)); c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, { roundingDecimals, roundingMode }), ot_type: otType, day_status: 'lam_viec' }; }
-  } else {
-    c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: inIso ? 'thieu_ra' : 'vang' };
-  }
-  return { shiftId: shift?.id ?? null, late, ...c };
+  const ctx = payrollCtx(getSetting, db);
+  const shift = ctx.hourly ? null : (presetShift !== undefined ? presetShift
+    : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
+  return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs);
 }
 
 // Map serial → số máy (IDM: máy lẻ VÀO / chẵn RA)
@@ -609,8 +596,9 @@ export function rebuildDay(employeeId, workDate) {
   } else {
     inIso = prov[0].punch_at;
     outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null;
-    // Chế độ theo giờ, chọn "tính theo cặp": giờ làm = tổng các cặp lượt quẹt trong ngày
-    if (hourly && getSetting('hourly_merge_rule', 'filo') === 'pairs') pairs = punchPairs(prov.map((p) => p.punch_at));
+    // Chế độ theo giờ chọn "tính theo cặp", HOẶC chế độ theo ca mà không tìm được ca nào khớp:
+    // giờ làm = tổng các cặp lượt quẹt trong ngày (1-2, 3-4…) thay vì lấy đầu–cuối
+    if (hourly ? getSetting('hourly_merge_rule', 'filo') === 'pairs' : true) pairs = punchPairs(prov.map((p) => p.punch_at));
   }
   const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
   if (existing && existing.manual) return; // tôn trọng sửa tay của admin

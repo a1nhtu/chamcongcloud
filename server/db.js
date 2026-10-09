@@ -455,6 +455,19 @@ function migrateColumns() {
   add('shifts', 'allow_ot',           'INTEGER NOT NULL DEFAULT 0');   // ca này có tính OT?
   add('shifts', 'ot_start_after_min', 'INTEGER NOT NULL DEFAULT 30');  // ở lại tối thiểu để tính OT
   add('shifts', 'ot_rounding_unit',   'INTEGER NOT NULL DEFAULT 0');   // làm tròn OT (phút), 0=không
+  // Tăng ca nâng cao (tham khảo Ronald Jack) — mặc định đều TẮT để không đổi kết quả cũ
+  add('shifts', 'ot_before',       'INTEGER NOT NULL DEFAULT 0');    // 1 = tính tăng ca TRƯỚC giờ vào ca
+  add('shifts', 'ot_before_min',   'INTEGER NOT NULL DEFAULT 30');   // đến sớm tối thiểu (phút) mới tính
+  add('shifts', 'ot_tier1_min',    'INTEGER NOT NULL DEFAULT 0');    // giới hạn mức TC1 (phút), 0 = tất cả là TC1
+  add('shifts', 'ot_tier2_min',    'INTEGER NOT NULL DEFAULT 0');    // giới hạn mức TC2 (phút), 0 = phần còn lại là TC2
+  add('shifts', 'ot_tier3_min',    'INTEGER NOT NULL DEFAULT 0');    // giới hạn mức TC3 (phút), 0 = phần còn lại là TC3; dư → TC4
+  add('shifts', 'ot_tier2_rate',   'REAL NOT NULL DEFAULT 0');       // hệ số lương TC2 (0 = theo hệ số OT ngày thường của NV)
+  add('shifts', 'ot_tier3_rate',   'REAL NOT NULL DEFAULT 0');
+  add('shifts', 'ot_tier4_rate',   'REAL NOT NULL DEFAULT 0');
+  add('shifts', 'weekend_as_ot',   'INTEGER NOT NULL DEFAULT 0');    // 1 = làm ca này vào cuối tuần → cả ca là tăng ca
+  add('shifts', 'holiday_as_ot',   'INTEGER NOT NULL DEFAULT 0');    // 1 = làm ca này ngày lễ → cả ca là tăng ca
+  add('shifts', 'compensate_late', 'INTEGER NOT NULL DEFAULT 0');    // 1 = bù trừ: đi trễ thì về trễ bù lại, không bị trừ giờ
+  add('shifts', 'no_out_credit',   'INTEGER NOT NULL DEFAULT 0');    // 1 = thiếu giờ ra vẫn tính công (trừ phần đi trễ)
 
   // Phân ca làm việc: quy tắc ghép log máy + ca đêm (dùng cho ghép punch máy ZKTeco)
   add('shifts', 'merge_rule',    "TEXT NOT NULL DEFAULT 'filo'");   // filo|tdhc|idm|tdqd — quy tắc ghép log mặc định của ca

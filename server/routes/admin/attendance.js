@@ -72,7 +72,7 @@ export function registerAttendanceRoutes(r, { need }) {
         const usePairs = !row.manual && (ctx.hourly ? hourlyPairs : eff.mergeRule === 'pairs');
         const pairs = usePairs ? dayPairsFor(row.employee_id, row.work_date, calcShift) : null;
         const m = computeDayMetrics(ctx, calcShift, row.work_date, row.check_in_at, row.check_out_at || null, pairs);
-        if (!row.check_out_at) {
+        if (!row.check_out_at && !(calcShift && calcShift.no_out_credit)) {
           // Chưa chấm ra: chỉ cập nhật muộn/trạng thái/ca — GIỮ NGUYÊN giờ công cũ (như trước)
           updNoOut.run(m.late, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);
         } else {

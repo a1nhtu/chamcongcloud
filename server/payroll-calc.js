@@ -1,5 +1,6 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
 import { db, getSetting, adminAttWhere } from './db.js';
+import { splitOtTiers } from './attendance-calc.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const round0 = (n) => Math.round(n || 0);
@@ -34,7 +35,10 @@ export function computePayrollForEmployee(employeeId, from, to) {
   const hourlyRate = dailyRate / 8;
 
   const rows = db.prepare(
-    'SELECT work_date, work_unit, work_minutes, ot_min, ot_type FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?'
+    `SELECT a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,
+            s.ot_tier1_min, s.ot_tier2_min, s.ot_tier3_min, s.ot_tier2_rate, s.ot_tier3_rate, s.ot_tier4_rate
+     FROM attendance a LEFT JOIN shifts s ON s.id = a.shift_id
+     WHERE a.employee_id = ? AND a.work_date >= ? AND a.work_date <= ?`
   ).all(employeeId, from, to);
 
   // Chế độ tính công theo GIỜ: lương = tổng giờ làm × đơn giá giờ + phụ cấp
@@ -57,11 +61,20 @@ export function computePayrollForEmployee(employeeId, from, to) {
   }
 
   let workUnits = 0, otMinW = 0, otMinE = 0, otMinH = 0;
+  // Tăng ca ngày thường chia mức TC1→TC4 theo giới hạn của ca; tiền OT ngày thường = Σ giờ mức × hệ số mức
+  // (TC1 dùng hệ số OT ngày thường của NV; TC2–TC4 dùng hệ số đặt ở ca, để 0 = cũng theo hệ số ngày thường)
+  const tierMin = [0, 0, 0, 0];
+  let otPayWeekdayUnits = 0;   // Σ (phút × hệ số)
   for (const r of rows) {
     workUnits += r.work_unit || 0;
     if (r.ot_type === 'cuoi_tuan') otMinE += r.ot_min || 0;
     else if (r.ot_type === 'le') otMinH += r.ot_min || 0;
-    else otMinW += r.ot_min || 0;
+    else {
+      otMinW += r.ot_min || 0;
+      const t = splitOtTiers(r.ot_min || 0, r);
+      const rates = [cfg.ot_rate_weekday, r.ot_tier2_rate || cfg.ot_rate_weekday, r.ot_tier3_rate || cfg.ot_rate_weekday, r.ot_tier4_rate || cfg.ot_rate_weekday];
+      t.forEach((m, i) => { tierMin[i] += m; otPayWeekdayUnits += m * rates[i]; });
+    }
   }
   const otH_w = otMinW / 60, otH_e = otMinE / 60, otH_h = otMinH / 60;
 
@@ -79,7 +92,7 @@ export function computePayrollForEmployee(employeeId, from, to) {
 
   const workSalary = workUnits * dailyRate;
   const paidLeaveSalary = paidLeaveDays * dailyRate;
-  const otSalary = otH_w * hourlyRate * cfg.ot_rate_weekday
+  const otSalary = (otPayWeekdayUnits / 60) * hourlyRate
                  + otH_e * hourlyRate * cfg.ot_rate_weekend
                  + otH_h * hourlyRate * cfg.ot_rate_holiday;
   const gross = workSalary + paidLeaveSalary + otSalary + (cfg.allowance || 0);
@@ -88,6 +101,7 @@ export function computePayrollForEmployee(employeeId, from, to) {
     workUnits: round2(workUnits), paidLeaveDays: round2(paidLeaveDays),
     otHoursWeekday: round2(otH_w), otHoursWeekend: round2(otH_e), otHoursHoliday: round2(otH_h),
     otHoursTotal: round2(otH_w + otH_e + otH_h),
+    otTierHours: tierMin.map((m) => round2(m / 60)),
     basicSalary: round0(cfg.basic_salary), dailyRate: round0(dailyRate),
     workSalary: round0(workSalary), paidLeaveSalary: round0(paidLeaveSalary),
     otSalary: round0(otSalary), allowance: round0(cfg.allowance || 0),
