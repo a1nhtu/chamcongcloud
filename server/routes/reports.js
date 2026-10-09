@@ -250,7 +250,17 @@ function buildManualTime(from, to) {
 }
 
 // Trả về { title, columns:[{key,label,weekend?,w?}], rows:[obj] }
+// Chế độ chấm "theo giờ": các báo cáo danh sách bỏ cột Công và Tăng ca (chỉ ý nghĩa khi theo ca)
+const HOURLY_HIDE = { attendance: ['cong', 'ot'], detail: ['cong', 'ot'], detaillist: ['cong', 'ot'], detailmulti: ['cong', 'ot'] };
 function buildReport(type, from, to, filter) {
+  const rep = buildReportRaw(type, from, to, filter);
+  const hide = HOURLY_HIDE[type];
+  if (hide && rep && Array.isArray(rep.columns) && getSetting('attendance_mode', 'shift') === 'hourly')
+    rep.columns = rep.columns.filter((c) => !hide.includes(c.key));
+  return rep;
+}
+
+function buildReportRaw(type, from, to, filter) {
   if (type === 'manualtime') return buildManualTime(from, to);
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
@@ -509,13 +519,13 @@ function buildReport(type, from, to, filter) {
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'place', label: 'Nơi chấm', w: 14 }, { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 },
-        { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'ot', label: 'OT (p)', w: 8 }, { key: 'cong', label: 'Công', w: 7 },
+        { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 }, { key: 'ot', label: 'OT (p)', w: 8 }, { key: 'cong', label: 'Công', w: 7 },
       ];
       const rows = sortedResults().map((c) => ({
         date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         place: c.check_in_outside ? 'Ngoài VP' : 'Trong VP',
-        late: c.late_min || 0, early: c.early_min || 0, gio: round2((c.work_minutes || 0) / 60),
+        late: c.late_min || 0, early: c.early_min || 0, gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0),
         ot: c.ot_min || 0, cong: round2(c.work_unit),
       }));
       return { title: `Báo cáo chấm công ${PERIOD}`, columns, rows };
