@@ -44,9 +44,22 @@ test('computeCheckout: làm đủ ca → 1 công, trừ nghỉ giữa ca', () =>
 
 test('computeCheckout: về sớm → early_min + công theo tỉ lệ (floor)', () => {
   const c = computeCheckout(shift, iso(WD, '08:00'), iso(WD, '16:00'), WD, {});
-  assert.equal(c.early_min, 45);       // sớm 60' - grace 15'
+  assert.equal(c.early_min, 60);       // sớm 60' > ngưỡng 15' → ghi ĐỦ 60' (giống đi muộn)
   assert.equal(c.work_minutes, 420);   // 480 - 60 nghỉ
   assert.equal(c.work_unit, 0.87);     // floor(0.875*100)/100
+});
+
+test('computeCheckout: trễ/sớm TRONG dung sai → coi như đúng giờ, không trừ giờ công (như Ronald Jack)', () => {
+  const c = computeCheckout(shift, iso(WD, '08:04'), iso(WD, '16:50'), WD, {});   // trễ 4' ≤ 5', sớm 10' ≤ 15'
+  assert.equal(c.early_min, 0);
+  assert.equal(c.work_minutes, 480);   // đủ 8h, không mất 14 phút
+  assert.equal(c.work_unit, 1.0);
+  const c2 = computeCheckout(shift, iso(WD, '08:10'), iso(WD, '17:00'), WD, {});  // trễ 10' > 5' → trừ đủ 10'
+  assert.equal(c2.work_minutes, 470);
+  // Nhiều lần vào/ra: dung sai áp cho lượt vào đầu + lượt ra cuối
+  const p = [[iso(WD, '08:03'), iso(WD, '12:00')], [iso(WD, '13:00'), iso(WD, '16:55')]];
+  const c3 = computeCheckout(shift, p[0][0], p[1][1], WD, { pairs: p });
+  assert.equal(c3.work_minutes, 480);  // 4h + 4h
 });
 
 test('computeCheckout: có OT khi ca cho phép + ở lại quá ngưỡng', () => {

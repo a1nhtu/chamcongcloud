@@ -57,14 +57,20 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   const co = new Date(checkOutIso);
   const { start, end } = shiftBounds(workDate, shift);
 
-  // Về sớm
+  // Về sớm — cùng cách với đi muộn: dung sai chỉ là NGƯỠNG; vượt ngưỡng → ghi ĐỦ số phút về sớm thực tế
   const earlyRaw = mins(co, end);
   const earlyGrace = shift.early_grace_min ?? 15;
-  const early_min = earlyRaw > earlyGrace ? earlyRaw - earlyGrace : 0;
+  const early_min = earlyRaw > earlyGrace ? earlyRaw : 0;
+
+  // Trễ/sớm NẰM TRONG dung sai thì coi như đúng giờ: KHÔNG trừ giờ công (giống Ronald Jack/WiseEye:
+  // giờ = giờ ca − phút trễ − phút sớm đã tính). Vượt dung sai → trừ đủ.
+  const lateGrace = shift.late_grace_min || 0;
+  const inGraceIn = (t) => { const raw = mins(start, t); return raw > 0 && raw <= lateGrace; };
+  const inGraceOut = (t) => { const raw = mins(t, end); return raw > 0 && raw <= earlyGrace; };
 
   // Giờ công thực: kẹp trong khung ca, trừ nghỉ giữa ca nếu có mặt >= nửa ca
-  const effIn = ci < start ? start : ci;
-  const effOut = co > end ? end : co;
+  const effIn = ci < start || inGraceIn(ci) ? start : ci;
+  const effOut = co > end || inGraceOut(co) ? end : co;
   const inShift = Math.max(0, mins(effIn, effOut));
   const shiftLen = mins(start, end);
   const halfShift = Math.floor(shiftLen / 2);
@@ -73,9 +79,11 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
     // Quy tắc "Nhiều lần vào/ra": cộng từng cặp vào–ra (kẹp trong khung ca); thời gian ra ngoài giữa các cặp
     // chính là giờ nghỉ nên KHÔNG trừ thêm nghỉ giữa ca.
     work_minutes = 0;
-    for (const [pi, po] of pairs) {
-      if (!pi || !po) continue;
-      const a = new Date(pi), b = new Date(po);
+    const full = pairs.filter(([pi, po]) => pi && po);
+    for (const [k, [pi, po]] of full.entries()) {
+      let a = new Date(pi), b = new Date(po);
+      if (k === 0 && inGraceIn(a)) a = start;                 // lượt vào đầu trễ trong dung sai
+      if (k === full.length - 1 && inGraceOut(b)) b = end;    // lượt ra cuối sớm trong dung sai
       work_minutes += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
     }
   } else {
