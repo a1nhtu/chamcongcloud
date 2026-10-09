@@ -266,6 +266,7 @@ function buildReportRaw(type, from, to, filter) {
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
   const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1]);   // giờ vào/ra theo quy tắc ghép log
+  const HOURLY = getSetting('attendance_mode', 'shift') === 'hourly';   // chế độ theo giờ: bỏ công/tăng ca, dùng tổng giờ
   const sortedResults = () => [...ctx.cell.values()].sort((a, b) =>
     a.full_name === b.full_name ? (a.work_date < b.work_date ? -1 : 1) : (a.full_name < b.full_name ? -1 : 1));
 
@@ -276,7 +277,8 @@ function buildReportRaw(type, from, to, filter) {
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
-        { key: 'total', label: 'Tổng công', w: 10 }, { key: 'ot', label: 'OT (giờ)', w: 9 },
+        ...(HOURLY ? [{ key: 'total', label: 'Tổng giờ', w: 10 }]
+          : [{ key: 'total', label: 'Tổng công', w: 10 }, { key: 'ot', label: 'OT (giờ)', w: 9 }]),
         { key: 'late', label: 'Trễ (lần)', w: 9 }, { key: 'early', label: 'Sớm (lần)', w: 9 },
         { key: 'absent', label: 'Vắng', w: 8 },
       ];
@@ -285,7 +287,9 @@ function buildReportRaw(type, from, to, filter) {
         let total = 0, ot = 0, late = 0, early = 0, absent = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
-          if (c && c.work_unit > 0) { row['d' + d] = round2(c.work_unit); total += c.work_unit; }
+          if (HOURLY) {   // theo giờ: ô = số giờ làm trong ngày
+            if (c && c.work_minutes > 0) { row['d' + d] = round2(c.work_minutes / 60); total += c.work_minutes / 60; } else row['d' + d] = '';
+          } else if (c && c.work_unit > 0) { row['d' + d] = round2(c.work_unit); total += c.work_unit; }
           else row['d' + d] = '';
           if (c) { ot += (c.ot_min || 0); if (c.late_min > 0) late++; if (c.early_min > 0) early++; }
           if (symbolOf(ctx, e.id, d) === 'V') absent++;
@@ -293,7 +297,7 @@ function buildReportRaw(type, from, to, filter) {
         row.total = round2(total); row.ot = round2(ot / 60); row.late = late; row.early = early; row.absent = absent;
         return row;
       });
-      return { title: `Bảng công ngang ${PERIOD}`, columns, rows };
+      return { title: HOURLY ? `Bảng giờ làm ngang ${PERIOD} (số giờ mỗi ngày)` : `Bảng công ngang ${PERIOD}`, columns, rows };
     }
 
     /* --- Ký hiệu (X/V/T/P/L/O) --- */
@@ -304,12 +308,15 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
         { key: 'X', label: 'X', w: 5 }, { key: 'T', label: 'T', w: 5 }, { key: 'P', label: 'P', w: 5 },
         { key: 'L', label: 'L', w: 5 }, { key: 'V', label: 'V', w: 5 }, { key: 'O', label: 'O', w: 5 },
+        ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 9 }] : []),
       ];
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '' };
         const cnt = { X: 0, T: 0, P: 0, L: 0, V: 0, O: 0 };
-        for (const d of days) { const s = symbolOf(ctx, e.id, d); row['d' + d] = s; if (cnt[s] != null) cnt[s]++; }
+        let mins = 0;
+        for (const d of days) { const s = symbolOf(ctx, e.id, d); row['d' + d] = s; if (cnt[s] != null) cnt[s]++; mins += (ctx.cell.get(e.id + '|' + d)?.work_minutes || 0); }
         Object.assign(row, cnt);
+        if (HOURLY) row.gio = round2(mins / 60);
         return row;
       });
       return { title: `Bảng ký hiệu ${PERIOD} (X=làm, T=trễ/sớm, P=phép, L=lễ, V=vắng, O=thiếu ra)`, columns, rows };
@@ -395,7 +402,8 @@ function buildReportRaw(type, from, to, filter) {
     case 'summary': {
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
-        { key: 'cong', label: 'Tổng công', w: 10 }, { key: 'gio', label: 'Tổng giờ', w: 10 }, { key: 'ot', label: 'Tăng ca (giờ)', w: 12 },
+        ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 10 }]
+          : [{ key: 'cong', label: 'Tổng công', w: 10 }, { key: 'gio', label: 'Tổng giờ', w: 10 }, { key: 'ot', label: 'Tăng ca (giờ)', w: 12 }]),
         { key: 'lateN', label: 'Trễ (lần)', w: 9 }, { key: 'lateM', label: 'Trễ (phút)', w: 10 },
         { key: 'earlyN', label: 'Sớm (lần)', w: 9 }, { key: 'earlyM', label: 'Sớm (phút)', w: 10 }, { key: 'vang', label: 'Vắng', w: 8 },
       ];
@@ -548,6 +556,19 @@ function buildReportRaw(type, from, to, filter) {
 
     /* --- Tăng ca --- */
     case 'ot': {
+      if (HOURLY) {   // theo giờ không có tăng ca → liệt kê tổng giờ làm từng ngày
+        const columns = [
+          { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+          { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
+          { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 },
+        ];
+        const rows = sortedResults().filter((c) => c.work_minutes > 0).map((c) => ({
+          date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
+          inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
+          gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0),
+        }));
+        return { title: `Tổng giờ làm chi tiết ${PERIOD}`, columns, rows };
+      }
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
@@ -606,6 +627,19 @@ function buildReportRaw(type, from, to, filter) {
       const [y, m] = from.split('-').map(Number);
       const { from: pFrom, to: pTo, rows: pr } = computePayrollTable(y, m, filter);
       const money = (n) => (n || 0).toLocaleString('vi-VN');
+      if (HOURLY) {   // theo giờ: lương = tổng giờ × đơn giá giờ + phụ cấp
+        const columns = [
+          { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
+          { key: 'days', label: 'Số ngày làm', w: 10 }, { key: 'gio', label: 'Tổng giờ', w: 10 }, { key: 'rate', label: 'Đơn giá giờ', w: 12 },
+          { key: 'workpay', label: 'Lương theo giờ', w: 14 }, { key: 'allow', label: 'Phụ cấp', w: 11 }, { key: 'net', label: 'Thực lĩnh', w: 14 },
+        ];
+        const rows = pr.map(({ emp, pay }) => ({
+          code: emp.code, name: emp.full_name, dept: emp.department || '',
+          days: pay.daysWorked ?? pay.workUnits, gio: pay.totalHours ?? 0, rate: money(pay.hourlyRate),
+          workpay: money(pay.workSalary), allow: money(pay.allowance), net: money(pay.net),
+        }));
+        return { title: `Bảng lương theo giờ tháng ${String(m).padStart(2, '0')}/${y} (kỳ ${fmtDMY(pFrom)} - ${fmtDMY(pTo)})`, columns, rows };
+      }
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
         { key: 'cong', label: 'Ngày công', w: 9 }, { key: 'phep', label: 'Nghỉ phép', w: 9 }, { key: 'ot', label: 'OT (giờ)', w: 9 },
