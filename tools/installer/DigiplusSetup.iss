@@ -40,6 +40,8 @@ OutputBaseFilename=DigiplusChamCong-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=digiplus.ico
+UninstallDisplayIcon={app}\digiplus.ico
 CloseApplications=no
 UninstallDisplayName={code:DispName}
 VersionInfoVersion={#AppVer}
@@ -78,6 +80,11 @@ StatusRunProgram=Đang hoàn tất cài đặt...
 ; config.txt: KHÔNG ghi đè cấu hình khách đang có; bản mới (nếu chọn) do phần [Code] ghi TRƯỚC khi chép tệp
 Source: "{#Src}\config.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "{#Src}\*"; DestDir: "{app}"; Excludes: "config.txt"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "digiplus.ico"; DestDir: "{app}"; Flags: ignoreversion
+
+[InstallDelete]
+Type: files; Name: "{autodesktop}\Digiplus Cham Cong.url"
+Type: files; Name: "{autodesktop}\Digiplus Cham Cong {code:InstNum}.url"
 
 [Run]
 ; Đăng ký tự bật khi mở máy + khởi động phần mềm + chờ phần mềm sẵn sàng (CaiDat.bat chế độ im lặng)
@@ -127,9 +134,24 @@ begin
   Result := ExpandConstant('{sd}\DigiplusChamCong') + InstSuffix;
 end;
 
-function ShortcutName(Param: String): String;
+function InstNum(Param: String): String;
 begin
-  if Instance = '' then Result := 'Digiplus Cham Cong.url' else Result := 'Digiplus Cham Cong ' + Instance + '.url';
+  if Instance = '' then Result := '0' else Result := Instance;
+end;
+
+{ Tên lối tắt ngoài Desktop: bản đầu tiên "Digiplus Chấm Công"; bản cài thêm kèm tên khách hoặc cổng để phân biệt }
+function ShortcutName(Param: String): String;
+var Cust, Port: String;
+begin
+  Result := 'Digiplus Chấm Công';
+  if Instance <> '' then begin
+    Cust := ReadCfg(AddBackslash(WizardDirValue) + 'config.txt', 'CUSTOMER');
+    Port := ReadCfg(AddBackslash(WizardDirValue) + 'config.txt', 'PORT');
+    if Cust <> '' then Result := Result + ' - ' + Cust
+    else if Port <> '' then Result := Result + ' - cổng ' + Port
+    else Result := Result + ' ' + Instance;
+  end;
+  Result := Result + '.url';
 end;
 
 { Tên hiện trong danh sách gỡ cài đặt: kèm tên khách hoặc cổng để phân biệt các bản }
@@ -475,5 +497,6 @@ begin
   if CurStep = ssPostInstall then
     { Lối tắt ngoài Desktop mở trang quản lý }
     SaveStringToFile(ExpandConstant('{autodesktop}\') + ShortcutName(''),
-      '[InternetShortcut]' + #13#10 + 'URL=http://localhost:' + CurrentPort + '/admin' + #13#10, False);
+      '[InternetShortcut]' + #13#10 + 'URL=http://localhost:' + CurrentPort + '/admin' + #13#10 +
+      'IconFile=' + ExpandConstant('{app}\digiplus.ico') + #13#10 + 'IconIndex=0' + #13#10, False);
 end;
