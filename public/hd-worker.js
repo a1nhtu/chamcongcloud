@@ -277,6 +277,19 @@ async function handleProvision(request, env) {
   }
 }
 
+// Cổng "Nội bộ" (/noibo): kiểm tra mật khẩu trước khi hiện link công cụ. Nhận mật khẩu cấp domain HOẶC cấp license.
+// Chỉ để gom link + đỡ gõ địa chỉ; bảo vệ thật vẫn là mật khẩu riêng của từng công cụ.
+async function handleNoiBo(request, env) {
+  if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
+  let b;
+  try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
+  const pass = String((b && b.pass) || "");
+  const domain = !!env.DOMAIN_ADMIN_PASS && safeEqual(pass, env.DOMAIN_ADMIN_PASS);
+  const license = !!env.LICENSE_ADMIN_PASS && safeEqual(pass, env.LICENSE_ADMIN_PASS);
+  if (!domain && !license) return jsonRes({ error: "Sai mật khẩu" }, 401);
+  return jsonRes({ ok: true, domain, license });
+}
+
 // Proxy bộ cài BASE (neutral) từ link ngoài (GitHub Release...) qua CÙNG tên miền
 // → trang tao-domain.html tải về ghép config, KHÔNG dính lỗi CORS.
 async function handleBaseZip(request, env) {
@@ -319,6 +332,7 @@ export default {
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
     if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
     if (url.pathname === "/api/ds-khach") return handleListCustomers(request, env);
+    if (url.pathname === "/api/noibo") return handleNoiBo(request, env);
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
     // Link TẢI BỘ CÀI LAN có thương hiệu (proxy từ GitHub Release → tải thẳng về)
     if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
@@ -328,7 +342,7 @@ export default {
     const ct = res.headers.get("content-type") || "";
     if (!ct.includes("text/html")) return res;   // chỉ xử lý trang HTML
     // Trang nội bộ (cấp license / cấp domain): KHÔNG tiêm quảng cáo/đại lý, giữ nguyên
-    if (url.pathname.startsWith("/cap-license") || url.pathname.startsWith("/tao-domain")) return res;
+    if (url.pathname.startsWith("/cap-license") || url.pathname.startsWith("/tao-domain") || url.pathname.startsWith("/noibo")) return res;
 
     const code = (url.searchParams.get("dl") || url.searchParams.get("daily") || "").trim().toLowerCase();
     const d = (code && DAILY[code]) ? DAILY[code] : MAC_DINH;

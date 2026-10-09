@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Digiplus — Nội bộ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap">
+<style>
+:root{--paper:#FBF4EF;--surface:#fff;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;--brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--shadow-sm:0 4px 14px rgba(80,30,10,.08)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--paper:#191210;--surface:#241A15;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;--brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.6}
+.top{background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:22px 0}
+.wrap{max-width:520px;margin:0 auto;padding:0 18px}
+.top h1{margin:0;font-size:22px;font-weight:800}.top p{margin:4px 0 0;font-size:13.5px;opacity:.92}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-sm);padding:20px;margin:18px 0}
+label{display:block;font-size:13px;font-weight:600;color:var(--muted);margin:0 0 6px}
+input{width:100%;padding:12px 13px;border:1px solid var(--line);border-radius:11px;font-size:16px;background:var(--surface);color:var(--ink);outline:none;font-family:inherit}
+input:focus{border-color:var(--brand)}
+.btn{margin-top:14px;width:100%;background:var(--brand);color:#fff;border:none;border-radius:12px;padding:14px;font-size:16px;font-weight:700;cursor:pointer;font-family:inherit}
+.btn[disabled]{opacity:.6;cursor:default}
+.err{color:var(--brand-2);font-size:13.5px;margin-top:10px;min-height:1em}
+.links{display:none}
+.tool{display:block;text-decoration:none;color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-top:12px;background:var(--surface)}
+.tool:hover,.tool:focus-visible{border-color:var(--brand);outline:none}
+.tool b{display:block;font-size:17px}
+.tool span{font-size:13.5px;color:var(--muted)}
+.out{background:none;border:none;color:var(--brand-ink);font-weight:700;cursor:pointer;padding:0;margin-top:14px;font-size:13.5px;font-family:inherit}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap"><h1>🔒 Digiplus — Nội bộ</h1><p>Công cụ cho kỹ thuật Digiplus. Nhập mật khẩu để mở.</p></div></div>
+<div class="wrap">
+  <div class="card" id="gate">
+    <label for="pass">Mật khẩu nội bộ</label>
+    <input id="pass" type="password" autocomplete="current-password" placeholder="Mật khẩu cấp domain hoặc cấp license">
+    <button class="btn" id="go">Mở công cụ</button>
+    <div class="err" id="err"></div>
+  </div>
+  <div class="card links" id="links">
+    <a class="tool" href="/tao-domain"><b>🏢 Tạo khách mới / tải lại bộ cài</b><span>Tạo domain cho khách, xem cổng đã cấp, tải bộ cài.</span></a>
+    <a class="tool" href="/cap-license.html"><b>🔑 Cấp license / key máy chấm công</b><span>Nhập Mã máy hoặc serial để lấy key.</span></a>
+    <a class="tool" href="/tai-ban-lan"><b>⬇ Tải bộ cài bản LAN</b><span>Bộ cài không cần domain, chạy trong mạng nội bộ.</span></a>
+    <button class="out" id="out">Khoá lại</button>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const KEY = 'dp_noibo_ok';
+function open_(){ $('gate').style.display = 'none'; $('links').style.display = 'block'; }
+try { if (sessionStorage.getItem(KEY) === '1') open_(); } catch {}
+async function check(){
+  const pass = $('pass').value.trim();
+  $('err').textContent = '';
+  if (!pass) { $('err').textContent = 'Nhập mật khẩu.'; return; }
+  $('go').disabled = true;
+  try {
+    const r = await fetch('/api/noibo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || ('Lỗi ' + r.status));
+    // Nhớ trong phiên này để trang công cụ tương ứng tự điền sẵn mật khẩu (đóng trình duyệt là mất)
+    try {
+      sessionStorage.setItem(KEY, '1');
+      if (d.domain) sessionStorage.setItem('dp_dom_pass', pass);
+      if (d.license) sessionStorage.setItem('dp_lic_pass', pass);
+    } catch {}
+    open_();
+  } catch (e) { $('err').textContent = e.message; }
+  $('go').disabled = false;
+}
+$('go').onclick = check;
+$('pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') check(); });
+$('out').onclick = () => { try { sessionStorage.removeItem(KEY); sessionStorage.removeItem('dp_dom_pass'); sessionStorage.removeItem('dp_lic_pass'); } catch {} location.reload(); };
+</script>
+</body>
+</html>
