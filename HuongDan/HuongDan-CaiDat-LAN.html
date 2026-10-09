@@ -138,13 +138,14 @@ footer b{color:var(--ink)}
     <div class="eyebrow"><span class="num">3</span> Cài đặt</div>
     <h2 class="sec">Các bước cài đặt</h2>
     <div class="dl">
-      <a class="btn" href="https://huongdan.maychamcongcloud.com/tai-ban-lan" id="dlink">⬇ Tải bộ cài LAN</a>
-      <div class="t">Bộ cài LAN (mới nhất)<small>Link do Digiplus cung cấp · giải nén là chạy, không cần cài Node hay gì thêm</small></div>
+      <a class="btn" href="https://huongdan.maychamcongcloud.com/tai-bo-cai" id="dlink">⬇ Tải bộ cài (Setup.exe)</a>
+      <div class="t">Bộ cài đặt Digiplus Chấm Công (mới nhất)<small>Link do Digiplus cung cấp · cài kiểu Tiếp tục → Tiếp tục, không cần cài Node hay gì thêm</small></div>
     </div>
     <ol class="steps">
-      <li><b>Giải nén ra ổ đĩa</b><span>Ví dụ <span class="kbd">C:\DigiplusChamCong</span>. <b>Không</b> để trong thư mục Downloads hay thư mục tạm.</span></li>
-      <li><b>Mở thư mục, chạy <span class="kbd">CaiDat.bat</span></b><span>Bấm đúp. Nếu Windows hỏi "Windows protected your PC" → bấm <b>More info → Run anyway</b>.</span></li>
-      <li><b>Đợi app tự chạy</b><span>Phần mềm tự khởi động và <b>tự bật mỗi khi mở máy</b>. Trình duyệt sẽ tự mở trang quản lý <span class="kbd">/admin</span>.</span></li>
+      <li><b>Chạy file <span class="kbd">DigiplusChamCong-Setup.exe</span> vừa tải</b><span>Bấm đúp. Nếu Windows hỏi "Windows protected your PC" → bấm <b>More info → Run anyway</b>; nếu hỏi quyền quản trị → bấm <b>Yes</b>.</span></li>
+      <li><b>Bấm Tiếp tục, giữ thư mục mặc định</b><span>Phần mềm cài vào <span class="kbd">C:\DigiplusChamCong</span>.</span></li>
+      <li><b>Ở bước "Kiểu cài đặt" chọn <span class="kbd">Bản LAN</span></b><span>Không cần tên khách hay mật khẩu. Ô cổng để nguyên <span class="kbd">8686</span>, rồi bấm Tiếp tục → Cài đặt.</span></li>
+      <li><b>Đợi cài xong, bấm Hoàn tất</b><span>Phần mềm tự khởi động và <b>tự bật mỗi khi mở máy</b>. Trình duyệt mở trang quản lý <span class="kbd">/admin</span>; ngoài Desktop có lối tắt <b>Digiplus Cham Cong</b>.</span></li>
       <li><b>Đăng nhập quản lý</b><span>Mặc định <span class="kbd">admin</span> / <span class="kbd">admin123</span> — vào đổi mật khẩu ngay trong mục Cài đặt.</span></li>
     </ol>
     <div class="note ok"><span class="ic">✅</span><div>Cài xong là app đã chạy. Bước tiếp theo là <b>kích hoạt bản quyền</b> để dùng lâu dài.</div></div>
@@ -212,7 +213,7 @@ footer b{color:var(--ink)}
     <div class="eyebrow"><span class="num">9</span> Gỡ / chuyển máy</div>
     <h2 class="sec">Gỡ cài đặt hoặc chuyển sang máy khác</h2>
     <div class="grid2">
-      <div class="fcard"><div class="vi">🗑</div><h3>Gỡ cài</h3><p>Chạy <span class="kbd">GoCaiDat.bat</span> — gỡ tự chạy + dừng app. Dữ liệu trong <span class="mono">app\data</span> và <span class="mono">app\uploads</span> vẫn còn.</p></div>
+      <div class="fcard"><div class="vi">🗑</div><h3>Gỡ cài</h3><p>Vào <b>Settings → Apps</b> của Windows, tìm <b>Digiplus Chấm Công</b> → Uninstall — gỡ tự chạy + dừng app. Dữ liệu trong <span class="mono">app\data</span> và <span class="mono">app\uploads</span> vẫn còn.</p></div>
       <div class="fcard"><div class="vi">💾</div><h3>Sao lưu / chuyển máy</h3><p>Copy 2 thư mục <span class="mono">app\data</span> và <span class="mono">app\uploads</span> sang máy mới (cùng vị trí), rồi lấy Mã máy mới xin cấp lại license.</p></div>
     </div>
   </section>
