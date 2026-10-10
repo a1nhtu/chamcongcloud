@@ -545,7 +545,7 @@ begin
   ModePage.Add('Bản LAN — chỉ dùng trong mạng nội bộ, không cần tên miền');
 
   DomainPage := CreateInputQueryPage(ModePage.ID, 'Thông tin khách', 'Bản có tên miền',
-    'Nhập tên khách (viết liền không dấu) và mật khẩu cấp domain. Khách chưa có sẽ được tạo mới. Hai ô chọn bên dưới chỉ áp dụng khi tạo khách mới. Máy này cần có Internet.');
+    'Nhập tên khách (viết liền không dấu) và mật khẩu cấp domain. Khách chưa có sẽ được tạo mới. Ô máy chấm công / điện thoại chỉ áp dụng khi tạo khách mới. Máy này cần có Internet.');
   DomainPage.Add('Tên khách (ví dụ: congtyabc):', False);
   DomainPage.Add('Mật khẩu cấp domain:', True);
   ChkDevice := TNewCheckBox.Create(DomainPage);
@@ -564,7 +564,7 @@ begin
   ChkVps.Parent := DomainPage.Surface;
   ChkVps.Top := ChkPhone.Top + ScaleY(34);
   ChkVps.Width := DomainPage.SurfaceWidth; ChkVps.Height := ScaleY(20);
-  ChkVps.Caption := 'Cài trên VPS nhiều khách (né cả cổng đã cấp cho các khách VPS khác)';
+  ChkVps.Caption := 'Đang cài trên VPS nhiều khách của Digiplus (cài ở máy khách thì BỎ tích)';
   ChkVps.Checked := OtherInstCount > 0;   { máy đã có bản Digiplus khác → nhiều khả năng là VPS }
 
   PortPage := CreateInputQueryPage(DomainPage.ID, 'Cổng phần mềm', 'Chọn cổng cho phần mềm trên máy này',
