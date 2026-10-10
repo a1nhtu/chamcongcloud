@@ -1636,6 +1636,9 @@ let _asAdd = null;          // đang mở trang "Thêm": 'emp' (gán ca nhân vi
 let _asTmpSrc = '';
 // Bảng Excel: chế độ TOÀN MÀN HÌNH (ẩn menu trái + cây phòng ban, bảng chiếm gần hết màn hình) — nhớ theo máy
 let _asSheetResize = false;
+let _asSheetQ = '';
+let _asFocusSearch = false;          // Bảng Excel: ô tìm nhân viên (tên / mã)
+let _asReuse = false, _asLast = null;   // gõ ô tìm → vẽ lại bảng bằng dữ liệu đã tải, không gọi lại máy chủ
 let _asFull = (() => { try { return localStorage.getItem('as_full') === '1'; } catch { return false; } })();
 document.addEventListener('keydown', (ev) => {
   if (ev.key === 'Escape' && document.body.classList.contains('as-full') && !document.querySelector('#modal-bg.show')) {
@@ -1679,7 +1682,10 @@ async function pageAssignments() {
   // Dữ liệu chung: NV (+ ca gốc) + ca; thẻ Xem lịch lấy thêm lưới ca thực tế cả tháng
   let data, ranged = [], deptRows = [];
   try {
-    data = await api(`/admin/assignments?from=${from}&to=${to}${_asTab === 'sheet' ? '&grid=1' : ''}`);
+    const dKey = `${_asTab}|${from}|${to}`;
+    if (_asReuse && _asLast && _asLast.key === dKey) data = _asLast.data;
+    else { data = await api(`/admin/assignments?from=${from}&to=${to}${_asTab === 'sheet' ? '&grid=1' : ''}`); _asLast = { key: dKey, data }; }
+    _asReuse = false;
     if (_asTab === 'list') ranged = (await api('/admin/shift-assignments')).rows || [];
     if (_asTab === 'dept') deptRows = (await api('/admin/dept-shift-assignments')).rows || [];
   } catch (e) { setMain(head(pageTitle), tabBar, el('div', { class: 'empty' }, e.message)); return; }
@@ -2024,6 +2030,12 @@ async function pageAssignments() {
    * Delete = bỏ ca đã nhập (về lịch đã phân), Ctrl+Z = hoàn tác. Ô sửa chưa lưu tô vàng → bấm Lưu.
    * Chữ đậm = ca nhập riêng cho ngày đó; chữ xám = ca đang theo lịch đã phân (không cần nhập lại). */
   if (_asTab === 'sheet') {
+    // Ô tìm nhân viên (tên / mã) — lọc dòng ngay trên dữ liệu đã tải (công ty đông người)
+    const sq = _asSheetQ.trim().toLowerCase();
+    const sheetEmps = sq ? emps.filter((e) => (e.full_name || '').toLowerCase().includes(sq) || String(e.code || '').toLowerCase().includes(sq)) : emps;
+    const searchS = el('input', { placeholder: '🔍 Tìm NV (tên / mã)', value: _asSheetQ, style: 'width:170px', title: 'Gõ tên hoặc mã nhân viên để lọc' });
+    let sqT = null;
+    searchS.oninput = () => { clearTimeout(sqT); sqT = setTimeout(() => { _asSheetQ = searchS.value; _asReuse = true; _asFocusSearch = true; pageAssignments(); }, 250); };
     const codeOfShift = new Map(data.shifts.map((s) => [s.id, (s.code || '').trim() || s.name]));
     const canon = new Map();   // CHỮ HOA (mã hoặc tên ca) → mã chuẩn để hiển thị
     for (const s of data.shifts) { const c = (s.code || '').trim() || s.name; canon.set(s.name.trim().toUpperCase(), c); }
@@ -2039,7 +2051,7 @@ async function pageAssignments() {
       if (parts.length && parts.every((p) => canon.has(p))) return { v: [...new Set(parts.map((p) => canon.get(p)))].join('+') };
       return { v: t, bad: true };
     };
-    // Giá trị ĐÃ NHẬP ở bảng này (lớp ưu tiên cao nhất). Lịch trình tạm thời / ca phần mềm tự tìm nằm bên dưới (emps[r].grid).
+    // Giá trị ĐÃ NHẬP ở bảng này (lớp ưu tiên cao nhất). Lịch trình tạm thời / ca phần mềm tự tìm nằm bên dưới (sheetEmps[r].grid).
     const saved = new Map();
     for (const a of data.assignments) {
       if (a.source === 'temp') continue;
@@ -2047,17 +2059,17 @@ async function pageAssignments() {
       if (a.is_off) saved.set(k, 'NGHỈ');
       else if (saved.get(k) !== 'NGHỈ') { const c = codeOfShift.get(a.shift_id); if (c) saved.set(k, saved.has(k) ? saved.get(k) + '+' + c : c); }
     }
-    const R = emps.length, C = days.length;
-    const keyOf = (r, c) => emps[r].id + '|' + days[c];
+    const R = sheetEmps.length, C = days.length;
+    const keyOf = (r, c) => sheetEmps[r].id + '|' + days[c];
     const cellEls = [];   // [r][c] → td
     const curVal = (r, c) => { const k = keyOf(r, c); return _asDirty.has(k) ? _asDirty.get(k) : (saved.get(k) || ''); };
     const paint = (r, c) => {
       const td = cellEls[r][c], k = keyOf(r, c), dirty = _asDirty.has(k);
-      const v = curVal(r, c), g = (emps[r].grid || [])[c] || {};
+      const v = curVal(r, c), g = (sheetEmps[r].grid || [])[c] || {};
       td.textContent = v || g.l || '';   // chưa nhập ở bảng này → hiện (chữ mờ) ca phần mềm tự tìm: lịch tạm thời / lịch đã gán / ca dò theo giờ chấm
       td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph' + (g.k === 'temp' ? ' tmp' : g.k === 'found' ? ' fnd' : '')) + (dirty && norm(v).bad ? ' bad' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
       const under = g.k === 'none' ? 'tự động theo giờ chấm' : g.k === 'temp' ? (g.t || g.l) : g.k === 'found' ? g.t : 'theo lịch đã gán: ' + (g.t || g.l || '');
-      td.title = `${emps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập ở bảng này — ưu tiên cao nhất)') + `\nBấm "↺ Về tự động" để bỏ → ${under}` : (dirty ? '↺ về tự động (chưa lưu) → ' : '') + under);
+      td.title = `${sheetEmps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập ở bảng này — ưu tiên cao nhất)') + `\nBấm "↺ Về tự động" để bỏ → ${under}` : (dirty ? '↺ về tự động (chưa lưu) → ' : '') + under);
     };
 
     // ----- vùng chọn -----
@@ -2072,7 +2084,7 @@ async function pageAssignments() {
       for (let r = q.r1; r <= q.r2; r++) for (let c = q.c1; c <= q.c2; c++) { cellEls[r][c].classList.add('sel'); painted.push(cellEls[r][c]); }
       cellEls[sel.ar][sel.ac].classList.add('anchor');
       const n = (q.r2 - q.r1 + 1) * (q.c2 - q.c1 + 1);
-      selInfo.textContent = n > 1 ? `Đang chọn ${n} ô (${q.r2 - q.r1 + 1} nhân viên × ${q.c2 - q.c1 + 1} ngày)` : `${emps[sel.ar].full_name} · ${fmtD(days[sel.ac])}`;
+      selInfo.textContent = n > 1 ? `Đang chọn ${n} ô (${q.r2 - q.r1 + 1} nhân viên × ${q.c2 - q.c1 + 1} ngày)` : `${sheetEmps[sel.ar].full_name} · ${fmtD(days[sel.ac])}`;
     };
     const setSel = (r, c, extend) => {
       r = Math.max(0, Math.min(R - 1, r)); c = Math.max(0, Math.min(C - 1, c));
@@ -2147,7 +2159,7 @@ async function pageAssignments() {
     });
     tbl.append(el('thead', {}, hr));
     const tb = el('tbody'); tbl.append(tb);
-    emps.forEach((e, r) => {
+    sheetEmps.forEach((e, r) => {
       const rowHead = el('td', { class: 'pin p0 rh', title: 'Bấm để chọn cả dòng' }, String(r + 1));
       rowHead.onclick = () => { sel = { ar: r, ac: 0, r, c: C - 1 }; drawSel(); box.focus({ preventScroll: true }); };
       const tr = el('tr', {}, rowHead, el('td', { class: 'pin p1' }, e.code), el('td', { class: 'pin p2', title: e.full_name }, e.full_name), el('td', { class: 'dept' }, e.department || ''));
@@ -2184,7 +2196,7 @@ async function pageAssignments() {
     box.addEventListener('copy', (ev) => {
       if (editing || !R) return;
       const q = rect(); const lines = [];
-      for (let r = q.r1; r <= q.r2; r++) { const row = []; for (let c = q.c1; c <= q.c2; c++) { const g = (emps[r].grid || [])[c] || {}; row.push(curVal(r, c) || (g.k !== 'none' && g.k !== 'schedule' ? g.l : '')); } lines.push(row.join('\t')); }
+      for (let r = q.r1; r <= q.r2; r++) { const row = []; for (let c = q.c1; c <= q.c2; c++) { const g = (sheetEmps[r].grid || [])[c] || {}; row.push(curVal(r, c) || (g.k !== 'none' && g.k !== 'schedule' ? g.l : '')); } lines.push(row.join('\t')); }
       ev.clipboardData.setData('text/plain', lines.join('\n')); ev.preventDefault();
       toast(`Đã copy ${lines.length} dòng × ${q.c2 - q.c1 + 1} cột`, 'ok');
     });
@@ -2215,7 +2227,7 @@ async function pageAssignments() {
     saveBtn.onclick = async () => {
       if ([..._asDirty.values()].some((v) => norm(v).bad)) return toast('Còn ô sai mã ca (chữ đỏ). Sửa lại trước khi lưu.', 'err');
       const cells = [..._asDirty].map(([k, v]) => { const [eid, date] = k.split('|'); return { employee_id: +eid, date, value: v }; });
-      saveBtn.disabled = true;
+      saveBtn.disabled = true; saveBtn.textContent = cells.length > 500 ? `⏳ Đang lưu ${cells.length} ô…` : '⏳ Đang lưu…';
       try {
         const r = await api('/admin/assignments/cells', { method: 'POST', body: { cells } });
         if (r.errorCount) { toast(`Đã lưu ${r.saved} ô, ${r.errorCount} ô lỗi: ${r.errors[0].error}`, 'err'); }
@@ -2269,7 +2281,7 @@ async function pageAssignments() {
     fullBtn.title = _asFull ? 'Hiện lại menu trái (phím Esc)' : 'Ẩn menu trái và cây phòng ban để bảng rộng nhất';
     if (deptBar) { deptBar.remove(); deptBar.style.marginBottom = '0'; deptBar.firstChild.remove(); }   // bỏ chữ "Phòng ban:" cho gọn
     undoBtn.textContent = '↶'; undoBtn.title = 'Hoàn tác (Ctrl+Z)';
-    headTools.push(deptBar, rangeNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, fullBtn, helpBtn);
+    headTools.push(deptBar, searchS, rangeNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, fullBtn, helpBtn);
     codes.style.margin = '0';
     const fitBox = () => setTimeout(() => { box.style.maxHeight = Math.max(240, innerHeight - box.getBoundingClientRect().top - 14) + 'px'; });
     main.append(
@@ -2395,7 +2407,10 @@ async function pageAssignments() {
   }
 
   setMain(head(pageTitle, ...headTools), tabBar, el('div', { class: 'emp-wrap' + (_asTab === 'sheet' ? ' as-sheet-page' : '') }, _asTab === 'sheet' && _asFull ? null : side, main));
-  if (_asTab === 'sheet') { $('#main .page-head').classList.add('as-head'); if (_asFull) document.body.classList.add('as-full'); }
+  if (_asTab === 'sheet') {
+    $('#main .page-head').classList.add('as-head'); if (_asFull) document.body.classList.add('as-full');
+    if (_asFocusSearch) { _asFocusSearch = false; const si = $('#main .page-head input[placeholder^="🔍"]'); if (si) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); } }
+  }
 }
 
 /* ---------- 4c) PHÂN CA LÀM VIỆC (gán ca/lịch trình theo khoảng ngày) ---------- */
