@@ -4080,10 +4080,13 @@ async function pageSettings() {
   const wkOtChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_work_as_ot ?? '1') === '1' ? { checked: '' } : {}) });
   const roundI = input('st-round', { type: 'number', min: 0, max: 3, value: s.workunit_rounding ?? 2 });
   const payStartI = input('st-paystart', { type: 'number', min: 1, max: 28, value: s.pay_period_start_day ?? 1 });
+  const otWdI = input('st-otwd', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekday ?? 1.5 });
+  const otWkI = input('st-otwk', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekend ?? 2 });
+  const otHoI = input('st-otho', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_holiday ?? 3 });
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, workunit_rounding: roundI.value, pay_period_start_day: payStartI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, workunit_rounding: roundI.value, pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -4101,6 +4104,9 @@ async function pageSettings() {
         el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkOtChk,
           el('div', {}, 'Đi làm vào ngày cuối tuần tính là TĂNG CA',
             el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Cả thời gian làm ngày đã tích ở trên thành tăng ca cuối tuần (không tính công thường). Báo cáo quy đổi 8 giờ = 1 công ở cột "Công TC cuối tuần". VD tích T7 → đi làm thứ 7 là tăng ca.')))),
+      el('div', {}, el('label', {}, 'Hệ số tăng ca (nhân với đơn giá giờ khi tính lương)'),
+        el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px' }, field('Ngày thường', otWdI), field('Ngày cuối tuần', otWkI), field('Ngày lễ', otHoI)),
+        el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Áp cho mọi nhân viên. Ai cần hệ số khác thì đặt riêng ở trang Lương (đặt riêng thì đổi ở đây không ảnh hưởng người đó).')),
       field('Làm tròn số công (số chữ số thập phân)', roundI),
       field('Ngày bắt đầu kỳ lương (1 = theo tháng dương lịch; VD 26 = 26 tháng trước→25 tháng này)', payStartI),
       el('div', { style: 'display:flex;gap:10px' }, saveCalc, ...(hasPerm('recompute') ? [recalcBtn] : [])),
@@ -4127,7 +4133,7 @@ async function pageSettings() {
     catch (e) { toast(e.message, 'err'); }
   };
   const panelHol = (hasPerm('holidays') && !hourlyMode()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
-    el('h3', { style: 'margin-top:0' }, 'Ngày lễ (tính OT ×3)'),
+    el('h3', { style: 'margin-top:0' }, 'Ngày lễ'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', { class: 'two-col' }, field('Ngày', holDate), field('Tên', holName)),
       addHol, holBox)) : null;

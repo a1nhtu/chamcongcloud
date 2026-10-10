@@ -23,8 +23,13 @@ const DEFAULT_CFG = {
   ot_rate_weekday: 1.5, ot_rate_weekend: 2.0, ot_rate_holiday: 3.0, allowance: 0, hourly_rate: 0,
 };
 
+// Hệ số tăng ca CHUNG của công ty (Cài đặt > Quy tắc tính công) — dùng cho NV chưa đặt lương riêng
+export function companyOtRates() {
+  const num = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v > 0 ? v : d; };
+  return { ot_rate_weekday: num('ot_rate_weekday', 1.5), ot_rate_weekend: num('ot_rate_weekend', 2.0), ot_rate_holiday: num('ot_rate_holiday', 3.0) };
+}
 export function getSalaryConfig(employeeId) {
-  return db.prepare('SELECT * FROM salary_configs WHERE employee_id = ?').get(employeeId) || { employee_id: employeeId, ...DEFAULT_CFG };
+  return db.prepare('SELECT * FROM salary_configs WHERE employee_id = ?').get(employeeId) || { employee_id: employeeId, ...DEFAULT_CFG, ...companyOtRates() };
 }
 
 // Tính lương 1 nhân viên trong kỳ [from,to]

@@ -1,6 +1,6 @@
 // Nhóm route CẤU HÌNH LƯƠNG + bảng lương + ngày lễ.
 import { db, getSetting, adminAttWhere } from '../../db.js';
-import { computePayrollTable } from '../../payroll-calc.js';
+import { computePayrollTable, companyOtRates } from '../../payroll-calc.js';
 import { sendCaughtError } from '../../util.js';
 
 export function registerPayrollRoutes(r, { need }) {
@@ -9,15 +9,17 @@ export function registerPayrollRoutes(r, { need }) {
     const rows = db.prepare(`
       SELECT e.id AS employee_id, e.code, e.full_name, e.department,
              c.basic_salary, c.daily_rate, c.working_days_per_month,
-             c.ot_rate_weekday, c.ot_rate_weekend, c.ot_rate_holiday, c.allowance, c.hourly_rate
+             COALESCE(c.ot_rate_weekday, ?) AS ot_rate_weekday, COALESCE(c.ot_rate_weekend, ?) AS ot_rate_weekend,
+             COALESCE(c.ot_rate_holiday, ?) AS ot_rate_holiday, c.allowance, c.hourly_rate
       FROM employees e LEFT JOIN salary_configs c ON c.employee_id = e.id
       WHERE e.active = 1${adminAttWhere('e.role')}
-      ORDER BY e.department, e.full_name`).all();
+      ORDER BY e.department, e.full_name`).all(...Object.values(companyOtRates()));
     res.json({ rows });
   });
   r.put('/salary/:empId', need('salary'), (req, res) => {
     const b = req.body || {};
     const eid = +req.params.empId;
+    const def = companyOtRates();
     const emp = db.prepare('SELECT id FROM employees WHERE id = ?').get(eid);
     if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
     db.prepare(`INSERT INTO salary_configs
@@ -30,7 +32,7 @@ export function registerPayrollRoutes(r, { need }) {
         ot_rate_holiday=excluded.ot_rate_holiday, allowance=excluded.allowance,
         hourly_rate=excluded.hourly_rate, updated_at=datetime('now')`)
       .run(eid, +b.basic_salary || 0, b.daily_rate ? +b.daily_rate : null, +b.working_days_per_month || 26,
-        +b.ot_rate_weekday || 1.5, +b.ot_rate_weekend || 2.0, +b.ot_rate_holiday || 3.0, +b.allowance || 0, +b.hourly_rate || 0);
+        +b.ot_rate_weekday || def.ot_rate_weekday, +b.ot_rate_weekend || def.ot_rate_weekend, +b.ot_rate_holiday || def.ot_rate_holiday, +b.allowance || 0, +b.hourly_rate || 0);
     res.json({ ok: true });
   });
 

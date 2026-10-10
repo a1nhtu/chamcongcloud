@@ -1,5 +1,5 @@
 // Nhóm route CÀI ĐẶT hệ thống + logo thương hiệu + cập nhật phần mềm.
-import { getSetting, setSetting, attModeMix } from '../../db.js';
+import { db, getSetting, setSetting, attModeMix } from '../../db.js';
 import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../../update.js';
 
@@ -14,6 +14,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       workunit_rounding: getSetting('workunit_rounding', '2'),
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
+      ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
       ...attModeMix(),   // any_shift / any_hourly: công ty đang có NV chấm theo ca / theo giờ
@@ -46,6 +47,15 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
     if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));
     if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);
+    // Hệ số tăng ca chung: NV đang dùng đúng hệ số chung CŨ (chưa đặt riêng) được đổi theo; NV đã đặt hệ số riêng giữ nguyên
+    for (const [k, d] of [['ot_rate_weekday', '1.5'], ['ot_rate_weekend', '2'], ['ot_rate_holiday', '3']]) {
+      if (b[k] == null) continue;
+      const v = parseFloat(b[k]);
+      if (!(Number.isFinite(v) && v > 0 && v <= 10)) return res.status(400).json({ error: 'Hệ số tăng ca phải từ 0,1 đến 10' });
+      const old = parseFloat(getSetting(k, d));
+      if (v !== old) db.prepare(`UPDATE salary_configs SET ${k} = ? WHERE ABS(${k} - ?) < 0.0001`).run(v, old);
+      setSetting(k, String(v));
+    }
     if (b.geofence_enforce != null) setSetting('geofence_enforce', b.geofence_enforce ? '1' : '0');
     if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');
     if (b.hourly_merge_rule != null) setSetting('hourly_merge_rule', b.hourly_merge_rule === 'pairs' ? 'pairs' : 'filo');
