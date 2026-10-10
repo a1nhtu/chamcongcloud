@@ -223,3 +223,15 @@ table.as-sheet td.c.fnd { color: #0f766e; }
 .as-legend .lg { font-style: normal; font-size: 11.5px; min-width: 30px; text-align: center; padding: 1px 4px; border: 1px solid var(--line); border-radius: 4px; background: #fff; }
 .as-legend .lg.ex { color: #0f172a; font-weight: 700; } .as-legend .lg.ph { color: #b3b9c2; } .as-legend .lg.tmp { color: #c2410c; font-style: italic; }
 .as-legend .lg.fnd { color: #0f766e; } .as-legend .lg.dirty { background: #fef08a; color: #0f172a; font-weight: 700; }
+/* Bảng Excel gọn chiều cao + toàn màn hình */
+.page-head.as-head { margin-bottom: 8px; gap: 8px; }
+.page-head.as-head h2 { display: none; }   /* bảng Excel: bỏ tiêu đề lớn cho bảng cao hơn (menu trái đã đánh dấu mục đang xem) */
+.page-head.as-head { justify-content: flex-start; }
+.page-head.as-head .toolbar { gap: 6px; }
+.page-head.as-head .btn { padding: 7px 12px; }
+.as-bar2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 0 0 6px; }
+.as-bar2 .as-legend { margin: 0; }
+.as-sheet-page .emp-main { min-width: 0; }
+body.as-full .layout { grid-template-columns: 1fr; }
+body.as-full .sidebar { display: none; }
+body.as-full .main { padding: 10px 14px 6px; }

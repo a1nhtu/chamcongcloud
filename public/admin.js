@@ -214,7 +214,7 @@ function setupWizard() {
 function head(title, ...tools) {
   return el('div', { class: 'page-head' }, el('h2', {}, title), el('div', { class: 'toolbar' }, ...tools));
 }
-function setMain(...nodes) { const m = $('#main'); m.innerHTML = ''; nodes.forEach(n => n && m.append(n)); }
+function setMain(...nodes) { document.body.classList.remove('as-full'); const m = $('#main'); m.innerHTML = ''; nodes.forEach(n => n && m.append(n)); }
 function loading() { return el('div', { class: 'empty' }, 'Đang tải…'); }
 
 function openModal(title, bodyNodes, footNodes) {
@@ -1619,8 +1619,8 @@ function addMonths(dateStr, n) { const d = new Date(dateStr.slice(0, 7) + '-01T1
 function monthDaysArr(month) { const [y, m] = month.split('-').map(Number); const n = new Date(Date.UTC(y, m, 0)).getUTCDate(); return Array.from({ length: n }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`); }
 
 let _asStart = null;         // ngày mốc đang xem
+let _asRange = null;         // Bảng Excel: khoảng ngày tự chọn { from, to } (null = cả tháng của _asStart)
 let _asMode = 'week';        // 'week' = theo tuần | 'month' = theo tháng
-let _asRange = null;         // {from,to} khi Anh tự chọn khoảng ngày (đè lên tuần/tháng)
 function daysBetween(from, to) { const out = []; let d = from; for (let i = 0; i < 366 && d <= to; i++) { out.push(d); d = addDays(d, 1); } return out.length ? out : [from]; }
 
 /* Trang PHÂN CA — bố cục kiểu "Lịch trình" của ZKBio: cây phòng ban bên trái + 3 thẻ bên phải
@@ -1633,7 +1633,15 @@ let _asSearch = '';
 let _asTreeHidden = (() => { try { return localStorage.getItem('as_tree_hidden') === '1'; } catch { return false; } })();   // ẩn cây phòng ban cho rộng màn hình
 const AS_TABS = [['list', '4. Gán ca cho nhân viên'], ['dept', '5. Gán ca cho phòng ban'], ['sheet', 'Xem lịch trình (kiểu Excel)'], ['temp', 'Lịch trình tạm thời']];
 let _asAdd = null;          // đang mở trang "Thêm": 'emp' (gán ca nhân viên) | 'dept' (gán ca phòng ban) | 'temp' (lịch trình tạm thời)
-let _asTmpSrc = '';         // lọc nguồn ở Lịch trình tạm thời: '' | 'temp' | 'sheet'
+let _asTmpSrc = '';
+// Bảng Excel: chế độ TOÀN MÀN HÌNH (ẩn menu trái + cây phòng ban, bảng chiếm gần hết màn hình) — nhớ theo máy
+let _asSheetResize = false;
+let _asFull = (() => { try { return localStorage.getItem('as_full') === '1'; } catch { return false; } })();
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && document.body.classList.contains('as-full') && !document.querySelector('#modal-bg.show')) {
+    _asFull = false; try { localStorage.setItem('as_full', '0'); } catch {} document.body.classList.remove('as-full'); pageAssignments();
+  }
+});         // lọc nguồn ở Lịch trình tạm thời: '' | 'temp' | 'sheet'
 // Cây phòng ban có cấp cha–con: [{ name, depth }], gồm cả tên phòng ban chỉ có ở hồ sơ nhân viên
 function asDeptNodes(master, extraNames) {
   const byName = (a, b) => a.name.localeCompare(b.name, 'vi');
@@ -1656,7 +1664,8 @@ async function pageAssignments() {
   if (!_asStart) _asStart = todayVN();
   const canEdit = hasPerm('assignments');
   const curMonth = _asStart.slice(0, 7);
-  const days = monthDaysArr(curMonth);
+  // Bảng Excel xem được 1 khoảng ngày tự chọn (≤ 62 ngày) — để xuất / nhập Excel 1 khoảng nhỏ cho nhanh
+  const days = _asTab === 'sheet' && _asRange ? (() => { const out = []; for (let d = new Date(_asRange.from + 'T12:00:00Z'); d <= new Date(_asRange.to + 'T12:00:00Z') && out.length < 62; d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10)); return out; })() : monthDaysArr(curMonth);
   const from = days[0], to = days[days.length - 1];
   const fmtD = (d) => (d ? d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : '');
 
@@ -1713,6 +1722,7 @@ async function pageAssignments() {
   const emps = data.employees.filter(inDept);
   const deptLabel = _asDept === '*' ? 'tất cả phòng ban' : _asDept === '' ? 'nhóm chưa có phòng ban' : `phòng "${_asDept}"`;
   const main = el('div', { class: 'emp-main' }, deptBar);
+  const headTools = [];   // nút đặt ngay trên dòng tiêu đề (bảng Excel: tiết kiệm chiều cao)
 
   /* ================= TRANG "THÊM" (kiểu ZKBio) =================
    * Trái: chọn đối tượng — nhân viên (bấm phòng ban → tick người, cộng dồn qua nhiều phòng) hoặc phòng ban (tick trên cây).
@@ -1934,6 +1944,29 @@ async function pageAssignments() {
       btnSm('‹', () => go(addMonths(_asStart, -1)), 'ghost'), mI,
       btnSm('›', () => go(addMonths(_asStart, 1)), 'ghost'),
       btnSm('Tháng này', () => go(todayVN()), 'ghost'));
+  };
+  // Chọn khoảng ngày cho Bảng Excel: ‹ [từ ngày] → [đến ngày] › · Tháng này
+  const rangeNav = () => {
+    const f0 = days[0], t0 = days[days.length - 1];
+    const fI = el('input', { type: 'date', value: f0, style: 'width:140px', title: 'Từ ngày' });
+    const tI = el('input', { type: 'date', value: t0, style: 'width:140px', title: 'Đến ngày' });
+    const reset = () => { fI.value = f0; tI.value = t0; };
+    const apply = (which) => {
+      let f = fI.value, t = tI.value;
+      if (!f || !t) return;
+      // chọn Từ ngày sau Đến ngày → Đến ngày dời về cuối tháng của Từ ngày; chọn Đến ngày trước Từ ngày → Từ ngày về đầu tháng
+      if (t < f) { if (which === 'from') t = monthDaysArr(f.slice(0, 7)).slice(-1)[0]; else f = t.slice(0, 8) + '01'; }
+      if (Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1 > 62) { toast('Chọn tối đa 62 ngày', 'err'); reset(); return; }
+      if (!asLeaveOk()) { reset(); return; }
+      const wholeMonth = f.slice(8) === '01' && t === monthDaysArr(f.slice(0, 7)).slice(-1)[0];
+      _asRange = wholeMonth ? null : { from: f, to: t }; _asStart = f; pageAssignments();
+    };
+    fI.onchange = () => apply('from'); tI.onchange = () => apply('to');
+    const go = (n) => { if (!asLeaveOk()) return; _asRange = null; _asStart = addMonths(f0, n); pageAssignments(); };
+    const prev = btnSm('‹', () => go(-1), 'ghost'); prev.title = 'Tháng trước';
+    const next = btnSm('›', () => go(1), 'ghost'); next.title = 'Tháng sau';
+    return el('div', { style: 'display:flex;gap:6px;align-items:center' }, prev, fI, el('span', { style: 'color:var(--muted)' }, '→'), tI, next,
+      btnSm('Tháng này', () => { if (!asLeaveOk()) return; _asRange = null; _asStart = todayVN(); pageAssignments(); }, 'ghost'));
   };
   const shiftOpts = (sel, autoLabel) => [
     el('option', { value: '', ...(sel === '' ? { selected: '' } : {}) }, autoLabel),
@@ -2194,10 +2227,10 @@ async function pageAssignments() {
     const fileI = el('input', { type: 'file', accept: '.xlsx', style: 'display:none' });
     const exBtn = btnSm('⬇ Xuất Excel', async () => {
       try {
-        const res = await api(`/admin/assignments/export.xlsx?month=${curMonth}&dept=${encodeURIComponent(deptQS)}`, { raw: true });
+        const res = await api(`/admin/assignments/export.xlsx?from=${days[0]}&to=${days[days.length - 1]}&dept=${encodeURIComponent(deptQS)}`, { raw: true });
         if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status, 'err'); return; }
         const blob = await res.blob(); const url = URL.createObjectURL(blob);
-        const a = el('a', { href: url, download: `phanca_${curMonth}.xlsx` });
+        const a = el('a', { href: url, download: `phanca_${days[0]}_${days[days.length - 1]}.xlsx` });
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(() => URL.revokeObjectURL(url), 4000);
         if (_asDirty.size) toast('Lưu ý: file xuất chưa gồm các ô đang sửa chưa lưu', 'err');
@@ -2209,8 +2242,8 @@ async function pageAssignments() {
       const reader = new FileReader();
       reader.onload = async () => {
         try {
-          const r = await api('/admin/assignments/import', { method: 'POST', body: { month: curMonth, fileBase64: reader.result } });
-          let msg = `Đã nhập tháng ${curMonth.slice(5)}/${curMonth.slice(0, 4)}: ${r.updated} ô ca, ${r.off} ô nghỉ, ${r.cleared} ô bỏ ca` + (r.keptAuto ? ` · ${r.keptAuto} ô giữ nguyên ca tự tìm` : '');
+          const r = await api('/admin/assignments/import', { method: 'POST', body: { from: days[0], to: days[days.length - 1], fileBase64: reader.result } });
+          let msg = `Đã nhập ${fmtD(r.from)} → ${fmtD(r.to)}: ${r.updated} ô ca, ${r.off} ô nghỉ, ${r.cleared} ô bỏ ca` + (r.keptAuto ? ` · ${r.keptAuto} ô giữ nguyên ca tự tìm` : '');
           if (r.errorCount) msg += ` · ${r.errorCount} lỗi`;
           toast(msg, r.errorCount ? 'err' : 'ok');
           if (r.errorCount) alert('Một số dòng lỗi (các ô khác vẫn được nhập):\n' + r.errors.join('\n'));
@@ -2222,24 +2255,36 @@ async function pageAssignments() {
     };
     // Bảng mã ca: bấm 1 mã để điền vào vùng đang chọn (không cần gõ)
     const chipFor = (label, value, title, style) => { const b = el('button', { class: 'as-code', title, style: style || '' }, label); b.onclick = () => { if (!canEdit) return; fillSel(value); box.focus({ preventScroll: true }); }; return b; };
-    const codes = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0' }, el('span', { style: 'font-size:12.5px;color:var(--muted)' }, 'Mã ca (bấm để điền vào ô đang chọn):'),
+    const codes = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0' }, el('span', { style: 'font-size:12.5px;color:var(--muted)', title: 'Bấm 1 mã để điền vào các ô đang chọn' }, 'Mã ca:'),
       ...data.shifts.map((s) => chipFor((s.code || '').trim() || s.name, (s.code || '').trim() || s.name, `${s.name} (${s.start_time}-${s.end_time})`)),
       chipFor('NGHỈ', 'NGHỈ', 'Ngày nghỉ', 'color:#b45309;border-color:#f5d0a9'), chipFor('↺ Tự động', '', 'Bỏ ca đã nhập tay ngày đó → phần mềm tự tìm ca lại', 'color:#6b7280'));
     const noCode = data.shifts.filter((s) => !(s.code || '').trim());
+    // Gọn chiều cao: thanh công cụ lên dòng tiêu đề; mã ca + chú thích + ô đang chọn chung 1 dòng; hướng dẫn ẩn sau nút "?"
+    let helpOn = false; try { helpOn = localStorage.getItem('as_help') === '1'; } catch {}
+    const hint = el('div', { class: 'map-hint', style: 'margin:0 0 6px;' + (helpOn ? '' : 'display:none') }, 'Dùng như Excel: bấm 1 ô rồi gõ mã ca + Enter · kéo chuột (hoặc Shift + mũi tên) chọn nhiều ô rồi gõ để điền cả vùng · Ctrl+C / Ctrl+V copy–dán (dán được từ Excel) · Delete (hoặc nút ↺ Về tự động) = bỏ ô nhập tay, phần mềm tự tìm ca lại · Ctrl+Z hoàn tác · bấm số ngày / số thứ tự để chọn cả cột / cả dòng · Esc thoát toàn màn hình.'
+      + (noCode.length ? ` Ca chưa đặt mã (${noCode.map((s) => s.name).join(', ')}) đang dùng tên ca làm mã — nên đặt mã ngắn ở mục Ca làm.` : ''));
+    const helpBtn = btnSm('?', () => { const on = hint.style.display === 'none'; hint.style.display = on ? '' : 'none'; try { localStorage.setItem('as_help', on ? '1' : '0'); } catch {} fitBox(); }, 'ghost');
+    helpBtn.title = 'Hướng dẫn thao tác';
+    const fullBtn = btnSm(_asFull ? '⤡' : '⛶', () => { _asFull = !_asFull; try { localStorage.setItem('as_full', _asFull ? '1' : '0'); } catch {} pageAssignments(); }, 'ghost');
+    fullBtn.title = _asFull ? 'Hiện lại menu trái (phím Esc)' : 'Ẩn menu trái và cây phòng ban để bảng rộng nhất';
+    if (deptBar) { deptBar.remove(); deptBar.style.marginBottom = '0'; deptBar.firstChild.remove(); }   // bỏ chữ "Phòng ban:" cho gọn
+    undoBtn.textContent = '↶'; undoBtn.title = 'Hoàn tác (Ctrl+Z)';
+    headTools.push(deptBar, rangeNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, fullBtn, helpBtn);
+    codes.style.margin = '0';
+    const fitBox = () => setTimeout(() => { box.style.maxHeight = Math.max(240, innerHeight - box.getBoundingClientRect().top - 14) + 'px'; });
     main.append(
-      el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, monthNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, warn),
-      codes,
-      el('div', { class: 'as-legend' },
+      warn,
+      el('div', { class: 'as-bar2' }, codes, el('div', { class: 'as-legend' },
         el('span', {}, el('i', { class: 'lg ex' }, 'HC'), 'nhập tay (ưu tiên cao nhất)'),
         el('span', {}, el('i', { class: 'lg ph' }, 'HC'), 'theo lịch đã gán'),
         el('span', {}, el('i', { class: 'lg tmp' }, 'HC'), 'theo lịch tạm thời'),
         el('span', {}, el('i', { class: 'lg fnd' }, 'HC'), 'ca đã dò theo giờ chấm'),
-        el('span', {}, el('i', { class: 'lg dirty' }, 'HC'), 'chưa lưu')),
-      el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, 'Dùng như Excel: bấm 1 ô rồi gõ mã ca + Enter · kéo chuột (hoặc Shift + mũi tên) chọn nhiều ô rồi gõ để điền cả vùng · Ctrl+C / Ctrl+V copy–dán (dán được từ Excel) · Delete (hoặc nút ↺ Về tự động) = bỏ ô nhập tay, phần mềm tự tìm ca lại · Ctrl+Z hoàn tác · bấm số ngày / số thứ tự để chọn cả cột / cả dòng.'
-        + (noCode.length ? ` Ca chưa đặt mã (${noCode.map((s) => s.name).join(', ')}) đang dùng tên ca làm mã — nên đặt mã ngắn ở mục Ca làm.` : '')),
-      box, el('div', { style: 'margin-top:6px' }, selInfo));
+        el('span', {}, el('i', { class: 'lg dirty' }, 'HC'), 'chưa lưu')), el('span', { style: 'flex:1' }), selInfo),
+      hint,
+      box);
     syncBar();
-    setTimeout(() => { box.style.maxHeight = Math.max(280, innerHeight - box.getBoundingClientRect().top - 40) + 'px'; if (R) drawSel(); });
+    fitBox(); setTimeout(() => { if (R) drawSel(); });
+    if (!_asSheetResize) { _asSheetResize = true; addEventListener('resize', () => { const b = document.querySelector('.as-sheet-box'); if (b) b.style.maxHeight = Math.max(240, innerHeight - b.getBoundingClientRect().top - 14) + 'px'; }); }
   }
 
   /* ================= LỊCH TRÌNH PHÒNG BAN =================
@@ -2349,7 +2394,8 @@ async function pageAssignments() {
       el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Thứ tự ưu tiên khi tính ca của một ngày: ① ô nhập ở Xem lịch trình (kiểu Excel) → ② Lịch trình tạm thời → ③ Gán ca cho nhân viên → ④ Gán ca cho phòng ban → ⑤ ca mặc định ở hồ sơ. Ô nhập ở bảng Excel luôn đè lên lịch tạm thời; xoá ô Excel (nút ↺ Về tự động) thì lịch tạm thời hiện lại.'));
   }
 
-  setMain(head(pageTitle), tabBar, el('div', { class: 'emp-wrap' }, side, main));
+  setMain(head(pageTitle, ...headTools), tabBar, el('div', { class: 'emp-wrap' + (_asTab === 'sheet' ? ' as-sheet-page' : '') }, _asTab === 'sheet' && _asFull ? null : side, main));
+  if (_asTab === 'sheet') { $('#main .page-head').classList.add('as-head'); if (_asFull) document.body.classList.add('as-full'); }
 }
 
 /* ---------- 4c) PHÂN CA LÀM VIỆC (gán ca/lịch trình theo khoảng ngày) ---------- */

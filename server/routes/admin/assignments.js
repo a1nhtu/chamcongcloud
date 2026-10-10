@@ -26,6 +26,13 @@ function monthDaysList(month) {
   const n = new Date(Date.UTC(y, m, 0)).getUTCDate();
   return Array.from({ length: n }, (_, i) => `${month}-${String(i + 1).padStart(2, '0')}`);
 }
+// Danh sách ngày [from, to] (tối đa 93 ngày)
+function rangeDaysList(from, to) {
+  const out = [];
+  for (let d = new Date(from + 'T12:00:00Z'); d <= new Date(to + 'T12:00:00Z') && out.length < 93; d.setUTCDate(d.getUTCDate() + 1)) out.push(d.toISOString().slice(0, 10));
+  return out;
+}
+const isYmd = (x) => /^\d{4}-\d{2}-\d{2}$/.test(String(x || ''));
 const vnWd = (d) => { const dow = new Date(d + 'T12:00:00Z').getUTCDay(); return dow === 0 ? 7 : dow; };
 
 // Bộ đọc giá trị 1 Ô phân ca (dùng chung cho Nhập Excel và Bảng phân ca gõ trực tiếp).
@@ -354,10 +361,15 @@ export function registerAssignmentRoutes(r, { need }) {
   /* -------------------- PHÂN CA BẰNG EXCEL -------------------- */
   // Xuất mẫu Excel phân ca tháng (lưới NV × ngày)
   r.get('/assignments/export.xlsx', need('assignments'), async (req, res) => {
+    // Khoảng ngày: ?from&to (xuất 1 khoảng nhỏ cho nhập lại nhanh) hoặc ?month (cả tháng)
     const month = (req.query.month || '').slice(0, 7);
     const dept = req.query.dept || null;
-    if (!month) return res.status(400).json({ error: 'Thiếu tháng' });
-    const days = monthDaysList(month);
+    const qf = String(req.query.from || '').slice(0, 10), qt = String(req.query.to || '').slice(0, 10);
+    let days;
+    if (isYmd(qf) && isYmd(qt) && qt >= qf) days = rangeDaysList(qf, qt);
+    else if (month) days = monthDaysList(month);
+    else return res.status(400).json({ error: 'Thiếu khoảng ngày' });
+    const fileTag = month && !(isYmd(qf) && isYmd(qt)) ? month : `${days[0]}_${days[days.length - 1]}`;
 
     let empSql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
     const args = [];
@@ -374,8 +386,9 @@ export function registerAssignmentRoutes(r, { need }) {
     }
 
     const wb = new ExcelJS.Workbook();
-    const ws = wb.addWorksheet('PhanCa ' + month);
-    const header = ['Mã NV', 'Họ tên', 'Bộ phận', ...days.map((d) => `${d.slice(8)}\n${WDVN[vnWd(d)]}`)];
+    const ws = wb.addWorksheet('PhanCa');
+    // Cột ngày ghi 'ngày/tháng' (VD 05/10) để nhập lại đúng ngày dù khoảng chọn qua 2 tháng
+    const header = ['Mã NV', 'Họ tên', 'Bộ phận', ...days.map((d) => `${d.slice(8)}/${d.slice(5, 7)}\n${WDVN[vnWd(d)]}`)];
     const hr = ws.addRow(header);
     hr.height = 28;
     hr.eachCell((c, col) => {
@@ -404,7 +417,7 @@ export function registerAssignmentRoutes(r, { need }) {
       });
     }
     ws.getColumn(1).width = 10; ws.getColumn(2).width = 22; ws.getColumn(3).width = 14;
-    for (let i = 0; i < days.length; i++) ws.getColumn(4 + i).width = 6;
+    for (let i = 0; i < days.length; i++) ws.getColumn(4 + i).width = 7;
     ws.views = [{ state: 'frozen', xSplit: 3, ySplit: 1 }];
 
     // Sheet chú thích mã ca
@@ -420,18 +433,20 @@ export function registerAssignmentRoutes(r, { need }) {
     ws2.getColumn(1).width = 14; ws2.getColumn(2).width = 48; ws2.getColumn(3).width = 16;
 
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="phanca_${month}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="phanca_${fileTag}.xlsx"`);
     await wb.xlsx.write(res);
     res.end();
   });
 
-  // Nhập Excel phân ca: {month, fileBase64}
+  // Nhập Excel phân ca: { fileBase64, from?, to?, month? } — cột ngày đọc từ dòng tiêu đề của file ('05/10' hoặc kiểu cũ '05' theo tháng)
   r.post('/assignments/import', need('assignments'), async (req, res) => {
     const month = (req.body?.month || '').slice(0, 7);
     const b64 = req.body?.fileBase64 || '';
-    if (!month || !b64) return res.status(400).json({ error: 'Thiếu tháng hoặc file' });
+    if (!b64) return res.status(400).json({ error: 'Thiếu file' });
     const buf = Buffer.from(b64.replace(/^data:.*;base64,/, ''), 'base64');
-    const days = monthDaysList(month);
+    // Mốc để đoán NĂM của cột 'ngày/tháng' và THÁNG của cột kiểu cũ chỉ ghi số ngày
+    const hint = isYmd(req.body?.from) ? req.body.from : month ? month + '-01' : new Date().toISOString().slice(0, 10);
+    const hintMonth = month || hint.slice(0, 7);
 
     const wb = new ExcelJS.Workbook();
     try { await wb.xlsx.load(buf); } catch { return res.status(400).json({ error: 'File Excel không đọc được' }); }
@@ -441,15 +456,28 @@ export function registerAssignmentRoutes(r, { need }) {
     const empByCode = new Map(db.prepare("SELECT id, code FROM employees WHERE active=1").all().map((e) => [String(e.code).trim().toUpperCase(), e.id]));
     const applyCell = cellApplier();
 
-    // map cột → ngày (từ header dòng 1, phần số trước xuống dòng)
+    // map cột → ngày (từ header dòng 1, phần trước xuống dòng): '05/10' → ngày 05 tháng 10 (năm gần mốc nhất); '05' → ngày 05 của tháng đang xem
     const dayCol = new Map();
     const headerRow = ws.getRow(1);
+    const hy = +hint.slice(0, 4), hintMs = Date.parse(hint + 'T12:00:00Z');
+    const pad = (n) => String(n).padStart(2, '0');
+    const monthDays = monthDaysList(hintMonth);
     headerRow.eachCell((cell, col) => {
       if (col <= 3) return;
       const txt = String(cell.value ?? '').split('\n')[0].trim();
+      const m = /^(\d{1,2})\/(\d{1,2})$/.exec(txt);
+      if (m) {
+        const dd = +m[1], mm = +m[2]; if (!(dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12)) return;
+        let best = null;
+        for (const y of [hy - 1, hy, hy + 1]) { const iso = `${y}-${pad(mm)}-${pad(dd)}`; const t = Date.parse(iso + 'T12:00:00Z'); if (isNaN(t) || new Date(t).getUTCDate() !== dd) continue; if (!best || Math.abs(t - hintMs) < Math.abs(Date.parse(best + 'T12:00:00Z') - hintMs)) best = iso; }
+        if (best) dayCol.set(col, best);
+        return;
+      }
       const dnum = parseInt(txt, 10);
-      if (dnum >= 1 && dnum <= days.length) dayCol.set(col, days[dnum - 1]);
+      if (String(dnum) === txt.replace(/^0/, '') && dnum >= 1 && dnum <= monthDays.length) dayCol.set(col, monthDays[dnum - 1]);
     });
+    if (!dayCol.size) return res.status(400).json({ error: 'Không thấy cột ngày ở dòng đầu file (VD "05/10")' });
+    const days = [...new Set(dayCol.values())].sort();
 
     let updated = 0, cleared = 0, off = 0, keptAuto = 0; const errors = [];
     const touchedImp = new Set();
@@ -485,7 +513,7 @@ export function registerAssignmentRoutes(r, { need }) {
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/import', e); }
     recalcDays(touchedImp);
 
-    res.json({ ok: true, updated, off, cleared, keptAuto, errors: errors.slice(0, 20), errorCount: errors.length });
+    res.json({ ok: true, updated, off, cleared, keptAuto, from: days[0], to: days[days.length - 1], errors: errors.slice(0, 20), errorCount: errors.length });
   });
 
   // Lưu các ô sửa trực tiếp trên Bảng phân ca (kiểu Excel): { cells: [{ employee_id, date, value }] }
