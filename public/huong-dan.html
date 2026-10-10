@@ -1,3 +1,4 @@
+<meta charset="utf-8">
 <title>Digiplus Chấm Công</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -82,6 +83,9 @@ h2.sec{font-size:clamp(24px,3.4vw,34px);font-weight:800;letter-spacing:-.4px}
 .split.rev{grid-template-columns:.95fr 1.05fr}
 .split.rev .shot{order:-1}
 @media(max-width:820px){.split,.split.rev{grid-template-columns:1fr;gap:30px}.split.rev .shot{order:0}}
+/* điện thoại: ô lưới được co lại, mock giao diện rộng thì cuộn ngang TRONG khung (trang không bị tràn ngang) */
+.split>*{min-width:0}
+@media(max-width:820px){.shot{overflow-x:auto;justify-content:flex-start;-webkit-overflow-scrolling:touch}}
 
 /* steps */
 ol.steps{list-style:none;margin:0;padding:0;counter-reset:s;display:flex;flex-direction:column;gap:16px}
@@ -169,6 +173,12 @@ table.mock td{padding:8px 9px;border-bottom:1px solid var(--line)}
 .vcard .vi{width:40px;height:40px;border-radius:11px;background:var(--brand-wash);color:var(--brand-ink);display:grid;place-items:center;font-size:20px;margin-bottom:12px}
 .vcard h3{font-size:16px;font-weight:700}
 .vcard p{color:var(--muted);font-size:14px;margin:6px 0 0}
+/* Ô tài liệu: bấm vào BẤT KỲ chỗ nào trong ô là mở trang */
+a.vlink{display:flex;flex-direction:column;color:var(--ink);text-decoration:none;cursor:pointer}
+a.vlink h3{color:var(--ink)}
+a.vlink .go{margin-top:auto;padding-top:12px;color:var(--brand-ink);font-weight:700;font-size:14px}
+a.vlink:hover{border-color:var(--brand)}
+a.vlink:focus-visible{outline:3px solid var(--brand);outline-offset:2px}
 
 /* faq */
 .faq{display:flex;flex-direction:column;gap:12px;margin-top:26px}
@@ -509,9 +519,9 @@ footer b{color:var(--ink)}
     <h2 class="sec">Hướng dẫn chi tiết</h2>
     <p class="lead">Tài liệu đầy đủ để tự cài đặt và sử dụng phần mềm.</p>
     <div class="vgrid">
-      <div class="vcard"><div class="vi">📦</div><h3><a href="HuongDan-CaiDat-LAN.html">Cài đặt bản LAN (cho đại lý)</a></h3><p>Cài từ A–Z, kích hoạt bản quyền, đặt IP tĩnh, kết nối máy chấm công, cập nhật &amp; FAQ.</p></div>
-      <div class="vcard"><div class="vi">📖</div><h3><a href="HuongDan-SuDung-ChiTiet.html">Hướng dẫn sử dụng chi tiết</a></h3><p>Khai báo nhân viên, ca, phân ca, chấm công, sửa giờ, tính công, xuất báo cáo &amp; bảng lương.</p></div>
-      <div class="vcard"><div class="vi">📱</div><h3><a href="HuongDan-CaiDat-App.html">Cài app cho điện thoại</a></h3><p>Hướng dẫn nhân viên cài ứng dụng chấm công lên điện thoại.</p></div>
+      <a class="vcard vlink" href="HuongDan-SuDung-ChiTiet.html"><div class="vi">📖</div><h3>Hướng dẫn sử dụng chi tiết</h3><p>Khai báo nhân viên, chấm công, sửa giờ, tính công, xuất báo cáo &amp; bảng lương.</p><span class="go">Xem hướng dẫn →</span></a>
+      <a class="vcard vlink" href="HuongDan-PhanCa.html"><div class="vi">🗓️</div><h3>Tạo ca &amp; phân ca</h3><p>Ca làm việc, lịch trình vào ra, xoay ca, gán ca nhân viên / phòng ban, lịch tạm thời, phân ca cả công ty bằng Excel.</p><span class="go">Xem hướng dẫn →</span></a>
+      <a class="vcard vlink" href="HuongDan-CaiDat-App.html"><div class="vi">📱</div><h3>Cài app cho điện thoại</h3><p>Hướng dẫn nhân viên cài ứng dụng chấm công lên điện thoại.</p><span class="go">Xem hướng dẫn →</span></a>
     </div>
   </section>
 

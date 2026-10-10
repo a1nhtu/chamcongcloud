@@ -163,22 +163,17 @@ footer b{color:var(--ink)}
       <li><b>Cho phép muộn/sớm</b><span>Đặt ngưỡng đi muộn, về sớm (phút) — trong ngưỡng thì không tính lỗi.</span></li>
       <li><b>Nghỉ giữa ca, tăng ca</b><span>Trừ giờ nghỉ trưa; bật tính tăng ca (ở lại tối thiểu bao nhiêu phút mới tính OT).</span></li>
       <li><b>Ca qua đêm</b><span>Chỉ cần đặt giờ ra nhỏ hơn giờ vào (VD 22:00 → 06:00) — hệ thống tự hiểu qua ngày hôm sau.</span></li>
-      <li><b>Lịch trình (ca xoay)</b><span>Gom nhiều ca (sáng/chiều/đêm) thành 1 lịch trình để gán cho nhân viên làm ca xoay.</span></li>
+      <li><b>Lịch trình (ca xoay)</b><span>Gom nhiều ca (sáng/chiều/đêm) thành 1 lịch trình, hoặc vẽ lịch xoay theo tuần/ngày, để gán cho nhân viên làm ca xoay.</span></li>
     </ol>
-    <div class="note"><span class="ic">⚙️</span><div>Đặt <b>cửa sổ nhận diện giờ vào/ra</b> cho mỗi ca để hệ thống <b>tự tìm đúng ca</b> theo giờ chấm (rất tiện cho ca xoay).</div></div>
+    <div class="note"><span class="ic">🗓️</span><div>Chi tiết từng ô trong form ca, lịch trình vào ra, lịch xoay ca: xem <a href="HuongDan-PhanCa.html"><b>Hướng dẫn tạo ca &amp; phân ca</b></a>.</div></div>
   </section>
 
   <section id="phan-ca">
     <div class="eyebrow"><span class="num">5</span> Phân ca</div>
     <h2 class="sec">Phân ca cho nhân viên</h2>
-    <p class="lead">Mặc định hệ thống tự tìm ca theo giờ chấm. Khi cần chỉ định cứng thì phân ca.</p>
-    <ol class="steps">
-      <li><b>Ca mặc định trên hồ sơ</b><span>Gán 1 ca cố định cho nhân viên hành chính.</span></li>
-      <li><b>Phân ca hàng loạt</b><span>Mục <b>Phân ca</b>: chọn phòng ban → chọn ca → chọn khoảng ngày/thứ → <b>Áp dụng</b> cho cả nhóm chỉ vài cú nhấp.</span></li>
-      <li><b>Phân ca bằng Excel (cả tháng)</b><span>Xuất Excel mẫu (lưới NV × ngày) → điền mã ca vào ô cần đổi (để trống = tự động) → nhập lên.</span></li>
-    </ol>
-    <div class="note ok"><span class="ic">🔁</span><div>Ô để trống = "tự động theo giờ chấm"; điền mã ca = gán cứng (được ưu tiên đè lên kết quả tự động).</div></div>
-    <figure class="fig"><img src="img/phan-ca.jpg" alt="Màn hình Phân ca" loading="lazy"><figcaption>Phân ca: chọn ca + khoảng ngày/thứ rồi "Áp dụng" cho cả nhóm.</figcaption></figure>
+    <p class="lead">Phân ca có nhiều cách (gán theo người, theo phòng ban, xoay ca, đổi tạm, bảng kiểu Excel cả công ty) nên được viết thành một hướng dẫn riêng.</p>
+    <div class="note ok"><span class="ic">🗓️</span><div>Xem đầy đủ: <a href="HuongDan-PhanCa.html"><b>Hướng dẫn tạo ca &amp; phân ca</b></a> — thứ tự khai báo, lịch xoay 3 ca, ca đêm, lịch tạm thời, phân ca cả công ty bằng Excel, thứ tự ưu tiên, mẫu cấu hình theo loại công ty.</div></div>
+    <figure class="fig"><img src="img/pc-14-bang-excel.jpg" alt="Bảng phân ca kiểu Excel" loading="lazy"><figcaption>Xem lịch trình (kiểu Excel): sửa ca cả công ty như bảng tính.</figcaption></figure>
   </section>
 
   <section id="cham-cong">
@@ -255,7 +250,7 @@ footer b{color:var(--ink)}
       <li><b>Xem lưới công</b><span>Mục <b>Tính công</b>: mỗi dòng là 1 NV × 1 ngày, có giờ vào/ra, đi muộn, về sớm, tăng ca, số công.</span></li>
       <li><b>Lọc theo phòng ban / nhân viên / khoảng ngày</b><span>Chọn để xem đúng nhóm cần.</span></li>
       <li><b>Tính lại công</b><span>Sau khi đổi ca/cấu hình hoặc sửa giờ → bấm <b>↻ Tính lại</b> để cập nhật số công.</span></li>
-      <li><b>Cấu hình làm tròn</b><span>Đặt số lẻ thập phân + kiểu làm tròn (lùi/tới/gần nhất) cho số công.</span></li>
+      <li><b>Cấu hình làm tròn</b><span>Ở <b>Cài đặt › Quy tắc tính công</b>: số lẻ + làm tròn lùi/tới cho công và cho tăng ca (tăng ca làm tròn được theo khối phút).</span></li>
     </ol>
     <div class="note"><span class="ic">🏢</span><div>Có tuỳ chọn hiển thị <b>cả công ty kể cả người chưa chấm</b> (để thấy ai vắng) — tích ô tương ứng.</div></div>
     <figure class="fig"><img src="img/tinh-cong.jpg" alt="Màn hình Tính công" loading="lazy"><figcaption>Tính công: mỗi dòng 1 NV × 1 ngày; bấm "Sửa" để chỉnh/xoá giờ.</figcaption></figure>
@@ -308,10 +303,9 @@ footer b{color:var(--ink)}
       <li><b>Chống chấm hộ:</b> bật "Mỗi tài khoản chỉ chấm trên 1 điện thoại" — đổi máy phải admin duyệt.</li>
       <li><b>Chế độ tính công:</b> "Theo ca" (đầy đủ muộn/sớm/tăng ca) hoặc "Chỉ tính theo giờ" (tổng giờ, hợp quán/cửa hàng).</li>
       <li><b>Bỏ qua lần chấm trùng trong N phút:</b> chống double-tap / quẹt liên tiếp.</li>
-      <li><b>Ngày cuối tuần, nghỉ lễ:</b> khai để tính công &amp; tăng ca đúng.</li>
+      <li><b>Ngày cuối tuần, nghỉ lễ:</b> chọn ngày cuối tuần (mặc định Chủ nhật; đi làm ngày đó tính là tăng ca), hệ số tăng ca, khai ngày lễ — ở Cài đặt › Quy tắc tính công.</li>
       <li><b>Tự sao lưu:</b> bật sao lưu hằng ngày (giữ N bản gần nhất).</li>
     </ul>
-    <p class="crumb">→ Cài đặt &amp; kết nối máy chấm công: xem <a href="HuongDan-CaiDat-LAN.html">Hướng dẫn cài đặt bản LAN</a>.</p>
   </section>
 
   <section id="faq">
@@ -324,7 +318,7 @@ footer b{color:var(--ink)}
       <details><summary>Nhân viên có xem được công của người khác không?</summary><p>Không. Mỗi nhân viên chỉ thấy dữ liệu của mình. Chỉ Admin/Quản lý (theo phân quyền) mới thấy toàn công ty.</p></details>
       <details><summary>Xuất báo cáo cho riêng một phòng ban được không?</summary><p>Được. Trong bộ lọc báo cáo, chọn phòng ban (hoặc chọn nhiều người cụ thể) rồi Xuất Excel.</p></details>
       <details><summary>"Chấm ngoài văn phòng" là ngoài đâu?</summary><p>Là ngoài bán kính của chi nhánh gần nhất mà nhân viên được phép chấm. Có bật chặn hay chỉ cảnh báo là tuỳ cài đặt geofence.</p></details>
-      <details><summary>Số công lẻ (VD 0.94) là gì?</summary><p>Là số công quy đổi theo giờ làm thực tế/độ dài ca và cấu hình làm tròn. Có thể chỉnh số lẻ &amp; kiểu làm tròn trong Tính công.</p></details>
+      <details><summary>Số công lẻ (VD 0.94) là gì?</summary><p>Là số công quy đổi theo giờ làm thực tế / độ dài ca, làm tròn theo cài đặt. Chỉnh số lẻ &amp; kiểu làm tròn (lùi/tới) ở Cài đặt › Quy tắc tính công.</p></details>
     </div>
   </section>
 </main>

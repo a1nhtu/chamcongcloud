@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tạo ca &amp; phân ca — Digiplus Chấm Công</title>
+<meta name="description" content="Hướng dẫn tạo ca và phân ca trên phần mềm Digiplus chấm công: ca làm việc, lịch trình vào ra, lịch xoay ca, gán ca nhân viên và phòng ban, lịch tạm thời, phân ca cả công ty bằng Excel, thứ tự ưu tiên và quy tắc tính công." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --paper:#FBF4EF;--surface:#fff;--surface-2:#FDF7F3;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;
+  --brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--brand-wash:#FCEBE2;
+  --green:#15803D;--green-bg:#DCFCE7;--amber:#B45309;--amber-bg:#FDECCB;--blue:#1D4ED8;--blue-bg:#DBEAFE;--red:#DC2626;--red-bg:#FCE1E1;
+  --shadow:0 10px 34px rgba(80,30,10,.10);--shadow-sm:0 4px 14px rgba(80,30,10,.08);--radius:16px;--maxw:900px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}}
+:root[data-theme="dark"]{
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+a{color:var(--brand-ink)}
+h1,h2,h3{line-height:1.2;text-wrap:balance}
+header.top{background:radial-gradient(120% 140% at 90% -20%,rgba(225,29,35,.28),transparent 60%),linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:40px 0 44px}
+.brandrow{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.mark{width:42px;height:46px}
+.brandname{font-weight:800;font-size:18px}.brandname small{display:block;font-weight:500;font-size:11px;opacity:.85;letter-spacing:2px;text-transform:uppercase}
+header .tag{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:700;margin-bottom:14px}
+header h1{margin:0;font-size:clamp(26px,4.6vw,40px);font-weight:800;letter-spacing:-.4px;max-width:20ch}
+header p{margin:12px 0 0;font-size:16px;opacity:.95;max-width:58ch}
+main{padding:0 0 60px}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;margin:26px 0;box-shadow:var(--shadow-sm)}
+.toc b{display:block;font-size:12.5px;text-transform:uppercase;letter-spacing:1px;color:var(--brand-ink);margin-bottom:8px}
+.toc ol{margin:0;padding-left:20px;columns:2;column-gap:26px}
+@media(max-width:620px){.toc ol{columns:1}}
+.toc li{margin:4px 0}.toc a{text-decoration:none}
+section{padding:30px 0;border-bottom:1px solid var(--line)}
+section:last-child{border-bottom:none}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--brand-ink);margin-bottom:10px}
+.eyebrow .num{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:13px}
+h2.sec{font-size:clamp(21px,3vw,28px);font-weight:800;letter-spacing:-.3px;margin:0}
+.lead{color:var(--muted);font-size:16px;margin:8px 0 0}
+ol.steps{list-style:none;margin:18px 0 0;padding:0;counter-reset:s;display:flex;flex-direction:column;gap:14px}
+ol.steps li{position:relative;padding-left:44px;counter-increment:s}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px;box-shadow:var(--shadow-sm)}
+ol.steps li b{color:var(--ink)}
+ol.steps li span{color:var(--muted);display:block;font-size:14.5px;margin-top:2px}
+ul.plain{margin:14px 0 0;padding-left:20px}ul.plain li{margin:6px 0}
+figure.fig{margin:18px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow-sm);background:var(--surface)}
+figure.fig img{display:block;width:100%;height:auto}
+figure.fig figcaption{font-size:13px;color:var(--muted);padding:8px 13px;border-top:1px solid var(--line);background:var(--surface-2)}
+figure.fig.phone{max-width:300px;margin-left:auto;margin-right:auto;border-radius:20px}
+.note{display:flex;gap:11px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;padding:13px 16px;margin-top:16px;font-size:14.5px}
+.note.ok{border-left-color:var(--green)}.note.warn{border-left-color:var(--amber)}
+.note .ic{flex:0 0 auto;font-size:18px}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:1px 7px;font-size:13.5px;font-weight:600;color:var(--brand-ink)}
+.faq{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:2px 18px;box-shadow:var(--shadow-sm)}
+details summary{cursor:pointer;font-weight:700;padding:14px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";color:var(--brand);font-weight:800;font-size:20px}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:0 0 15px;font-size:14.5px}
+table.t{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table.t th{text-align:left;background:var(--surface-2);color:var(--brand-ink);font-size:12.5px;text-transform:uppercase;letter-spacing:.4px;padding:10px 12px;border-bottom:1px solid var(--line)}
+table.t td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t tr:last-child td{border-bottom:none}
+table.t td b{color:var(--ink)}
+footer{background:var(--surface-2);border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px;margin-top:10px}
+footer b{color:var(--ink)}
+.crumb{font-size:13.5px;margin:18px 0 0}.crumb a{color:var(--brand-ink);text-decoration:none}
+.themebtn{position:fixed;right:14px;bottom:14px;z-index:50;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);font-family:inherit}
+
+/* ---- riêng trang Tạo ca & phân ca ---- */
+h3.sub{font-size:17px;font-weight:800;margin:26px 0 0}
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:18px}
+@media(max-width:760px){.flow{grid-template-columns:1fr 1fr}}
+@media(max-width:420px){.flow{grid-template-columns:1fr}}
+.fstep{display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow-sm);text-decoration:none;color:var(--ink);position:relative}
+.fstep:hover{border-color:var(--brand)}
+.fstep .fn{width:34px;height:28px;border-radius:8px;background:var(--brand);color:#fff;font-weight:800;display:grid;place-items:center;font-size:13px;font-family:'JetBrains Mono',monospace}
+.fstep b{font-size:15px}.fstep small{color:var(--muted);font-size:13px;line-height:1.4}
+.twocol{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:20px;align-items:start;margin-top:4px}
+.twocol>figure.fig{margin-top:18px}
+@media(max-width:760px){.twocol{grid-template-columns:1fr}}
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+@media(max-width:680px){.cards2{grid-template-columns:1fr}}
+.kcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow-sm);font-size:14.5px}
+.kcard p{margin:8px 0 0}.kcard .mut{color:var(--muted);font-size:13.5px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:14px;font-size:14px}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.lg{font-style:normal;font-family:'JetBrains Mono',monospace;font-size:12.5px;min-width:34px;text-align:center;padding:2px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface)}
+.lg.ex{color:var(--ink);font-weight:800}.lg.ph{color:#9CA3AF}.lg.tmp{color:#C2410C;font-style:italic}.lg.fnd{color:#0F766E}.lg.dirty{background:#FEF08A;color:#1F2937;font-weight:800}
+.ladder{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+.rung{display:flex;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow-sm)}
+.rung:first-child{border-color:var(--brand);background:var(--brand-wash)}
+.rung .rk{flex:0 0 auto;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-weight:800;display:grid;place-items:center;font-family:'JetBrains Mono',monospace}
+.rung.last .rk{background:var(--muted)}
+.rung small{display:block;color:var(--muted);font-size:13.5px}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brandrow">
+    <svg class="mark" viewBox="0 0 44 48" fill="none" aria-hidden="true">
+      <path d="M4 24C4 12 12 4 22 4s18 8 18 20" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M9 24c0-8 6-13 13-13s13 5 13 13" stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".8"/>
+      <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="brandname">Digiplus<small>Chấm Công Thông Minh</small></div>
+  </div>
+  <div class="tag">🗓️ HƯỚNG DẪN TẠO CA &amp; PHÂN CA</div>
+  <h1>Tạo ca và phân ca từ A đến Z</h1>
+  <p>Khai báo ca, cách lấy giờ vào/ra, lịch xoay ca, gán ca cho nhân viên và phòng ban, đổi ca đột xuất, phân ca cả công ty bằng Excel. Kèm mẫu cấu hình cho văn phòng, nhà máy 3 ca, bảo vệ, bán lẻ.</p>
+</div></header>
+
+<main class="wrap">
+  <p class="crumb"><a href="./">← Trang chủ hướng dẫn</a></p>
+
+  <!-- Thứ tự khai báo -->
+  <section id="thu-tu" style="border-bottom:none;padding-bottom:6px">
+    <div class="eyebrow">Đọc trước</div>
+    <h2 class="sec">Làm theo đúng thứ tự này</h2>
+    <p class="lead">Mỗi bước dùng kết quả của bước trước. Menu nằm ở cột bên trái phần mềm: mục <b>Ca làm</b> (bước 1–3) và mục <b>Phân ca</b> (bước 4–7).</p>
+    <div class="flow">
+      <a class="fstep" href="#ca"><span class="fn">1</span><b>Ca làm việc</b><small>Giờ vào, giờ ra, cho phép muộn/sớm, tăng ca</small></a>
+      <a class="fstep" href="#vao-ra"><span class="fn">2</span><b>Lịch trình vào ra</b><small>Lượt quẹt nào là VÀO, lượt nào là RA</small></a>
+      <a class="fstep" href="#lich-trinh"><span class="fn">3</span><b>Lịch trình ca làm việc</b><small>Nhóm ca, xoay ca theo tuần/ngày</small></a>
+      <a class="fstep" href="#gan-nv"><span class="fn">4–5</span><b>Gán ca</b><small>Cho từng nhân viên hoặc cả phòng ban</small></a>
+      <a class="fstep" href="#tam-thoi"><span class="fn">6–7</span><b>Đổi đột xuất</b><small>Lịch tạm thời · Bảng kiểu Excel</small></a>
+    </div>
+    <div class="note"><span class="ic">💡</span><div>Công ty chỉ có 1 ca hành chính: chỉ cần làm <b>bước 1</b> rồi <b>bước 5</b> (gán ca đó cho cả công ty / từng phòng ban). Bước 2, 3, 6, 7 chỉ cần khi có xoay ca, ca đêm, đổi ca đột xuất.</div></div>
+  </section>
+
+  <div class="toc">
+    <b>Nội dung</b>
+    <ol>
+      <li><a href="#ca">Ca làm việc</a></li>
+      <li><a href="#vao-ra">Lịch trình vào ra</a></li>
+      <li><a href="#lich-trinh">Lịch trình ca làm việc (xoay ca)</a></li>
+      <li><a href="#gan-nv">Gán ca cho nhân viên</a></li>
+      <li><a href="#gan-pb">Gán ca cho phòng ban</a></li>
+      <li><a href="#tam-thoi">Lịch trình tạm thời</a></li>
+      <li><a href="#excel">Xem lịch trình (kiểu Excel)</a></li>
+      <li><a href="#uu-tien">Thứ tự ưu tiên khi tìm ca</a></li>
+      <li><a href="#quy-tac">Quy tắc chung: cuối tuần, hệ số, làm tròn</a></li>
+      <li><a href="#tinh-lai">Đổi xong — khi nào phải tính lại công</a></li>
+      <li><a href="#mau">Mẫu cấu hình theo loại công ty</a></li>
+      <li><a href="#faq">Câu hỏi thường gặp</a></li>
+    </ol>
+  </div>
+
+  <!-- 1. CA LÀM VIỆC -->
+  <section id="ca">
+    <div class="eyebrow"><span class="num">1</span> Ca làm › 1. Ca làm việc</div>
+    <h2 class="sec">Ca làm việc</h2>
+    <p class="lead">Mỗi ca là một khung giờ làm. Bấm <span class="kbd">+ Thêm ca</span>, form chia 3 thẻ: <b>Ca làm việc</b> · <b>Tăng ca</b> · <b>Nâng cao</b>.</p>
+    <figure class="fig"><img src="img/pc-01-ca-lam-viec.jpg" alt="Danh sách ca làm việc" loading="lazy"><figcaption>Danh sách ca. Biểu tượng 🌙 là ca qua đêm.</figcaption></figure>
+
+    <h3 class="sub">Thẻ "Ca làm việc"</h3>
+    <div class="twocol">
+      <figure class="fig"><img src="img/pc-02-form-ca.jpg" alt="Form khai báo ca" loading="lazy"><figcaption>Thông tin chính của ca.</figcaption></figure>
+      <table class="t">
+        <tr><th>Ô</th><th>Ý nghĩa</th></tr>
+        <tr><td><b>Mã ca</b></td><td>Chữ ngắn (HC, C1, C2, SA…) dùng để gõ trong bảng kiểu Excel. Nên đặt cho mọi ca.</td></tr>
+        <tr><td><b>Giờ vào / Giờ ra</b></td><td>Ca qua đêm: đặt giờ ra <b>nhỏ hơn</b> giờ vào (22:00 → 06:00), phần mềm tự hiểu ra ca là sáng hôm sau.</td></tr>
+        <tr><td><b>Nghỉ giữa ca</b></td><td>Số phút nghỉ trưa, bị trừ khỏi giờ làm khi nhân viên có mặt từ nửa ca trở lên.</td></tr>
+        <tr><td><b>Số công của ca</b></td><td>1 = cả ngày, 0.5 = nửa ngày, 1.5 = ca 12 tiếng… Làm đủ ca được đúng số này.</td></tr>
+        <tr><td><b>Cho phép đi muộn / về sớm</b></td><td>Trễ/sớm <b>trong</b> mức này coi như đúng giờ. Vượt mức thì ghi <b>đủ</b> số phút (cho phép 5, trễ 12 → ghi trễ 12).</td></tr>
+        <tr><td><b>Bắt đầu / Kết thúc vào, ra</b></td><td>Không bắt buộc. Chỉ cần khi nhiều ca <b>cùng giờ vào</b> (VD ca sáng 8–12 và hành chính 8–17): đặt khung giờ RA để phần mềm phân biệt.</td></tr>
+      </table>
+    </div>
+
+    <h3 class="sub">Thẻ "Tăng ca"</h3>
+    <div class="twocol">
+      <figure class="fig"><img src="img/pc-03-form-ca-tang-ca.jpg" alt="Thẻ tăng ca của ca" loading="lazy"><figcaption>Tăng ca sau giờ, trước giờ, chia mức TC1–TC4.</figcaption></figure>
+      <ul class="plain">
+        <li><b>Ở lại tối thiểu</b>: ở lại sau giờ ra từ số phút này mới tính tăng ca, và tính <b>cả</b> thời gian ở lại. Đặt 30: ở lại 25 phút → không tính; ở lại 40 phút → 40 phút tăng ca.</li>
+        <li><b>Tăng ca TRƯỚC giờ vào</b>: tick nếu công ty trả tiền cho người đến sớm làm thêm.</li>
+        <li><b>Chia TC1 → TC4</b>: giới hạn số phút từng mức và hệ số lương riêng. VD TC1 = 120, TC2 = 120: tăng ca 5 tiếng → 2h TC1, 2h TC2, 1h TC3. Để 0 = không chia.</li>
+        <li><b>Cả ca là tăng ca ngày lễ</b>: đi làm ngày lễ thì không tính công, toàn bộ giờ thành tăng ca lễ.</li>
+        <li><b>Ca này là ca tăng ca</b>: ca làm thêm buổi tối, ngày nào làm cũng tính hết là tăng ca.</li>
+      </ul>
+    </div>
+    <div class="note warn"><span class="ic">ℹ️</span><div><b>Làm tròn tăng ca</b> và <b>đi làm ngày cuối tuần</b> không đặt ở ca nữa mà đặt chung cho cả công ty: xem mục <a href="#quy-tac">Quy tắc chung</a>.</div></div>
+
+    <h3 class="sub">Thẻ "Nâng cao"</h3>
+    <div class="twocol">
+      <figure class="fig"><img src="img/pc-04-form-ca-nang-cao.jpg" alt="Thẻ nâng cao của ca" loading="lazy"><figcaption>Các tuỳ chọn đặc biệt.</figcaption></figure>
+      <ul class="plain">
+        <li><b>Tính bù trừ</b>: đi trễ thì ở lại bù, không bị trừ giờ. Phút ở lại để bù không tính tăng ca, vẫn ghi nhận số phút trễ.</li>
+        <li><b>Thiếu giờ ra vẫn tính công</b>: quên chấm ra vẫn được đủ công (trừ phần đi trễ). Không tick = ngày thiếu giờ ra được 0 công, chờ quản lý bổ sung.</li>
+        <li><b>Chỉ tính phần vượt mức cho phép</b>: cho phép 5, trễ 12 → ghi 7 phút (thay vì 12).</li>
+      </ul>
+    </div>
+    <div class="note ok"><span class="ic">🧮</span><div><b>Công được tính thế nào?</b> Ca Hành chính 08:00–17:00 nghỉ 60 phút = 480 phút chuẩn. Đi trễ 25 phút → làm 455 phút → 455 ÷ 480 = 0,948 → làm tròn lùi 2 số lẻ = <b>0,94 công</b>.</div></div>
+  </section>
+
+  <!-- 2. LỊCH TRÌNH VÀO RA -->
+  <section id="vao-ra">
+    <div class="eyebrow"><span class="num">2</span> Ca làm › 2. Lịch trình vào ra</div>
+    <h2 class="sec">Lịch trình vào ra — lượt quẹt nào là VÀO, lượt nào là RA</h2>
+    <p class="lead">Một người có thể quẹt nhiều lần trong ngày (ra ăn trưa, quẹt nhầm 2 lần…). Lịch trình vào ra quy định cách đọc các lượt đó. Khai một lần, chọn khi gán ca ở bước 4–5.</p>
+    <figure class="fig"><img src="img/pc-05-lich-trinh-vao-ra.jpg" alt="Danh sách lịch trình vào ra" loading="lazy"><figcaption>Dòng có nhãn "Mặc định" dùng cho mọi người chưa được chọn lịch trình vào ra.</figcaption></figure>
+    <table class="t">
+      <tr><th style="width:30%">Cách</th><th>Hoạt động</th><th style="width:28%">Dùng khi</th></tr>
+      <tr><td><b>Giờ đầu là vào, giờ cuối là ra</b></td><td>Lượt đầu tiên = VÀO, lượt cuối cùng = RA, bỏ qua các lượt ở giữa. Ca đêm lấy lượt vào buổi tối và lượt ra sáng hôm sau.</td><td>Hầu hết công ty. Nên chọn làm <b>Mặc định</b>.</td></tr>
+      <tr><td><b>Tự động – không qua đêm</b> (theo cặp)</td><td>Lượt 1 = VÀO, lượt 2 = RA, lượt 3 = VÀO… Giờ làm = tổng các cặp, thời gian ra ngoài giữa chừng bị trừ.</td><td>Cần trừ giờ ra ngoài (ăn trưa tự do, ra ngoài việc riêng).</td></tr>
+      <tr><td><b>Tự động – qua đêm</b></td><td>Như trên nhưng cho ca đêm (cặp vào tối – ra sáng).</td><td>Ca đêm có ra ngoài giữa ca.</td></tr>
+      <tr><td><b>Theo ID máy</b></td><td>Máy số lẻ (1, 3, 5…) = VÀO, máy số chẵn (2, 4, 6…) = RA. Đặt "số máy" ở mục Máy chấm công.</td><td>Cổng vào và cổng ra đặt 2 máy riêng.</td></tr>
+      <tr><td><b>Chọn từ máy</b></td><td>Theo phím nhân viên bấm trên máy trước khi quẹt (Check In = VÀO, Check Out = RA).</td><td>Nhân viên quen bấm phím trạng thái.</td></tr>
+      <tr><td><b>Phân theo giờ</b></td><td>Lượt quẹt trong khung "Bắt đầu – Kết thúc vào" của ca là VÀO, trong khung "ra" là RA; lượt ngoài 2 khung bỏ qua.</td><td>Ca có khung giờ rõ, hay có lượt quẹt lẻ giữa ca.</td></tr>
+    </table>
+    <div class="twocol" style="margin-top:16px">
+      <figure class="fig"><img src="img/pc-06-form-vao-ra.jpg" alt="Form lịch trình vào ra" loading="lazy"><figcaption>Chọn cách đọc + 3 ngưỡng chống quẹt lặp.</figcaption></figure>
+      <ul class="plain">
+        <li><b>Thời gian nhỏ nhất</b> (30 phút): RA cách VÀO dưới mức này = quẹt lặp, bỏ.</li>
+        <li><b>Thời gian lớn nhất</b> (960 phút): một cặp dài hơn mức này = quên quẹt ra.</li>
+        <li><b>Khoảng cách giữa 2 cặp</b> (30 phút): VÀO mới cách RA trước dưới mức này = quẹt lặp.</li>
+        <li>Ngoài ra, ở <b>Cài đặt › Chống chấm trùng liên tiếp</b> (mặc định 15 phút): cùng một người quẹt liền nhau trong 15 phút chỉ tính 1 lần.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 3. LỊCH TRÌNH CA LÀM VIỆC -->
+  <section id="lich-trinh">
+    <div class="eyebrow"><span class="num">3</span> Ca làm › 3. Lịch trình ca làm việc</div>
+    <h2 class="sec">Lịch trình ca làm việc — nhóm ca &amp; xoay ca</h2>
+    <p class="lead">Dùng khi một người không làm cố định 1 ca. Có 2 kiểu, chọn ở ô <b>Đơn vị</b>.</p>
+    <figure class="fig"><img src="img/pc-07-lich-trinh-ca.jpg" alt="Danh sách lịch trình ca làm việc" loading="lazy"><figcaption>Ba lịch trình mẫu: xoay 3 ca theo tuần, bán hàng tự dò ca, cả ngày / nửa ngày xen kẽ.</figcaption></figure>
+    <div class="cards2">
+      <div class="kcard"><b>Kiểu A — Tự dò ca theo giờ chấm</b> (Đơn vị: <i>Tự động</i>)
+        <p>Chọn một nhóm ca (VD Sáng 8–12, Chiều 13–17, Hành chính 8–17). Mỗi ngày phần mềm nhìn giờ chấm và chọn đúng ca nhân viên đã làm: quẹt 8h–12h → ca Sáng; 13h–17h → ca Chiều; 8h–17h → Hành chính; quẹt 4 lần 8–12, 13–17 → tách thành 2 ca.</p>
+        <p class="mut">Hợp với: bán lẻ, F&amp;B, nhân viên tự chọn ca.</p></div>
+      <div class="kcard"><b>Kiểu B — Theo chu kỳ</b> (Đơn vị: <i>Tuần / Ngày / Tháng</i>)
+        <p>Vẽ sẵn lịch: ô nào ca nào. <b>Chu kỳ</b> = số tuần (hoặc ngày, tháng) rồi lặp lại. VD xoay 3 ca theo tuần, chu kỳ 3: tuần 1 ca 1 → tuần 2 ca 2 → tuần 3 ca 3 → quay lại tuần 1.</p>
+        <p class="mut">Ô để trống = ngày nghỉ. Tuần 1 tính từ <b>ngày bắt đầu</b> khi gán.</p></div>
+    </div>
+    <figure class="fig"><img src="img/pc-08-lich-trinh-chu-ky.jpg" alt="Vẽ lịch xoay 3 ca theo tuần" loading="lazy"><figcaption>Tick 1 ca ở bảng trái rồi bấm vào các ô ngày để gán. Chủ nhật để trống = nghỉ.</figcaption></figure>
+    <ol class="steps">
+      <li><b>Bấm "+ Thêm", đặt tên</b><span>VD "Xoay 3 ca theo tuần".</span></li>
+      <li><b>Chọn Đơn vị và Chu kỳ</b><span>Tuần + 3 → bảng hiện 3 cột "Chu kỳ-1, 2, 3", mỗi cột 7 ngày.</span></li>
+      <li><b>Tick 1 ca ở bảng trái, bấm vào ô</b><span>Tick C1 → bấm T2…T7 cột 1. Tick C2 → cột 2. Tick C3 → cột 3. Nút "Gán ca đang tick cho mọi ô" để điền nhanh.</span></li>
+      <li><b>Lưu</b><span>Rồi sang bước 4–5 để gán lịch này cho người / phòng ban.</span></li>
+    </ol>
+    <div class="note"><span class="ic">🔁</span><div><b>Cả ngày / nửa ngày xen kẽ:</b> Đơn vị <i>Ngày</i>, chu kỳ 2: ô 1 = Hành chính, ô 2 = Nửa ngày sáng → hôm nay cả ngày, mai nửa ngày, ngày kia cả ngày…</div></div>
+  </section>
+
+  <!-- 4. GÁN CA NV -->
+  <section id="gan-nv">
+    <div class="eyebrow"><span class="num">4</span> Phân ca › 4. Gán ca cho nhân viên</div>
+    <h2 class="sec">Gán ca cho nhân viên</h2>
+    <p class="lead">Gán 1 ca hoặc 1 lịch trình cho từng người, áp dụng từ ngày bắt đầu trở đi.</p>
+    <figure class="fig"><img src="img/pc-10-gan-ca-nv-them.jpg" alt="Trang gán ca cho nhân viên" loading="lazy"><figcaption>Trang "+ Thêm": trái chọn người, giữa danh sách đã chọn, phải chọn ngày + ca/lịch trình.</figcaption></figure>
+    <ol class="steps">
+      <li><b>Bấm "+ Thêm"</b><span>Bấm tên phòng ban ở cột trái → tick người ở cột giữa (chọn được nhiều phòng, cộng dồn).</span></li>
+      <li><b>Ngày bắt đầu, ngày kết thúc</b><span>Để trống ngày kết thúc = áp dụng không thời hạn.</span></li>
+      <li><b>Lịch trình vào ra</b><span>Để "Mặc định" nếu không có gì đặc biệt.</span></li>
+      <li><b>Chọn 1 ca hoặc 1 lịch trình ở bảng phải → Lưu</b></li>
+    </ol>
+    <figure class="fig"><img src="img/pc-09-gan-ca-nv.jpg" alt="Danh sách gán ca nhân viên" loading="lazy"><figcaption>Danh sách chỉ hiện người có gán riêng. Người không có ở đây thì theo ca của phòng ban.</figcaption></figure>
+  </section>
+
+  <!-- 5. GÁN CA PHÒNG BAN -->
+  <section id="gan-pb">
+    <div class="eyebrow"><span class="num">5</span> Phân ca › 5. Gán ca cho phòng ban</div>
+    <h2 class="sec">Gán ca cho phòng ban</h2>
+    <p class="lead">Cách nhanh nhất cho công ty đông người: gán 1 lần cho cả phòng, <b>người mới vào phòng sau này cũng tự theo</b>.</p>
+    <figure class="fig"><img src="img/pc-11-gan-ca-phong-ban.jpg" alt="Gán ca cho phòng ban" loading="lazy"><figcaption>Văn phòng làm Hành chính, Sản xuất xoay 3 ca, Bảo vệ ca 12 tiếng.</figcaption></figure>
+    <ul class="plain">
+      <li>Tick <b>"Bao gồm cấp dưới"</b> để áp cho cả các phòng con.</li>
+      <li>Ai trong phòng có <b>gán ca riêng</b> (bước 4) thì theo gán riêng, không theo phòng.</li>
+      <li>Đổi ca cả phòng từ một ngày: thêm dòng mới với ngày bắt đầu mới — dòng mới nhất đang hiệu lực được dùng, lịch sử cũ giữ nguyên để tính công các tháng trước.</li>
+    </ul>
+  </section>
+
+  <!-- 6. TẠM THỜI -->
+  <section id="tam-thoi">
+    <div class="eyebrow"><span class="num">6</span> Phân ca › Lịch trình tạm thời</div>
+    <h2 class="sec">Lịch trình tạm thời — đổi ca đột xuất vài ngày</h2>
+    <p class="lead">VD tuần này 2 người tổ A chuyển sang ca đêm 3 ngày, hoặc cho cả phòng nghỉ bù. Hết các ngày đó tự quay về lịch đã gán.</p>
+    <figure class="fig"><img src="img/pc-13-tam-thoi-them.jpg" alt="Thêm lịch trình tạm thời" loading="lazy"><figcaption>Tick cả phòng ban (ô vuông trên cây) hoặc từng người; chọn Từ ngày – Đến ngày và ca / lịch trình / "Nghỉ".</figcaption></figure>
+    <ol class="steps">
+      <li><b>Chọn người</b><span>Tick ô cạnh tên phòng = cả phòng; bấm tên phòng rồi tick từng người.</span></li>
+      <li><b>Từ ngày – Đến ngày</b><span>Tick <b>"Bỏ qua ngày nghỉ"</b> để không đổi vào Chủ nhật, ngày lễ.</span></li>
+      <li><b>Chọn ca, lịch trình hoặc "🛌 Nghỉ" → Lưu</b><span>Công các ngày đã chấm tự tính lại theo ca mới.</span></li>
+    </ol>
+    <figure class="fig"><img src="img/pc-12-tam-thoi.jpg" alt="Danh sách lịch trình tạm thời" loading="lazy"><figcaption>Mỗi dòng = 1 người × 1 ngày. Xoá dòng → ngày đó quay về lịch đã gán.</figcaption></figure>
+  </section>
+
+  <!-- 7. EXCEL -->
+  <section id="excel">
+    <div class="eyebrow"><span class="num">7</span> Phân ca › Xem lịch trình (kiểu Excel)</div>
+    <h2 class="sec">Xem lịch trình (kiểu Excel) — xem &amp; sửa ca cả công ty</h2>
+    <p class="lead">Mỗi dòng 1 nhân viên, mỗi cột 1 ngày. Ô nào cũng đã hiện sẵn ca phần mềm tìm được — chỉ cần sửa ô nào khác.</p>
+    <figure class="fig"><img src="img/pc-14-bang-excel.jpg" alt="Bảng phân ca kiểu Excel" loading="lazy"><figcaption>Khoảng 05/10 → 18/10: tổ sản xuất xoay ca, 2 người đổi tạm sang ca đêm 12–14/10, 1 ô nhập tay C2, 1 ô NGHỈ.</figcaption></figure>
+    <div class="legend">
+      <span><i class="lg ex">HC</i>Chữ đậm: nhập tay ở bảng này — ưu tiên cao nhất</span>
+      <span><i class="lg ph">HC</i>Chữ xám: theo lịch đã gán (bước 4–5)</span>
+      <span><i class="lg tmp">HC</i>Cam nghiêng: theo lịch trình tạm thời</span>
+      <span><i class="lg fnd">HC</i>Xanh: ca phần mềm đã dò ra theo giờ chấm</span>
+      <span><i class="lg">📋</i>Lịch tự dò, chưa chấm nên chưa biết ca</span>
+      <span><i class="lg dirty">HC</i>Nền vàng: đã sửa, chưa lưu</span>
+    </div>
+    <h3 class="sub">Thao tác như Excel</h3>
+    <table class="t">
+      <tr><th style="width:34%">Muốn</th><th>Làm</th></tr>
+      <tr><td>Đổi ca 1 ô</td><td>Bấm ô, gõ mã ca (HC, C1, SA…) rồi <span class="kbd">Enter</span>. Hoặc bấm các nút mã ca phía trên.</td></tr>
+      <tr><td>Đổi nhiều ô một lúc</td><td>Kéo chuột (hoặc <span class="kbd">Shift</span> + mũi tên) chọn vùng rồi gõ mã. Bấm số ngày = chọn cả cột, bấm số thứ tự = chọn cả dòng, <span class="kbd">Ctrl+A</span> = cả bảng.</td></tr>
+      <tr><td>2 ca trong 1 ngày (ca gãy)</td><td>Gõ nối bằng dấu cộng: <span class="kbd">SA+CH</span>.</td></tr>
+      <tr><td>Cho nghỉ</td><td>Gõ <span class="kbd">N</span> hoặc bấm nút NGHỈ.</td></tr>
+      <tr><td>Bấm nhầm, muốn trả về tự động</td><td>Chọn ô rồi bấm <span class="kbd">Delete</span> hoặc nút <b>↺ Về tự động</b>, rồi Lưu. Ô quay lại ca phần mềm tự tìm (hoặc lịch tạm thời nếu có).</td></tr>
+      <tr><td>Copy từ file Excel khác</td><td><span class="kbd">Ctrl+C</span> trong Excel → chọn ô → <span class="kbd">Ctrl+V</span>.</td></tr>
+      <tr><td>Hoàn tác / Lưu</td><td><span class="kbd">Ctrl+Z</span> / <span class="kbd">Ctrl+S</span> (hoặc nút 💾 Lưu (số ô)).</td></tr>
+      <tr><td>Xem khoảng ngày khác</td><td>Chọn <b>Từ ngày → Đến ngày</b> (tối đa 62 ngày, qua 2 tháng được). ‹ › chuyển cả tháng.</td></tr>
+      <tr><td>Tìm 1 người</td><td>Gõ tên hoặc mã ở ô <b>🔍 Tìm NV</b>.</td></tr>
+      <tr><td>Bảng to hơn</td><td>Nút <b>⛶</b>: ẩn menu trái, bảng chiếm cả màn hình. <span class="kbd">Esc</span> để thoát.</td></tr>
+    </table>
+    <h3 class="sub">Phân ca cả công ty bằng file Excel</h3>
+    <ol class="steps">
+      <li><b>Chọn "Tất cả phòng ban" và khoảng ngày</b><span>Nên chọn khoảng nhỏ (1–2 tuần) cho file gọn, nhập nhanh.</span></li>
+      <li><b>Bấm "⬇ Xuất Excel"</b><span>File đã điền sẵn ca phần mềm tìm được (chữ xám nghiêng) và ô đã nhập tay (chữ đậm). Cột ngày ghi dạng 05/10.</span></li>
+      <li><b>Sửa trong Excel</b><span>Chỉ sửa ô cần đổi. Ô để nguyên = vẫn tự động. Gõ <b>-</b> = bỏ ô nhập tay. Sheet "Mã ca" có danh sách mã.</span></li>
+      <li><b>Bấm "⬆ Nhập Excel"</b><span>Phần mềm nhận theo Mã NV, báo số ô đổi / giữ tự động, và tự tính lại công các ngày đó.</span></li>
+    </ol>
+    <div class="note ok"><span class="ic">⚡</span><div>Đã thử với <b>600 nhân viên × 30 ngày</b>: mở bảng dưới 2 giây, xuất / nhập Excel dưới 1 giây.</div></div>
+  </section>
+
+  <!-- 8. ƯU TIÊN -->
+  <section id="uu-tien">
+    <div class="eyebrow">Quan trọng</div>
+    <h2 class="sec">Thứ tự ưu tiên khi tìm ca của 1 ngày</h2>
+    <p class="lead">Một người có thể vừa thuộc phòng có ca, vừa có gán riêng, vừa bị đổi tạm. Phần mềm xét từ trên xuống, gặp cái nào trước thì dùng cái đó:</p>
+    <div class="ladder">
+      <div class="rung"><span class="rk">1</span><div><b>Ô nhập tay ở bảng kiểu Excel</b><small>Luôn thắng. Xoá ô (Về tự động) thì xuống các mức dưới.</small></div></div>
+      <div class="rung"><span class="rk">2</span><div><b>Lịch trình tạm thời</b><small>Đổi ca vài ngày.</small></div></div>
+      <div class="rung"><span class="rk">3</span><div><b>Gán ca cho nhân viên</b><small>Ca / lịch riêng của người đó.</small></div></div>
+      <div class="rung"><span class="rk">4</span><div><b>Gán ca cho phòng ban</b><small>Phòng của người đó, hoặc phòng cha (nếu tick "kèm cấp dưới").</small></div></div>
+      <div class="rung"><span class="rk">5</span><div><b>Ca mặc định trên hồ sơ nhân viên</b></div></div>
+      <div class="rung last"><span class="rk">—</span><div><b>Không có gì</b><small>Tính theo tổng các cặp vào/ra trong ngày (8 tiếng = 1 công).</small></div></div>
+    </div>
+  </section>
+
+  <!-- 9. QUY TẮC CHUNG -->
+  <section id="quy-tac">
+    <div class="eyebrow">Cài đặt › Quy tắc tính công</div>
+    <h2 class="sec">Quy tắc chung cho cả công ty</h2>
+    <div class="twocol">
+      <figure class="fig"><img src="img/pc-15-quy-tac-tinh-cong.jpg" alt="Quy tắc tính công" loading="lazy"><figcaption>Đặt một lần, áp cho mọi ca, mọi nhân viên.</figcaption></figure>
+      <ul class="plain">
+        <li><b>Ngày cuối tuần</b>: mặc định Chủ nhật. Tick thêm T7 nếu công ty nghỉ cả thứ 7. Ngày cuối tuần không bị tính là vắng.</li>
+        <li><b>Đi làm ngày cuối tuần tính là TĂNG CA</b>: cả thời gian làm thành tăng ca cuối tuần, không cộng vào công thường. Báo cáo quy đổi 8 giờ = 1 công ở cột "Công TC cuối tuần".</li>
+        <li><b>Hệ số tăng ca</b>: ngày thường / cuối tuần / lễ (mặc định 1,5 / 2 / 3). Ai cần khác thì đặt riêng ở trang Lương.</li>
+        <li><b>Làm tròn công</b>: số lẻ + lùi/tới. Mặc định 2 số lẻ, làm tròn lùi.</li>
+        <li><b>Làm tròn tăng ca</b>: theo số lẻ của giờ, hoặc <b>theo khối phút</b> (VD khối 15: 47 phút → lùi 45 · tới 60).</li>
+        <li><b>Ngày lễ</b>: khai ở khung "Ngày lễ" ngay bên dưới trong Cài đặt.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- 10. TÍNH LẠI -->
+  <section id="tinh-lai">
+    <div class="eyebrow">Sau khi đổi</div>
+    <h2 class="sec">Đổi xong — khi nào phải bấm "Tính lại công"?</h2>
+    <table class="t">
+      <tr><th>Bạn vừa đổi</th><th style="width:44%">Công các ngày đã chấm</th></tr>
+      <tr><td>Ô ở bảng kiểu Excel, nhập file Excel, lịch trình tạm thời</td><td>✅ <b>Tự tính lại</b> ngay</td></tr>
+      <tr><td>Ca làm việc (giờ, cho phép muộn…), lịch trình, gán ca nhân viên / phòng ban, quy tắc chung</td><td>Bấm <b>↻ Tính lại</b> ở trang <b>Tính công</b> (chọn khoảng ngày) hoặc <b>↻ Tính lại công tất cả</b> trong Cài đặt</td></tr>
+    </table>
+    <div class="note"><span class="ic">🛡️</span><div>Giờ quản lý đã sửa tay ở trang Tính công được giữ nguyên khi tính lại.</div></div>
+  </section>
+
+  <!-- 11. MẪU -->
+  <section id="mau">
+    <div class="eyebrow">Làm nhanh</div>
+    <h2 class="sec">Mẫu cấu hình theo loại công ty</h2>
+    <table class="t">
+      <tr><th style="width:22%">Loại</th><th>Ca (bước 1)</th><th>Lịch trình (bước 3)</th><th>Gán (bước 4–5)</th></tr>
+      <tr><td><b>Văn phòng</b></td><td>HC 08:00–17:00, nghỉ 60', cho phép muộn 5'</td><td>Không cần</td><td>Gán HC cho từng phòng ban</td></tr>
+      <tr><td><b>Nhà máy 3 ca xoay tuần</b></td><td>C1 06–14, C2 14–22, C3 22–06 (qua đêm)</td><td>Đơn vị Tuần, chu kỳ 3: C1 → C2 → C3</td><td>Gán lịch cho phòng Sản xuất; mỗi tổ một ngày bắt đầu khác nhau để lệch ca</td></tr>
+      <tr><td><b>Bảo vệ 12 tiếng</b></td><td>BV 07–19 (số công 1.5), BD 19–07 (qua đêm)</td><td>Đơn vị Ngày, chu kỳ 4: BV, BV, BD, BD (hoặc theo lịch riêng)</td><td>Gán cho phòng Bảo vệ</td></tr>
+      <tr><td><b>Bán lẻ / F&amp;B ca linh hoạt</b></td><td>SA 08–12 (0.5 công), CH 13–17 (0.5), HC 08–17</td><td>Đơn vị Tự động: SA, CH, HC</td><td>Gán lịch cho nhân viên; lịch vào ra "theo cặp" nếu nghỉ trưa không cố định</td></tr>
+      <tr><td><b>Part-time / theo giờ</b></td><td>—</td><td>—</td><td>Hồ sơ nhân viên: <b>Kiểu chấm công = Theo giờ</b>, chỉ tính tổng giờ</td></tr>
+    </table>
+  </section>
+
+  <!-- 12. FAQ -->
+  <section id="faq">
+    <div class="eyebrow">Hỏi &amp; đáp</div>
+    <h2 class="sec">Câu hỏi thường gặp</h2>
+    <div class="faq">
+      <details><summary>Ca đêm 22:00–06:00, giờ ra sáng hôm sau có bị tính sang ngày hôm sau không?</summary><p>Không. Đặt giờ ra nhỏ hơn giờ vào là phần mềm hiểu ca qua đêm: lượt 06:00 sáng hôm sau là giờ RA của ngày hôm trước. Kể cả khi gán ca đêm sau khi đã chấm, các lượt vẫn ghép đúng.</p></details>
+      <details><summary>Xếp ca chiều nhưng nhân viên đến từ 8 giờ sáng thì sao?</summary><p>Với cách "Giờ đầu là vào, giờ cuối là ra", phần mềm lấy lượt đầu tiên trong ngày làm giờ vào: không bị tính trễ, không bị thiếu giờ ra. Muốn tính giờ đến sớm là tăng ca thì tick "Tăng ca TRƯỚC giờ vào" ở ca.</p></details>
+      <details><summary>Ô hiện 📋 nghĩa là gì?</summary><p>Người đó theo lịch "tự dò ca" và ngày đó chưa chấm, nên chưa biết làm ca nào. Chấm xong ô tự hiện đúng ca (chữ xanh).</p></details>
+      <details><summary>Nhân viên làm 2 ca gãy (8–12 và 13–17) trong 1 ngày?</summary><p>Cho vào lịch trình tự dò có cả 2 ca, hoặc gõ <b>SA+CH</b> ở bảng kiểu Excel. Phần mềm tách thành 2 dòng công, mỗi ca 0,5.</p></details>
+      <details><summary>Tại sao công ra 0,94 mà không phải 0,95?</summary><p>Do làm tròn lùi 2 số lẻ (mặc định). Muốn làm tròn tới: Cài đặt › Quy tắc tính công › Làm tròn › Công = "Tới (lên)", rồi bấm Tính lại công.</p></details>
+      <details><summary>Lỡ nhập tay sai ở bảng Excel, làm sao trả về như cũ?</summary><p>Chọn các ô đó → nút ↺ Về tự động (hoặc phím Delete) → Lưu. Ô quay về ca phần mềm tự tìm.</p></details>
+      <details><summary>Đổi ca cả phòng từ tháng sau mà giữ đúng công tháng này?</summary><p>Ở "Gán ca cho phòng ban" thêm dòng mới, ngày bắt đầu = ngày 1 tháng sau. Dòng cũ vẫn dùng cho các ngày trước đó.</p></details>
+      <details><summary>Người mới vào phòng có phải gán ca không?</summary><p>Không, nếu phòng đã được gán ca ở bước 5 — người mới tự theo ca của phòng.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">
+  <div><b>Digiplus — Chấm công thông minh.</b> Hướng dẫn tạo ca &amp; phân ca.</div>
+  <div style="margin-top:6px">Hỗ trợ · Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
+</div></footer>
+
+<button class="themebtn" id="tt">🌗 Giao diện</button>
+<script>
+// Chạm / bấm ảnh minh hoạ → mở ảnh cỡ thật (điện thoại xem rõ hơn)
+document.querySelectorAll('figure.fig img').forEach(function(i){i.style.cursor='zoom-in';i.title='Bấm để xem ảnh to';i.addEventListener('click',function(){window.open(i.src,'_blank');});});
+(function(){var b=document.getElementById('tt');b.addEventListener('click',function(){var r=document.documentElement;var c=r.getAttribute('data-theme');if(!c){c=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}r.setAttribute('data-theme',c==='dark'?'light':'dark');});})();
+</script>
+</body>
+</html>
