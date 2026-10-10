@@ -227,7 +227,10 @@ table.as-sheet td.c.fnd { color: #0f766e; }
 .page-head.as-head { margin-bottom: 8px; gap: 8px; }
 .page-head.as-head h2 { display: none; }   /* bảng Excel: bỏ tiêu đề lớn cho bảng cao hơn (menu trái đã đánh dấu mục đang xem) */
 .page-head.as-head { justify-content: flex-start; }
-.page-head.as-head .toolbar { gap: 6px; }
+.page-head.as-head .toolbar { gap: 6px 10px; flex: 1; width: 100%; flex-wrap: wrap; align-items: center; }
+.as-tb-left, .as-tb-right { display: flex; gap: 6px; align-items: center; flex-wrap: nowrap; }
+.as-tb-left { flex-wrap: wrap; }
+.as-tb-right { margin-left: auto; }   /* nhóm nút thao tác luôn bám mép phải, không tách lẻ */
 .page-head.as-head .btn { padding: 7px 12px; }
 .as-bar2 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; margin: 0 0 6px; }
 .as-bar2 .as-legend { margin: 0; }

@@ -1,6 +1,7 @@
 // Ghi NHẬT KÝ THAO TÁC của admin/quản lý trên phần mềm.
 // Middleware tự động ghi mọi thao tác thay đổi (POST/PUT/DELETE/PATCH) trên router admin.
 import { db } from './db.js';
+import { describeAction } from './audit-describe.js';
 
 const clientIp = (req) =>
   (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').toString().split(',')[0].trim();
@@ -35,11 +36,21 @@ const LABELS = {
   'POST /holidays': 'Thêm ngày lễ',
   'DELETE /holidays/:id': 'Xóa ngày lễ',
   'POST /assignments': 'Phân ca (theo ngày)',
-  'POST /assignments/bulk': 'Phân ca hàng loạt',
+  'POST /assignments/bulk': 'Lịch trình tạm thời',
+  'POST /assignments/cells': 'Sửa bảng phân ca (Excel)',
+  'POST /assignments/clear': 'Xóa lịch theo ngày',
+  'POST /dept-shift-assignments': 'Gán ca cho phòng ban',
+  'POST /dept-shift-assignments/delete': 'Xóa gán ca phòng ban',
+  'POST /inout-schedules': 'Thêm lịch trình vào ra',
+  'PUT /inout-schedules/:id': 'Sửa lịch trình vào ra',
+  'DELETE /inout-schedules/:id': 'Xóa lịch trình vào ra',
+  'POST /shifts/:id/clear-merge-rule': 'Bỏ cách ghép giờ riêng của ca',
+  'POST /employees/import': 'Nhập nhân viên từ Excel',
+  'POST /employees/att-mode': 'Đổi kiểu chấm công nhân viên',
   'POST /assignments/import': 'Nhập phân ca từ Excel',
-  'POST /shift-assignments': 'Thêm phân ca theo khoảng',
-  'DELETE /shift-assignments/:id': 'Xóa phân ca theo khoảng',
-  'POST /shift-assignments/delete': 'Xóa phân ca theo khoảng',
+  'POST /shift-assignments': 'Gán ca cho nhân viên',
+  'DELETE /shift-assignments/:id': 'Xóa gán ca nhân viên',
+  'POST /shift-assignments/delete': 'Xóa gán ca nhân viên',
   'POST /recompute': 'Tính lại công',
   'POST /attendance': 'Thêm giờ chấm (tay)',
   'PUT /attendance/:id': 'Sửa giờ chấm',
@@ -92,8 +103,17 @@ function summarize(req) {
     }
     if (Object.keys(f).length) out.data = f;
   }
-  let s = '';
-  try { s = JSON.stringify(out); } catch {}
+  // Ghi dạng chữ "nhãn: giá trị · …" (không ghi mã JSON) cho thao tác chưa có câu mô tả riêng
+  const KEY_VI = { id: 'Mã', name: 'Tên', code: 'Mã', full_name: 'Họ tên', department: 'Bộ phận', from: 'Từ ngày', to: 'Đến ngày',
+    from_date: 'Từ ngày', to_date: 'Đến ngày', date: 'Ngày', work_date: 'Ngày', ids: 'Các mục', employee_ids: 'Nhân viên', employee_id: 'Nhân viên',
+    shift_id: 'Ca', mode: 'Kiểu', note: 'Ghi chú', serial: 'Số máy', month: 'Tháng', active: 'Đang dùng', value: 'Giá trị' };
+  const parts = [];
+  if (out.id != null) parts.push(`Mã: ${out.id}`);
+  for (const [k, v] of Object.entries(out.data || {})) {
+    const val = v === 'true' ? 'Có' : v === 'false' ? 'Không' : /^\[.*\]$/.test(v) ? (() => { try { const a = JSON.parse(v); return Array.isArray(a) ? a.length + ' mục' : v; } catch { return v; } })() : v;
+    parts.push(`${KEY_VI[k] || k}: ${val}`);
+  }
+  const s = parts.join(' · ');
   return s.length > 500 ? s.slice(0, 500) + '…' : s;
 }
 
@@ -107,13 +127,16 @@ export function auditMiddleware(req, res, next) {
   if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS') return next();
   const p = req.path || '';
   if (SKIP.some((re) => re.test(p))) return next();
+  // Câu mô tả tiếng Việt tính TRƯỚC khi thao tác chạy (thao tác xoá vẫn còn đọc được tên thứ bị xoá)
+  let desc = null;
+  try { desc = describeAction(req); } catch {}
   res.on('finish', () => {
     try {
       if (res.statusCode >= 400) return;               // thao tác lỗi → không ghi là đã làm
       const u = req.user || {};
       stmt().run(
         (u.id ?? null), u.username || '', u.full_name || '', u.role || '',
-        labelFor(req), m, (req.baseUrl || '') + p, summarize(req), res.statusCode, clientIp(req)
+        labelFor(req), m, (req.baseUrl || '') + p, desc != null ? desc : summarize(req), res.statusCode, clientIp(req)
       );
     } catch { /* không để việc ghi log làm hỏng request */ }
   });

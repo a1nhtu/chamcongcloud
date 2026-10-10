@@ -6,7 +6,16 @@ import { existsSync, readFileSync } from 'node:fs';
 import { LOG_FILE } from '../../logger.js';
 
 // Đổi JSON chi tiết nhật ký → chữ dễ đọc (dùng cho xuất Excel)
-const LOG_KEY_VI = { name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', lng: 'Kinh độ', radius_m: 'Bán kính(m)',
+const LOG_SKIP = new Set(['merge_rule', 'shift_type', 'tdqd_mode', 'cross_midnight', 'work_days', 'ot_rounding_unit']);
+const LOG_KEY_VI = {
+  scope: 'Phạm vi', mode: 'Kiểu', from_date: 'Từ ngày', to_date: 'Đến ngày', from: 'Từ ngày', to: 'Đến ngày', date: 'Ngày', work_date: 'Ngày',
+  start_time: 'Giờ vào', end_time: 'Giờ ra', late_grace_min: 'Cho phép muộn (phút)', early_grace_min: 'Cho phép sớm (phút)',
+  break_minutes: 'Nghỉ giữa ca (phút)', work_unit_value: 'Số công', allow_ot: 'Tính tăng ca', ot_start_after_min: 'Ở lại tối thiểu (phút)',
+  check_in_start: 'Bắt đầu vào', check_in_end: 'Kết thúc vào', check_out_start: 'Bắt đầu ra', check_out_end: 'Kết thúc ra',
+  check_in: 'Giờ vào', check_out: 'Giờ ra', note: 'Ghi chú', cells: 'Ô sửa', ids: 'Các mục', value: 'Giá trị', employee_id: 'NV (ID)',
+  departments: 'Phòng ban', include_children: 'Kèm cấp dưới', is_off: 'Nghỉ', skip_off: 'Bỏ qua ngày nghỉ', month: 'Tháng',
+  inout_schedule_id: 'Lịch trình vào ra', weekend_days: 'Ngày cuối tuần', company_name: 'Tên công ty',
+  name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', lng: 'Kinh độ', radius_m: 'Bán kính(m)',
   code: 'Mã', full_name: 'Họ tên', role: 'Vai trò', username: 'Tài khoản', permissions: 'Quyền',
   department: 'Bộ phận', position: 'Chức danh', phone: 'SĐT', device_pin: 'Số ID máy',
   employee_ids: 'NV (ID)', active: 'Kích hoạt', shift_id: 'Ca', work_schedule_id: 'Lịch trình',
@@ -14,14 +23,20 @@ const LOG_KEY_VI = { name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', ln
 const LOG_ROLE_VI = { admin: 'Admin', manager: 'Quản lý', employee: 'Nhân viên', master: 'Tài khoản tổng' };
 function fmtLogDetail(raw) {
   if (raw == null || raw === '' || raw === '{}') return '(không có chi tiết)';
-  let o; try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return String(raw); }
+  let o; try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch {
+    // Không phải mã JSON (bản ghi mới đã là câu tiếng Việt) → giữ nguyên; JSON bị cắt dở (bản ghi cũ) → đọc từng cặp "khoá":giá trị
+    const t = String(raw);
+    if (!t.startsWith('{')) return t;
+    o = {}; for (const mm of t.matchAll(/"(\w+)":(?:"((?:[^"\\]|\\.)*)"|(-?[\d.]+|true|false|null))/g)) if (mm[1] !== 'data') o[mm[1]] = mm[2] !== undefined ? mm[2] : mm[3];
+    if (!Object.keys(o).length) return t;
+  }
   const flat = {};
   const take = (obj) => { for (const [k, v] of Object.entries(obj || {})) { if (k === 'data' && v && typeof v === 'object') take(v); else flat[k] = v; } };
   take(o);
   const parts = [];
   for (const [k, v] of Object.entries(flat)) {
-    if (k === 'id' || v == null || v === '') continue;
-    let val = v;
+    if (k === 'id' || v == null || v === '' || LOG_SKIP.has(k)) continue;
+    let val = v === true || v === 'true' ? 'Có' : v === false || v === 'false' ? 'Không' : v;
     if (k === 'role') val = LOG_ROLE_VI[v] || v;
     else if (k === 'password') val = '••••';
     else if (k === 'permissions') { try { const a = Array.isArray(v) ? v : JSON.parse(v); val = a.length ? a.length + ' quyền' : 'không quyền'; } catch { val = String(v); } }

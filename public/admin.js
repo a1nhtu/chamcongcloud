@@ -1954,8 +1954,8 @@ async function pageAssignments() {
   // Chọn khoảng ngày cho Bảng Excel: ‹ [từ ngày] → [đến ngày] › · Tháng này
   const rangeNav = () => {
     const f0 = days[0], t0 = days[days.length - 1];
-    const fI = el('input', { type: 'date', value: f0, style: 'width:140px', title: 'Từ ngày' });
-    const tI = el('input', { type: 'date', value: t0, style: 'width:140px', title: 'Đến ngày' });
+    const fI = el('input', { type: 'date', value: f0, style: 'width:126px', title: 'Từ ngày' });
+    const tI = el('input', { type: 'date', value: t0, style: 'width:126px', title: 'Đến ngày' });
     const reset = () => { fI.value = f0; tI.value = t0; };
     const apply = (which) => {
       let f = fI.value, t = tI.value;
@@ -2033,7 +2033,7 @@ async function pageAssignments() {
     // Ô tìm nhân viên (tên / mã) — lọc dòng ngay trên dữ liệu đã tải (công ty đông người)
     const sq = _asSheetQ.trim().toLowerCase();
     const sheetEmps = sq ? emps.filter((e) => (e.full_name || '').toLowerCase().includes(sq) || String(e.code || '').toLowerCase().includes(sq)) : emps;
-    const searchS = el('input', { placeholder: '🔍 Tìm NV (tên / mã)', value: _asSheetQ, style: 'width:170px', title: 'Gõ tên hoặc mã nhân viên để lọc' });
+    const searchS = el('input', { placeholder: '🔍 Tìm NV (tên / mã)', value: _asSheetQ, style: 'width:140px', title: 'Gõ tên hoặc mã nhân viên để lọc' });
     let sqT = null;
     searchS.oninput = () => { clearTimeout(sqT); sqT = setTimeout(() => { _asSheetQ = searchS.value; _asReuse = true; _asFocusSearch = true; pageAssignments(); }, 250); };
     const codeOfShift = new Map(data.shifts.map((s) => [s.id, (s.code || '').trim() || s.name]));
@@ -2097,7 +2097,9 @@ async function pageAssignments() {
     const undo = [];
     const syncBar = () => {
       const bad = [..._asDirty.values()].filter((v) => norm(v).bad).length;
-      saveBtn.textContent = _asDirty.size ? `💾 Lưu ${_asDirty.size} ô đã sửa` : '💾 Lưu';
+      // chữ ngắn + độ rộng cố định → thanh nút không nhảy dòng khi số ô sửa thay đổi
+      saveBtn.textContent = _asDirty.size ? `💾 Lưu (${_asDirty.size})` : '💾 Lưu';
+      saveBtn.title = _asDirty.size ? `Lưu ${_asDirty.size} ô đã sửa (Ctrl+S)` : 'Chưa có ô nào sửa';
       saveBtn.disabled = !_asDirty.size;
       undoBtn.disabled = !undo.length;
       warn.textContent = bad ? `⚠ ${bad} ô sai mã ca (chữ đỏ) — sửa lại rồi mới lưu được` : '';
@@ -2220,14 +2222,14 @@ async function pageAssignments() {
     // ----- thanh công cụ -----
     const selInfo = el('span', { style: 'color:var(--muted);font-size:12.5px' }, '');
     const warn = el('span', { style: 'color:#dc2626;font-size:13px;font-weight:600' }, '');
-    const saveBtn = el('button', { class: 'btn green' }, '💾 Lưu');
+    const saveBtn = el('button', { class: 'btn green', style: 'min-width:104px' }, '💾 Lưu');
     const undoBtn = btnSm('↶ Hoàn tác', doUndo, 'ghost');
     const autoBtn = btnSm('↺ Về tự động', () => { fillSel(''); box.focus({ preventScroll: true }); }, 'ghost');
     autoBtn.title = 'Bỏ các ô đã nhập tay trong vùng đang chọn → phần mềm tự tìm ca lại (lịch trình tạm thời / lịch đã gán / dò theo giờ chấm). Bấm Lưu để áp dụng.';
     saveBtn.onclick = async () => {
       if ([..._asDirty.values()].some((v) => norm(v).bad)) return toast('Còn ô sai mã ca (chữ đỏ). Sửa lại trước khi lưu.', 'err');
       const cells = [..._asDirty].map(([k, v]) => { const [eid, date] = k.split('|'); return { employee_id: +eid, date, value: v }; });
-      saveBtn.disabled = true; saveBtn.textContent = cells.length > 500 ? `⏳ Đang lưu ${cells.length} ô…` : '⏳ Đang lưu…';
+      saveBtn.disabled = true; saveBtn.textContent = '⏳ Đang lưu…'; saveBtn.title = `Đang lưu ${cells.length} ô…`;
       try {
         const r = await api('/admin/assignments/cells', { method: 'POST', body: { cells } });
         if (r.errorCount) { toast(`Đã lưu ${r.saved} ô, ${r.errorCount} ô lỗi: ${r.errors[0].error}`, 'err'); }
@@ -2281,7 +2283,9 @@ async function pageAssignments() {
     fullBtn.title = _asFull ? 'Hiện lại menu trái (phím Esc)' : 'Ẩn menu trái và cây phòng ban để bảng rộng nhất';
     if (deptBar) { deptBar.remove(); deptBar.style.marginBottom = '0'; deptBar.firstChild.remove(); }   // bỏ chữ "Phòng ban:" cho gọn
     undoBtn.textContent = '↶'; undoBtn.title = 'Hoàn tác (Ctrl+Z)';
-    headTools.push(deptBar, searchS, rangeNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, fullBtn, helpBtn);
+    // 2 nhóm cố định: trái = bộ lọc (phòng ban, tìm NV, khoảng ngày) · phải = nút thao tác (luôn bám mép phải, đi liền 1 khối)
+    headTools.push(el('div', { class: 'as-tb-left' }, deptBar, searchS, rangeNav()),
+      el('div', { class: 'as-tb-right' }, canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, fullBtn, helpBtn));
     codes.style.margin = '0';
     const fitBox = () => setTimeout(() => { box.style.maxHeight = Math.max(240, innerHeight - box.getBoundingClientRect().top - 14) + 'px'; });
     main.append(
@@ -3096,7 +3100,16 @@ async function pageDevReq() {
 
 /* ---------- NHẬT KÝ THAO TÁC ---------- */
 // Đổi JSON chi tiết nhật ký → chữ dễ đọc (tiếng Việt), thay vì đổ code thô
-const LOG_KEY_VI = { name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', lng: 'Kinh độ', radius_m: 'Bán kính(m)',
+const LOG_SKIP = new Set(['merge_rule', 'shift_type', 'tdqd_mode', 'cross_midnight', 'work_days', 'ot_rounding_unit']);
+const LOG_KEY_VI = {
+  scope: 'Phạm vi', mode: 'Kiểu', from_date: 'Từ ngày', to_date: 'Đến ngày', from: 'Từ ngày', to: 'Đến ngày', date: 'Ngày', work_date: 'Ngày',
+  start_time: 'Giờ vào', end_time: 'Giờ ra', late_grace_min: 'Cho phép muộn (phút)', early_grace_min: 'Cho phép sớm (phút)',
+  break_minutes: 'Nghỉ giữa ca (phút)', work_unit_value: 'Số công', allow_ot: 'Tính tăng ca', ot_start_after_min: 'Ở lại tối thiểu (phút)',
+  check_in_start: 'Bắt đầu vào', check_in_end: 'Kết thúc vào', check_out_start: 'Bắt đầu ra', check_out_end: 'Kết thúc ra',
+  check_in: 'Giờ vào', check_out: 'Giờ ra', note: 'Ghi chú', cells: 'Ô sửa', ids: 'Các mục', value: 'Giá trị', employee_id: 'NV (ID)',
+  departments: 'Phòng ban', include_children: 'Kèm cấp dưới', is_off: 'Nghỉ', skip_off: 'Bỏ qua ngày nghỉ', month: 'Tháng',
+  inout_schedule_id: 'Lịch trình vào ra', weekend_days: 'Ngày cuối tuần', company_name: 'Tên công ty',
+  name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', lng: 'Kinh độ', radius_m: 'Bán kính(m)',
   code: 'Mã', full_name: 'Họ tên', role: 'Vai trò', username: 'Tài khoản', permissions: 'Quyền',
   department: 'Bộ phận', position: 'Chức danh', phone: 'SĐT', device_pin: 'Số ID máy',
   employee_ids: 'NV (ID)', active: 'Kích hoạt', shift_id: 'Ca', work_schedule_id: 'Lịch trình',
@@ -3104,14 +3117,20 @@ const LOG_KEY_VI = { name: 'Tên', address: 'Địa chỉ', lat: 'Vĩ độ', ln
 const LOG_ROLE_VI = { admin: 'Admin', manager: 'Quản lý', employee: 'Nhân viên', master: 'Tài khoản tổng' };
 function fmtLogDetail(raw) {
   if (raw == null || raw === '' || raw === '{}') return '(không có chi tiết)';
-  let o; try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return String(raw); }
+  let o; try { o = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch {
+    // Không phải mã JSON (bản ghi mới đã là câu tiếng Việt) → giữ nguyên; JSON bị cắt dở (bản ghi cũ) → đọc từng cặp "khoá":giá trị
+    const t = String(raw);
+    if (!t.startsWith('{')) return t;
+    o = {}; for (const mm of t.matchAll(/"(\w+)":(?:"((?:[^"\\]|\\.)*)"|(-?[\d.]+|true|false|null))/g)) if (mm[1] !== 'data') o[mm[1]] = mm[2] !== undefined ? mm[2] : mm[3];
+    if (!Object.keys(o).length) return t;
+  }
   const flat = {};
   const take = (obj) => { for (const [k, v] of Object.entries(obj || {})) { if (k === 'data' && v && typeof v === 'object') take(v); else flat[k] = v; } };
   take(o);
   const parts = [];
   for (const [k, v] of Object.entries(flat)) {
-    if (k === 'id' || v == null || v === '') continue;
-    let val = v;
+    if (k === 'id' || v == null || v === '' || LOG_SKIP.has(k)) continue;
+    let val = v === true || v === 'true' ? 'Có' : v === false || v === 'false' ? 'Không' : v;
     if (k === 'role') val = LOG_ROLE_VI[v] || v;
     else if (k === 'password') val = '••••';
     else if (k === 'permissions') { try { const a = Array.isArray(v) ? v : JSON.parse(v); val = a.length ? a.length + ' quyền' : 'không quyền'; } catch { val = String(v); } }
