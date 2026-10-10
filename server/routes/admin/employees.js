@@ -1,7 +1,7 @@
 // Nhóm route NHÂN VIÊN + phân quyền chi tiết + khoá thiết bị chấm công điện thoại.
 import ExcelJS from 'exceljs';
 import { db } from '../../db.js';
-import { hashPassword, PERMISSIONS } from '../../auth.js';
+import { hashPassword, passwordHasher, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
@@ -189,6 +189,7 @@ export function registerEmployeeRoutes(r, { need }) {
     const insDept = db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)');
     const insPos = db.prepare('INSERT OR IGNORE INTO positions(name) VALUES(?)');
     const empByCode = new Map(db.prepare('SELECT id, code, role, device_pin FROM employees').all().map((e) => [String(e.code).trim().toUpperCase(), e]));
+    const pwHash = passwordHasher();   // các dòng cùng mật khẩu (thường để trống = 123456) chỉ mã hoá 1 lần
     const pinUsed = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?");
 
     const lic = licenseState();
@@ -233,7 +234,7 @@ export function registerEmployeeRoutes(r, { need }) {
             const info = db.prepare(`INSERT INTO employees
               (code, full_name, department, position, phone, role, username, password_hash, permissions, device_pin, active)
               VALUES (?,?,?,?,?,?,?,?,?,?,1)`).run(
-              code, name, dept, pos, phone, role, username, hashPassword(password),
+              code, name, dept, pos, phone, role, username, pwHash(password),
               normPerms(role, role === 'admin' ? null : []), pinOk);
             empByCode.set(CODE, { id: info.lastInsertRowid, code, role, device_pin: pinOk });
             relinkSafe(info.lastInsertRowid, pinOk);
@@ -259,7 +260,7 @@ export function registerEmployeeRoutes(r, { need }) {
           if (pin && !(existing.device_pin || '').trim() && !pinUsed.get(pin, existing.id)) { sets.push('device_pin=?'); args.push(pin); }
           if (sets.length) { args.push(existing.id); db.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE id=?`).run(...args); }
           if (sets.includes('device_pin=?')) relinkSafe(existing.id, pin);
-          if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(cellStr(row, 10)), existing.id);
+          if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(pwHash(cellStr(row, 10)), existing.id);
           if (basic > 0) setBasicSalary(existing.id, basic);
           updated++;
         }

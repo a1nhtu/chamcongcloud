@@ -4,7 +4,7 @@ import { db, getSetting, empHourly } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
-import { hashPassword } from './auth.js';
+import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
 
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
@@ -53,7 +53,7 @@ export function upsertEmployeeFromDevice(pin, name, force = false) {
   const info = db.prepare(`INSERT INTO employees
     (code, full_name, department, position, phone, role, username, password_hash, device_pin, from_device, active)
     VALUES (?,?, '', '', '', 'employee', ?, ?, ?, 1, 1)`)
-    .run(code, fullName, username, hashPassword('123456'), pin);
+    .run(code, fullName, username, defaultPasswordHash(), pin);
   relinkQuiet(Number(info.lastInsertRowid), pin);   // lượt quẹt có trước khi NV được tạo → gán luôn
   return Number(info.lastInsertRowid);
 }
@@ -68,6 +68,9 @@ function relinkQuiet(empId, pin) {
 export function ingestUserData(serial, table, rawBody) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const seen = new Set();
+  // Cả khối (VD máy gửi 600 NV một lần) ghi trong MỘT giao dịch — nhanh hơn nhiều so với ghi từng dòng
+  db.exec('SAVEPOINT ingest_users');
+  try {
   for (let line of lines) {
     // Bỏ tiền tố loại dòng nếu có (USER / FP / USERINFO)
     const m = line.match(/^(USER|FP|USERINFO|FACE|BIODATA)\b\s*/i);
@@ -89,6 +92,8 @@ export function ingestUserData(serial, table, rawBody) {
     const id = upsertEmployeeFromDevice(pin, name);
     if (id) seen.add(pin);
   }
+    db.exec('RELEASE ingest_users');
+  } catch (e) { db.exec('ROLLBACK TO ingest_users'); db.exec('RELEASE ingest_users'); throw e; }
   return seen;   // Set các PIN đã đụng tới (dùng để đồng bộ nhóm)
 }
 

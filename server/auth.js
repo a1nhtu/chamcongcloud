@@ -32,6 +32,15 @@ function getSecret() {
 export function hashPassword(pw) {
   return bcrypt.hashSync(pw, 10);
 }
+// Mã hoá mật khẩu cố ý CHẬM (~70ms/lần, chống dò mật khẩu). NV tự tạo từ máy chấm công / nhập Excel đều dùng chung
+// mật khẩu mặc định 123456 → mã hoá MỘT lần rồi dùng lại (600 NV: 43 giây → dưới 1 giây). Ai đổi mật khẩu thì mã hoá riêng.
+let _defHash = null;
+export function defaultPasswordHash() { return _defHash || (_defHash = hashPassword('123456')); }
+// Bộ nhớ tạm cho 1 lần nhập hàng loạt: các dòng cùng mật khẩu chỉ mã hoá 1 lần
+export function passwordHasher() {
+  const memo = new Map();
+  return (pw) => { pw = String(pw); if (pw === '123456') return defaultPasswordHash(); if (!memo.has(pw)) memo.set(pw, hashPassword(pw)); return memo.get(pw); };
+}
 
 export function verifyPassword(pw, hash) {
   return bcrypt.compareSync(pw, hash);
