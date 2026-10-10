@@ -124,7 +124,8 @@ var
   ChkVps: TNewCheckBox;   { cài trên VPS nhiều khách → né cả cổng đã cấp cho các khách VPS khác (theo máy chủ) }
   UseVps: Boolean;
   VpsList: String;        { các dòng "cổng slug" của khách VPS khác, dạng #10 + "8687 abc" + #10 + ... }
-  OtherInstCount: Integer;   { số bản Digiplus đang có trên máy (để chọn sẵn ô VPS) }
+  OtherInstCount: Integer;
+  ListenCache: String;    { cổng đang nghe, đọc 1 lần khi vào trang Cổng → kiểm tra ngay khi gõ không phải chờ }   { số bản Digiplus đang có trên máy (để chọn sẵn ô VPS) }
 
   Instance: String;       { '' = bản đầu tiên; '2', '3'... = các bản cài thêm trên cùng máy }
 
@@ -475,28 +476,44 @@ begin
   end;
 end;
 
-{ Cổng trống đầu tiên từ Start trở lên }
-function FindFreePort(Start: Integer): String;
-var P: Integer; L: String;
+{ Cổng trống đầu tiên từ Start trở lên, theo danh sách cổng đang nghe L }
+function FindFreePortIn(Start: Integer; const L: String): String;
+var P: Integer;
 begin
-  L := ListenPorts;
   Result := IntToStr(Start);
   for P := Start to Start + 500 do
     if (P <= 65000) and (PortProblem(IntToStr(P), L) = '') then begin Result := IntToStr(P); Exit; end;
 end;
 
-procedure ShowPortStatus;
+{ Như trên nhưng đọc lại danh sách cổng đang nghe (và cập nhật bản lưu để kiểm tra khi gõ) }
+function FindFreePort(Start: Integer): String;
+begin
+  ListenCache := ListenPorts;
+  Result := FindFreePortIn(Start, ListenCache);
+end;
+
+{ Refresh=True: đọc lại danh sách cổng đang nghe (mất ~1 giây); False: dùng bản đã đọc (khi đang gõ) }
+procedure ShowPortStatusEx(Refresh: Boolean);
 var P, Why: String;
 begin
   P := Trim(PortPage.Values[0]);
   if not ValidPort(P) then begin LblPort.Caption := ''; Exit; end;
-  LblPort.Font.Color := clGray; LblPort.Caption := 'Đang kiểm tra cổng ' + P + '...'; WizardForm.Refresh;
-  Why := PortProblem(P, ListenPorts);
+  P := IntToStr(StrToInt(P));
+  if Refresh or (ListenCache = '') then begin
+    LblPort.Font.Color := clGray; LblPort.Caption := 'Đang kiểm tra cổng ' + P + '...'; WizardForm.Refresh;
+    ListenCache := ListenPorts;
+  end;
+  Why := PortProblem(P, ListenCache);
   if Why = '' then begin
     LblPort.Font.Color := $00007A00; LblPort.Caption := 'Cổng ' + P + ' đang trống, dùng được.';
   end else begin
     LblPort.Font.Color := clRed; LblPort.Caption := 'Cổng ' + P + ' ' + Why + '. Bấm "Tự chọn cổng trống" hoặc gõ cổng khác.';
   end;
+end;
+
+procedure ShowPortStatus;
+begin
+  ShowPortStatusEx(True);
 end;
 
 procedure AutoPortClick(Sender: TObject);
@@ -508,9 +525,10 @@ begin
   LblPort.Font.Color := $00007A00; LblPort.Caption := 'Cổng ' + P + ' đang trống, dùng được.';
 end;
 
+{ Gõ tới đâu báo tới đó (dùng danh sách cổng đã đọc khi vào trang; bấm Tiếp tục sẽ kiểm tra lại lần nữa) }
 procedure PortEditChange(Sender: TObject);
 begin
-  LblPort.Caption := '';
+  ShowPortStatusEx(False);
 end;
 
 procedure InitializeWizard;
@@ -596,13 +614,15 @@ begin
       WizardForm.PageDescriptionLabel.Caption := 'Bản LAN — chỉ dùng trong mạng nội bộ';
     end;
     { điền sẵn cổng khi mới vào hoặc vừa đổi kiểu / tên khách; giữ nguyên nếu người cài đã gõ }
+    LblPort.Font.Color := clGray; LblPort.Caption := 'Đang kiểm tra cổng...'; WizardForm.Refresh;
+    ListenCache := ListenPorts;   { đọc 1 lần; gõ cổng thì báo ngay theo bản này }
     if Ctx <> PortCtx then begin
       PortCtx := Ctx;
       if (ModePage.SelectedValueIndex = MODE_DOMAIN) and not DomainIsNew and (DomainPort <> '') then PortPage.Values[0] := DomainPort
       else if HasOldConfig then PortPage.Values[0] := ReadCfg(OldConfigPath, 'PORT')
-      else PortPage.Values[0] := FindFreePort(8686);
+      else PortPage.Values[0] := FindFreePortIn(8686, ListenCache);
     end;
-    ShowPortStatus;
+    ShowPortStatusEx(False);
   end;
 end;
 
