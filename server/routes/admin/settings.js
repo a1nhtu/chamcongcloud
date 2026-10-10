@@ -13,6 +13,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       weekend_work_as_ot: getSetting('weekend_work_as_ot', '1'),
       workunit_rounding: getSetting('workunit_rounding', '2'),
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
+      ot_rounding: getSetting('ot_rounding', '2'), ot_rounding_mode: getSetting('ot_rounding_mode', '0'),   // làm tròn số giờ tăng ca
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
@@ -46,6 +47,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.weekend_work_as_ot != null) setSetting('weekend_work_as_ot', b.weekend_work_as_ot ? '1' : '0');
     if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
     if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));
+    if (b.ot_rounding != null) setSetting('ot_rounding', String(Math.max(0, Math.min(3, parseInt(b.ot_rounding, 10) || 0))));
+    if (b.ot_rounding_mode != null) setSetting('ot_rounding_mode', String(parseInt(b.ot_rounding_mode, 10) === 1 ? 1 : 0));
     if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);
     // Hệ số tăng ca chung: NV đang dùng đúng hệ số chung CŨ (chưa đặt riêng) được đổi theo; NV đã đặt hệ số riêng giữ nguyên
     for (const [k, d] of [['ot_rate_weekday', '1.5'], ['ot_rate_weekend', '2'], ['ot_rate_holiday', '3']]) {

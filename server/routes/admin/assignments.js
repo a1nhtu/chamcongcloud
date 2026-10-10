@@ -55,6 +55,39 @@ function cellApplier() {
   };
 }
 
+// Ca phần mềm TỰ TÌM cho từng NV × ngày, KHÔNG tính ô nhập tay ở bảng Excel:
+//   lịch trình tạm thời → gán ca NV → gán ca phòng ban → ca mặc định; ngày đã chấm mà lịch có nhiều ca → ca đã dò theo giờ chấm.
+// Trả Map empId → [{ l: nhãn ngắn (mã ca / 'Nghỉ' / '📋' / ''), k: off | temp | assign | default | found | schedule | none, t: chú thích }]
+function autoGrid(empIds, days) {
+  const out = new Map();
+  if (!empIds.length || !days.length) return out;
+  const from = days[0], to = days[days.length - 1];
+  const short = (sh) => ((sh.code || '').trim() || sh.name || '');
+  const shById = new Map(db.prepare('SELECT id, code, name FROM shifts').all().map((x) => [x.id, x]));
+  const found = new Map();   // empId|date → [ca đã dò theo giờ chấm]
+  for (const a of db.prepare('SELECT employee_id, work_date, shift_id FROM attendance WHERE work_date >= ? AND work_date <= ? AND shift_id IS NOT NULL ORDER BY check_in_at').all(from, to)) {
+    const k = a.employee_id + '|' + a.work_date, sh = shById.get(a.shift_id); if (!sh) continue;
+    if (!found.has(k)) found.set(k, []); if (!found.get(k).includes(sh)) found.get(k).push(sh);
+  }
+  const foundCell = (k, why) => { const f = found.get(k); return f && f.length ? { l: f.map(short).join('+'), k: 'found', t: `${f.map((x) => x.name).join(' + ')} (phần mềm tự dò theo giờ chấm${why ? ' — ' + why : ''})` } : null; };
+  for (const id of empIds) {
+    out.set(id, days.map((d) => {
+      const rs = resolveShift(id, d, { ignoreSheet: true });
+      const tmp = rs.layer === 'temp', tag = tmp ? 'Lịch trình tạm thời: ' : '';
+      if (rs.off) return { l: 'Nghỉ', k: tmp ? 'temp' : 'off', t: tag + 'Nghỉ' + (!tmp && rs.scheduleName ? ' (theo ' + rs.scheduleName + ')' : '') };
+      if (rs.shift) return { l: short(rs.shift), k: tmp ? 'temp' : rs.source === 'assign' ? 'assign' : 'default', t: tag + rs.shift.name + (rs.scheduleName ? ' (theo ' + rs.scheduleName + ')' : '') };
+      if (rs.source === 'schedule') {
+        const why = tmp ? 'lịch trình tạm thời ' + (rs.scheduleName || '') : rs.scheduleName || 'lịch trình';
+        return foundCell(id + '|' + d, why) || (tmp && rs.shifts ? { l: rs.shifts.map(short).join('+'), k: 'temp', t: tag + rs.shifts.map((x) => x.name).join(' + ') } : { l: '📋', k: 'schedule', t: (rs.scheduleName || 'Lịch trình') + ' — chưa chấm nên chưa dò được ca' });
+      }
+      return foundCell(id + '|' + d, '') || { l: '', k: 'none' };
+    }));
+  }
+  return out;
+}
+// Nhãn ca tự tìm dùng được trong file Excel ('' = không có / chưa xác định)
+const autoLabel = (g) => (!g || !g.l || g.l === '📋' ? '' : g.l === 'Nghỉ' ? 'NGHỈ' : g.l);
+
 export function registerAssignmentRoutes(r, { need }) {
   /* ----------------------------- PHÂN CA THEO NGÀY ----------------------------- */
   // Danh sách NV + ca + các phân ca trong khoảng ngày
@@ -86,33 +119,12 @@ export function registerAssignmentRoutes(r, { need }) {
       'SELECT employee_id, work_date, shift_id, is_off, source FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?'
     ).all(from, to);
 
-    // ?grid=1 → ca phần mềm TỰ TÌM cho từng NV từng ngày, KHÔNG tính ô nhập ở bảng Excel (ô Excel hiện đè lên trên ở giao diện):
-    //   lịch trình tạm thời → gán ca NV → gán ca phòng ban → ca mặc định; ngày đã chấm mà lịch có nhiều ca → ca đã dò ra theo giờ chấm.
-    // mỗi ô: { l: nhãn ngắn, k: off | temp | assign | default | found | schedule | none, t: chú thích }
+    // ?grid=1 → ca phần mềm TỰ TÌM cho từng NV từng ngày (không tính ô nhập ở bảng Excel — ô Excel hiện đè lên trên ở giao diện)
     if (req.query.grid) {
       const days = [];
       for (let d = new Date(from + 'T12:00:00Z'); d <= new Date(to + 'T12:00:00Z') && days.length < 62; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
-      const short = (sh) => ((sh.code || '').trim() || sh.name || '');
-      const shById = new Map(db.prepare('SELECT id, code, name FROM shifts').all().map((x) => [x.id, x]));
-      const found = new Map();   // empId|date → [ca đã dò theo giờ chấm]
-      for (const a of db.prepare('SELECT employee_id, work_date, shift_id FROM attendance WHERE work_date >= ? AND work_date <= ? AND shift_id IS NOT NULL ORDER BY check_in_at').all(from, to)) {
-        const k = a.employee_id + '|' + a.work_date, sh = shById.get(a.shift_id); if (!sh) continue;
-        if (!found.has(k)) found.set(k, []); if (!found.get(k).includes(sh)) found.get(k).push(sh);
-      }
-      const foundCell = (k, why) => { const f = found.get(k); return f && f.length ? { l: f.map(short).join('+'), k: 'found', t: `${f.map((x) => x.name).join(' + ')} (phần mềm tự dò theo giờ chấm${why ? ' — ' + why : ''})` } : null; };
-      for (const e of employees) {
-        e.grid = days.map((d) => {
-          const rs = resolveShift(e.id, d, { ignoreSheet: true });
-          const tmp = rs.layer === 'temp', tag = tmp ? 'Lịch trình tạm thời: ' : '';
-          if (rs.off) return { l: 'Nghỉ', k: tmp ? 'temp' : 'off', t: tag + 'Nghỉ' + (!tmp && rs.scheduleName ? ' (theo ' + rs.scheduleName + ')' : '') };
-          if (rs.shift) return { l: short(rs.shift), k: tmp ? 'temp' : rs.source === 'assign' ? 'assign' : 'default', t: tag + rs.shift.name + (rs.scheduleName ? ' (theo ' + rs.scheduleName + ')' : '') };
-          if (rs.source === 'schedule') {
-            const why = tmp ? 'lịch trình tạm thời ' + (rs.scheduleName || '') : rs.scheduleName || 'lịch trình';
-            return foundCell(e.id + '|' + d, why) || (tmp && rs.shifts ? { l: rs.shifts.map(short).join('+'), k: 'temp', t: tag + rs.shifts.map((x) => x.name).join(' + ') } : { l: '📋', k: 'schedule', t: (rs.scheduleName || 'Lịch trình') + ' — chưa chấm nên chưa dò được ca' });
-          }
-          return foundCell(e.id + '|' + d, '') || { l: '', k: 'none' };
-        });
-      }
+      const g = autoGrid(employees.map((e) => e.id), days);
+      for (const e of employees) e.grid = g.get(e.id);
     }
 
     const shifts = db.prepare('SELECT id, code, name, start_time, end_time FROM shifts WHERE active = 1 ORDER BY name').all();
@@ -372,16 +384,24 @@ export function registerAssignmentRoutes(r, { need }) {
       const weekend = col > 3 && vnWd(days[col - 4]) >= 6;
       c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: weekend ? 'FFB45309' : 'FF1E3A5F' } };
     });
+    // Ô chưa nhập tay → ghi luôn ca phần mềm TỰ TÌM (chữ xám nghiêng) để sửa cho dễ;
+    // nhập lại mà để nguyên ca tự tìm thì vẫn là tự động, chỉ ô sửa khác đi mới thành ô nhập tay.
+    const auto = autoGrid(emps.map((e) => e.id), days);
     for (const e of emps) {
       const cells = [e.code, e.full_name, e.department || ''];
-      for (const d of days) {
+      const isAuto = [];
+      days.forEach((d, i) => {
         const arr = assigns.get(e.id + '|' + d) || [];
-        if (!arr.length) cells.push('');
-        else if (arr.some((x) => x.is_off)) cells.push('NGHỈ');
-        else cells.push(arr.map((x) => codeOf.get(x.shift_id)).filter(Boolean).join('+')); // "S+C" = 2 ca gãy
-      }
+        if (arr.length) { isAuto.push(false); cells.push(arr.some((x) => x.is_off) ? 'NGHỈ' : arr.map((x) => codeOf.get(x.shift_id)).filter(Boolean).join('+')); } // "S+C" = 2 ca gãy
+        else { const v = autoLabel(auto.get(e.id)?.[i]); isAuto.push(!!v); cells.push(v); }
+      });
       const row = ws.addRow(cells);
-      row.eachCell((c, col) => { if (col > 3 && vnWd(days[col - 4]) >= 6) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } }; });
+      row.eachCell((c, col) => {
+        if (col <= 3) return;
+        if (vnWd(days[col - 4]) >= 6) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
+        c.alignment = { horizontal: 'center' };
+        c.font = isAuto[col - 4] ? { italic: true, color: { argb: 'FF9CA3AF' } } : { bold: true };
+      });
     }
     ws.getColumn(1).width = 10; ws.getColumn(2).width = 22; ws.getColumn(3).width = 14;
     for (let i = 0; i < days.length; i++) ws.getColumn(4 + i).width = 6;
@@ -393,6 +413,9 @@ export function registerAssignmentRoutes(r, { need }) {
     for (const s of shifts) ws2.addRow([(s.code || '').trim() || s.name, s.name, `${s.start_time}-${s.end_time}`]);   // ca chưa có mã → gõ tên ca
     ws2.addRow(['NGHỈ', 'Ngày nghỉ', '']);
     ws2.addRow(['(trống)', 'Tự động tìm ca theo giờ chấm', '']);
+    ws2.addRow(['Chữ xám nghiêng', 'Ca phần mềm tự tìm (theo lịch đã gán / lịch tạm thời / giờ chấm). Để nguyên = vẫn tự động; gõ mã khác = đổi ca ngày đó', '']);
+    ws2.addRow(['Chữ đậm', 'Ca đã nhập tay ở bảng Excel (ưu tiên cao nhất)', '']);
+    ws2.addRow(['-', 'Bỏ ca đã nhập tay → phần mềm tự tìm ca lại', '']);
     ws2.addRow(['VD: S+C', 'NHIỀU ca trong 1 ngày (ca gãy) — nối mã ca bằng dấu +', 'VD sáng + chiều']);
     ws2.getColumn(1).width = 14; ws2.getColumn(2).width = 48; ws2.getColumn(3).width = 16;
 
@@ -428,8 +451,16 @@ export function registerAssignmentRoutes(r, { need }) {
       if (dnum >= 1 && dnum <= days.length) dayCol.set(col, days[dnum - 1]);
     });
 
-    let updated = 0, cleared = 0, off = 0; const errors = [];
+    let updated = 0, cleared = 0, off = 0, keptAuto = 0; const errors = [];
     const touchedImp = new Set();
+    const auto = autoGrid([...new Set(empByCode.values())], days);
+    const hasSheetRow = db.prepare("SELECT 1 FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ? AND source <> 'temp' LIMIT 1");
+    const NGHI = ['NGHỈ', 'NGHI', 'OFF', 'N', 'X'];
+    const sameAsAuto = (empId, date, v) => {
+      const t = String(v ?? '').trim().toUpperCase(); if (!t) return false;
+      const lab = autoLabel(auto.get(empId)?.[days.indexOf(date)]).toUpperCase(); if (!lab) return false;
+      return t === lab || (lab === 'NGHỈ' && NGHI.includes(t));
+    };
 
     db.exec('BEGIN');
     try {
@@ -440,7 +471,9 @@ export function registerAssignmentRoutes(r, { need }) {
         const empId = empByCode.get(code);
         if (!empId) { errors.push(`Mã NV "${code}" không tồn tại`); continue; }
         for (const [col, date] of dayCol) {
-          const out = applyCell(empId, date, row.getCell(col).value);   // ô trống = không đổi
+          const val = row.getCell(col).value;
+          if (sameAsAuto(empId, date, val) && !hasSheetRow.get(empId, date)) { keptAuto++; continue; }   // để nguyên ca tự tìm → vẫn tự động
+          const out = applyCell(empId, date, val);   // ô trống = không đổi
           if (out !== 'skip' && !(out && out.error)) touchedImp.add(empId + '|' + date);
           if (out === 'clear') cleared++;
           else if (out === 'off') off++;
@@ -452,7 +485,7 @@ export function registerAssignmentRoutes(r, { need }) {
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/import', e); }
     recalcDays(touchedImp);
 
-    res.json({ ok: true, updated, off, cleared, errors: errors.slice(0, 20), errorCount: errors.length });
+    res.json({ ok: true, updated, off, cleared, keptAuto, errors: errors.slice(0, 20), errorCount: errors.length });
   });
 
   // Lưu các ô sửa trực tiếp trên Bảng phân ca (kiểu Excel): { cells: [{ employee_id, date, value }] }

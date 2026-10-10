@@ -209,9 +209,7 @@ function loadRange(from, to, filter) {
     if (holidays.has(date)) return false;
     const s = scheduledShift(empId, date);
     if (!s) return false;
-    const wd = String(vnWeekday(date));
-    const days = (s.work_days || '1,2,3,4,5,6').split(',');
-    return days.includes(wd);
+    return !isWeekendDay(date, weekend);   // ngày phải đi làm = không phải ngày cuối tuần (Cài đặt > Quy tắc tính công)
   };
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
@@ -266,6 +264,7 @@ function symbolOf(ctx, empId, date) {
   if ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) return 'X';   // ca tính cả ca là tăng ca: công 0 nhưng có làm
   return 'V';
 }
+const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
 const OT_LABEL = { thuong: 'Ngày thường', cuoi_tuan: 'Cuối tuần', le: 'Ngày lễ' };
 const DS_LABEL = {
   lam_viec: 'Đủ công', thieu_ra: 'Thiếu ra', vang: 'Vắng',
@@ -547,7 +546,7 @@ function buildReportRaw(type, from, to, filter) {
         code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
         inCa: c.shift_start || '', outCa: c.shift_end || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
-        late: c.late_min || 0, early: c.early_min || 0, ot: c.ot_min || 0,
+        late: c.late_min || 0, early: c.early_min || 0, ot: r1(c.ot_min || 0),
         cong: round2(c.work_unit), status: c.check_out_at ? (c.late_min > 0 ? 'Đi muộn' : c.early_min > 0 ? 'Về sớm' : 'Đủ công') : 'Thiếu ra',
       }));
       return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
@@ -650,7 +649,7 @@ function buildReportRaw(type, from, to, filter) {
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         place: c.check_in_outside ? 'Ngoài VP' : 'Trong VP',
         late: c.late_min || 0, early: c.early_min || 0, gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0),
-        ot: c.ot_min || 0, cong: round2(c.work_unit),
+        ot: r1(c.ot_min || 0), cong: round2(c.work_unit),
       }));
       return { title: `Báo cáo chấm công ${PERIOD}`, columns, rows };
     }
@@ -694,7 +693,7 @@ function buildReportRaw(type, from, to, filter) {
       const rows = sortedResults().filter((c) => c.ot_min > 0).map((c) => ({
         date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
-        otp: c.ot_min || 0, oth: round2((c.ot_min || 0) / 60), loai: OT_LABEL[c.ot_type] || '',
+        otp: r1(c.ot_min || 0), oth: round2((c.ot_min || 0) / 60), loai: OT_LABEL[c.ot_type] || '',
         ...Object.fromEntries((c._tiers || [0, 0, 0, 0]).map((m, i) => ['tier' + i, round2(m / 60)])),
       }));
       return { title: `Tăng ca chi tiết ${PERIOD}`, columns, rows };

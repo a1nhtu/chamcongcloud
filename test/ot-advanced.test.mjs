@@ -1,7 +1,7 @@
 // Tăng ca nâng cao + bù trừ + thiếu giờ ra (tham khảo Ronald Jack). Chạy: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeCheckout, computeNoOut, splitOtTiers, ruleWindow } from '../server/attendance-calc.js';
+import { computeCheckout, computeNoOut, splitOtTiers, ruleWindow, weekendToOt } from '../server/attendance-calc.js';
 
 const iso = (d, hm) => new Date(`${d}T${hm}:00+07:00`).toISOString();
 const WD = '2026-01-05'; // Thứ Hai
@@ -38,13 +38,14 @@ test('2. chia mức TC1→TC4 theo giới hạn phút', () => {
   assert.deepEqual(splitOtTiers(300, null), [300, 0, 0, 0]);
 });
 
-test('3. xem cả ca là tăng ca vào cuối tuần / ngày lễ', () => {
+test('3. xem cả ca là tăng ca vào ngày lễ (cuối tuần nay theo quy tắc chung của công ty)', () => {
   const s = { ...base, weekend_as_ot: 1 };
+  // cờ cuối tuần theo từng ca đã bỏ: tự ca không đổi công; đổi thành tăng ca do weekendToOt (Cài đặt) làm
   const we = computeCheckout(s, iso(WD, '08:00'), iso(WD, '18:00'), WD, { isWeekend: true });
-  assert.equal(we.work_unit, 0);
-  assert.equal(we.work_minutes, 0);
-  assert.equal(we.ot_min, 480 + 60);   // cả ca + 1h sau giờ
+  assert.equal(we.work_unit, 1);
   assert.equal(we.ot_type, 'cuoi_tuan');
+  const wk = weekendToOt(we, { isWeekend: true, weekendOt: true });
+  assert.equal(wk.work_unit, 0); assert.equal(wk.ot_min, 480 + 60);   // cả ca + 1h sau giờ
   // ngày thường không ảnh hưởng; ngày lễ chỉ khi bật holiday_as_ot
   assert.equal(computeCheckout(s, iso(WD, '08:00'), iso(WD, '17:00'), WD, {}).work_unit, 1);
   assert.equal(computeCheckout(s, iso(WD, '08:00'), iso(WD, '17:00'), WD, { isHoliday: true }).work_unit, 1);

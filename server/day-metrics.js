@@ -1,7 +1,7 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt } from './attendance-calc.js';
+import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtMinutes } from './attendance-calc.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -16,6 +16,8 @@ export function payrollCtx(getSetting, db) {
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
+    otDecimals: (() => { const v = parseInt(getSetting('ot_rounding', '2'), 10); return Number.isFinite(v) ? v : 2; })(),
+    otMode: parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0,
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
     // Kiểu chấm công của TỪNG nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung) — nạp 1 lần cho cả mẻ
     isHourly: (() => {
@@ -65,5 +67,6 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: 'vang' };
   }
   if (ctx.weekendOt && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
+  if (c.ot_min) c = { ...c, ot_min: roundOtMinutes(c.ot_min, ctx.otDecimals ?? 2, ctx.otMode || 0) };   // làm tròn tăng ca (quy tắc chung)
   return { shiftId: shift?.id ?? null, late, ...c };
 }

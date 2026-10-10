@@ -35,9 +35,16 @@ export function computeLate(shift, checkInIso, workDate) {
   return shift.grace_deduct ? raw - grace : raw;   // tùy chọn của ca: chỉ tính phần VƯỢT số phút cho phép
 }
 
-function roundOt(minutes, unit) {
-  if (!unit || unit <= 0) return minutes;
-  return Math.floor(minutes / unit) * unit; // làm tròn xuống theo đơn vị
+// Làm tròn TĂNG CA theo quy tắc chung của công ty (Cài đặt > Quy tắc tính công):
+// số giờ tăng ca giữ `decimals` chữ số thập phân, mode 0 = lùi (xuống), 1 = tới (lên). Trả lại số PHÚT tương ứng.
+// VD 40 phút = 0,666… giờ → 2 số lẻ, lùi = 0,66 giờ = 39,6 phút; tới = 0,67 giờ.
+export function roundOtMinutes(minutes, decimals = 2, mode = 0) {
+  const m = Number(minutes) || 0;
+  if (m <= 0) return 0;
+  const f = Math.pow(10, Math.max(0, Math.min(3, decimals | 0)));
+  const h = m / 60 * f;
+  const r = (mode === 1 ? Math.ceil(h - 1e-9) : Math.floor(h + 1e-9)) / f;
+  return Math.round(r * 60 * 1000) / 1000;
 }
 
 /**
@@ -116,11 +123,11 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   let ot_min = 0;
   if (shift.allow_ot) {
     const after = shift.ot_start_after_min ?? 30;
-    if (otAfterRaw >= after && otAfterRaw > 0) ot_min += roundOt(otAfterRaw, shift.ot_rounding_unit || 0);
+    if (otAfterRaw >= after && otAfterRaw > 0) ot_min += otAfterRaw;
     // Tăng ca TRƯỚC giờ vào ca (tùy chọn): đến sớm >= ngưỡng
     if (shift.ot_before) {
       const beforeRaw = Math.max(0, mins(ci, start));
-      if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) ot_min += roundOt(beforeRaw, shift.ot_rounding_unit || 0);
+      if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) ot_min += beforeRaw;
     }
   }
 
@@ -144,9 +151,10 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec', compensated };
 }
 
-// Ca được xem là TĂNG CA cả ca: ca đánh dấu "ca này là ca tăng ca" (mọi ngày), hoặc làm vào ngày lễ / cuối tuần mà ca bật tùy chọn tương ứng
+// Ca được xem là TĂNG CA cả ca: ca đánh dấu "ca này là ca tăng ca" (mọi ngày), hoặc làm vào ngày lễ mà ca bật tùy chọn.
+// (Ngày CUỐI TUẦN = tăng ca nay theo quy tắc chung của công ty ở Cài đặt — weekendToOt — không đặt theo từng ca nữa.)
 function shiftIsOt(shift, isHoliday, isWeekend) {
-  return !!(shift.shift_as_ot || (isHoliday && shift.holiday_as_ot) || (!isHoliday && isWeekend && shift.weekend_as_ot));
+  return !!(shift.shift_as_ot || (isHoliday && shift.holiday_as_ot));
 }
 
 // Đi làm vào NGÀY CUỐI TUẦN (Cài đặt > Ngày cuối tuần, mặc định CN) khi bật "đi làm cuối tuần tính là tăng ca":

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
-import { computeCheckout } from '../server/attendance-calc.js';
+import { computeCheckout, roundOtMinutes } from '../server/attendance-calc.js';
 
 const iso = (d, hm) => new Date(`${d}T${hm}:00+07:00`).toISOString();
 const WD = '2026-01-05'; // Thứ Hai
@@ -44,18 +44,19 @@ test('OT: ở lại TRÊN ngưỡng → ghi đúng số phút OT thực tế (kh
   assert.equal(c.ot_min, 77); // 77' sau tan ca, ot_rounding_unit=0 → không làm tròn
 });
 
-test('OT: ot_rounding_unit > 0 → làm tròn XUỐNG theo đơn vị', () => {
+test('OT: làm tròn theo từng ca (ot_rounding_unit) đã bỏ — số phút giữ nguyên, làm tròn theo quy tắc chung công ty', () => {
   const shift = { ...baseShift, ot_rounding_unit: 15 };
-  // Ở lại 47' sau tan ca → floor(47/15)*15 = 45
   const c = computeCheckout(shift, iso(WD, '08:00'), iso(WD, '17:47'), WD, {});
-  assert.equal(c.ot_min, 45);
+  assert.equal(c.ot_min, 47);
 });
 
-test('OT: ot_rounding_unit > 0 nhưng chưa đủ 1 đơn vị → làm tròn về 0', () => {
-  const shift = { ...baseShift, ot_rounding_unit: 60 };
-  // Ở lại 40' (đã qua ngưỡng 30') nhưng floor(40/60)*60 = 0
-  const c = computeCheckout(shift, iso(WD, '08:00'), iso(WD, '17:40'), WD, {});
-  assert.equal(c.ot_min, 0);
+test('OT: làm tròn chung (số giờ, lùi / tới)', () => {
+  assert.equal(roundOtMinutes(40, 2, 0), 39.6);   // 0,666 giờ → lùi 0,66
+  assert.equal(roundOtMinutes(40, 2, 1), 40.2);   // tới 0,67
+  assert.equal(roundOtMinutes(90, 2, 0), 90);     // 1,5 giờ giữ nguyên
+  assert.equal(roundOtMinutes(50, 0, 0), 0);      // số nguyên, lùi → 0 giờ
+  assert.equal(roundOtMinutes(50, 0, 1), 60);     // tới → 1 giờ
+  assert.equal(roundOtMinutes(47, 1, 0), 42);     // 0,78 → 0,7 giờ
 });
 
 test('OT: không có mặt sau tan ca (về đúng giờ) → ot_min = 0', () => {

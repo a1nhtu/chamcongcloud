@@ -4,7 +4,7 @@ import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt } from '../attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtMinutes } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 
 const r = Router();
@@ -262,6 +262,7 @@ r.post('/check-out', (req, res) => {
     calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate)), ot_type: otTypeOf(wdate), day_status: 'lam_viec' };
   }
   if (!hourly) calc = weekendToOt(calc, dayFlags(wdate));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
+  if (calc.ot_min) calc = { ...calc, ot_min: roundOtMinutes(calc.ot_min, parseInt(getSetting('ot_rounding', '2'), 10), parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0) };
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');
@@ -313,7 +314,7 @@ r.get('/calendar', (req, res) => {
   const scheduled = (date) => {
     if (holidays.has(date) || offDays.has(date)) return false;
     const s = empShift; if (!s) return false;
-    return (s.work_days || '1,2,3,4,5,6').split(',').includes(String(vnWeekday(date)));
+    return !isWeekendDay(date, weekend);   // ngày phải đi làm = không phải ngày cuối tuần (Cài đặt)
   };
 
   const out = days.map((d) => {
