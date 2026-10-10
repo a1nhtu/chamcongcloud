@@ -178,3 +178,16 @@ table.as-sheet td.c.anchor { outline: 2px solid #2563eb; outline-offset: -2px; }
 .as-editor { display: none; position: absolute; z-index: 6; border: 2px solid #2563eb; border-radius: 0; padding: 0 4px; font-size: 13px; font-weight: 700; text-align: center; box-sizing: border-box; background: #fff; text-transform: uppercase; }
 .as-code { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 2px 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; color: #0f172a; }
 .as-code:hover { background: #eff6ff; border-color: #2563eb; }
+/* Menu trái: menu con của mục Phân ca (kiểu ZKBio) */
+.sidebar nav .nav-arrow { font-size: 11px; opacity: .8; padding: 2px 4px; border-radius: 6px; }
+.sidebar nav .nav-arrow:hover { background: rgba(255,255,255,.18); }
+.sidebar nav .nav-sub { margin: 0 0 4px; }
+.sidebar nav button.nav-sub-btn { padding: 8px 14px 8px 44px; font-size: 13.5px; font-weight: 500; color: #aeb4c0; border-radius: 8px; }
+.sidebar nav button.nav-sub-btn.active { background: #2f3646; color: #fff; font-weight: 700; box-shadow: inset 3px 0 0 var(--brand); }
+/* Trang Phân ca: thanh thẻ chỉ dùng trên màn hình hẹp; dải hẹp để hiện lại cây phòng ban */
+.as-tabs { display: none; gap: 6px; flex-wrap: wrap; margin-bottom: 14px; }
+.as-side-mini { flex: none; width: 44px; cursor: pointer; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 0 14px; position: sticky; top: 12px; }
+.as-side-mini:hover { background: #fdece4; }
+.as-mini-btn { font-weight: 700; color: var(--brand); font-size: 12px; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.as-mini-v { writing-mode: vertical-rl; font-size: 12.5px; font-weight: 700; color: #6b7280; letter-spacing: .5px; }
+@media (max-width: 820px) { .as-tabs { display: flex; } .sidebar nav .nav-sub, .sidebar nav .nav-arrow { display: none !important; } .as-side-mini { width: 100%; flex-direction: row; justify-content: center; position: static; padding: 8px; } .as-mini-v { writing-mode: horizontal-tb; } .as-mini-btn { flex-direction: row; } }
