@@ -515,8 +515,16 @@ function migrateColumns() {
   add('shift_assignments', 'inout_schedule_id', 'INTEGER');        // lịch trình vào ra gán kèm cho NV
   add('dept_shift_assignments', 'inout_schedule_id', 'INTEGER');   // … cho phòng ban
   // Nguồn của dòng phân ca theo NGÀY: 'sheet' = nhập ở bảng Xem lịch trình (kiểu Excel) / Nhập Excel — ƯU TIÊN CAO NHẤT;
-  // 'temp' = Lịch trình tạm thời (không được đè lên ô đã nhập ở bảng Excel). Dòng cũ coi như 'sheet'.
+  // 'temp' = Lịch trình tạm thời. Dòng cũ coi như 'sheet'.
   add('daily_shift_assignments', 'source', "TEXT NOT NULL DEFAULT 'sheet'");
+  // Hai lớp nằm CHỒNG nhau: ô Excel đè lên lịch tạm thời; xoá ô Excel ("Về tự động") thì lịch tạm thời / lịch đã gán hiện lại.
+  db.exec('DROP INDEX IF EXISTS uidx_dsa_emp_date_shift');
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS uidx_dsa_emp_date_src_shift ON daily_shift_assignments(employee_id, work_date, source, COALESCE(shift_id, 0))');
+  // Phân ca theo ngày ĐANG CÓ HIỆU LỰC: ngày nào có ô Excel thì chỉ lấy ô Excel, không thì lấy lịch tạm thời
+  db.exec(`CREATE VIEW IF NOT EXISTS dsa_effective AS
+    SELECT d.* FROM daily_shift_assignments d
+    WHERE d.source <> 'temp' OR NOT EXISTS (SELECT 1 FROM daily_shift_assignments x
+      WHERE x.employee_id = d.employee_id AND x.work_date = d.work_date AND x.source <> 'temp')`);
   add('shifts', 'no_out_credit',   'INTEGER NOT NULL DEFAULT 0');    // 1 = thiếu giờ ra vẫn tính công (trừ phần đi trễ)
   add('shifts', 'grace_deduct',    'INTEGER NOT NULL DEFAULT 0');    // 1 = trễ/sớm chỉ tính phần VƯỢT số phút cho phép
   add('shifts', 'shift_as_ot',     'INTEGER NOT NULL DEFAULT 0');    // 1 = ca này là ca tăng ca (cả ca tính tăng ca, 0 công)

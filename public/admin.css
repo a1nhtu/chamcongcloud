@@ -217,3 +217,4 @@ table.sch-grid td.cell { cursor: pointer; min-width: 120px; height: 38px; }
 table.sch-grid td.cell:hover { background: #fdece4; }
 table.sch-grid td.cell.on { color: #0f766e; font-weight: 700; background: #f0fdf4; }
 table.as-sheet td.c.tmp { color: #c2410c; font-style: italic; }
+table.as-sheet td.c.fnd { color: #0f766e; }

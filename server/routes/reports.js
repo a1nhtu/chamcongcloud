@@ -177,7 +177,7 @@ function loadRange(from, to, filter) {
   }
 
   const assigns = new Map(); // empId|date -> {shift_id,is_off}
-  for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?').all(from, to))
+  for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM dsa_effective WHERE work_date >= ? AND work_date <= ?').all(from, to))
     assigns.set(a.employee_id + '|' + a.work_date, a);
 
   const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date >= ? AND holiday_date <= ?').all(from, to).map((h) => h.holiday_date));

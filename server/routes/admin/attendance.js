@@ -1,8 +1,8 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
 import { db, getSetting, adminAttWhere } from '../../db.js';
-import { resolveEffectiveShift } from '../../shift-resolver.js';
+import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
-import { dayPairsFor } from '../../device-sync.js';
+import { dayPairsFor, rebuildDays } from '../../device-sync.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
 
@@ -55,6 +55,20 @@ export function registerAttendanceRoutes(r, { need }) {
     else if (dept) { join = ' JOIN employees e ON e.id=a.employee_id'; where.push('e.department=?'); args.push(dept); }
     const rows = db.prepare(`SELECT a.* FROM attendance a${join} WHERE ${where.join(' AND ')}`).all(...args);
 
+    // Ngày có giờ chấm từ MÁY: ghép lại từ các lượt quẹt gốc theo ca / lịch trình HIỆN TẠI (đổi ca sau khi đã chấm,
+    // gán ca đêm muộn, lịch nhiều ca… đều ra đúng), theo thứ tự ngày để ca đêm lấy đúng giờ ra sáng hôm sau.
+    // Dòng sửa tay giữ nguyên. Các dòng còn lại (chấm bằng điện thoại) tính lại như cũ ở vòng dưới.
+    const dWhere = where.filter((w) => w !== 'a.check_in_at IS NOT NULL').map((w) => w.replace(/\ba\./g, 'p.'));
+    const dArgs = args.slice();
+    const dJoin = join.replace('e.id=a.employee_id', 'e.id=p.employee_id');
+    const devDays = db.prepare(`SELECT DISTINCT p.employee_id, p.work_date FROM device_punches p${dJoin} WHERE p.employee_id IS NOT NULL${dWhere.length ? ' AND ' + dWhere.join(' AND ') : ''}`)
+      .all(...dArgs).map((r) => r.employee_id + '|' + r.work_date);
+    const devSet = new Set(devDays);
+    db.exec('BEGIN');
+    try { rebuildDays(devDays); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); throw e; }
+    const perDay = new Map();
+    for (const row of rows) { const k = row.employee_id + '|' + row.work_date; perDay.set(k, (perDay.get(k) || 0) + 1); }
+
     // Prepare MỘT LẦN ngoài vòng (không re-prepare mỗi dòng)
     const updNoOut = db.prepare('UPDATE attendance SET late_min=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?');
     const updFull = db.prepare(`UPDATE attendance SET late_min=?, early_min=?, ot_min=?, work_minutes=?,
@@ -64,8 +78,12 @@ export function registerAttendanceRoutes(r, { need }) {
     db.exec('BEGIN');
     try {
       for (const row of rows) {
-        // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định
-        const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
+        const key = row.employee_id + '|' + row.work_date;
+        if (devSet.has(key) && !row.manual) { n++; continue; }   // đã dựng lại từ lượt quẹt máy ở trên
+        // Dò lại ca: phân ca thủ công (Excel) đè → tự động theo giờ → mặc định.
+        // Ngày có NHIỀU dòng (nhiều ca) thì mỗi dòng giữ đúng ca của nó (dò lại sẽ dồn các dòng về cùng 1 ca).
+        const own = perDay.get(key) > 1 && row.shift_id ? getShift(row.shift_id) : null;
+        const eff = own ? { shift: own, source: row.shift_source || 'schedule', mergeRule: own.merge_rule || 'filo' } : resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
         // Chế độ theo GIỜ: không dùng ca (giống khi máy đẩy log). Quy tắc "Nhiều lần vào/ra" (ca chọn pairs,
         // hoặc theo giờ chọn "theo cặp"): tính theo các cặp lượt quẹt; giờ sửa tay thì tính như cũ.
         const hr = ctx.isHourly(row.employee_id);   // kiểu chấm công riêng của nhân viên này

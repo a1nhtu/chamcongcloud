@@ -3,7 +3,7 @@
 // Phụ thuộc MỘT CHIỀU vào db.js (chỉ đọc dữ liệu) — không có vòng import ngược.
 import { db } from './db.js';
 
-const getShift = (id) => db.prepare('SELECT * FROM shifts WHERE id = ?').get(id);
+export const getShift = (id) => db.prepare('SELECT * FROM shifts WHERE id = ?').get(id);
 const hhmm2min = (s) => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 function checkinMinVN(iso) { const d = new Date(iso); const t = new Date(d.getTime() + 7 * 3600000); return t.getUTCHours() * 60 + t.getUTCMinutes(); }
 function inWindow(min, start, end) { return start <= end ? (min >= start && min <= end) : (min >= start || min <= end); }
@@ -104,7 +104,7 @@ export function ioParamsFor(employeeId, workDate) {
 
 // Cách ghép giờ thực tế, theo thứ tự: lịch trình vào ra của dòng gán → quy tắc RIÊNG còn lưu ở ca (kiểu cũ, khác FILO)
 // → lịch trình vào ra MẶC ĐỊNH → FILO (giờ đầu vào, giờ cuối ra).
-function effectiveMergeRule(shift, override) {
+export function effectiveMergeRule(shift, override) {
   if (override && override !== 'default') return override;
   const legacy = shift && shift.merge_rule && shift.merge_rule !== 'filo' && shift.merge_rule !== 'default' ? shift.merge_rule : null;
   if (legacy) return legacy;
@@ -113,8 +113,13 @@ function effectiveMergeRule(shift, override) {
 }
 
 // Phân ca ngày của 1 NV trong 1 ngày — có thể NHIỀU ca (NV tự chọn 2-3 ca gãy).
-function dailyAssignments(employeeId, workDate) {
-  return db.prepare('SELECT shift_id, is_off FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').all(employeeId, workDate);
+// Phân ca theo NGÀY có 2 lớp: ô nhập ở bảng Excel ('sheet', ưu tiên cao nhất) đè lên lịch trình tạm thời ('temp').
+// opts.ignoreSheet = bỏ qua lớp Excel → ca phần mềm tự tìm nếu không có ô Excel (để bảng Excel hiện lớp bên dưới).
+function dailyAssignments(employeeId, workDate, opts = {}) {
+  const rows = db.prepare('SELECT shift_id, is_off, source FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').all(employeeId, workDate);
+  const temp = rows.filter((x) => x.source === 'temp');
+  if (opts.ignoreSheet) return temp;
+  return rows.length > temp.length ? rows.filter((x) => x.source !== 'temp') : temp;
 }
 // Danh sách ca (object) từ phân ca ngày; [] nếu không có / toàn null.
 function dailyShiftObjs(da) {
@@ -151,13 +156,14 @@ export function schedDay(scheduleId, workDate, anchor) {
   return { pattern: true, off: !shifts.length, shifts };
 }
 
-export function resolveShift(employeeId, workDate) {
-  const da = dailyAssignments(employeeId, workDate);
+export function resolveShift(employeeId, workDate, opts = {}) {
+  const da = dailyAssignments(employeeId, workDate, opts);
   if (da.length) {
-    if (da.some((x) => x.is_off)) return { off: true, shift: null, source: 'manual' };
+    const layer = da[0].source === 'temp' ? 'temp' : 'sheet';
+    if (da.some((x) => x.is_off)) return { off: true, shift: null, source: 'manual', layer };
     const shifts = dailyShiftObjs(da);
-    if (shifts.length > 1) return { off: false, shift: null, source: 'schedule', scheduleName: shifts.length + ' ca đã chọn' };
-    if (shifts.length === 1) return { off: false, shift: shifts[0], source: 'manual' };
+    if (shifts.length > 1) return { off: false, shift: null, source: 'schedule', scheduleName: shifts.length + ' ca đã chọn', layer, shifts };
+    if (shifts.length === 1) return { off: false, shift: shifts[0], source: 'manual', layer };
   }
   const ra = rangedShiftAssignment(employeeId, workDate);
   if (ra) {

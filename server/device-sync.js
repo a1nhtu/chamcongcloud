@@ -1,8 +1,8 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { db, getSetting, empHourly } from './db.js';
-import { resolveEffectiveShift, resolveDayShifts, ioParamsFor } from './shift-resolver.js';
-import { mergeDayPunches, ruleWindow, punchPairs } from './attendance-calc.js';
+import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
+import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { hashPassword } from './auth.js';
 import { notifyEmployee } from './push.js';
@@ -555,29 +555,62 @@ export function relinkPunchesForPin(employeeId, pin) {
 
 // Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay).
 // Nếu gán LỊCH TRÌNH nhiều ca → tách punch theo cửa sổ từng ca thành nhiều dòng công/ngày.
+// Lượt quẹt sáng sớm đã được dùng làm giờ RA của ca qua đêm NGÀY HÔM TRƯỚC → không tính lại cho ngày này.
+// Trả mốc ISO: các lượt quẹt <= mốc này thuộc ngày hôm trước (null = không có).
+function consumedByPrevDay(employeeId, workDate) {
+  const prev = new Date(workDate + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
+  const r = db.prepare('SELECT MAX(check_out_at) m FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, prev.toISOString().slice(0, 10));
+  return r && r.m && r.m >= new Date(workDate + 'T00:00:00+07:00').toISOString() ? r.m : null;
+}
+
+// Dựng lại nhiều ngày theo đúng THỨ TỰ (từng NV, ngày tăng dần) — ngày hôm trước phải xong trước để biết
+// lượt quẹt sáng sớm nào đã là giờ ra ca đêm. keys: Set/mảng 'empId|YYYY-MM-DD'. Tự thêm ngày kế tiếp (ca đêm lấn sang).
+export function rebuildDays(keys) {
+  const all = new Set();
+  for (const key of keys) {
+    const [eid, date] = String(key).split('|');
+    all.add(eid + '|' + date);
+    const nx = new Date(date + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
+    all.add(eid + '|' + nx.toISOString().slice(0, 10));
+  }
+  const list = [...all].map((k) => k.split('|')).sort((a, b) => (+a[0] - +b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
+  for (const [eid, date] of list) rebuildDay(+eid, date);
+  return list.length;
+}
+
 export function rebuildDay(employeeId, workDate) {
-  const prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
+  let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
   if (!prov.length) return;
+  const usedTo = consumedByPrevDay(employeeId, workDate);
+  if (usedTo) prov = prov.filter((p) => p.punch_at > usedTo);
+  if (!prov.length) {   // mọi lượt quẹt của ngày đã là giờ ra ca đêm hôm trước → bỏ dòng công rác của ngày này
+    db.prepare('DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)').run(employeeId, workDate);
+    return;
+  }
   const hourly = empHourly(employeeId);   // kiểu chấm công của RIÊNG nhân viên này (theo ca / theo giờ)
   const machineMap = deviceMachineMap();
   // Ngưỡng ghép cặp: theo Lịch trình vào ra của NV (min / gap / max); chưa khai thì theo ô "Bỏ qua lần chấm trùng" ở Cài đặt
   const dup = ioParamsFor(employeeId, workDate) || pairDup();
   const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
-    .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+    .all(employeeId, winStart.toISOString(), winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
 
   const plan = hourly ? { off: false, shifts: [], mergeRule: null, isSchedule: false } : resolveDayShifts(employeeId, workDate);
   if (plan.off) return; // ngày nghỉ → không dựng
 
-  // NHIỀU ca/ngày (lịch trình ≥ 2 ca): tách punch theo cửa sổ từng ca → mỗi ca 1 dòng
+  // Lịch trình NHIỀU ca/ngày: chọn bộ ca thực làm theo giờ chấm (1 ca trong nhóm Sáng/Chiều/HC, hoặc 2 ca gãy) → mỗi ca 1 dòng
   if (plan.isSchedule && plan.shifts.length > 1) {
     db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)").run(employeeId, workDate);
-    for (const shift of plan.shifts) {
-      const { winStart, winEnd } = ruleWindow(workDate, shift);
-      const punches = punchesInWin(winStart, winEnd);
-      if (!punches.length) continue;
+    const seen = new Map();
+    for (const shift of plan.shifts) { const { winStart, winEnd } = ruleWindow(workDate, shift); for (const p of punchesInWin(winStart, winEnd)) seen.set(p.punch_at, p); }
+    const picked = pickShiftSet(plan.shifts, [...seen.values()], workDate);
+    for (const { shift, punches } of picked) {
       // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
-      const rule = (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || shift.merge_rule || 'filo');
-      const { inIso, outIso, pairs } = mergeDayPunches(punches, shift, rule, machineMap, workDate, { dupMin: dup });
+      const rule = (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || effectiveMergeRule(shift, null) || 'filo');
+      const one = picked.length === 1;
+      const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup };
+      // chỉ 1 ca → nhận lượt quẹt như ca đơn (tới hết ngày với ca ngày); nhiều ca → đúng các lượt đã chia cho ca đó
+      const w = ruleWindow(workDate, shift, wopts);
+      const { inIso, outIso, pairs } = mergeDayPunches(one ? punchesInWin(w.winStart, w.winEnd) : punches, shift, rule, machineMap, workDate, wopts);
       if (!inIso) continue;
       if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
       upsertRow(employeeId, workDate, shift.id, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs));
@@ -667,7 +700,7 @@ export function ingestAttlog(serial, rawBody) {
     n++;
     if (empId) touched.add(empId + '|' + workDate);
   }
-  // Dựng lại ngày có punch + NGÀY HÔM TRƯỚC (punch sáng sớm có thể là giờ RA của ca đêm hôm trước)
+  // Dựng lại ngày có punch + NGÀY HÔM TRƯỚC (punch sáng sớm có thể là giờ RA của ca đêm hôm trước), theo thứ tự ngày
   const toRebuild = new Set();
   for (const key of touched) {
     const [eid, date] = key.split('|');
@@ -675,7 +708,7 @@ export function ingestAttlog(serial, rawBody) {
     const prev = new Date(date + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
     toRebuild.add(eid + '|' + prev.toISOString().slice(0, 10));
   }
-  for (const key of toRebuild) { const [eid, date] = key.split('|'); rebuildDay(+eid, date); }
+  rebuildDays(toRebuild);
   if (notifyNow.size) {
     const dev = db.prepare('SELECT name FROM push_devices WHERE serial=?').get(serial);
     const where = dev && dev.name ? 'tại máy ' + dev.name : 'tại máy chấm công';

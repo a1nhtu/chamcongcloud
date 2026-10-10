@@ -1915,7 +1915,7 @@ async function pageAssignments() {
       try {
         const r = await api(g.url, { method: 'POST', body });
         if (isTemp) {
-          toast(`Đã tạo ${r.count} dòng lịch tạm thời cho ${r.employees} nhân viên` + (r.skippedOff ? ` · bỏ qua ${r.skippedOff} ngày nghỉ` : '') + (r.keptSheet ? ` · giữ nguyên ${r.keptSheet} ô đã nhập ở bảng Excel` : ''), r.count ? 'ok' : 'err');
+          toast(`Đã tạo ${r.count} dòng lịch tạm thời cho ${r.employees} nhân viên` + (r.skippedOff ? ` · bỏ qua ${r.skippedOff} ngày nghỉ` : '') + (r.keptSheet ? ` · ${r.keptSheet} ngày đã nhập ở bảng Excel vẫn được ưu tiên` : ''), r.count ? 'ok' : 'err');
           _asStart = fromI.value;
         } else toast(`Đã lưu cho ${r.count} ${isDept ? 'phòng ban' : 'nhân viên'}`, 'ok');
         back();
@@ -2009,11 +2009,11 @@ async function pageAssignments() {
       if (parts.length && parts.every((p) => canon.has(p))) return { v: [...new Set(parts.map((p) => canon.get(p)))].join('+') };
       return { v: t, bad: true };
     };
-    // Giá trị ĐÃ LƯU của từng ô (ca nhập riêng cho ngày đó)
-    const saved = new Map(), tempKeys = new Set();
+    // Giá trị ĐÃ NHẬP ở bảng này (lớp ưu tiên cao nhất). Lịch trình tạm thời / ca phần mềm tự tìm nằm bên dưới (emps[r].grid).
+    const saved = new Map();
     for (const a of data.assignments) {
+      if (a.source === 'temp') continue;
       const k = a.employee_id + '|' + a.work_date;
-      if (a.source === 'temp') tempKeys.add(k);
       if (a.is_off) saved.set(k, 'NGHỈ');
       else if (saved.get(k) !== 'NGHỈ') { const c = codeOfShift.get(a.shift_id); if (c) saved.set(k, saved.has(k) ? saved.get(k) + '+' + c : c); }
     }
@@ -2024,9 +2024,10 @@ async function pageAssignments() {
     const paint = (r, c) => {
       const td = cellEls[r][c], k = keyOf(r, c), dirty = _asDirty.has(k);
       const v = curVal(r, c), g = (emps[r].grid || [])[c] || {};
-      td.textContent = v || g.l || '';   // chưa nhập riêng → hiện (chữ xám) ca theo lịch đã phân, kể cả "Nghỉ" theo chu kỳ
-      td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph') + (dirty && norm(v).bad ? ' bad' : '') + (!dirty && tempKeys.has(k) ? ' tmp' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
-      td.title = `${emps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : tempKeys.has(k) ? ' (lịch trình tạm thời — nhập đè vào đây sẽ được ưu tiên hơn)' : ' (nhập ở bảng này)') : (g.k === 'none' ? 'tự động theo giờ chấm' : 'theo lịch đã phân: ' + (g.t || g.l || '')));
+      td.textContent = v || g.l || '';   // chưa nhập ở bảng này → hiện (chữ mờ) ca phần mềm tự tìm: lịch tạm thời / lịch đã gán / ca dò theo giờ chấm
+      td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph' + (g.k === 'temp' ? ' tmp' : g.k === 'found' ? ' fnd' : '')) + (dirty && norm(v).bad ? ' bad' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
+      const under = g.k === 'none' ? 'tự động theo giờ chấm' : g.k === 'temp' ? (g.t || g.l) : g.k === 'found' ? g.t : 'theo lịch đã gán: ' + (g.t || g.l || '');
+      td.title = `${emps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập ở bảng này — ưu tiên cao nhất)') + `\nBấm "↺ Về tự động" để bỏ → ${under}` : (dirty ? '↺ về tự động (chưa lưu) → ' : '') + under);
     };
 
     // ----- vùng chọn -----
@@ -2153,7 +2154,7 @@ async function pageAssignments() {
     box.addEventListener('copy', (ev) => {
       if (editing || !R) return;
       const q = rect(); const lines = [];
-      for (let r = q.r1; r <= q.r2; r++) { const row = []; for (let c = q.c1; c <= q.c2; c++) { const g = (emps[r].grid || [])[c] || {}; row.push(curVal(r, c) || (g.k === 'assign' || g.k === 'default' ? g.l : '')); } lines.push(row.join('\t')); }
+      for (let r = q.r1; r <= q.r2; r++) { const row = []; for (let c = q.c1; c <= q.c2; c++) { const g = (emps[r].grid || [])[c] || {}; row.push(curVal(r, c) || (g.k !== 'none' && g.k !== 'schedule' ? g.l : '')); } lines.push(row.join('\t')); }
       ev.clipboardData.setData('text/plain', lines.join('\n')); ev.preventDefault();
       toast(`Đã copy ${lines.length} dòng × ${q.c2 - q.c1 + 1} cột`, 'ok');
     });
@@ -2179,6 +2180,8 @@ async function pageAssignments() {
     const warn = el('span', { style: 'color:#dc2626;font-size:13px;font-weight:600' }, '');
     const saveBtn = el('button', { class: 'btn green' }, '💾 Lưu');
     const undoBtn = btnSm('↶ Hoàn tác', doUndo, 'ghost');
+    const autoBtn = btnSm('↺ Về tự động', () => { fillSel(''); box.focus({ preventScroll: true }); }, 'ghost');
+    autoBtn.title = 'Bỏ các ô đã nhập tay trong vùng đang chọn → phần mềm tự tìm ca lại (lịch trình tạm thời / lịch đã gán / dò theo giờ chấm). Bấm Lưu để áp dụng.';
     saveBtn.onclick = async () => {
       if ([..._asDirty.values()].some((v) => norm(v).bad)) return toast('Còn ô sai mã ca (chữ đỏ). Sửa lại trước khi lưu.', 'err');
       const cells = [..._asDirty].map(([k, v]) => { const [eid, date] = k.split('|'); return { employee_id: +eid, date, value: v }; });
@@ -2224,12 +2227,12 @@ async function pageAssignments() {
     const chipFor = (label, value, title, style) => { const b = el('button', { class: 'as-code', title, style: style || '' }, label); b.onclick = () => { if (!canEdit) return; fillSel(value); box.focus({ preventScroll: true }); }; return b; };
     const codes = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0' }, el('span', { style: 'font-size:12.5px;color:var(--muted)' }, 'Mã ca (bấm để điền vào ô đang chọn):'),
       ...data.shifts.map((s) => chipFor((s.code || '').trim() || s.name, (s.code || '').trim() || s.name, `${s.name} (${s.start_time}-${s.end_time})`)),
-      chipFor('NGHỈ', 'NGHỈ', 'Ngày nghỉ', 'color:#b45309;border-color:#f5d0a9'), chipFor('⌫ Xoá', '', 'Bỏ ca đã nhập ngày đó → quay về lịch đã phân', 'color:#6b7280'));
+      chipFor('NGHỈ', 'NGHỈ', 'Ngày nghỉ', 'color:#b45309;border-color:#f5d0a9'), chipFor('↺ Tự động', '', 'Bỏ ca đã nhập tay ngày đó → phần mềm tự tìm ca lại', 'color:#6b7280'));
     const noCode = data.shifts.filter((s) => !(s.code || '').trim());
     main.append(
-      el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, monthNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', exBtn, imBtn, fileI, warn),
+      el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, monthNav(), canEdit ? saveBtn : '', canEdit ? undoBtn : '', canEdit ? autoBtn : '', exBtn, imBtn, fileI, warn),
       codes,
-      el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, 'Dùng như Excel: bấm 1 ô rồi gõ mã ca + Enter · kéo chuột (hoặc Shift + mũi tên) chọn nhiều ô rồi gõ để điền cả vùng · Ctrl+C / Ctrl+V copy–dán (dán được từ Excel) · Delete xoá · Ctrl+Z hoàn tác · bấm số ngày / số thứ tự để chọn cả cột / cả dòng. Chữ xám = đang theo lịch đã phân, không cần nhập lại; chỉ nhập ô nào khác lịch. Ô vàng = chưa lưu.'
+      el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, 'Dùng như Excel: bấm 1 ô rồi gõ mã ca + Enter · kéo chuột (hoặc Shift + mũi tên) chọn nhiều ô rồi gõ để điền cả vùng · Ctrl+C / Ctrl+V copy–dán (dán được từ Excel) · Delete (hoặc nút ↺ Về tự động) = bỏ ô nhập tay, phần mềm tự tìm ca lại · Ctrl+Z hoàn tác · bấm số ngày / số thứ tự để chọn cả cột / cả dòng. Chữ đậm = nhập ở bảng này (ưu tiên cao nhất). Chữ mờ = phần mềm tự tìm: xám = theo lịch đã gán, cam nghiêng = lịch trình tạm thời, xanh = ca đã dò theo giờ chấm. Ô vàng = chưa lưu.'
         + (noCode.length ? ` Ca chưa đặt mã (${noCode.map((s) => s.name).join(', ')}) đang dùng tên ca làm mã — nên đặt mã ngắn ở mục Ca làm.` : '')),
       box, el('div', { style: 'margin-top:6px' }, selInfo));
     syncBar();
@@ -2285,12 +2288,13 @@ async function pageAssignments() {
     const byKey = new Map();
     for (const a of data.assignments) {
       if (!inSel.has(a.employee_id)) continue;
-      const k = a.employee_id + '|' + a.work_date;
-      const g = byKey.get(k) || { employee_id: a.employee_id, date: a.work_date, off: false, shifts: [], source: a.source || 'sheet' };
+      const src = a.source === 'temp' ? 'temp' : 'sheet';
+      const k = a.employee_id + '|' + a.work_date + '|' + src;
+      const g = byKey.get(k) || { employee_id: a.employee_id, date: a.work_date, off: false, shifts: [], source: src };
       if (a.is_off) g.off = true; else g.shifts.push(shiftName.get(a.shift_id) || 'Ca đã xoá');
-      if ((a.source || 'sheet') !== 'temp') g.source = 'sheet';
       byKey.set(k, g);
     }
+    const hasSheet = (g) => byKey.has(g.employee_id + '|' + g.date + '|sheet');
     const searchI = el('input', { placeholder: 'Tên nhân viên, mã nhân viên', value: _asSearch, style: 'width:220px' });
     const srcSel = el('select', { style: 'width:auto' }, el('option', { value: '' }, 'Tất cả'), el('option', { value: 'temp' }, 'Lịch trình tạm thời'), el('option', { value: 'sheet' }, 'Nhập ở bảng Excel'));
     srcSel.value = _asTmpSrc;
@@ -2314,13 +2318,14 @@ async function pageAssignments() {
       if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Trống — tháng này chưa có lịch trình tạm thời nào. Bấm "+ Thêm".'))));
       for (const g of rows.slice(0, MAX)) {
         const e = empById.get(g.employee_id) || {};
-        tb.append(el('tr', {}, el('td', {}, el('input', { type: 'checkbox', class: 'tmp-pick', style: 'width:auto', 'data-emp': g.employee_id, 'data-date': g.date })),
+        tb.append(el('tr', {}, el('td', {}, el('input', { type: 'checkbox', class: 'tmp-pick', style: 'width:auto', 'data-emp': g.employee_id, 'data-date': g.date, 'data-src': g.source })),
           el('td', {}, e.code || ''), el('td', {}, el('b', {}, e.full_name || '')),
           el('td', {}, `${fmtD(g.date)} ${WDL[weekdayVN(g.date)]}`),
           el('td', {}, g.off ? el('span', { class: 'pill warn' }, 'Nghỉ') : '-'),
           el('td', { style: 'color:#0f766e;font-weight:700' }, g.off ? '-' : g.shifts.join(' + ')),
-          el('td', {}, g.source === 'temp' ? el('span', { class: 'chip' }, 'Tạm thời') : el('span', { class: 'chip g' }, 'Bảng Excel')),
-          el('td', {}, canEdit ? el('a', { href: '#', style: 'color:#dc2626;font-weight:600', onclick: (ev) => { ev.preventDefault(); clearItems([{ employee_id: g.employee_id, date: g.date }], `Xoá lịch ngày ${fmtD(g.date)} của ${e.full_name}? Nhân viên quay về lịch đã gán.`); } }, 'Xoá') : '')));
+          el('td', {}, g.source === 'temp' ? el('span', { class: 'chip' }, 'Tạm thời') : el('span', { class: 'chip g' }, 'Bảng Excel'),
+            g.source === 'temp' && hasSheet(g) ? el('div', { style: 'font-size:11.5px;color:#b45309;margin-top:2px' }, 'đang bị ô Excel đè') : ''),
+          el('td', {}, canEdit ? el('a', { href: '#', style: 'color:#dc2626;font-weight:600', onclick: (ev) => { ev.preventDefault(); clearItems([{ employee_id: g.employee_id, date: g.date, source: g.source }], `Xoá ${g.source === 'temp' ? 'lịch trình tạm thời' : 'ô nhập ở bảng Excel'} ngày ${fmtD(g.date)} của ${e.full_name}?`); } }, 'Xoá') : '')));
       }
       selAll.checked = false;
     };
@@ -2330,15 +2335,15 @@ async function pageAssignments() {
     const addBtn = canEdit ? el('button', { class: 'btn' }, '+ Thêm') : null;
     if (addBtn) addBtn.onclick = () => { _asAdd = 'temp'; pageAssignments(); };
     const delBtn = canEdit ? btnSm('🗑 Xoá', () => {
-      const items = [...tb.querySelectorAll('.tmp-pick:checked')].map((c) => ({ employee_id: +c.dataset.emp, date: c.dataset.date }));
+      const items = [...tb.querySelectorAll('.tmp-pick:checked')].map((c) => ({ employee_id: +c.dataset.emp, date: c.dataset.date, source: c.dataset.src }));
       if (!items.length) return toast('Chưa tick dòng nào', 'err');
-      clearItems(items, `Xoá ${items.length} dòng đã chọn? Nhân viên quay về lịch đã gán.`);
+      clearItems(items, `Xoá ${items.length} dòng đã chọn? Phần mềm sẽ tự tìm ca lại cho các ngày đó.`);
     }, 'ghost') : null;
     renderRows();
     main.append(
       el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px' }, searchI, monthNav(), srcSel, info, el('span', { style: 'flex:1' }), addBtn, delBtn, btnSm('⟳', () => pageAssignments(), 'ghost')),
       el('div', { class: 'panel tbl-scroll' }, tbl),
-      el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Thứ tự ưu tiên khi tính ca của một ngày: ① ô nhập ở Xem lịch trình (kiểu Excel) → ② Lịch trình tạm thời → ③ Gán ca cho nhân viên → ④ Gán ca cho phòng ban → ⑤ ca mặc định ở hồ sơ. Lịch tạm thời không đè lên ô đã nhập ở bảng Excel.'));
+      el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Thứ tự ưu tiên khi tính ca của một ngày: ① ô nhập ở Xem lịch trình (kiểu Excel) → ② Lịch trình tạm thời → ③ Gán ca cho nhân viên → ④ Gán ca cho phòng ban → ⑤ ca mặc định ở hồ sơ. Ô nhập ở bảng Excel luôn đè lên lịch tạm thời; xoá ô Excel (nút ↺ Về tự động) thì lịch tạm thời hiện lại.'));
   }
 
   setMain(head(pageTitle), tabBar, el('div', { class: 'emp-wrap' }, side, main));

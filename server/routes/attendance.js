@@ -302,7 +302,7 @@ r.get('/calendar', (req, res) => {
   for (const a of db.prepare('SELECT * FROM attendance WHERE employee_id=? AND work_date LIKE ?').all(req.user.id, month + '%'))
     cell.set(a.work_date, a);
   const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date LIKE ?').all(month + '%').map((h) => h.holiday_date));
-  const offDays = new Set(db.prepare('SELECT work_date FROM daily_shift_assignments WHERE employee_id=? AND is_off=1 AND work_date LIKE ?').all(req.user.id, month + '%').map((r) => r.work_date));
+  const offDays = new Set(db.prepare('SELECT work_date FROM dsa_effective WHERE employee_id=? AND is_off=1 AND work_date LIKE ?').all(req.user.id, month + '%').map((r) => r.work_date));
   const leaveDays = new Set();
   for (const l of db.prepare("SELECT type, from_date, to_date FROM leave_requests WHERE employee_id=? AND status='approved' AND from_date<=? AND to_date>=?").all(req.user.id, month + '-31', month + '-01'))
     for (const d of days) if (d >= l.from_date && d <= l.to_date) leaveDays.add(d);

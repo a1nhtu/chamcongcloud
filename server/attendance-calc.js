@@ -186,7 +186,7 @@ export function splitOtTiers(otMin, shift) {
 /* ===================== GHÉP LOG MÁY → GIỜ VÀO / RA (4 quy tắc) =====================
  * Theo phần mềm mẫu ChamCongApp (Rules/*Processor.cs):
  *   filo — Vào trước, ra sau: sớm nhất/muộn nhất trong cửa sổ ca.
- *   tdhc — Theo cửa sổ thời gian: VÀO trong cửa sổ vào; RA = log kế tiếp, phải nằm trong cửa sổ ra.
+ *   tdhc — Phân theo giờ (như Ronald Jack): lượt quẹt trong khung vào = VÀO, trong khung ra = RA; lượt nằm ngoài cả hai khung bỏ qua.
  *   idm  — Máy lẻ vào / máy chẵn ra: VÀO = log máy lẻ sớm nhất; RA = log máy chẵn muộn nhất.
  *   tdqd — Qua đêm: cửa sổ xuyên đêm; con: pair (như filo) hoặc idm.
  *   pairs — Nhiều lần vào/ra: giờ Vào/Ra như FILO, kèm danh sách cặp (lượt 1-2, 3-4…) để tính giờ công
@@ -213,7 +213,46 @@ export function ruleWindow(workDate, shift, opts = {}) {
     if (dayEnd > winEnd) winEnd = dayEnd;
   }
   const before = shift.allow_ot && shift.ot_before ? 4 * HH : 2 * HH;   // có tăng ca trước giờ vào → nhận log sớm hơn
-  return { winStart: new Date(start.getTime() - before), winEnd, start, end };
+  let winStart = new Date(start.getTime() - before);
+  // Ca NGÀY 1 ca/ngày: nhận cả lượt quẹt từ ĐẦU NGÀY (xếp Ca chiều mà đến từ 8h sáng → giờ vào là 8h, không thành "trễ 240' + thiếu ra").
+  // Lượt quẹt sáng sớm là giờ ra ca đêm hôm trước đã được loại trước khi gọi (consumedByPrevDay).
+  if (opts.toDayEnd && !night) { const dayStart = vnInstant(workDate, '00:00'); if (dayStart < winStart) winStart = dayStart; }
+  return { winStart, winEnd, start, end };
+}
+
+// Lịch trình có NHIỀU ca trong 1 ngày (VD Sáng / Chiều / Hành chính, hoặc ca gãy Sáng + Chiều):
+// chọn bộ ca nhân viên THỰC SỰ làm theo giờ chấm, thay vì coi như làm hết mọi ca của lịch.
+// Thử mọi tổ hợp ca KHÔNG chồng giờ nhau; mỗi lượt quẹt gán cho ca gần nhất trong tổ hợp (ca nào không có lượt quẹt → loại tổ hợp);
+// độ lệch của 1 ca = |vào − đầu ca| + |ra − cuối ca| (thiếu giờ ra: phạt 240').
+// Chọn tổ hợp lệch ít nhất; bằng nhau thì ưu tiên tổ hợp dùng NHIỀU lượt quẹt làm giờ vào/ra hơn (ca gãy 08-12 / 13-17), rồi ít ca hơn.
+// Trả [{ shift, punches }] theo thứ tự giờ; punches = các lượt quẹt (object có punch_at) thuộc ca đó.
+export function pickShiftSet(cands, punches, workDate) {
+  const list = (cands || []).slice(0, 10).map((shift) => ({ shift, ...shiftBounds(workDate, shift) }));
+  const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
+  if (!list.length || !ps.length) return [];
+  const t = (p) => toMinute(p.punch_at).getTime();
+  let best = null;
+  for (let mask = 1; mask < (1 << list.length); mask++) {
+    const set = list.filter((_, i) => mask & (1 << i)).sort((a, b) => a.start - b.start);
+    if (set.some((x, i) => i && x.start < set[i - 1].end)) continue;          // chồng giờ nhau → không cùng làm được
+    const got = set.map(() => []);
+    for (const p of ps) {
+      let bi = 0, bd = Infinity;
+      set.forEach((x, i) => { const v = t(p); const d = v >= x.start && v <= x.end ? 0 : Math.min(Math.abs(v - x.start), Math.abs(v - x.end)); if (d < bd) { bd = d; bi = i; } });
+      got[bi].push(p);
+    }
+    if (got.some((g) => !g.length)) continue;
+    let dev = 0, used = 0;
+    set.forEach((x, i) => {
+      const g = got[i], a = t(g[0]), b = g.length > 1 ? t(g[g.length - 1]) : null;
+      dev += Math.abs(a - x.start) / 60000 + (b == null ? 240 : Math.abs(b - x.end) / 60000);
+      used += b == null ? 1 : 2;
+    });
+    const score = [dev, -used, set.length];
+    if (!best || score[0] < best.score[0] - 1e-9 || (Math.abs(score[0] - best.score[0]) < 1e-9 && (score[1] < best.score[1] || (score[1] === best.score[1] && score[2] < best.score[2]))))
+      best = { score, out: set.map((x, i) => ({ shift: x.shift, punches: got[i] })) };
+  }
+  return best ? best.out : [];
 }
 
 export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate, opts = {}) {
@@ -245,7 +284,8 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
     return { inIso: iso(ins[0] || null), outIso: iso(outs.length ? outs[outs.length - 1] : null) };
   }
 
-  // TĐ-HC: VÀO trong cửa sổ vào; RA = log KẾ TIẾP, phải nằm trong cửa sổ ra (nếu lệch → bỏ RA)
+  // Phân theo giờ: VÀO = lượt đầu trong khung vào; RA = lượt CUỐI trong khung ra (sau giờ vào).
+  // Lượt nằm ngoài cả 2 khung (VD ra ăn trưa 12h) bỏ qua — trước đây lấy "lượt kế tiếp" nên quẹt trưa làm mất giờ ra.
   if (rule === 'tdhc') {
     let ci;
     if (shift.check_in_start && shift.check_in_end) {
@@ -255,16 +295,14 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
       ci = all.find((p) => at(p) >= cs && at(p) <= ce);
     } else ci = inWin[0];
     if (!ci) return { inIso: null, outIso: null };
-    const co = all.find((p) => at(p) > at(ci));
-    if (!co) return { inIso: iso(ci), outIso: null };
     let cos, coe;
     if (shift.check_out_start && shift.check_out_end) {
       cos = vnInstant(workDate, shift.check_out_start);
       coe = vnInstant(workDate, shift.check_out_end);
       if (coe < cos) coe = new Date(coe.getTime() + 24 * HH);
     } else { cos = new Date(end.getTime() - HH); coe = new Date(end.getTime() + 8 * HH); }
-    if (at(co) < cos || at(co) > coe) return { inIso: iso(ci), outIso: null };
-    return { inIso: iso(ci), outIso: iso(co) };
+    const outs = all.filter((p) => at(p) > at(ci) && at(p) >= cos && at(p) <= coe);
+    return { inIso: iso(ci), outIso: outs.length ? iso(outs[outs.length - 1]) : null };
   }
 
   // FILO (mặc định) & TĐ-QĐ/pair: sớm nhất VÀO, muộn nhất RA trong cửa sổ
