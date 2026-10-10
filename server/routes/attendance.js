@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, getSetting, allowedOffices } from '../db.js';
+import { db, getSetting, allowedOffices, empAttMode, empHourly } from '../db.js';
 import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
@@ -78,7 +78,7 @@ r.post('/request-device', (req, res) => {
 // Bản ghi chấm công hôm nay (hỗ trợ nhiều ca/ngày)
 r.get('/today', (req, res) => {
   const date = vnDateStr();
-  const mode = getSetting('attendance_mode', 'shift');
+  const mode = empAttMode(req.user.id);   // kiểu chấm công của chính nhân viên này
   const rows = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? ORDER BY check_in_at').all(req.user.id, date);
   // Ca đang mở (đã vào, chưa ra) — hôm nay hoặc ca đêm hôm qua
   let openRow = rows.find((r) => r.check_in_at && !r.check_out_at) || null;
@@ -137,7 +137,7 @@ r.post('/check-in', (req, res) => {
   const date = vnDateStr();
   const at = nowIso();
   // Chế độ chấm công: 'hourly' = chỉ tính giờ, không ca, không muộn/sớm
-  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const hourly = empHourly(req.user.id);
   // TỰ ĐỘNG tìm ca theo giờ chấm (phân ca thủ công đè) → xác định ca đang VÀO (cho phép nhiều ca/ngày)
   const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, date, at);
   const shift = rs.shift;
@@ -237,7 +237,7 @@ r.post('/check-out', (req, res) => {
 
   const wdate = row.work_date;   // ngày công của bản ghi (ca đêm = hôm qua)
   const at = nowIso();
-  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const hourly = empHourly(req.user.id);
   // DÒ LẠI ca bằng CẢ giờ vào + giờ ra (phân biệt ca cùng giờ vào: Sáng/Hành chính; và ca đêm)
   const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, wdate, row.check_in_at, at);
   const shift = rs.shift;

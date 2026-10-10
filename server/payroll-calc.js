@@ -1,5 +1,5 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
-import { db, getSetting, adminAttWhere } from './db.js';
+import { db, getSetting, adminAttWhere, empHourly } from './db.js';
 import { splitOtTiers } from './attendance-calc.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -42,7 +42,7 @@ export function computePayrollForEmployee(employeeId, from, to) {
   ).all(employeeId, from, to);
 
   // Chế độ tính công theo GIỜ: lương = tổng giờ làm × đơn giá giờ + phụ cấp
-  if (getSetting('attendance_mode', 'shift') === 'hourly') {
+  if (empHourly(employeeId)) {
     const totalMin = rows.reduce((s, r) => s + (r.work_minutes || 0), 0);
     // Nhiều phiên/ngày vẫn tính 1 NGÀY công (đếm theo ngày distinct, không theo số dòng)
     const daysWorked = new Set(rows.filter((r) => (r.work_minutes || 0) > 0).map((r) => r.work_date)).size;

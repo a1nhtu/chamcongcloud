@@ -440,6 +440,8 @@ function migrateColumns() {
   add('employees', 'device_label',   "TEXT DEFAULT ''");   // mô tả máy (trình duyệt/hệ máy) để admin nhận biết
   // Phân quyền chi tiết theo chức năng (JSON mảng key; NULL = mặc định theo vai trò)
   add('employees', 'permissions', 'TEXT');
+  // Kiểu chấm công RIÊNG của nhân viên: '' = theo cài đặt chung | 'shift' = theo ca | 'hourly' = theo giờ
+  add('employees', 'att_mode', "TEXT NOT NULL DEFAULT ''");
   // Lương theo giờ (dùng cho chế độ chấm công 'hourly')
   add('salary_configs', 'hourly_rate', 'REAL NOT NULL DEFAULT 0');
   // Đánh dấu bản ghi chấm công do admin thêm/sửa tay + ghi chú lý do
@@ -569,6 +571,27 @@ function migrateColumns() {
 export function getSetting(key, fallback = null) {
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key);
   return row ? row.value : fallback;
+}
+
+// Kiểu chấm công THỰC TẾ của 1 nhân viên: đặt riêng ở hồ sơ ('shift' | 'hourly'), không đặt thì theo cài đặt chung.
+// → công ty vừa có người chấm theo ca vừa có người chấm theo giờ vẫn tính đúng cho từng người.
+export const globalAttMode = () => (getSetting('attendance_mode', 'shift') === 'hourly' ? 'hourly' : 'shift');
+export function empAttMode(employeeId) {
+  const g = globalAttMode();
+  if (!employeeId) return g;
+  const r = db.prepare('SELECT att_mode FROM employees WHERE id = ?').get(employeeId);
+  return r && (r.att_mode === 'shift' || r.att_mode === 'hourly') ? r.att_mode : g;
+}
+export const empHourly = (employeeId) => empAttMode(employeeId) === 'hourly';
+// Công ty hiện có nhân viên chấm theo ca / theo giờ không (giao diện dựa vào đây để hiện mục Ca làm, Phân ca…)
+export function attModeMix() {
+  const g = globalAttMode();
+  const c = db.prepare("SELECT SUM(att_mode='shift') s, SUM(att_mode='hourly') h, COUNT(*) n FROM employees WHERE active=1 AND role<>'admin'").get() || {};
+  const s = c.s || 0, h = c.h || 0, rest = (c.n || 0) - s - h;   // rest = số NV theo cài đặt chung
+  return {
+    any_shift: s > 0 || (g === 'shift' && (rest > 0 || !c.n)),
+    any_hourly: h > 0 || (g === 'hourly' && (rest > 0 || !c.n)),
+  };
 }
 
 export function setSetting(key, value) {

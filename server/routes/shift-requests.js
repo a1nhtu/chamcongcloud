@@ -1,7 +1,7 @@
 // Nhân viên tự đăng ký ca làm việc → tự áp dụng hoặc chờ admin/quản lý duyệt.
 // Bật/tắt bằng setting self_shift_enabled; cần duyệt hay không bằng self_shift_approve.
 import { Router } from 'express';
-import { db, getSetting } from '../db.js';
+import { db, getSetting, empHourly } from '../db.js';
 import { authRequired, permRequired } from '../auth.js';
 import { nowIso } from '../util.js';
 
@@ -10,7 +10,7 @@ r.use(authRequired);
 
 const enabled = () => getSetting('self_shift_enabled', '0') === '1';
 const needApprove = () => getSetting('self_shift_approve', '1') === '1';
-const isShiftMode = () => getSetting('attendance_mode', 'shift') !== 'hourly';
+const isShiftMode = (req) => !empHourly(req && req.user ? req.user.id : null);   // theo kiểu chấm công của chính nhân viên
 
 // Áp một đăng ký đã duyệt vào bảng phân ca theo ngày.
 // Xin nghỉ → xoá hết ca của ngày rồi đặt nghỉ. Đăng ký ca → CỘNG THÊM ca (cho phép nhiều ca gãy/ngày).
@@ -29,14 +29,14 @@ function applyToAssignment(employeeId, workDate, shiftId, isOff) {
 
 // Danh sách ca đang hoạt động để nhân viên chọn
 r.get('/shifts', (req, res) => {
-  if (!enabled() || !isShiftMode()) return res.json({ enabled: false, shifts: [] });
+  if (!enabled() || !isShiftMode(req)) return res.json({ enabled: false, shifts: [] });
   const shifts = db.prepare('SELECT id, name, start_time, end_time FROM shifts WHERE active = 1 ORDER BY start_time, name').all();
   res.json({ enabled: true, needApprove: needApprove(), shifts });
 });
 
 // Đăng ký ca cho một ngày
 r.post('/', (req, res) => {
-  if (!enabled() || !isShiftMode()) return res.status(403).json({ error: 'Chức năng tự chọn ca đang tắt' });
+  if (!enabled() || !isShiftMode(req)) return res.status(403).json({ error: 'Chức năng tự chọn ca đang tắt' });
   const b = req.body || {};
   const workDate = String(b.work_date || '').slice(0, 10);
   const isOff = b.is_off ? 1 : 0;

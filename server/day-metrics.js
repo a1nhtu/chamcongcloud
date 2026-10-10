@@ -16,6 +16,15 @@ export function payrollCtx(getSetting, db) {
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
+    // Kiểu chấm công của TỪNG nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung) — nạp 1 lần cho cả mẻ
+    isHourly: (() => {
+      const g = getSetting('attendance_mode', 'shift') === 'hourly';
+      let map = null;
+      return (empId) => {
+        if (!map) map = new Map(db.prepare("SELECT id, att_mode FROM employees WHERE att_mode IN ('shift','hourly')").all().map((e) => [e.id, e.att_mode === 'hourly']));
+        return map.has(empId) ? map.get(empId) : g;
+      };
+    })(),
     isHoliday: (d) => hol.has(d),
   };
 }

@@ -26,7 +26,10 @@ const NAV = [
 const isMaster = () => ME?.role === 'master';                 // tài khoản tổng (Anh)
 const isAdmin = () => ME?.role === 'admin' || isMaster();     // master có mọi quyền admin
 const hasPerm = (key) => isAdmin() || (ME?.permissions || []).includes(key);
-const hourlyMode = () => SETTINGS.attendance_mode === 'hourly';
+const hourlyMode = () => (SETTINGS.any_shift != null ? !SETTINGS.any_shift : SETTINGS.attendance_mode === 'hourly');
+// Công ty có CẢ nhân viên chấm theo ca lẫn theo giờ
+const mixedMode = () => !!(SETTINGS.any_shift && SETTINGS.any_hourly);
+const ATT_MODE_LABEL = { '': 'Theo cài đặt chung của công ty', shift: '🕐 Theo ca làm việc', hourly: '⏱️ Theo giờ (làm bao nhiêu tính bấy nhiêu)' };
 const deviceEnabled = () => SETTINGS.device_enabled === '1';
 const deviceLockEnabled = () => SETTINGS.device_lock_enabled === '1';
 const selfShiftEnabled = () => SETTINGS.self_shift_enabled === '1';
@@ -676,6 +679,9 @@ function empModal(e) {
     el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name))),
     el('div', { class: 'two-col' }, deptField, posField),
     el('div', { class: 'two-col' }, field('Số điện thoại', mk('phone', '', e?.phone)), pinField),
+    field('Kiểu chấm công của nhân viên này',
+      el('select', { id: 'e-attmode' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v, ...((e?.att_mode || '') === v ? { selected: '' } : {}) },
+        v === '' ? `Theo cài đặt chung (hiện là: ${SETTINGS.attendance_mode === 'hourly' ? 'theo giờ' : 'theo ca'})` : ATT_MODE_LABEL[v])))),
     el('div', { class: 'two-col' }, field('Tài khoản *', mk('username', 'nv002', e?.username)), field('Vai trò', roleSel)),
     permWrap,
     field(e ? 'Mật khẩu mới (để trống nếu giữ nguyên)' : 'Mật khẩu *', input('e-password', { type: 'text', placeholder: e ? '••••••' : '123456' })),
@@ -699,6 +705,7 @@ function empModal(e) {
       position: posSel.value, phone: f.phone.value, role: $('#e-role').value,
       username: f.username.value.trim(),
       password: $('#e-password').value || undefined,
+      att_mode: $('#e-attmode') ? $('#e-attmode').value : undefined,
     };
     // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
     if (!pinLocked) body.device_pin = f.device_pin.value.trim();
@@ -3198,8 +3205,16 @@ function makeChecklist(icon, allLabel, getItems, picked, afterChange) {
   return { btn, sync };
 }
 
+let _rpForm = '';      // mẫu báo cáo đang chọn: 'shift' | 'hourly'
+let _rpOnly = true;    // công ty có cả 2 kiểu: chỉ lấy NV chấm đúng kiểu của mẫu
 async function pageReport() {
-  const hourly = hourlyMode();
+  // Mẫu báo cáo: theo ca (công, trễ/sớm, tăng ca) hay theo giờ (tổng giờ). Mặc định theo kiểu công ty đang dùng.
+  if (!_rpForm) _rpForm = hourlyMode() ? 'hourly' : 'shift';
+  const formSel = el('select', { title: 'Mẫu báo cáo: theo ca hay theo giờ', style: 'width:auto' },
+    el('option', { value: 'shift', ...(_rpForm === 'shift' ? { selected: '' } : {}) }, '🕐 Mẫu theo ca (công)'),
+    el('option', { value: 'hourly', ...(_rpForm === 'hourly' ? { selected: '' } : {}) }, '⏱️ Mẫu theo giờ'));
+  const onlyChk = el('input', { type: 'checkbox', style: 'width:auto', ...(_rpOnly ? { checked: '' } : {}) });
+  const onlyLbl = mixedMode() ? el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);font-size:13px', title: 'Công ty có cả nhân viên chấm theo ca và theo giờ: chỉ đưa vào báo cáo những người chấm đúng kiểu của mẫu đang chọn' }, onlyChk, 'Chỉ NV chấm kiểu này') : null;
   const monthI = el('input', { type: 'month', id: 'rp-month', value: todayMonth(), title: 'Chọn nhanh trọn 1 tháng' });
   const md0 = monthDaysArr(todayMonth());
   const fromI = el('input', { type: 'date', id: 'rp-from', value: md0[0], title: 'Từ ngày' });
@@ -3217,18 +3232,20 @@ async function pageReport() {
 
   const periodQS = () => `from=${fromI.value}&to=${toI.value}`;
   // Phần lọc NV cho query: ưu tiên NV cụ thể (ids), rồi tới nhiều phòng ban (depts)
-  const filterQS = () => empPick.size ? '&ids=' + [...empPick].join(',')
-    : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : '');
+  const filterQS = () => (empPick.size ? '&ids=' + [...empPick].join(',')
+    : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : ''))
+    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '');
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
   const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; };
 
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
   const hub = () => {
     monthI.onchange = snapMonth; fromI.onchange = null; toI.onchange = null; onFilterChange = () => {};
+    formSel.onchange = () => { _rpForm = formSel.value; hub(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; };
     const wrap = el('div', {});
     wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
     for (const [gname, cards] of REPORT_GROUPS) {
-      const list = cards.filter(([v]) => !hourly || !['late', 'ot', 'symbol'].includes(v));
+      const list = cards.filter(([v]) => formSel.value !== 'hourly' || !['late', 'ot', 'symbol'].includes(v));
       if (!list.length) continue;
       wrap.append(el('div', { style: 'font-weight:800;color:var(--ink);margin:18px 0 10px;font-size:15px' }, gname));
       const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px' });
@@ -3244,7 +3261,7 @@ async function pageReport() {
       }
       wrap.append(grid);
     }
-    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptCl.btn, empCl.btn), wrap);
+    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl), wrap);
   };
 
   // Xem 1 báo cáo cụ thể (có nút quay lại danh sách)
@@ -3254,7 +3271,7 @@ async function pageReport() {
     const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
     exportBtn.onclick = () => downloadExcel(type, fromI.value, toI.value, filterQS());
     const wrap = el('div', {}, loading());
-    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, exportBtn), wrap);
+    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl, exportBtn), wrap);
     const load = async () => {
       if (fromI.value && toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
       wrap.innerHTML = ''; wrap.append(loading());
@@ -3302,6 +3319,7 @@ async function pageReport() {
     };
     const snapAndLoad = () => { snapMonth(); load(); };
     monthI.onchange = snapAndLoad; fromI.onchange = load; toI.onchange = load; onFilterChange = load;
+    formSel.onchange = () => { _rpForm = formSel.value; load(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; load(); };
     load();
   };
 
@@ -3394,6 +3412,7 @@ const isStandalone = () => window.matchMedia('(display-mode: standalone)').match
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 
 async function pageSettings() {
+  if (!DEPARTMENTS.length) { try { await loadRefs(); } catch {} }   // cần danh sách phòng ban cho mục đặt kiểu chấm công riêng
   setMain(head('Cài đặt'), loading());
   const s = await api('/admin/settings');
   const nameI = input('st-name', { value: s.company_name });
@@ -3472,6 +3491,20 @@ async function pageSettings() {
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
   };
+  // Công ty có cả 2 kiểu: đặt kiểu chấm công RIÊNG cho từng phòng ban (hoặc từng người ở hồ sơ nhân viên)
+  const mixDept = el('select', { style: 'width:auto;min-width:150px' }, el('option', { value: '*' }, 'Tất cả nhân viên'), ...(DEPARTMENTS || []).map((d) => el('option', { value: d.name }, d.name)));
+  const mixMode = el('select', { style: 'width:auto' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v }, ATT_MODE_LABEL[v])));
+  const mixBtn = btnSm('Áp dụng', async () => {
+    const who = mixDept.value === '*' ? 'TẤT CẢ nhân viên' : `phòng "${mixDept.value}"`;
+    if (!confirm(`Đặt kiểu chấm công "${ATT_MODE_LABEL[mixMode.value]}" cho ${who}?`)) return;
+    try { const r = await api('/admin/employees/att-mode', { method: 'POST', body: { department: mixDept.value, mode: mixMode.value } }); toast(`Đã đặt cho ${r.count} nhân viên. Đang tải lại…`, 'ok'); setTimeout(() => location.reload(), 800); }
+    catch (e) { toast(e.message, 'err'); }
+  });
+  const mixBox = el('div', { style: 'padding:10px;border:1px dashed var(--line,#ddd);border-radius:10px' },
+    el('b', {}, 'Công ty vừa có người chấm theo ca, vừa có người chấm theo giờ?'),
+    el('div', { style: 'font-size:13px;color:var(--muted);margin:4px 0 8px' }, 'Lựa chọn ở trên là kiểu CHUNG. Nhóm nào khác thì đặt riêng tại đây theo phòng ban, hoặc đặt cho từng người ở Nhân viên → Sửa → "Kiểu chấm công". '
+      + (SETTINGS.any_shift && SETTINGS.any_hourly ? 'Hiện công ty đang có CẢ HAI kiểu.' : SETTINGS.any_hourly ? 'Hiện tất cả đang chấm theo giờ.' : 'Hiện tất cả đang chấm theo ca.')),
+    el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, mixDept, mixMode, mixBtn));
   const modeRow = (radio, title, desc) => el('label', { style: 'display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line,#eee);border-radius:10px;cursor:pointer' },
     radio, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
   const panelMode = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
@@ -3480,6 +3513,7 @@ async function pageSettings() {
       modeRow(modeShift, '🕐 Theo ca làm việc', 'Có ca, tính đi muộn / về sớm / tăng ca, báo cáo đầy đủ. Phù hợp văn phòng, nhà máy.'),
       modeRow(modeHourly, '⏱️ Chỉ tính công theo giờ', 'Không cần khai báo ca, chỉ tính tổng giờ làm để trả lương theo giờ. Đơn giản cho cửa hàng, quán.'),
       stRule.box,
+      mixBox,
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Phạm vi chấm công (GPS)'),
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, geoChk,

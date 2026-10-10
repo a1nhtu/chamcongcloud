@@ -167,6 +167,7 @@ async function renderCham() {
   const c = $('#content'); c.innerHTML = '<div class="empty"><span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span></div>';
   let data;
   try { data = await api('/attendance/today'); } catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  if (data.mode === 'shift' || data.mode === 'hourly') MODE = data.mode;   // kiểu chấm công của RIÊNG nhân viên này (có thể khác cài đặt chung)
   const a = data.attendance;
   const hasIn = a && a.check_in_at;
   const hasOut = a && a.check_out_at;

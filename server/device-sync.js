@@ -1,6 +1,6 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
-import { db, getSetting } from './db.js';
+import { db, getSetting, empHourly } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
@@ -504,7 +504,7 @@ export function relearnDevice(serial) {
 // presetShift: nếu truyền (kể cả null) thì dùng luôn, không tự dò lại ca (dùng khi tách nhiều ca/ngày).
 function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null) {
   const ctx = payrollCtx(getSetting, db);
-  const shift = ctx.hourly ? null : (presetShift !== undefined ? presetShift
+  const shift = ctx.isHourly(employeeId) ? null : (presetShift !== undefined ? presetShift
     : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
   return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs);
 }
@@ -558,7 +558,7 @@ export function relinkPunchesForPin(employeeId, pin) {
 export function rebuildDay(employeeId, workDate) {
   const prov = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
   if (!prov.length) return;
-  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const hourly = empHourly(employeeId);   // kiểu chấm công của RIÊNG nhân viên này (theo ca / theo giờ)
   const machineMap = deviceMachineMap();
   const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, winStart.toISOString(), winEnd.toISOString());

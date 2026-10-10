@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
-import { db, getSetting, adminAttWhere } from '../db.js';
+import { db, getSetting, adminAttWhere, globalAttMode } from '../db.js';
 import { authRequired, permRequired } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches } from '../attendance-calc.js';
@@ -99,7 +99,8 @@ const toPairs = (ts) => { const r = []; for (let i = 0; i < ts.length; i += 2) r
 //    → liệt kê từng cặp: cin/cout nhiều dòng, pairs = [[vào, ra], ...]
 //  - còn lại (FILO, IDM…) → giờ vào/ra của bản ghi công (đầu–cuối), pairs = null
 function inOutResolver(employees, from, to) {
-  const hourly = getSetting('attendance_mode', 'shift') === 'hourly';
+  const modeOf = new Map(employees.map((e) => [e.id, effMode(e)]));
+  const hourlyOf = (empId) => (modeOf.get(empId) || globalAttMode()) === 'hourly';   // theo kiểu chấm công của từng NV
   const hourlyRule = getSetting('hourly_merge_rule', 'filo');
   let timesOf = null;
   const memo = new Map();   // empId|date → kết quả (nhiều cột cùng gọi 1 ô)
@@ -114,20 +115,29 @@ function inOutResolver(employees, from, to) {
     if (!timesOf) timesOf = dayTimesLoader(from, to, new Set(employees.map((e) => e.id)));
     const ts = timesOf(empId, date);
     if (ts.length <= 2) return single;
-    const rule = hourly ? hourlyRule : (resolveEffectiveShift(empId, date, c.check_in_at, c.check_out_at || null).mergeRule || 'filo');
+    const rule = hourlyOf(empId) ? hourlyRule : (resolveEffectiveShift(empId, date, c.check_in_at, c.check_out_at || null).mergeRule || 'filo');
     if (rule !== 'pairs') return single;
     const ps = toPairs(ts);
     return { cin: ps.map(([a]) => isoToVnHM(a)).join('\n'), cout: ps.map(([, b]) => (b ? isoToVnHM(b) : '?')).join('\n'), pairs: ps };
   }
 }
 
+// MẪU báo cáo: 'hourly' (theo giờ: tổng giờ, bỏ công/tăng ca) hay 'shift' (theo ca: công, trễ/sớm, tăng ca).
+// Người xem chọn trên trang Báo cáo (?mode=); không chọn thì theo cài đặt chung của công ty.
+const formHourly = (filter) => ((filter && typeof filter === 'object' && filter.mode) || globalAttMode()) === 'hourly';
+// Kiểu chấm công thực tế của 1 nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung)
+const effMode = (e) => (e.att_mode === 'shift' || e.att_mode === 'hourly' ? e.att_mode : globalAttMode());
+
 // Nạp toàn bộ dữ liệu 1 khoảng ngày [from, to] để các báo cáo dùng chung
 function loadRange(from, to, filter) {
   const weekend = getSetting('weekend_days', '7');
   const ef = empFilterSql(filter);
-  const empSql = `SELECT id, code, full_name, department, position, shift_id
+  const empSql = `SELECT id, code, full_name, department, position, shift_id, att_mode
                 FROM employees WHERE active = 1${adminAttWhere()}${ef.where} ORDER BY department, full_name`;
-  const employees = db.prepare(empSql).all(...ef.args);
+  let employees = db.prepare(empSql).all(...ef.args);
+  // ?emode=shift|hourly: chỉ lấy nhân viên chấm công theo kiểu đó (công ty có cả 2 kiểu)
+  const emode = filter && typeof filter === 'object' ? filter.emode : null;
+  if (emode) employees = employees.filter((e) => effMode(e) === emode);
 
   const results = db.prepare(
     `SELECT a.*, e.code, e.full_name, e.department, s.name AS shift_name,
@@ -301,7 +311,7 @@ const HOURLY_HIDE = { attendance: ['cong', 'ot'], detail: ['cong', 'ot'], detail
 function buildReport(type, from, to, filter) {
   const rep = buildReportRaw(type, from, to, filter);
   const hide = HOURLY_HIDE[type];
-  if (hide && rep && Array.isArray(rep.columns) && getSetting('attendance_mode', 'shift') === 'hourly')
+  if (hide && rep && Array.isArray(rep.columns) && formHourly(filter))
     rep.columns = rep.columns.filter((c) => !hide.includes(c.key));
   return rep;
 }
@@ -312,7 +322,7 @@ function buildReportRaw(type, from, to, filter) {
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
   const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1]);   // giờ vào/ra theo quy tắc ghép log
-  const HOURLY = getSetting('attendance_mode', 'shift') === 'hourly';   // chế độ theo giờ: bỏ công/tăng ca, dùng tổng giờ
+  const HOURLY = formHourly(filter);   // mẫu theo giờ: bỏ công/tăng ca, dùng tổng giờ
   const sortedResults = () => [...ctx.cell.values()].sort((a, b) =>
     a.full_name === b.full_name ? (a.work_date < b.work_date ? -1 : 1) : (a.full_name < b.full_name ? -1 : 1));
 
@@ -729,7 +739,10 @@ function buildReportRaw(type, from, to, filter) {
     /* --- Bảng lương (luôn theo THÁNG chứa ngày bắt đầu) --- */
     case 'payroll': {
       const [y, m] = from.split('-').map(Number);
-      const { from: pFrom, to: pTo, rows: pr } = computePayrollTable(y, m, filter);
+      const pt = computePayrollTable(y, m, filter);
+      const pFrom = pt.from, pTo = pt.to;
+      // công ty có cả 2 kiểu: chỉ lấy NV chấm theo kiểu đang chọn (lương theo giờ và theo ca tính khác nhau)
+      const pr = filter && filter.emode ? pt.rows.filter(({ pay }) => (pay.hourly ? 'hourly' : 'shift') === filter.emode) : pt.rows;
       const money = (n) => (n || 0).toLocaleString('vi-VN');
       if (HOURLY) {   // theo giờ: lương = tổng giờ × đơn giá giờ + phụ cấp
         const columns = [
@@ -773,7 +786,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const ioOf = inOutResolver(ctx.employees, from, to);
-  const HOURLY = getSetting('attendance_mode', 'shift') === 'hourly';
+  const HOURLY = formHourly(filter);
   const PAIRS = 4;
   const TITLE = onlyLateEarly ? 'BẢNG ĐI MUỘN / VỀ SỚM' : 'BẢNG CHI TIẾT CHẤM CÔNG';
   const vnMs = (iso) => new Date(iso).getTime();
@@ -1165,7 +1178,8 @@ r.get('/departments', (req, res) => {
 function filterFromQuery(q) {
   const ids = String(q.ids || '').split(',').map(Number).filter(Boolean);
   const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
-  return { ids, depts, dept: q.dept || null };
+  const m = (v) => (v === 'shift' || v === 'hourly' ? v : null);
+  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode) };
 }
 
 r.get('/data', (req, res) => {

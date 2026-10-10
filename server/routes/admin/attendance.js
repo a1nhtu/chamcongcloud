@@ -28,7 +28,7 @@ function vnToIso(date, hm) {
 function computeManual(employeeId, workDate, inIso, outIso) {
   const ctx = payrollCtx(getSetting, db);
   // Chế độ theo GIỜ: không dò ca, không muộn/sớm (giữ nguyên hành vi cũ)
-  const eff = ctx.hourly ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
+  const eff = ctx.isHourly(employeeId) ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
   return computeDayMetrics(ctx, eff.shift, workDate, inIso, outIso);
 }
 
@@ -68,8 +68,9 @@ export function registerAttendanceRoutes(r, { need }) {
         const eff = resolveEffectiveShift(row.employee_id, row.work_date, row.check_in_at, row.check_out_at || null);
         // Chế độ theo GIỜ: không dùng ca (giống khi máy đẩy log). Quy tắc "Nhiều lần vào/ra" (ca chọn pairs,
         // hoặc theo giờ chọn "theo cặp"): tính theo các cặp lượt quẹt; giờ sửa tay thì tính như cũ.
-        const calcShift = ctx.hourly ? null : eff.shift;
-        const usePairs = !row.manual && (ctx.hourly ? hourlyPairs : eff.mergeRule === 'pairs');
+        const hr = ctx.isHourly(row.employee_id);   // kiểu chấm công riêng của nhân viên này
+        const calcShift = hr ? null : eff.shift;
+        const usePairs = !row.manual && (hr ? hourlyPairs : eff.mergeRule === 'pairs');
         const pairs = usePairs ? dayPairsFor(row.employee_id, row.work_date, calcShift) : null;
         const m = computeDayMetrics(ctx, calcShift, row.work_date, row.check_in_at, row.check_out_at || null, pairs);
         if (!row.check_out_at && !(calcShift && calcShift.no_out_credit)) {

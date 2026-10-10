@@ -1,5 +1,5 @@
 // Nhóm route CÀI ĐẶT hệ thống + logo thương hiệu + cập nhật phần mềm.
-import { getSetting, setSetting } from '../../db.js';
+import { getSetting, setSetting, attModeMix } from '../../db.js';
 import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../../update.js';
 
@@ -15,6 +15,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
+      ...attModeMix(),   // any_shift / any_hourly: công ty đang có NV chấm theo ca / theo giờ
       hourly_merge_rule: getSetting('hourly_merge_rule', 'filo'), // theo giờ: filo | pairs (nhiều lần vào/ra)
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
       phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)

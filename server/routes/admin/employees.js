@@ -47,15 +47,29 @@ function setEmpOffices(empId, officeIds) {
   for (const oid of officeIds) { if (oid) ins.run(empId, +oid); }
 }
 
+const normAttMode = (v) => (v === 'shift' || v === 'hourly' ? v : '');
+
 export function registerEmployeeRoutes(r, { need }) {
   // Danh mục quyền (cho giao diện dựng ô tích phân quyền)
   r.get('/perm-catalog', (req, res) => res.json({ permissions: PERMISSIONS }));
+
+  // Đặt KIỂU CHẤM CÔNG hàng loạt: { mode: ''|'shift'|'hourly', department? | ids? } (không gửi phạm vi = tất cả NV)
+  r.post('/employees/att-mode', need('employees'), (req, res) => {
+    const b = req.body || {};
+    const mode = normAttMode(b.mode);
+    const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter(Boolean) : [];
+    let n;
+    if (ids.length) n = db.prepare(`UPDATE employees SET att_mode=? WHERE id IN (${ids.map(() => '?').join(',')})`).run(mode, ...ids).changes;
+    else if (b.department != null && b.department !== '*') n = db.prepare("UPDATE employees SET att_mode=? WHERE active=1 AND role<>'admin' AND IFNULL(department,'')=?").run(mode, String(b.department)).changes;
+    else n = db.prepare("UPDATE employees SET att_mode=? WHERE active=1 AND role<>'admin'").run(mode).changes;
+    res.json({ ok: true, count: n });
+  });
 
   r.get('/employees', (req, res) => {
     const rows = db.prepare(`
       SELECT e.id,e.code,e.full_name,e.department,e.position,e.phone,e.role,e.username,
              e.active,e.office_id,e.shift_id,e.work_schedule_id,e.permissions,e.device_pin,e.from_device,
-             e.device_id,e.pending_device,e.device_label,
+             e.device_id,e.pending_device,e.device_label,e.att_mode,
              o.name AS office_name, s.name AS shift_name, ws.name AS schedule_name
       FROM employees e
       LEFT JOIN offices o ON o.id = e.office_id
@@ -110,6 +124,7 @@ export function registerEmployeeRoutes(r, { need }) {
         b.shift_id || null, b.work_schedule_id || null, normPerms(guard.role, guard.permissions),
         (b.device_pin || '').trim());
       setEmpOffices(info.lastInsertRowid, b.office_ids);
+      if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), info.lastInsertRowid);
       const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
       res.json({ ok: true, id: info.lastInsertRowid, relinked });
     } catch (e) {
@@ -292,6 +307,7 @@ export function registerEmployeeRoutes(r, { need }) {
         b.active != null ? (b.active ? 1 : 0) : emp.active, emp.id);
       if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
       if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
+      if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
       res.json({ ok: true, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
