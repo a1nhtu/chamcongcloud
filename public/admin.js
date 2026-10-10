@@ -4055,9 +4055,17 @@ async function pageSettings() {
   const wkOtChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_work_as_ot ?? '1') === '1' ? { checked: '' } : {}) });
   // Làm tròn (áp chung cả công ty): số chữ số thập phân + lùi / tới
   const decSel = (v) => el('select', {}, ...[0, 1, 2, 3].map((d) => el('option', { value: d, ...(String(v ?? 2) === String(d) ? { selected: '' } : {}) }, d === 0 ? '0 (số nguyên)' : d + ' số lẻ')));
-  const modeSel = (v) => el('select', {}, ...[['0', 'Làm tròn lùi'], ['1', 'Làm tròn tới']].map(([k, t]) => el('option', { value: k, ...(String(v ?? '0') === k ? { selected: '' } : {}) }, t)));
+  const modeSel = (v) => el('select', {}, ...[['0', 'Lùi (xuống)'], ['1', 'Tới (lên)']].map(([k, t]) => el('option', { value: k, ...(String(v ?? '0') === k ? { selected: '' } : {}) }, t)));
   const roundI = decSel(s.workunit_rounding), roundM = modeSel(s.workunit_rounding_mode);
   const otRoundI = decSel(s.ot_rounding), otRoundM = modeSel(s.ot_rounding_mode);
+  // Tăng ca: làm tròn theo số lẻ của giờ HOẶC theo khối phút (VD 15 / 30 phút)
+  const otTypeSel = el('select', {}, el('option', { value: 'hour' }, 'Theo số lẻ của giờ'), el('option', { value: 'block' }, 'Theo khối phút'));
+  otTypeSel.value = s.ot_rounding_type === 'block' ? 'block' : 'hour';
+  const otBlockI = el('input', { type: 'number', min: 1, max: 240, step: 1, value: s.ot_rounding_block ?? 15, style: 'width:80px' });
+  const otBlockBox = el('div', { style: 'display:flex;align-items:center;gap:6px' }, otBlockI, el('span', {}, 'phút'));
+  const otLevel = el('div', {}, otRoundI, otBlockBox);
+  const syncOtType = () => { const b = otTypeSel.value === 'block'; otRoundI.style.display = b ? 'none' : ''; otBlockBox.style.display = b ? 'flex' : 'none'; };
+  otTypeSel.onchange = syncOtType; syncOtType();
   const payStartI = input('st-paystart', { type: 'number', min: 1, max: 28, value: s.pay_period_start_day ?? 1 });
   const otWdI = input('st-otwd', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekday ?? 1.5 });
   const otWkI = input('st-otwk', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekend ?? 2 });
@@ -4065,7 +4073,7 @@ async function pageSettings() {
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -4076,7 +4084,7 @@ async function pageSettings() {
     catch (e) { toast(e.message, 'err'); }
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại công tất cả'; }
   };
-  const panelCalc = (hasPerm('settings') && !hourlyMode()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+  const panelCalc = (hasPerm('settings') && !hourlyMode()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Quy tắc tính công'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', {}, el('label', {}, 'Ngày cuối tuần'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...wkBoxes),
@@ -4087,10 +4095,11 @@ async function pageSettings() {
         el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px' }, field('Ngày thường', otWdI), field('Ngày cuối tuần', otWkI), field('Ngày lễ', otHoI)),
         el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Áp cho mọi nhân viên. Ai cần hệ số khác thì đặt riêng ở trang Lương (đặt riêng thì đổi ở đây không ảnh hưởng người đó).')),
       el('div', {}, el('label', {}, 'Làm tròn (áp cho cả công ty)'),
-        el('div', { style: 'display:grid;grid-template-columns:110px 1fr 1fr;gap:8px;align-items:center' },
-          el('b', {}, 'Công'), roundI, roundM,
-          el('b', {}, 'Tăng ca (giờ)'), otRoundI, otRoundM),
-        el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'VD công 0,866 → 2 số lẻ: lùi = 0,86 · tới = 0,87. Tăng ca 40 phút = 0,666 giờ → lùi 0,66 giờ · tới 0,67 giờ.')),
+        el('div', { style: 'display:grid;grid-template-columns:80px 1.3fr 1fr 1fr;gap:8px;align-items:center' },
+          ...['', 'Kiểu', 'Mức', 'Làm tròn'].map((t) => el('span', { style: 'color:var(--muted);font-size:12px' }, t)),
+          el('b', {}, 'Công'), el('span', { style: 'color:var(--muted);font-size:13px' }, 'Theo số lẻ'), roundI, roundM,
+          el('b', {}, 'Tăng ca'), otTypeSel, otLevel, otRoundM),
+        el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'VD công 0,866 → 2 số lẻ: lùi = 0,86 · tới = 0,87. Tăng ca 40 phút = 0,666 giờ → 2 số lẻ: lùi 0,66 giờ · tới 0,67 giờ. Theo khối 15 phút: tăng ca 47 phút → lùi 45 phút · tới 60 phút.')),
       field('Ngày bắt đầu kỳ lương (1 = theo tháng dương lịch; VD 26 = 26 tháng trước→25 tháng này)', payStartI),
       el('div', { style: 'display:flex;gap:10px' }, saveCalc, ...(hasPerm('recompute') ? [recalcBtn] : [])),
       el('div', { class: 'map-hint' }, 'Đổi cấu hình ca/quy tắc xong nên bấm "Tính lại công" để áp cho dữ liệu cũ.'))) : null;

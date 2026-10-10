@@ -35,12 +35,14 @@ export function computeLate(shift, checkInIso, workDate) {
   return shift.grace_deduct ? raw - grace : raw;   // tùy chọn của ca: chỉ tính phần VƯỢT số phút cho phép
 }
 
-// Làm tròn TĂNG CA theo quy tắc chung của công ty (Cài đặt > Quy tắc tính công):
-// số giờ tăng ca giữ `decimals` chữ số thập phân, mode 0 = lùi (xuống), 1 = tới (lên). Trả lại số PHÚT tương ứng.
-// VD 40 phút = 0,666… giờ → 2 số lẻ, lùi = 0,66 giờ = 39,6 phút; tới = 0,67 giờ.
-export function roundOtMinutes(minutes, decimals = 2, mode = 0) {
+// Làm tròn TĂNG CA theo quy tắc chung của công ty (Cài đặt > Quy tắc tính công), mode 0 = lùi (xuống), 1 = tới (lên):
+//  - block > 0: theo KHỐI PHÚT — VD khối 15', 47 phút → lùi 45 · tới 60
+//  - còn lại: số giờ giữ `decimals` chữ số thập phân — VD 40 phút = 0,666 giờ → 2 số lẻ: lùi 0,66 giờ (39,6 phút) · tới 0,67 giờ
+// Trả lại số PHÚT.
+export function roundOtMinutes(minutes, decimals = 2, mode = 0, block = 0) {
   const m = Number(minutes) || 0;
   if (m <= 0) return 0;
+  if (block > 0) { const q = m / block; return (mode === 1 ? Math.ceil(q - 1e-9) : Math.floor(q + 1e-9)) * block; }
   const f = Math.pow(10, Math.max(0, Math.min(3, decimals | 0)));
   const h = m / 60 * f;
   const r = (mode === 1 ? Math.ceil(h - 1e-9) : Math.floor(h + 1e-9)) / f;

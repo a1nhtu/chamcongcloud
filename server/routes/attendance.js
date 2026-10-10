@@ -6,6 +6,7 @@ import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtMinutes } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
+import { otRoundingFrom } from '../day-metrics.js';
 
 const r = Router();
 r.use(authRequired);
@@ -262,7 +263,7 @@ r.post('/check-out', (req, res) => {
     calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate)), ot_type: otTypeOf(wdate), day_status: 'lam_viec' };
   }
   if (!hourly) calc = weekendToOt(calc, dayFlags(wdate));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
-  if (calc.ot_min) calc = { ...calc, ot_min: roundOtMinutes(calc.ot_min, parseInt(getSetting('ot_rounding', '2'), 10), parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0) };
+  if (calc.ot_min) { const r = otRoundingFrom(getSetting); calc = { ...calc, ot_min: roundOtMinutes(calc.ot_min, r.decimals, r.mode, r.block) }; }
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');

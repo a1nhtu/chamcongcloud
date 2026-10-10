@@ -9,6 +9,12 @@ import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, 
  * @param {(k:string,d?:string)=>string} getSetting
  * @param {{prepare:Function}} db
  */
+// Cách làm tròn tăng ca (Cài đặt > Quy tắc tính công): { decimals, mode, block } — block > 0 = theo khối phút
+export function otRoundingFrom(getSetting) {
+  const dec = parseInt(getSetting('ot_rounding', '2'), 10);
+  const block = getSetting('ot_rounding_type', 'hour') === 'block' ? Math.max(1, parseInt(getSetting('ot_rounding_block', '15'), 10) || 15) : 0;
+  return { decimals: Number.isFinite(dec) ? dec : 2, mode: parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0, block };
+}
 export function payrollCtx(getSetting, db) {
   const hol = new Set(db.prepare('SELECT holiday_date FROM public_holidays').all().map((r) => r.holiday_date));
   return {
@@ -16,8 +22,7 @@ export function payrollCtx(getSetting, db) {
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
-    otDecimals: (() => { const v = parseInt(getSetting('ot_rounding', '2'), 10); return Number.isFinite(v) ? v : 2; })(),
-    otMode: parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0,
+    otRound: otRoundingFrom(getSetting),
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
     // Kiểu chấm công của TỪNG nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung) — nạp 1 lần cho cả mẻ
     isHourly: (() => {
@@ -67,6 +72,6 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: 'vang' };
   }
   if (ctx.weekendOt && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
-  if (c.ot_min) c = { ...c, ot_min: roundOtMinutes(c.ot_min, ctx.otDecimals ?? 2, ctx.otMode || 0) };   // làm tròn tăng ca (quy tắc chung)
+  if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtMinutes(c.ot_min, r.decimals ?? 2, r.mode || 0, r.block || 0) }; }   // làm tròn tăng ca (quy tắc chung)
   return { shiftId: shift?.id ?? null, late, ...c };
 }

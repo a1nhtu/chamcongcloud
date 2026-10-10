@@ -59,6 +59,14 @@ test('OT: làm tròn chung (số giờ, lùi / tới)', () => {
   assert.equal(roundOtMinutes(47, 1, 0), 42);     // 0,78 → 0,7 giờ
 });
 
+test('OT: làm tròn theo KHỐI PHÚT (lùi / tới)', () => {
+  assert.equal(roundOtMinutes(47, 2, 0, 15), 45);   // khối 15', lùi
+  assert.equal(roundOtMinutes(47, 2, 1, 15), 60);   // tới
+  assert.equal(roundOtMinutes(45, 2, 1, 15), 45);   // tròn khối thì giữ nguyên
+  assert.equal(roundOtMinutes(40, 2, 0, 60), 0);    // khối 60', chưa đủ 1 khối → 0
+  assert.equal(roundOtMinutes(40, 2, 1, 30), 60);
+});
+
 test('OT: không có mặt sau tan ca (về đúng giờ) → ot_min = 0', () => {
   const c = computeCheckout(baseShift, iso(WD, '08:00'), iso(WD, '17:00'), WD, {});
   assert.equal(c.ot_min, 0);
