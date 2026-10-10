@@ -6,6 +6,8 @@
 ;   - Bản LAN: không cần tên khách / mật khẩu
 ;   - Cả 2 kiểu đều có trang CHỌN CỔNG: gõ cổng hoặc bấm "Tự chọn cổng trống"; cổng trùng (chương trình khác đang dùng /
 ;     bản Digiplus khác trên máy) thì báo + gợi ý cổng trống. Khách cũ đổi cổng → máy chủ trỏ tên miền về cổng mới.
+;   - Ô "Cài trên VPS nhiều khách": lấy thêm từ máy chủ danh sách cổng đã cấp cho các khách chạy trên VPS (kể cả bản zip
+;     đang tắt mà máy này không thấy) để né; khách được đánh dấu là khách VPS. Cài im lặng: /VPS=1
 ;   - Cài đè lên bản đang có: mặc định GIỮ cấu hình + dữ liệu cũ
 ;   - NHIỀU BẢN TRÊN 1 MÁY (VPS nhiều khách): máy đã có bản Digiplus thì trình cài hỏi "cập nhật bản nào" hay "cài thêm bản mới";
 ;     mỗi bản một AppId riêng (hậu tố -2, -3...) → mỗi bản một thư mục, một mục gỡ cài đặt, một lối tắt.
@@ -23,6 +25,7 @@
   #define OutDir "..\..\dist-setup"
 #endif
 #define ApiUrl "https://huongdan.maychamcongcloud.com/api/tao-domain"
+#define ListUrl "https://huongdan.maychamcongcloud.com/api/ds-khach"
 
 [Setup]
 AppId={code:GetAppId}
@@ -118,6 +121,10 @@ var
   DomainCfg, DomainPort: String;   { cấu hình + cổng của khách đã có (lấy từ máy chủ) }
   NewConfig: String;      { nội dung config.txt sẽ ghi ('' = giữ cấu hình cũ) }
   HasOldConfig: Boolean;
+  ChkVps: TNewCheckBox;   { cài trên VPS nhiều khách → né cả cổng đã cấp cho các khách VPS khác (theo máy chủ) }
+  UseVps: Boolean;
+  VpsList: String;        { các dòng "cổng slug" của khách VPS khác, dạng #10 + "8687 abc" + #10 + ... }
+  OtherInstCount: Integer;   { số bản Digiplus đang có trên máy (để chọn sẵn ô VPS) }
 
   Instance: String;       { '' = bản đầu tiên; '2', '3'... = các bản cài thêm trên cùng máy }
 
@@ -330,8 +337,12 @@ var W: Variant; St: Integer; Body, NP: String;
 begin
   Result := False; Cfg := ''; Err := ''; NotFound := False;
   Body := '{"pass":"' + JsonEsc(Pass) + '","slug":"' + JsonEsc(Slug) + '","plain":true,';
+  if UseVps then Body := Body + '"vps":true,';
   case Kind of
-    FETCH_CREATE: Body := Body + '"port":' + Port + ',"localPort":true,"mode":"office","useDevice":' + BoolJson(UseDevice) + ',"usePhone":' + BoolJson(UsePhone) + '}';
+    FETCH_CREATE: begin
+      if UseVps then Body := Body + '"mode":"vps",' else Body := Body + '"mode":"office",';
+      Body := Body + '"port":' + Port + ',"localPort":true,"useDevice":' + BoolJson(UseDevice) + ',"usePhone":' + BoolJson(UsePhone) + '}';
+    end;
     FETCH_SETPORT: Body := Body + '"onlyExisting":true,"setPort":true,"port":' + Port + '}';
   else
     Body := Body + '"onlyExisting":true}';
@@ -411,12 +422,57 @@ begin
   end;
 end;
 
+{ Lấy từ máy chủ các cổng đã cấp cho khách chạy trên VPS (trừ khách Slug đang cài) → VpsList }
+function FetchVpsPorts(const Slug, Pass: String; var Err: String): Boolean;
+var W: Variant; St: Integer; T: String;
+begin
+  Result := False; Err := ''; VpsList := #10;
+  try
+    W := CreateOleObject('WinHttp.WinHttpRequest.5.1');
+    W.SetTimeouts(15000, 15000, 30000, 60000);
+    W.Open('POST', '{#ListUrl}', False);
+    W.SetRequestHeader('Content-Type', 'application/json');
+    W.Send('{"pass":"' + JsonEsc(Pass) + '","slug":"' + JsonEsc(Slug) + '","vpsPorts":true}');
+    St := W.Status;
+    if St = 200 then begin
+      T := W.ResponseText;
+      StringChangeEx(T, #13, '', True);
+      VpsList := #10 + T + #10;
+      Result := True;
+    end
+    else if St = 401 then Err := 'Sai mật khẩu cấp domain.'
+    else Err := 'Máy chủ báo lỗi (mã ' + IntToStr(St) + ').';
+  except
+    Err := 'Không kết nối được máy chủ Digiplus.' + #13#10 + GetExceptionMessage;
+  end;
+end;
+
+{ Cổng đã cấp cho khách VPS khác (theo máy chủ) → tên khách đó, '' nếu không }
+function VpsOwner(const Port: String): String;
+var P: Integer; T: String;
+begin
+  Result := '';
+  if not UseVps then Exit;
+  P := Pos(#10 + Port + ' ', VpsList);
+  if P = 0 then Exit;
+  T := Copy(VpsList, P + Length(Port) + 2, MaxInt);
+  P := Pos(#10, T);
+  if P > 0 then T := Copy(T, 1, P - 1);
+  Result := Trim(T);
+  if Result = '' then Result := '?';
+end;
+
 { '' = cổng dùng được; ngược lại là lý do bị trùng. Cổng của chính bản đang cập nhật thì không tính (sẽ tắt trước khi chép). }
 function PortProblem(const Port, Listen: String): String;
+var V: String;
 begin
   Result := PortOwner(Port);
   if (Result = '') and (Port <> ReadCfg(OldConfigPath, 'PORT')) and (Pos(',' + Port + ',', Listen) > 0) then
     Result := 'đang có chương trình khác dùng trên máy này';
+  if Result = '' then begin
+    V := VpsOwner(Port);
+    if V <> '' then Result := 'đã cấp cho khách "' + V + '" trên VPS (bản đó có thể đang tắt nên máy không thấy)';
+  end;
 end;
 
 { Cổng trống đầu tiên từ Start trở lên }
@@ -458,7 +514,12 @@ begin
 end;
 
 procedure InitializeWizard;
+var I: Integer;
 begin
+  OtherInstCount := 0;
+  for I := 1 to 30 do
+    if I = 1 then begin if InstalledDir('') <> '' then OtherInstCount := OtherInstCount + 1; end
+    else if InstalledDir(IntToStr(I)) <> '' then OtherInstCount := OtherInstCount + 1;
   ModePage := CreateInputOptionPage(wpSelectDir, 'Kiểu cài đặt', 'Chọn cách phần mềm sẽ chạy trên máy này',
     'Chọn một kiểu rồi bấm Tiếp tục.', True, False);
   ModePage.Add('Giữ cấu hình đang có trên máy này (cập nhật / cài lại, giữ nguyên dữ liệu)');
@@ -481,6 +542,12 @@ begin
   ChkPhone.Width := DomainPage.SurfaceWidth; ChkPhone.Height := ScaleY(20);
   ChkPhone.Caption := 'Khách chấm công bằng điện thoại (chụp ảnh + định vị)';
   ChkPhone.Checked := True;
+  ChkVps := TNewCheckBox.Create(DomainPage);
+  ChkVps.Parent := DomainPage.Surface;
+  ChkVps.Top := ChkPhone.Top + ScaleY(34);
+  ChkVps.Width := DomainPage.SurfaceWidth; ChkVps.Height := ScaleY(20);
+  ChkVps.Caption := 'Cài trên VPS nhiều khách (né cả cổng đã cấp cho các khách VPS khác)';
+  ChkVps.Checked := OtherInstCount > 0;   { máy đã có bản Digiplus khác → nhiều khả năng là VPS }
 
   PortPage := CreateInputQueryPage(DomainPage.ID, 'Cổng phần mềm', 'Chọn cổng cho phần mềm trên máy này',
     'Phần mềm chạy tại http://localhost:<cổng>/admin. Mỗi bản Digiplus trên cùng một máy cần một cổng riêng. Không rõ thì bấm "Tự chọn cổng trống".');
@@ -521,6 +588,7 @@ begin
     if ModePage.SelectedValueIndex = MODE_DOMAIN then begin
       Slug := Lowercase(Trim(DomainPage.Values[0]));
       Ctx := 'D:' + Slug;
+      if UseVps then Ctx := Ctx + ':vps';
       if DomainIsNew then WizardForm.PageDescriptionLabel.Caption := 'Khách mới ' + Slug + '.maychamcongcloud.com — tên miền sẽ trỏ về cổng này'
       else WizardForm.PageDescriptionLabel.Caption := 'Khách ' + Slug + '.maychamcongcloud.com — đang dùng cổng ' + DomainPort;
     end else begin
@@ -557,6 +625,7 @@ begin
       MsgBox('Chọn một kiểu cài đặt.', mbError, MB_OK); Result := False; Exit;
     end;
     if ModePage.SelectedValueIndex = MODE_KEEP then NewConfig := '';
+    if ModePage.SelectedValueIndex <> MODE_DOMAIN then UseVps := False;
   end
   else if CurPageID = DomainPage.ID then begin
     Slug := Lowercase(Trim(DomainPage.Values[0]));
@@ -570,8 +639,16 @@ begin
       MsgBox('Chọn ít nhất một hình thức chấm công (máy hoặc điện thoại).', mbError, MB_OK); Result := False; Exit;
     end;
     Pass := Trim(DomainPage.Values[1]);
+    UseVps := ChkVps.Checked;
     WizardForm.NextButton.Enabled := False;
     try
+      { 0) VPS nhiều khách: lấy danh sách cổng đã cấp cho khách VPS khác để trang sau né }
+      if UseVps and not FetchVpsPorts(Slug, Pass, Err) then begin
+        if Pos('Sai mật khẩu', Err) > 0 then begin MsgBox(Err, mbError, MB_OK); Result := False; Exit; end;
+        if MsgBox('Không lấy được danh sách cổng của các khách VPS: ' + Err + #13#10 + #13#10 +
+                  'Vẫn tiếp tục (chỉ kiểm tra cổng trên máy này)?', mbConfirmation, MB_YESNO) <> IDYES then begin Result := False; Exit; end;
+        VpsList := #10;
+      end;
       { 1) khách đã có → lấy cấu hình cũ (giữ cổng + lựa chọn cũ); trang sau cho đổi cổng nếu bị trùng }
       if FetchConfig(Slug, Pass, FETCH_EXISTING, '', True, True, Cfg, Err, NotFound) then begin
         DomainIsNew := False; DomainCfg := Cfg; DomainPort := CfgVal(Cfg, 'PORT');
@@ -667,6 +744,8 @@ begin
     else begin Err := 'PORT không hợp lệ.'; Result := False; end;
   end
   else if M = 'domain' then begin
+    UseVps := Param('VPS', '0') = '1';
+    if UseVps and not FetchVpsPorts(Lowercase(Param('SLUG', '')), Param('PASS', ''), Err) then begin Result := False; Exit; end;
     if FetchConfig(Lowercase(Param('SLUG', '')), Param('PASS', ''), FETCH_EXISTING, '', True, True, Cfg, Err, NotFound) then NewConfig := Cfg
     else if NotFound and (Param('CREATE', '0') = '1') then begin
       P := SilentPort('auto');

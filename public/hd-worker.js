@@ -199,6 +199,12 @@ async function handleListCustomers(request, env) {
     const token = env.CF_PROVISION_TOKEN;
     const { zoneName, zoneId, accountId } = await zoneAndAccount(token, env);
     const list = await listCustomers(token, accountId, zoneId, zoneName);
+    // Setup.exe "Cài trên VPS nhiều khách": các dòng "cổng slug" của khách chạy trên VPS (mode vps / chưa rõ), trừ khách đang cài
+    if (b.vpsPorts) {
+      const me = String(b.slug || "").toLowerCase().trim();
+      const lines = list.filter((c) => c.port && c.slug !== me && (c.mode === "vps" || !c.mode)).map((c) => `${c.port} ${c.slug}`);
+      return new Response(lines.join("\n"), { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+    }
     const quota = parseInt(env.DOMAIN_QUOTA || "100", 10) || 100;
     return jsonRes({ ok: true, customers: list.map(({ tunnelId, dnsId, ...c }) => c), nextPort: nextFreePort(list), count: list.length, quota });
   } catch (e) {
@@ -242,18 +248,25 @@ async function handleProvision(request, env) {
       useDevice = existing.useDevice ? "1" : "0";
       usePhone = existing.usePhone ? "1" : "0";
       if (existing.mode) mode = existing.mode;
+      if (b.vps) mode = "vps";   // Setup.exe tích "Cài trên VPS nhiều khách" → đánh dấu khách VPS
     }
+    // cổng đã cấp cho khách VPS khác (mode vps / chưa rõ) — dùng khi cài trên VPS nhiều khách
+    const vpsClash = (p) => list.find((c) => c.slug !== slug && c.port === p && (c.mode === "vps" || !c.mode));
     if (existing) {
       tunnelId = existing.tunnelId;
       // Setup.exe: cổng cũ bị trùng trên máy cài, người cài đã đồng ý đổi → trỏ tên miền về cổng mới
-      if (b.onlyExisting && b.setPort) port = reqPort;
+      if (b.onlyExisting && b.setPort) {
+        port = reqPort;
+        const vc = mode === "vps" ? vpsClash(port) : null;
+        if (vc) return jsonRes({ error: `Cổng ${port} đã cấp cho khách VPS "${vc.slug}".`, nextPort: nextFreePort(list) }, 409);
+      }
       else if (existing.port && existing.port !== port) { port = existing.port; portKept = true; }
     } else {
       if (list.length >= quota)
         return jsonRes({ error: `Đã đạt hạn mức ${quota} domain (đang dùng ${list.length}). Liên hệ quản trị để nâng hạn mức.`, count: list.length, quota }, 403);
       if (b.autoPort) port = nextFreePort(list);   // Setup.exe: khách mới tự lấy cổng trống tiếp theo
       // Setup.exe bản mới (localPort): cổng do người cài chọn, đã kiểm tra trống TRÊN MÁY CÀI — cổng chỉ cần riêng trong 1 máy
-      const clash = b.localPort ? null : list.find((c) => c.port === port);
+      const clash = b.localPort ? (mode === "vps" ? vpsClash(port) : null) : list.find((c) => c.port === port);
       if (clash)
         return jsonRes({ error: `Cổng ${port} đã cấp cho khách "${clash.slug}". Dùng cổng trống tiếp theo: ${nextFreePort(list)}.`, nextPort: nextFreePort(list) }, 409);
       const t = await cfProv(token, "POST", `/accounts/${accountId}/cfd_tunnel`, { name: tname, config_src: "cloudflare" });
