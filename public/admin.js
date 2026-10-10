@@ -1379,6 +1379,7 @@ function daysBetween(from, to) { const out = []; let d = from; for (let i = 0; i
 let _asTab = 'list';
 let _asDept = '*';          // phòng ban đang chọn trên cây ('*' = tất cả, '' = chưa có phòng ban)
 let _asSearch = '';
+let _asTreeHidden = (() => { try { return localStorage.getItem('as_tree_hidden') === '1'; } catch { return false; } })();   // ẩn cây phòng ban cho rộng màn hình
 const AS_TABS = [['list', '📋 Lịch phân ca'], ['sheet', '📊 Bảng phân ca (kiểu Excel)'], ['temp', '🔁 Đổi ca tạm thời']];
 let _asStopDrag = null;
 document.addEventListener('mouseup', () => { if (_asStopDrag) _asStopDrag(); });
@@ -1418,7 +1419,19 @@ async function pageAssignments() {
   tree.append(node('*', 'Tất cả phòng ban', 0));
   for (const d of depts) tree.append(node(d, d, 1));
   if (countOf('') > 0) tree.append(node('', '(Chưa có phòng ban)', 1));
-  const side = el('div', { class: 'panel emp-side' }, el('div', { class: 'emp-side-h' }, 'Phòng ban'), tree);
+  const setTreeHidden = (h) => { _asTreeHidden = h; try { localStorage.setItem('as_tree_hidden', h ? '1' : '0'); } catch {} pageAssignments(); };
+  const hideBtn = el('span', { title: 'Ẩn cây phòng ban cho rộng màn hình', style: 'float:right;cursor:pointer;font-weight:700;color:#6b7280' }, '◀ Ẩn');
+  hideBtn.onclick = () => setTreeHidden(true);
+  const side = _asTreeHidden ? null : el('div', { class: 'panel emp-side' }, el('div', { class: 'emp-side-h' }, 'Phòng ban', hideBtn), tree);
+  // Cây đang ẩn → thay bằng 1 ô chọn phòng ban gọn trên thanh thẻ + nút hiện lại cây
+  if (_asTreeHidden) {
+    const dSel = el('select', { style: 'width:auto;min-width:170px;padding:6px 10px' },
+      el('option', { value: '*' }, `Tất cả phòng ban (${countOf('*')})`), ...depts.map((d) => el('option', { value: d }, `${d} (${countOf(d)})`)),
+      ...(countOf('') > 0 ? [el('option', { value: '' }, `(Chưa có phòng ban) (${countOf('')})`)] : []));
+    dSel.value = _asDept;
+    dSel.onchange = () => { if (!asLeaveOk()) { dSel.value = _asDept; return; } _asDept = dSel.value; pageAssignments(); };
+    tabBar.append(el('span', { style: 'flex:1' }), dSel, btnSm('▶ Hiện cây phòng ban', () => setTreeHidden(false), 'ghost'));
+  }
 
   const inDept = (e) => _asDept === '*' || (e.department || '') === _asDept;
   const emps = data.employees.filter(inDept);
