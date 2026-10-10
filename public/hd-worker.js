@@ -324,14 +324,14 @@ async function handleNoiBo(request, env) {
 async function handleBaseZip(request, env) {
   if (!env.BASE_ZIP_URL)
     return jsonRes({ error: "Chưa cấu hình BASE_ZIP_URL (link bộ cài base) trên Cloudflare." }, 503);
-  const upstream = await fetch(env.BASE_ZIP_URL, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 3600 } });
+  const upstream = await fetch(env.BASE_ZIP_URL, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 60 } });
   if (!upstream.ok || !upstream.body)
     return jsonRes({ error: "Không tải được bộ cài base (HTTP " + upstream.status + ")." }, 502);
   const headers = new Headers();
   headers.set("content-type", "application/zip");
   const len = upstream.headers.get("content-length");
   if (len) headers.set("content-length", len);
-  headers.set("cache-control", "public, max-age=3600");
+  headers.set("cache-control", "no-cache");
   headers.set("access-control-allow-origin", "*");
   return new Response(upstream.body, { status: 200, headers });
 }
@@ -340,7 +340,7 @@ async function handleBaseZip(request, env) {
 // File vẫn ở GitHub (khỏi tốn hosting), link hiện là maychamcongcloud.com.
 async function handleLanZip(request, env) {
   const src = env.LAN_ZIP_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/base/DigiplusChamCong-lan.zip";
-  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 3600 } });
+  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 60 } });
   if (!upstream.ok || !upstream.body)
     return jsonRes({ error: "Chưa tải được bộ cài LAN (HTTP " + upstream.status + "). Thử lại sau ít phút." }, 502);
   const headers = new Headers();
@@ -348,14 +348,14 @@ async function handleLanZip(request, env) {
   const len = upstream.headers.get("content-length");
   if (len) headers.set("content-length", len);
   headers.set("content-disposition", 'attachment; filename="DigiplusChamCong-LAN.zip"');
-  headers.set("cache-control", "public, max-age=3600");
+  headers.set("cache-control", "no-cache");
   return new Response(upstream.body, { status: 200, headers });
 }
 
 // Tải TRÌNH CÀI ĐẶT (Setup.exe kiểu Next-Next, dùng chung cho mọi khách + bản LAN): proxy từ GitHub Release.
 async function handleSetupExe(request, env) {
   const src = env.SETUP_EXE_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/base/DigiplusChamCong-Setup.exe";
-  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 600 } });
+  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 60 } });
   if (!upstream.ok || !upstream.body)
     return jsonRes({ error: "Chưa tải được bộ cài (HTTP " + upstream.status + "). Thử lại sau ít phút." }, 502);
   const headers = new Headers();
@@ -363,7 +363,7 @@ async function handleSetupExe(request, env) {
   const len = upstream.headers.get("content-length");
   if (len) headers.set("content-length", len);
   headers.set("content-disposition", 'attachment; filename="DigiplusChamCong-Setup.exe"');
-  headers.set("cache-control", "public, max-age=600");
+  headers.set("cache-control", "no-cache");   // bộ cài build lại thường xuyên → luôn lấy bản mới nhất (đệm Cloudflare chỉ 60 giây)
   return new Response(upstream.body, { status: 200, headers });
 }
 
