@@ -187,8 +187,8 @@ LƯU Ý:
 Hỗ trợ: Digiplus.
 `);
 
-// Ghi chú cho Anh (không đưa khách — nhắc cấu hình token)
-writeFileSync(join(ROOT, 'dist-khach', 'DOC-CHO-ANH.txt'),
+// Ghi chú cho Anh (không đưa khách — nhắc cấu hình token). Đóng gói ra chỗ khác (DIST_DIR) thì ghi vào đó, không đụng dist-khach
+writeFileSync(join(DIST, 'DOC-CHO-ANH.txt'),
 `GHI CHÚ CHO ANH (KHÔNG gửi khách)
 =================================
 Quy trình ĐẦY ĐỦ: xem file QUY-TRINH-BAN-KHACH.txt. Tóm tắt nhanh:
