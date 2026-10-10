@@ -82,13 +82,34 @@ export function rangedShiftAssignment(employeeId, workDate) {
     WHERE employee_id = ? AND active = 1 AND from_date <= ?
       AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
     ORDER BY id DESC LIMIT 1`).get(employeeId, workDate, workDate);
-  return own || deptShiftAssignment(employeeId, workDate);
+  const r = own || deptShiftAssignment(employeeId, workDate);
+  // Dòng gán có kèm "Lịch trình vào ra" → cách ghép giờ lấy theo lịch trình vào ra đó
+  if (r && r.inout_schedule_id) { const io = ioSchedule(r.inout_schedule_id); if (io) { r._io = io; r.merge_rule = io.rule; } }
+  return r;
 }
 
-// Quy tắc ghép log thực tế: ưu tiên ghi đè từ phân ca → quy tắc của ca → 'filo'.
+// ----- Lịch trình vào ra (cách xác định lượt VÀO / RA), khai báo riêng như Ronald Jack -----
+function ioSchedule(id) { return id ? (db.prepare('SELECT * FROM inout_schedules WHERE id = ? AND active = 1').get(id) || null) : null; }
+export function defaultIoSchedule() { return db.prepare('SELECT * FROM inout_schedules WHERE active = 1 AND is_default = 1 ORDER BY id LIMIT 1').get() || null; }
+// Lịch trình vào ra đang áp cho 1 NV trong 1 ngày: của dòng gán (NV → phòng ban), không có thì lấy lịch trình mặc định.
+export function ioScheduleFor(employeeId, workDate) {
+  const ra = rangedShiftAssignment(employeeId, workDate);
+  return (ra && ra._io) || defaultIoSchedule();
+}
+// Ngưỡng ghép cặp của lịch trình vào ra đó → { min, gap, max } (phút); null = chưa khai lịch trình vào ra nào
+export function ioParamsFor(employeeId, workDate) {
+  const io = ioScheduleFor(employeeId, workDate);
+  return io ? { min: io.min_minutes, gap: io.gap_minutes, max: io.max_minutes } : null;
+}
+
+// Cách ghép giờ thực tế, theo thứ tự: lịch trình vào ra của dòng gán → quy tắc RIÊNG còn lưu ở ca (kiểu cũ, khác FILO)
+// → lịch trình vào ra MẶC ĐỊNH → FILO (giờ đầu vào, giờ cuối ra).
 function effectiveMergeRule(shift, override) {
-  const r = (override && override !== 'default') ? override : (shift && shift.merge_rule) || 'filo';
-  return r === 'default' ? 'filo' : r;
+  if (override && override !== 'default') return override;
+  const legacy = shift && shift.merge_rule && shift.merge_rule !== 'filo' && shift.merge_rule !== 'default' ? shift.merge_rule : null;
+  if (legacy) return legacy;
+  const d = defaultIoSchedule();
+  return d ? d.rule : 'filo';
 }
 
 // Phân ca ngày của 1 NV trong 1 ngày — có thể NHIỀU ca (NV tự chọn 2-3 ca gãy).

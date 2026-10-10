@@ -127,3 +127,20 @@ test('tùy chọn: ca này là ca tăng ca (mọi ngày)', () => {
   const c = computeCheckout({ ...base, shift_as_ot: 1 }, iso(WD, '08:00'), iso(WD, '17:00'), WD, {});
   assert.equal(c.work_unit, 0); assert.equal(c.ot_min, 480); assert.equal(c.ot_type, 'thuong');
 });
+
+/* ---------- Lịch trình vào ra (kiểu Ronald Jack): 3 thông số nhỏ nhất / lớn nhất / giữa 2 cặp + "Chọn từ máy" ---------- */
+test('ghép cặp theo 3 thông số của Lịch trình vào ra', () => {
+  const t = (hm) => iso(WD, hm);
+  const io = { min: 30, gap: 30, max: 960 };
+  // 08:20 (RA quá sát VÀO) và 12:10 (VÀO quá sát RA trước) là quẹt lặp
+  assert.deepEqual(punchPairs([t('08:00'), t('08:20'), t('12:00'), t('12:10'), t('13:00'), t('17:00')], io), [[t('08:00'), t('12:00')], [t('13:00'), t('17:00')]]);
+  // cặp dài hơn "lớn nhất" (quên quẹt ra hôm trước): bỏ lượt vào cũ, lượt sau thành VÀO mới
+  assert.deepEqual(punchPairs([t('01:00'), t('18:30'), t('22:00')], { min: 30, gap: 30, max: 600 }), [[t('18:30'), t('22:00')]]);
+});
+
+test('"Chọn từ máy": VÀO/RA theo phím trạng thái bấm trên máy', () => {
+  const p = (hm, status) => ({ punch_at: iso(WD, hm), serial: 'A', status });
+  const r = mergeDayPunches([p('07:50', 1), p('08:00', 0), p('12:00', 0), p('17:05', 1), p('17:30', 0)], base, 'state', {}, WD);
+  assert.equal(r.inIso, iso(WD, '08:00'));    // lượt Check-In đầu tiên
+  assert.equal(r.outIso, iso(WD, '17:05'));   // lượt Check-Out cuối cùng
+});

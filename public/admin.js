@@ -926,10 +926,11 @@ function deptEditModal(d, after) {
 async function pageShifts() {
   document.querySelectorAll('#nav-sub-sh .nav-sub-btn').forEach((x) => x.classList.toggle('active', x.dataset.as === _shView));
   if (_shView === 'schedules') return pageSchedules();
+  if (_shView === 'inout') return pageInOut();
   const addBtn = hasPerm('shifts') ? el('button', { class: 'btn' }, '+ Thêm ca') : null;
   // Màn hình hẹp không có menu con → vẫn để nút sang Lịch trình làm việc
-  const schedBtn = el('button', { class: 'btn ghost as-tabs', style: 'margin:0' }, '🗂️ Lịch trình làm việc');
-  schedBtn.onclick = () => { _shView = 'schedules'; _schEdit = null; pageShifts(); };
+  // Màn hình hẹp (không có menu con): nút sang 2 mục còn lại
+  const schedBtn = el('span', { class: 'as-tabs', style: 'margin:0' }, btnSm('Lịch trình vào ra', () => { _shView = 'inout'; pageShifts(); }, 'ghost'), btnSm('Lịch trình ca làm việc', () => { _shView = 'schedules'; _schEdit = null; pageShifts(); }, 'ghost'));
   setMain(head('Ca làm việc', schedBtn, addBtn), loading());
   const { rows } = await api('/admin/shifts');
   SHIFTS = rows;
@@ -940,7 +941,9 @@ async function pageShifts() {
   for (const s of rows) {
     const overnight = s.end_time <= s.start_time;
     tb.append(el('tr', {},
-      el('td', {}, el('b', {}, s.name), overnight ? el('span', { title: 'Ca qua đêm' }, ' 🌙') : ''),
+      el('td', {}, el('b', {}, s.name), overnight ? el('span', { title: 'Ca qua đêm' }, ' 🌙') : '',
+        (s.merge_rule && s.merge_rule !== 'filo' && s.merge_rule !== 'default') ? el('div', { style: 'font-size:12px;color:#b45309;margin-top:2px' }, `Còn lưu cách ghép giờ riêng (kiểu cũ): ${(RULE_LABEL[s.merge_rule] || s.merge_rule).split(' —')[0]} `,
+          hasPerm('shifts') ? el('a', { href: '#', style: 'color:#dc2626;font-weight:700', onclick: async (ev) => { ev.preventDefault(); if (!confirm(`Bỏ cách ghép giờ riêng của ca "${s.name}"? Sau đó ca này ghép giờ theo Lịch trình vào ra.`)) return; try { await api('/admin/shifts/' + s.id + '/clear-merge-rule', { method: 'POST' }); toast('Đã bỏ', 'ok'); pageShifts(); } catch (e) { toast(e.message, 'err'); } } }, 'Bỏ') : '') : ''),
       el('td', {}, s.code ? el('span', { class: 'pill muted' }, s.code) : '—'),
       el('td', {}, s.start_time), el('td', {}, s.end_time),
       el('td', {}, s.check_in_start && s.check_in_end ? `${s.check_in_start}–${s.check_in_end}` : el('span', { style: 'color:#bbb' }, 'tắt')),
@@ -958,22 +961,94 @@ async function pageShifts() {
   setMain(head('Ca làm việc', schedBtn, addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
-/* ---------- LỊCH TRÌNH LÀM VIỆC (kiểu "Ca làm việc" của ZKBio) ----------
+/* ---------- LỊCH TRÌNH VÀO RA (kiểu Ronald Jack) ----------
+ * Khai báo RIÊNG cách xác định lượt quẹt nào là VÀO, lượt nào là RA (không còn nằm trong ca). Gán kèm khi Gán ca cho nhân viên / phòng ban. */
+const IO_RULES = [
+  ['filo', 'Giờ đầu là vào, giờ cuối là ra trong 1 ngày', 'Lần chấm công đầu tiên được xem là giờ VÀO, lần chấm công cuối cùng được xem là giờ RA. Bỏ qua tất cả các giờ chấm ở giữa, chỉ áp dụng chấm công trong ngày.'],
+  ['pairs', 'Tự động - không qua đêm (không qua 12h)', 'Lần chấm đầu là VÀO, lần chấm kế tiếp là RA, rồi lại VÀO… Giờ làm = tổng các cặp vào–ra (thời gian ra ngoài giữa chừng bị trừ). Việc chọn lượt phụ thuộc ba thông số bên dưới.'],
+  ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động" nhưng dùng cho ca đêm: lượt VÀO buổi tối ghép với lượt RA sáng hôm sau.'],
+  ['idm', 'Theo ID máy', 'Khi chấm công ở máy có số máy lẻ (1, 3, 5, 7, 9) sẽ là VÀO. Khi chấm ở máy có số máy chẵn (2, 4, 6, 8, 10) sẽ là RA. Đặt "số máy" cho từng máy ở mục Máy chấm công.'],
+  ['state', 'Chọn từ máy', 'Giờ VÀO hay giờ RA nhận từ máy chấm công: bấm phím Check In trước khi chấm là VÀO, bấm Check Out trước khi chấm là RA.'],
+  ['tdhc', 'Phân theo giờ', 'Giờ chấm nằm trong khung "Bắt đầu vào – Kết thúc vào" của ca là VÀO; nằm trong khung "Bắt đầu ra – Kết thúc ra" là RA (khai ở Ca làm việc).'],
+];
+const IO_RULE_NAME = Object.fromEntries(IO_RULES.map(([k, t]) => [k, t]));
+
+async function pageInOut() {
+  const canEdit = hasPerm('shifts');
+  setMain(head('Lịch trình vào ra'), loading());
+  let rows = [];
+  try { rows = (await api('/admin/inout-schedules')).rows || []; } catch (e) { setMain(head('Lịch trình vào ra'), el('div', { class: 'empty' }, e.message)); return; }
+  const addBtn = canEdit ? el('button', { class: 'btn' }, '+ Thêm mới') : null;
+  if (addBtn) addBtn.onclick = () => inOutModal(null);
+  const tbl = el('table', { class: 'data' });
+  tbl.append(el('thead', {}, el('tr', {}, el('th', {}, 'Mã'), el('th', {}, 'Tên lịch trình'), el('th', {}, 'Cách xác định VÀO / RA'), el('th', {}, 'Nhỏ nhất'), el('th', {}, 'Lớn nhất'), el('th', {}, 'Giữa 2 cặp'), el('th', {}, ''), el('th', {}, 'Thao tác'))));
+  const tb = el('tbody'); tbl.append(tb);
+  if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Chưa có lịch trình vào ra nào. Khi chưa khai, hệ thống dùng "Giờ đầu là vào, giờ cuối là ra". Bấm "+ Thêm mới".'))));
+  for (const r of rows) {
+    tb.append(el('tr', {}, el('td', {}, r.code || '—'), el('td', {}, el('b', {}, r.name)), el('td', {}, IO_RULE_NAME[r.rule] || r.rule),
+      el('td', {}, r.min_minutes + ' phút'), el('td', {}, r.max_minutes + ' phút'), el('td', {}, r.gap_minutes + ' phút'),
+      el('td', {}, r.is_default ? el('span', { class: 'pill ok' }, 'Mặc định') : ''),
+      el('td', {}, canEdit ? el('div', { style: 'display:flex;gap:6px' }, btnSm('Sửa', () => inOutModal(r)),
+        btnSm('Xoá', async () => { if (!confirm(`Xoá lịch trình vào ra "${r.name}"?`)) return; try { await api('/admin/inout-schedules/' + r.id, { method: 'DELETE' }); toast('Đã xoá', 'ok'); pageInOut(); } catch (e) { toast(e.message, 'err'); } }, 'ghost')) : '')));
+  }
+  setMain(head('Lịch trình vào ra', addBtn),
+    el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Lịch trình vào ra = cách phần mềm hiểu lượt quẹt nào là VÀO, lượt nào là RA. Khai ở đây một lần rồi chọn khi Gán ca cho nhân viên / phòng ban. Nhân viên chưa được gán lịch trình vào ra nào thì dùng dòng có nhãn "Mặc định".'),
+    el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+function inOutModal(r) {
+  const codeI = el('input', { value: r?.code || '', placeholder: 'VD: LTVR01' });
+  const nameI = el('input', { value: r?.name || '', placeholder: 'VD: Hành chính' });
+  let rule = r?.rule || 'filo';
+  const descT = el('b', {}), descB = el('div', { style: 'font-size:13.5px;color:var(--ink);line-height:1.55;margin-top:4px' });
+  const radios = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px 16px' });
+  const sync = () => { const it = IO_RULES.find(([k]) => k === rule); descT.textContent = it[1]; descB.textContent = it[2]; };
+  for (const [k, t] of IO_RULES) {
+    const rd = el('input', { type: 'radio', name: 'io-rule', style: 'width:auto', ...(rule === k ? { checked: '' } : {}) });
+    rd.onchange = () => { rule = k; sync(); };
+    radios.append(el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);cursor:pointer' }, rd, t));
+  }
+  const minI = el('input', { type: 'number', min: '0', value: r?.min_minutes ?? 30, style: 'width:90px' });
+  const maxI = el('input', { type: 'number', min: '0', value: r?.max_minutes ?? 960, style: 'width:90px' });
+  const gapI = el('input', { type: 'number', min: '0', value: r?.gap_minutes ?? 30, style: 'width:90px' });
+  const defC = el('input', { type: 'checkbox', style: 'width:auto', ...(r?.is_default ? { checked: '' } : {}) });
+  const row = (label, inp, hint) => el('div', { style: 'display:flex;align-items:center;gap:10px' }, el('span', { style: 'width:210px;font-weight:600' }, label), inp, el('span', {}, 'phút'), el('span', { style: 'color:var(--muted);font-size:12.5px' }, hint));
+  const save = el('button', { class: 'btn' }, 'Lưu');
+  save.onclick = async () => {
+    if (!nameI.value.trim()) return toast('Nhập tên lịch trình', 'err');
+    const body = { code: codeI.value.trim(), name: nameI.value.trim(), rule, min_minutes: minI.value, max_minutes: maxI.value, gap_minutes: gapI.value, is_default: defC.checked };
+    try { if (r) await api('/admin/inout-schedules/' + r.id, { method: 'PUT', body }); else await api('/admin/inout-schedules', { method: 'POST', body }); toast('Đã lưu', 'ok'); closeModal(); pageInOut(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  sync();
+  openModal(r ? 'Sửa lịch trình vào ra' : 'Thêm lịch trình vào ra', [
+    el('div', { class: 'two-col' }, field('Mã lịch trình', codeI), field('Tên lịch trình *', nameI)),
+    radios,
+    row('Thời gian nhỏ nhất', minI, 'RA cách VÀO dưới mức này = quẹt lặp, bỏ'),
+    row('Thời gian lớn nhất', maxI, 'cặp vào–ra dài hơn mức này = quên quẹt ra'),
+    row('Khoảng cách giữa 2 cặp vào ra', gapI, 'VÀO mới cách RA trước dưới mức này = quẹt lặp'),
+    el('div', { style: 'border:1px solid var(--line);border-radius:10px;padding:12px;background:#faf7f5' }, descT, descB),
+    el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)' }, defC, 'Dùng làm MẶC ĐỊNH cho nhân viên chưa được gán lịch trình vào ra'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+  const m = document.querySelector('#modal-bg .modal'); if (m) m.style.maxWidth = '680px';
+}
+
+/* ---------- LỊCH TRÌNH CA LÀM VIỆC (theo chu kỳ, kiểu "Ca làm việc" của ZKBio) ----------
  * Một lịch trình = thứ nào / ngày nào làm ca nào, lặp theo chu kỳ (tuần · ngày · tháng). Ô trống = ngày nghỉ.
  * Kiểu "tự dò" (cũ): chỉ là nhóm ca, hệ thống tự chọn ca theo giờ chấm. Lịch trình được chọn khi gán Lịch trình nhân viên / phòng ban. */
 let _shView = 'shifts';     // mục con đang xem của "Ca làm": shifts | schedules
 let _shNavOpen = false;
 let _schEdit = null;        // null = danh sách · { } = thêm mới · { id… } = đang sửa
-const SH_TABS = [['shifts', 'Ca làm việc'], ['schedules', 'Lịch trình làm việc']];
+const SH_TABS = [['shifts', '1. Ca làm việc'], ['inout', '2. Lịch trình vào ra'], ['schedules', '3. Lịch trình ca làm việc']];
 const SCH_UNIT = { week: 'Tuần', day: 'Ngày', month: 'Tháng', auto: 'Tự dò theo giờ chấm' };
 const SCH_WD = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật'];
 
 async function pageSchedules() {
   const canEdit = hasPerm('shifts');
   let shifts = [], rows = [];
-  setMain(head('Lịch trình làm việc'), loading());
+  setMain(head('Lịch trình ca làm việc'), loading());
   try { shifts = ((await api('/admin/shifts')).rows || []).filter((s) => s.active); SHIFTS = shifts; rows = (await api('/admin/schedules')).rows || []; SCHEDULES = rows; }
-  catch (e) { setMain(head('Lịch trình làm việc'), el('div', { class: 'empty' }, e.message)); return; }
+  catch (e) { setMain(head('Lịch trình ca làm việc'), el('div', { class: 'empty' }, e.message)); return; }
   const sName = new Map(shifts.map((s) => [s.id, (s.code || '').trim() || s.name]));
 
   /* ===== Danh sách ===== */
@@ -991,7 +1066,7 @@ async function pageSchedules() {
         el('td', {}, canEdit ? el('div', { style: 'display:flex;gap:6px' }, btnSm('Chỉnh sửa', () => { _schEdit = w; pageSchedules(); }),
           btnSm('Xoá', async () => { if (!confirm(`Xoá lịch trình "${w.name}"?`)) return; try { await api('/admin/schedules/' + w.id, { method: 'DELETE' }); toast('Đã xoá', 'ok'); pageSchedules(); } catch (e) { toast(e.message, 'err'); } }, 'ghost')) : '')));
     }
-    setMain(head('Lịch trình làm việc', addBtn),
+    setMain(head('Lịch trình ca làm việc', addBtn),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Lịch trình làm việc = thứ nào làm ca nào, lặp theo chu kỳ (VD Thứ Hai → Thứ Sáu ca Hành chính, Thứ Bảy ca Sáng, Chủ Nhật nghỉ). Tạo ở đây rồi gán cho nhân viên / phòng ban ở mục Phân ca.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
     return;
@@ -1093,7 +1168,7 @@ async function pageSchedules() {
     } catch (e) { toast(e.message, 'err'); saveBtn.disabled = false; }
   };
   drawShifts(); drawGrid();
-  setMain(head('Lịch trình làm việc'),
+  setMain(head('Lịch trình ca làm việc'),
     el('div', { class: 'panel', style: 'padding:10px 16px;display:flex;align-items:center;gap:14px;margin-bottom:14px' },
       btnSm('‹ Quay lại', back, 'ghost'), el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, w.id ? 'Chỉnh sửa' : 'Thêm'), el('span', { style: 'flex:1' }), canEdit ? saveBtn : ''),
     el('div', { class: 'as-add', style: 'grid-template-columns:minmax(300px,1fr) minmax(0,1.5fr)' }, left, right));
@@ -1166,10 +1241,10 @@ function shiftModal(s) {
     el('div', { class: 'two-col' }, field('Tên ca *', input('s-name', { value: s?.name || '', placeholder: 'Hành chính' })), field('Mã ca (cho Excel)', input('s-code', { value: s?.code || '', placeholder: 'VD: HC, S, C, DEM' }))),
     el('div', { class: 'two-col' }, field('Giờ vào * (24h, VD 08:00)', time24('s-start', s?.start_time || '08:00')), field('Giờ ra * (24h, VD 17:30)', time24('s-end', s?.end_time || '17:30'))),
     el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, '🌙 Ca qua đêm: đặt Giờ ra NHỎ HƠN Giờ vào (VD 22:00 → 06:00) — hệ thống tự hiểu là qua ngày hôm sau.'),
-    el('div', {}, el('label', {}, 'Cửa sổ nhận diện ca theo GIỜ CHẤM VÀO (tuỳ chọn — để tự tìm đúng ca)'),
+    el('div', {}, el('label', {}, 'Bắt đầu vào – Kết thúc vào: khung giờ nhận lượt chấm VÀO của ca (tuỳ chọn — để tự tìm đúng ca)'),
       el('div', { class: 'two-col' }, field('Nhận diện TỪ giờ', time24('s-ciStart', s?.check_in_start || '')), field('ĐẾN giờ', time24('s-ciEnd', s?.check_in_end || ''))),
       el('div', { class: 'map-hint' }, 'Là MỘT khoảng giờ (từ → đến) để tự nhận đúng ca khi nhân viên chấm VÀO. VD ca Sáng 06:00→10:00, ca Chiều 12:00→15:00.')),
-    el('div', {}, el('label', {}, 'Cửa sổ nhận diện theo GIỜ CHẤM RA (để phân biệt ca CÙNG giờ vào)'),
+    el('div', {}, el('label', {}, 'Bắt đầu ra – Kết thúc ra: khung giờ nhận lượt chấm RA của ca (để phân biệt ca CÙNG giờ vào)'),
       el('div', { class: 'two-col' }, field('Nhận diện TỪ giờ', time24('s-coStart', s?.check_out_start || '')), field('ĐẾN giờ', time24('s-coEnd', s?.check_out_end || ''))),
       el('div', { class: 'map-hint' }, 'Quan trọng khi 2 ca CÙNG giờ vào: VD ca Sáng (8:00) ra 11:30→13:00, ca Hành chính (8:00) ra 16:00→19:00 → hệ thống nhìn GIỜ RA để chọn đúng ca. Để trống = tự suy từ Giờ ra. Ca đêm: đặt cửa sổ ra buổi sáng hôm sau, VD 05:00→08:00.')),
     el('div', { class: 'two-col' },
@@ -1221,7 +1296,8 @@ function shiftModal(s) {
     el('div', {}, el('label', {}, 'Ngày làm việc'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...dayBoxes)),
   ];
   // Chia form thành các TAB (như Ronald Jack) cho đỡ rối. Mọi ô vẫn nằm trong form, bấm Lưu một lần là lưu hết các tab.
-  const TABS = [['Thông tin chung', [0, 1, 2, 6, 5, 18]], ['Nhận diện ca & ghép giờ', [3, 4, 16, 17]], ['Tăng ca', [7, 8, 9, 10, 11, 14]], ['Nâng cao', [12, 13, 15]]];
+  // (ô số 16, 17 = quy tắc ghép giờ kiểu cũ: KHÔNG còn khai ở ca — đã chuyển sang mục "Lịch trình vào ra")
+  const TABS = [['Ca làm việc', [0, 1, 2, 6, 5, 3, 4, 18]], ['Tăng ca', [7, 8, 9, 10, 11, 14]], ['Nâng cao', [12, 13, 15]]];
   const panes = TABS.map(([, idx]) => el('div', { class: 'tab-pane' }, ...idx.map((k) => parts[k])));
   const tabBtns = TABS.map(([t], k) => { const b = el('button', { type: 'button', class: 'tab-btn' }, t); b.onclick = () => showTab(k); return b; });
   const showTab = (k) => { panes.forEach((p, n) => { p.style.display = n === k ? 'flex' : 'none'; }); tabBtns.forEach((b, n) => b.classList.toggle('on', n === k)); };
@@ -1239,7 +1315,6 @@ function shiftModal(s) {
       break_minutes: +$('#s-break').value || 0, work_unit_value: +$('#s-unit').value || 1,
       allow_ot: otChk.checked, ot_start_after_min: +$('#s-otafter').value || 0,
       ot_rounding_unit: +$('#s-otround').value || 0, work_days,
-      merge_rule: $('#s-rule').value || 'filo', tdqd_mode: $('#s-tdqd').value || 'pair',
       ot_before: $('#s-otbefore').checked, ot_before_min: +$('#s-otbeforemin').value || 0,
       ot_tier1_min: +$('#s-t1').value || 0, ot_tier2_min: +$('#s-t2').value || 0, ot_tier3_min: +$('#s-t3').value || 0,
       ot_tier2_rate: +$('#s-r2').value || 0, ot_tier3_rate: +$('#s-r3').value || 0, ot_tier4_rate: +$('#s-r4').value || 0,
@@ -1559,7 +1634,7 @@ let _asTab = 'list';
 let _asDept = '*';          // phòng ban đang chọn trên cây ('*' = tất cả, '' = chưa có phòng ban)
 let _asSearch = '';
 let _asTreeHidden = (() => { try { return localStorage.getItem('as_tree_hidden') === '1'; } catch { return false; } })();   // ẩn cây phòng ban cho rộng màn hình
-const AS_TABS = [['list', 'Lịch trình nhân viên'], ['dept', 'Lịch trình phòng ban'], ['sheet', 'Xem lịch trình (kiểu Excel)'], ['temp', 'Lịch trình tạm thời']];
+const AS_TABS = [['list', '4. Gán ca cho nhân viên'], ['dept', '5. Gán ca cho phòng ban'], ['sheet', 'Xem lịch trình (kiểu Excel)'], ['temp', 'Lịch trình tạm thời']];
 let _asAdd = null;          // đang mở trang "Thêm": 'emp' (lịch trình nhân viên) | 'dept' (lịch trình phòng ban)
 // Cây phòng ban có cấp cha–con: [{ name, depth }], gồm cả tên phòng ban chỉ có ở hồ sơ nhân viên
 function asDeptNodes(master, extraNames) {
@@ -1646,9 +1721,13 @@ async function pageAssignments() {
    * Giữa: danh sách "Đã chọn N mục" (bỏ từng mục bằng ×). Phải: ngày bắt đầu/kết thúc + chọn 1 ca hoặc 1 lịch trình. */
   if (_asAdd && canEdit) {
     const isDept = _asAdd === 'dept';
-    let schedules = [];
+    let schedules = [], ios = [];
     try { schedules = (await api('/admin/schedules')).rows || []; } catch {}
+    try { ios = (await api('/admin/inout-schedules')).rows || []; } catch {}
     const back = () => { _asAdd = null; pageAssignments(); };
+    const ioDef = ios.find((x) => x.is_default);
+    const ioSel = el('select', { style: 'width:100%' }, el('option', { value: '' }, ioDef ? `Mặc định — ${ioDef.name} (${IO_RULE_NAME[ioDef.rule] || ioDef.rule})` : 'Mặc định — giờ đầu là vào, giờ cuối là ra'),
+      ...ios.map((x) => el('option', { value: String(x.id) }, `${x.name} — ${IO_RULE_NAME[x.rule] || x.rule}`)));
 
     // ----- Phải: ngày + chọn ca / lịch trình -----
     const fromI = el('input', { type: 'date', value: todayVN() });
@@ -1678,6 +1757,9 @@ async function pageAssignments() {
       el('div', { class: 'as-form-row' }, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Ngày bắt đầu:'), fromI),
       el('div', { class: 'as-form-row' }, el('label', {}, 'Ngày kết thúc:'), toI),
       el('div', { class: 'map-hint', style: 'margin:0 0 12px' }, 'Để trống ngày kết thúc = áp dụng không thời hạn.'),
+      el('div', { style: 'margin-bottom:12px' }, el('label', {}, 'Lịch trình vào ra (cách xác định VÀO / RA)'), ioSel,
+        ios.length ? '' : el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Chưa khai lịch trình vào ra nào (mục 2. Lịch trình vào ra) → dùng "giờ đầu là vào, giờ cuối là ra".')),
+      el('label', {}, 'Ca làm việc / Lịch trình ca làm việc'),
       el('div', { style: 'display:flex;gap:8px;margin-bottom:10px' }, pickSearch),
       el('div', { class: 'tbl-scroll', style: 'max-height:calc(100vh - 430px);overflow:auto' }, pickTbl));
 
@@ -1767,14 +1849,14 @@ async function pageAssignments() {
       if (!picked) return toast('Chọn 1 ca hoặc 1 lịch trình ở bảng bên phải', 'err');
       const [kind, id] = picked.split(':');
       const g = getBody();
-      const body = { ...g.body, mode: kind, from_date: fromI.value, to_date: toI.value || null, merge_rule: 'default' };
+      const body = { ...g.body, mode: kind, from_date: fromI.value, to_date: toI.value || null, merge_rule: 'default', inout_schedule_id: ioSel.value ? +ioSel.value : null };
       if (kind === 'shift') body.shift_id = +id; else body.work_schedule_id = +id;
       saveBtn.disabled = true;
       try { const r = await api(g.url, { method: 'POST', body }); toast(`Đã lưu lịch trình cho ${r.count} ${isDept ? 'phòng ban' : 'nhân viên'}`, 'ok'); back(); }
       catch (e) { toast(e.message, 'err'); saveBtn.disabled = false; }
     };
     const bar = el('div', { class: 'panel', style: 'padding:10px 16px;display:flex;align-items:center;gap:14px;margin-bottom:14px' },
-      btnSm('‹ Quay lại', back, 'ghost'), el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, 'Thêm ' + (isDept ? 'lịch trình phòng ban' : 'lịch trình nhân viên')), el('span', { style: 'flex:1' }), saveBtn);
+      btnSm('‹ Quay lại', back, 'ghost'), el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, isDept ? 'Gán ca cho phòng ban' : 'Gán ca cho nhân viên'), el('span', { style: 'flex:1' }), saveBtn);
     setMain(head(pageTitle), tabBar, bar, el('div', { class: 'as-add' }, el('div', { class: 'panel as-add-left' }, ...leftCols), right));
     return;
   }
@@ -1804,20 +1886,21 @@ async function pageAssignments() {
     const tbl = el('table', { class: 'data' });
     const selAll = el('input', { type: 'checkbox', style: 'width:auto', title: 'Chọn / bỏ tất cả' });
     tbl.append(el('thead', {}, el('tr', {}, el('th', {}, selAll), el('th', {}, 'Phòng ban'), el('th', {}, 'Mã nhân viên'), el('th', {}, 'Tên nhân viên'),
-      el('th', {}, 'Tên ca làm việc'), el('th', {}, 'Ngày bắt đầu'), el('th', {}, 'Ngày kết thúc'))));
+      el('th', {}, 'Ca / lịch trình ca làm việc'), el('th', {}, 'Lịch trình vào ra'), el('th', {}, 'Ngày bắt đầu'), el('th', {}, 'Ngày kết thúc'))));
     const tb = el('tbody'); tbl.append(tb);
     const renderRows = () => {
       tb.innerHTML = '';
       const q = _asSearch.trim().toLowerCase();
       const rows = ranged.filter((r) => empById.has(r.employee_id) && (!q || (r.emp_name || '').toLowerCase().includes(q) || String(r.emp_code || '').toLowerCase().includes(q)))
         .sort((a, b) => (a.department || '').localeCompare(b.department || '', 'vi') || (a.emp_name || '').localeCompare(b.emp_name || '', 'vi') || (a.from_date < b.from_date ? 1 : -1));
-      if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, '📭 Trống — chưa nhân viên nào ở đây có lịch trình riêng. Bấm "+ Thêm" để gán.'))));
+      if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Trống — chưa nhân viên nào ở đây được gán ca riêng. Bấm "+ Thêm" để gán.'))));
       for (const r of rows) {
         const expired = r.to_date && r.to_date < today, future = r.from_date > today;
         tb.append(el('tr', {}, el('td', {}, el('input', { type: 'checkbox', class: 'as-pick', style: 'width:auto', 'data-sa': r.id })),
           el('td', {}, r.department || ''), el('td', {}, r.emp_code || ''), el('td', {}, el('b', {}, r.emp_name || '')),
           el('td', {}, el('span', { style: expired ? 'color:#9ca3af' : 'color:#0f766e;font-weight:700' }, r.mode === 'schedule' ? '📋 ' + (r.schedule_name || 'Lịch trình') : (r.shift_name || 'Ca')),
             expired ? el('span', { class: 'chip', style: 'margin-left:6px' }, 'đã hết hạn') : future ? el('span', { class: 'chip', style: 'margin-left:6px;background:#eff6ff;color:#1d4ed8' }, 'sắp áp dụng') : ''),
+          el('td', { style: 'color:var(--muted)' }, r.inout_name || 'Mặc định'),
           el('td', {}, fmtD(r.from_date)), el('td', {}, r.to_date ? fmtD(r.to_date) : '—')));
       }
       selAll.checked = false;
@@ -2092,10 +2175,10 @@ async function pageAssignments() {
     const today = todayVN();
     const tbl = el('table', { class: 'data' });
     const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
-    tbl.append(el('thead', {}, el('tr', {}, el('th', {}, selAll), el('th', {}, 'Phòng ban'), el('th', {}, 'Tên ca làm việc'), el('th', {}, 'Ngày bắt đầu'), el('th', {}, 'Ngày kết thúc'), el('th', {}, 'Áp dụng'), el('th', {}, 'Thao tác'))));
+    tbl.append(el('thead', {}, el('tr', {}, el('th', {}, selAll), el('th', {}, 'Phòng ban'), el('th', {}, 'Ca / lịch trình ca làm việc'), el('th', {}, 'Lịch trình vào ra'), el('th', {}, 'Ngày bắt đầu'), el('th', {}, 'Ngày kết thúc'), el('th', {}, 'Áp dụng'), el('th', {}, 'Thao tác'))));
     const tb = el('tbody'); tbl.append(tb);
     const rows = deptRows.filter((r) => !selSet || selSet.has(r.department));
-    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, '📭 Trống — chưa phòng ban nào ở đây có lịch trình. Bấm "+ Thêm" để gán.'))));
+    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Trống — chưa phòng ban nào ở đây được gán ca. Bấm "+ Thêm" để gán.'))));
     const delIds = async (ids, msg) => {
       if (!confirm(msg)) return;
       try { const r = await api('/admin/dept-shift-assignments/delete', { method: 'POST', body: { ids } }); toast(`Đã xoá ${r.count} lịch trình phòng ban`, 'ok'); pageAssignments(); } catch (e) { toast(e.message, 'err'); }
@@ -2106,6 +2189,7 @@ async function pageAssignments() {
         el('td', {}, el('b', {}, '📁 ' + r.department)),
         el('td', {}, el('span', { style: expired ? 'color:#9ca3af' : 'color:#0f766e;font-weight:700' }, r.mode === 'schedule' ? '📋 ' + (r.schedule_name || 'Lịch trình') : (r.shift_name || 'Ca')),
           expired ? el('span', { class: 'chip', style: 'margin-left:6px' }, 'đã hết hạn') : future ? el('span', { class: 'chip', style: 'margin-left:6px;background:#eff6ff;color:#1d4ed8' }, 'sắp áp dụng') : ''),
+        el('td', { style: 'color:var(--muted)' }, r.inout_name || 'Mặc định'),
         el('td', {}, fmtD(r.from_date)), el('td', {}, r.to_date ? fmtD(r.to_date) : '—'),
         el('td', { style: 'color:var(--muted);font-size:13px' }, r.include_children ? 'cả phòng ban cấp dưới' : 'chỉ phòng này'),
         el('td', {}, canEdit ? btnSm('Xoá', () => delIds([r.id], `Xoá lịch trình "${r.mode === 'schedule' ? r.schedule_name : r.shift_name}" của phòng "${r.department}"?`), 'ghost') : '')));

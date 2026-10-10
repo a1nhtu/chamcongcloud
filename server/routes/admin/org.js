@@ -100,6 +100,51 @@ export function registerOrgRoutes(r, { need }) {
     res.json({ ok: true });
   });
 
+  /* ----------------------------- LỊCH TRÌNH VÀO RA ----------------------------- */
+  const IO_RULES = ['filo', 'pairs', 'tdqd', 'idm', 'state', 'tdhc'];
+  const ioBody = (b, old = {}) => ({
+    code: String(b.code ?? old.code ?? '').trim(), name: String(b.name ?? old.name ?? '').trim(),
+    rule: IO_RULES.includes(b.rule) ? b.rule : (old.rule || 'filo'),
+    min: Math.max(0, parseInt(b.min_minutes ?? old.min_minutes ?? 30, 10) || 0),
+    max: Math.max(0, parseInt(b.max_minutes ?? old.max_minutes ?? 960, 10) || 0),
+    gap: Math.max(0, parseInt(b.gap_minutes ?? old.gap_minutes ?? 30, 10) || 0),
+    def: (b.is_default != null ? b.is_default : old.is_default) ? 1 : 0,
+  });
+  r.get('/inout-schedules', (req, res) => {
+    res.json({ rows: db.prepare('SELECT * FROM inout_schedules WHERE active = 1 ORDER BY is_default DESC, name').all() });
+  });
+  r.post('/inout-schedules', need('shifts'), (req, res) => {
+    const v = ioBody(req.body || {});
+    if (!v.name) return res.status(400).json({ error: 'Nhập tên lịch trình vào ra' });
+    if (v.def) db.prepare('UPDATE inout_schedules SET is_default = 0').run();
+    const first = !db.prepare('SELECT 1 FROM inout_schedules WHERE active = 1').get();   // lịch trình đầu tiên tự là mặc định
+    const info = db.prepare('INSERT INTO inout_schedules(code, name, rule, min_minutes, max_minutes, gap_minutes, is_default) VALUES (?,?,?,?,?,?,?)')
+      .run(v.code, v.name, v.rule, v.min, v.max, v.gap, v.def || first ? 1 : 0);
+    res.json({ ok: true, id: info.lastInsertRowid });
+  });
+  r.put('/inout-schedules/:id', need('shifts'), (req, res) => {
+    const old = db.prepare('SELECT * FROM inout_schedules WHERE id = ?').get(req.params.id);
+    if (!old) return res.status(404).json({ error: 'Không tìm thấy lịch trình vào ra' });
+    const v = ioBody(req.body || {}, old);
+    if (!v.name) return res.status(400).json({ error: 'Nhập tên lịch trình vào ra' });
+    if (v.def) db.prepare('UPDATE inout_schedules SET is_default = 0 WHERE id <> ?').run(old.id);
+    db.prepare('UPDATE inout_schedules SET code=?, name=?, rule=?, min_minutes=?, max_minutes=?, gap_minutes=?, is_default=? WHERE id=?')
+      .run(v.code, v.name, v.rule, v.min, v.max, v.gap, v.def, old.id);
+    res.json({ ok: true });
+  });
+  r.delete('/inout-schedules/:id', need('shifts'), (req, res) => {
+    const used = db.prepare('SELECT COUNT(*) c FROM shift_assignments WHERE inout_schedule_id = ? AND active = 1').get(req.params.id).c
+      + db.prepare('SELECT COUNT(*) c FROM dept_shift_assignments WHERE inout_schedule_id = ? AND active = 1').get(req.params.id).c;
+    if (used > 0) return res.status(400).json({ error: `Lịch trình vào ra này đang được gán ở ${used} dòng gán ca. Xoá hoặc đổi các dòng đó trước.` });
+    db.prepare('UPDATE inout_schedules SET active = 0, is_default = 0 WHERE id = ?').run(req.params.id);
+    res.json({ ok: true });
+  });
+  // Bỏ quy tắc ghép giờ riêng còn lưu ở ca (kiểu cũ) → ca dùng theo Lịch trình vào ra
+  r.post('/shifts/:id/clear-merge-rule', need('shifts'), (req, res) => {
+    db.prepare("UPDATE shifts SET merge_rule = 'filo' WHERE id = ?").run(req.params.id);
+    res.json({ ok: true });
+  });
+
   /* ----------------------------- BỘ PHẬN ----------------------------- */
   r.get('/departments', (req, res) => {
     res.json({ rows: db.prepare('SELECT id, name, parent_id FROM departments ORDER BY name').all() });

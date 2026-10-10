@@ -237,6 +237,14 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
     return { inIso: iso(ins[0] || null), outIso: iso(outs.length ? outs[outs.length - 1] : null) };
   }
 
+  // "Chọn từ máy": VÀO/RA theo phím trạng thái nhân viên bấm trên máy (0 Check-In, 3 Break-In, 4 OT-In = VÀO; 1 Check-Out, 2 Break-Out, 5 OT-Out = RA)
+  if (rule === 'state') {
+    const st = (p) => Number(p.status) || 0;
+    const ins = inWin.filter((p) => [0, 3, 4].includes(st(p)));
+    const outs = inWin.filter((p) => [1, 2, 5].includes(st(p)));
+    return { inIso: iso(ins[0] || null), outIso: iso(outs.length ? outs[outs.length - 1] : null) };
+  }
+
   // TĐ-HC: VÀO trong cửa sổ vào; RA = log KẾ TIẾP, phải nằm trong cửa sổ ra (nếu lệch → bỏ RA)
   if (rule === 'tdhc') {
     let ci;
@@ -279,11 +287,28 @@ export function dropRepeatPunches(isoList, dupMin = PAIR_DUP_DEFAULT) {
   for (const t of ts) if (!out.length || new Date(t) - new Date(out[out.length - 1]) >= gap) out.push(t);
   return out;
 }
-// Chia lượt quẹt thành cặp vào–ra: bỏ lượt quẹt lặp, ghép (1,2), (3,4)…; lượt lẻ cuối không có cặp → bỏ.
-export function punchPairs(isoList, dupMin = PAIR_DUP_DEFAULT) {
-  const uniq = dropRepeatPunches(isoList, dupMin);
+// Chia lượt quẹt thành cặp vào–ra theo đúng cách của Ronald Jack ("Lịch trình vào ra"):
+//   lượt 1 = VÀO, lượt kế = RA, rồi lại VÀO…; lượt lẻ cuối không có cặp → bỏ.
+//   - RA cách VÀO dưới `min` phút  → coi là quẹt lặp, bỏ (vẫn chờ lượt RA thật)
+//   - VÀO mới cách RA trước dưới `gap` phút → quẹt lặp, bỏ
+//   - cặp dài hơn `max` phút (quên quẹt ra) → bỏ lượt VÀO cũ, lấy lượt này làm VÀO mới
+// opt: số phút (dùng chung cho min và gap) HOẶC { min, gap, max }.
+export function punchPairs(isoList, opt = PAIR_DUP_DEFAULT) {
+  const o = opt && typeof opt === 'object' ? opt : { min: opt, gap: opt };
+  const min = Math.max(1, Number(o.min) || PAIR_DUP_DEFAULT) * 60000;
+  const gap = Math.max(1, Number(o.gap) || PAIR_DUP_DEFAULT) * 60000;
+  const maxMs = Number(o.max) > 0 ? Number(o.max) * 60000 : Infinity;
+  const ts = [...(isoList || [])].filter(Boolean).sort();
   const out = [];
-  for (let i = 0; i + 1 < uniq.length; i += 2) out.push([uniq[i], uniq[i + 1]]);
+  let inT = null, lastOut = null;
+  for (const t of ts) {
+    const x = new Date(t).getTime();
+    if (inT == null) { if (lastOut != null && x - lastOut < gap) continue; inT = t; continue; }
+    const d = x - new Date(inT).getTime();
+    if (d < min) continue;
+    if (d > maxMs) { inT = t; continue; }
+    out.push([inT, t]); lastOut = x; inT = null;
+  }
   return out;
 }
 

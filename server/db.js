@@ -497,6 +497,23 @@ function migrateColumns() {
     shift_id         INTEGER NOT NULL REFERENCES shifts(id),
     UNIQUE(work_schedule_id, idx, shift_id)
   )`);
+  // LỊCH TRÌNH VÀO RA (kiểu Ronald Jack): cách xác định lượt quẹt nào là VÀO, lượt nào là RA — khai báo RIÊNG, không nằm trong ca.
+  //   rule: filo (giờ đầu vào, giờ cuối ra) | pairs (tự động, không qua đêm) | tdqd (tự động, qua đêm) | idm (theo ID máy)
+  //         | state (chọn từ máy: phím Check-In/Check-Out) | tdhc (theo khung giờ nhận vào/ra của ca)
+  db.exec(`CREATE TABLE IF NOT EXISTS inout_schedules (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    code        TEXT DEFAULT '',
+    name        TEXT NOT NULL,
+    rule        TEXT NOT NULL DEFAULT 'filo',
+    min_minutes INTEGER NOT NULL DEFAULT 30,    -- thời gian nhỏ nhất giữa VÀO và RA (dưới mức này = quẹt lặp)
+    max_minutes INTEGER NOT NULL DEFAULT 960,   -- thời gian lớn nhất của 1 cặp vào–ra
+    gap_minutes INTEGER NOT NULL DEFAULT 30,    -- khoảng cách nhỏ nhất giữa 2 cặp vào–ra
+    is_default  INTEGER NOT NULL DEFAULT 0,     -- dùng cho NV chưa được gán lịch trình vào ra nào
+    active      INTEGER NOT NULL DEFAULT 1,
+    created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+  )`);
+  add('shift_assignments', 'inout_schedule_id', 'INTEGER');        // lịch trình vào ra gán kèm cho NV
+  add('dept_shift_assignments', 'inout_schedule_id', 'INTEGER');   // … cho phòng ban
   add('shifts', 'no_out_credit',   'INTEGER NOT NULL DEFAULT 0');    // 1 = thiếu giờ ra vẫn tính công (trừ phần đi trễ)
   add('shifts', 'grace_deduct',    'INTEGER NOT NULL DEFAULT 0');    // 1 = trễ/sớm chỉ tính phần VƯỢT số phút cho phép
   add('shifts', 'shift_as_ot',     'INTEGER NOT NULL DEFAULT 0');    // 1 = ca này là ca tăng ca (cả ca tính tăng ca, 0 công)

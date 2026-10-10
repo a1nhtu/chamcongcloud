@@ -140,11 +140,12 @@ export function registerAssignmentRoutes(r, { need }) {
   // Danh sách phân ca khoảng đang hiệu lực (kèm tên NV, ca/lịch trình)
   r.get('/shift-assignments', need('assignments'), (req, res) => {
     const rows = db.prepare(`SELECT sa.*, e.code AS emp_code, e.full_name AS emp_name, e.department,
-        s.name AS shift_name, ws.name AS schedule_name
+        s.name AS shift_name, ws.name AS schedule_name, io.name AS inout_name
       FROM shift_assignments sa
       JOIN employees e ON e.id = sa.employee_id
       LEFT JOIN shifts s ON s.id = sa.shift_id
       LEFT JOIN work_schedules ws ON ws.id = sa.work_schedule_id
+      LEFT JOIN inout_schedules io ON io.id = sa.inout_schedule_id
       WHERE sa.active = 1 ORDER BY sa.id DESC`).all();
     res.json({ rows });
   });
@@ -180,13 +181,14 @@ export function registerAssignmentRoutes(r, { need }) {
     const shiftType = b.shift_type === 'rotating' ? 'rotating' : 'fixed';
     const mergeRule = b.merge_rule || 'default';
     const note = (b.note || '').slice(0, 500);
+    const ioId = b.inout_schedule_id ? +b.inout_schedule_id : null;
     const ins = db.prepare(`INSERT INTO shift_assignments
-      (employee_id, mode, shift_id, work_schedule_id, from_date, to_date, shift_type, merge_rule, note)
-      VALUES (?,?,?,?,?,?,?,?,?)`);
+      (employee_id, mode, shift_id, work_schedule_id, from_date, to_date, shift_type, merge_rule, note, inout_schedule_id)
+      VALUES (?,?,?,?,?,?,?,?,?,?)`);
     let n = 0;
     db.exec('BEGIN');
     try {
-      for (const e of emps) { ins.run(e.id, mode, shiftId, scheduleId, from, to, shiftType, mergeRule, note); n++; }
+      for (const e of emps) { ins.run(e.id, mode, shiftId, scheduleId, from, to, shiftType, mergeRule, note, ioId); n++; }
       db.exec('COMMIT');
     } catch (err) { db.exec('ROLLBACK'); throw err; }
     res.json({ ok: true, count: n });
@@ -216,10 +218,11 @@ export function registerAssignmentRoutes(r, { need }) {
 
   /* -------------------- LỊCH TRÌNH PHÒNG BAN -------------------- */
   r.get('/dept-shift-assignments', need('assignments'), (req, res) => {
-    const rows = db.prepare(`SELECT da.*, s.name AS shift_name, ws.name AS schedule_name
+    const rows = db.prepare(`SELECT da.*, s.name AS shift_name, ws.name AS schedule_name, io.name AS inout_name
       FROM dept_shift_assignments da
       LEFT JOIN shifts s ON s.id = da.shift_id
       LEFT JOIN work_schedules ws ON ws.id = da.work_schedule_id
+      LEFT JOIN inout_schedules io ON io.id = da.inout_schedule_id
       WHERE da.active = 1 ORDER BY da.department, da.id DESC`).all();
     res.json({ rows });
   });
@@ -236,11 +239,12 @@ export function registerAssignmentRoutes(r, { need }) {
     const scheduleId = mode === 'schedule' ? (b.work_schedule_id || null) : null;
     if (mode === 'shift' && !shiftId) return res.status(400).json({ error: 'Chưa chọn ca làm việc' });
     if (mode === 'schedule' && !scheduleId) return res.status(400).json({ error: 'Chưa chọn lịch trình' });
+    const ioId = b.inout_schedule_id ? +b.inout_schedule_id : null;
     const ins = db.prepare(`INSERT INTO dept_shift_assignments
-      (department, include_children, mode, shift_id, work_schedule_id, from_date, to_date, merge_rule, note) VALUES (?,?,?,?,?,?,?,?,?)`);
+      (department, include_children, mode, shift_id, work_schedule_id, from_date, to_date, merge_rule, note, inout_schedule_id) VALUES (?,?,?,?,?,?,?,?,?,?)`);
     db.exec('BEGIN');
     try {
-      for (const d of depts) ins.run(d, b.include_children === false ? 0 : 1, mode, shiftId, scheduleId, from, to, b.merge_rule || 'default', String(b.note || '').slice(0, 500));
+      for (const d of depts) ins.run(d, b.include_children === false ? 0 : 1, mode, shiftId, scheduleId, from, to, b.merge_rule || 'default', String(b.note || '').slice(0, 500), ioId);
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     res.json({ ok: true, count: depts.length });
