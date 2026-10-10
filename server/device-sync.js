@@ -504,9 +504,10 @@ export function relearnDevice(serial) {
 // presetShift: nếu truyền (kể cả null) thì dùng luôn, không tự dò lại ca (dùng khi tách nhiều ca/ngày).
 function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null) {
   const ctx = payrollCtx(getSetting, db);
-  const shift = ctx.isHourly(employeeId) ? null : (presetShift !== undefined ? presetShift
+  const hourly = ctx.isHourly(employeeId);
+  const shift = hourly ? null : (presetShift !== undefined ? presetShift
     : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
-  return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs);
+  return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs, { hourly });
 }
 
 // Ngưỡng quẹt lặp khi ghép cặp vào/ra (phút) = ô "Bỏ qua lần chấm trùng trong N phút" ở Cài đặt;

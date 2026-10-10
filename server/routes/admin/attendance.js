@@ -29,7 +29,7 @@ function computeManual(employeeId, workDate, inIso, outIso) {
   const ctx = payrollCtx(getSetting, db);
   // Chế độ theo GIỜ: không dò ca, không muộn/sớm (giữ nguyên hành vi cũ)
   const eff = ctx.isHourly(employeeId) ? { shift: null } : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null);
-  return computeDayMetrics(ctx, eff.shift, workDate, inIso, outIso);
+  return computeDayMetrics(ctx, eff.shift, workDate, inIso, outIso, null, { hourly: ctx.isHourly(employeeId) });
 }
 
 export function registerAttendanceRoutes(r, { need }) {
@@ -90,7 +90,7 @@ export function registerAttendanceRoutes(r, { need }) {
         const calcShift = hr ? null : eff.shift;
         const usePairs = !row.manual && (hr ? hourlyPairs : eff.mergeRule === 'pairs');
         const pairs = usePairs ? dayPairsFor(row.employee_id, row.work_date, calcShift) : null;
-        const m = computeDayMetrics(ctx, calcShift, row.work_date, row.check_in_at, row.check_out_at || null, pairs);
+        const m = computeDayMetrics(ctx, calcShift, row.work_date, row.check_in_at, row.check_out_at || null, pairs, { hourly: hr });
         if (!row.check_out_at && !(calcShift && calcShift.no_out_credit)) {
           // Chưa chấm ra: chỉ cập nhật muộn/trạng thái/ca — GIỮ NGUYÊN giờ công cũ (như trước)
           updNoOut.run(m.late, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);

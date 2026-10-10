@@ -10,6 +10,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       company_name: getSetting('company_name', 'Digiplus'),
       company_address: getSetting('company_address', ''),
       weekend_days: getSetting('weekend_days', '7'),
+      weekend_work_as_ot: getSetting('weekend_work_as_ot', '1'),
       workunit_rounding: getSetting('workunit_rounding', '2'),
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
@@ -41,6 +42,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.company_name != null) setSetting('company_name', b.company_name);
     if (b.company_address != null) setSetting('company_address', b.company_address);
     if (b.weekend_days != null) setSetting('weekend_days', b.weekend_days);
+    if (b.weekend_work_as_ot != null) setSetting('weekend_work_as_ot', b.weekend_work_as_ot ? '1' : '0');
     if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
     if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));
     if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);

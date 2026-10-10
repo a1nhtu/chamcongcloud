@@ -4,7 +4,7 @@ import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit } from '../attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 
 const r = Router();
@@ -27,6 +27,7 @@ function dayFlags(date) {
     isWeekend: isWeekendDay(date, getSetting('weekend_days', '7')),
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
+    weekendOt: getSetting('weekend_work_as_ot', '1') === '1',
   };
 }
 function otTypeOf(date) {
@@ -260,6 +261,7 @@ r.post('/check-out', (req, res) => {
     const wm = Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
     calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate)), ot_type: otTypeOf(wdate), day_status: 'lam_viec' };
   }
+  if (!hourly) calc = weekendToOt(calc, dayFlags(wdate));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');

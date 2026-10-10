@@ -149,6 +149,16 @@ function shiftIsOt(shift, isHoliday, isWeekend) {
   return !!(shift.shift_as_ot || (isHoliday && shift.holiday_as_ot) || (!isHoliday && isWeekend && shift.weekend_as_ot));
 }
 
+// Đi làm vào NGÀY CUỐI TUẦN (Cài đặt > Ngày cuối tuần, mặc định CN) khi bật "đi làm cuối tuần tính là tăng ca":
+// toàn bộ thời gian làm thành TĂNG CA CUỐI TUẦN, không tính công thường. Ngày lễ không áp (đã có tăng ca lễ riêng).
+// Báo cáo quy đổi: OT_DAY_MIN phút (8 giờ) tăng ca = 1 công.
+export const OT_DAY_MIN = 480;
+export function weekendToOt(c, flags = {}) {
+  if (!c || !flags.weekendOt || !flags.isWeekend || flags.isHoliday) return c;
+  const wm = c.work_minutes || 0;
+  return { ...c, ot_min: (c.ot_min || 0) + wm, work_minutes: 0, work_unit: 0, ot_type: 'cuoi_tuan' };
+}
+
 // Chỉ có giờ VÀO, thiếu giờ RA. Mặc định 0 công (trạng thái "thiếu ra").
 // Ca bật "thiếu giờ ra vẫn tính công": tính đủ giờ chuẩn của ca TRỪ phần đi trễ (vượt dung sai) — như Ronald Jack.
 export function computeNoOut(shift, checkInIso, workDate, opts = {}) {

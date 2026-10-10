@@ -1,7 +1,7 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes } from './attendance-calc.js';
+import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt } from './attendance-calc.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -13,6 +13,7 @@ export function payrollCtx(getSetting, db) {
   const hol = new Set(db.prepare('SELECT holiday_date FROM public_holidays').all().map((r) => r.holiday_date));
   return {
     weekend: getSetting('weekend_days', '7'),
+    weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
@@ -35,7 +36,8 @@ export function payrollCtx(getSetting, db) {
  * work_minutes, work_unit, ot_type, day_status }.
  * Công thức giữ NGUYÊN so với code cũ — chỉ gom một chỗ.
  */
-export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = null) {
+// opts.hourly: nhân viên chấm công THEO GIỜ → không đổi ngày cuối tuần thành tăng ca (mẫu theo giờ không có tăng ca)
+export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = null, opts = {}) {
   const flags = {
     isHoliday: ctx.isHoliday(workDate),
     isWeekend: isWeekendDay(workDate, ctx.weekend),
@@ -62,5 +64,6 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   } else {
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: 'vang' };
   }
+  if (ctx.weekendOt && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
   return { shiftId: shift?.id ?? null, late, ...c };
 }

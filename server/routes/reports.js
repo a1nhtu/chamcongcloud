@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { db, getSetting, adminAttWhere, globalAttMode } from '../db.js';
 import { authRequired, permRequired } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
-import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches } from '../attendance-calc.js';
+import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
 
@@ -333,23 +333,26 @@ function buildReportRaw(type, from, to, filter) {
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
-        { key: 'total', label: 'Tổng công', w: 10 }, ...(HOURLY ? [] : [{ key: 'ot', label: 'OT (giờ)', w: 9 }]),
+        { key: 'total', label: 'Tổng công', w: 10 }, ...(HOURLY ? [] : [{ key: 'otWk', label: 'Công TC cuối tuần', w: 11 }, { key: 'ot', label: 'OT (giờ)', w: 9 }]),
         { key: 'late', label: 'Trễ (lần)', w: 9 }, { key: 'early', label: 'Sớm (lần)', w: 9 },
         { key: 'absent', label: 'Vắng', w: 8 }, ...leaveCols(ctx),
       ];
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '', ...leaveCounts(ctx, e.id, days) };
-        let total = 0, ot = 0, late = 0, early = 0, absent = 0;
+        let total = 0, ot = 0, late = 0, early = 0, absent = 0, otWk = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           // Bảng công: ô luôn là SỐ CÔNG (số giờ xem ở "Bảng thống kê chấm công (giờ)")
           if (c && c.work_unit > 0) { row['d' + d] = round2(c.work_unit); total += c.work_unit; }
+          else if (!HOURLY && c && c.ot_type === 'cuoi_tuan' && c.ot_min > 0) {   // làm ngày cuối tuần = tăng ca: 8 giờ = 1 công
+            const u = c.ot_min / OT_DAY_MIN; row['d' + d] = round2(u); otWk += u;
+          }
           else row['d' + d] = '';
           if (row['d' + d] === '' && ctx.leaveDays.has(e.id + '|' + d)) row['d' + d] = ctx.leaveDays.get(e.id + '|' + d).sym;   // ngày nghỉ → ký hiệu loại nghỉ
           if (c) { ot += (c.ot_min || 0); if (c.late_min > 0) late++; if (c.early_min > 0) early++; }
           if (symbolOf(ctx, e.id, d) === 'V') absent++;
         }
-        row.total = round2(total); row.ot = round2(ot / 60); row.late = late; row.early = early; row.absent = absent;
+        row.total = round2(total); row.otWk = round2(otWk); row.ot = round2(ot / 60); row.late = late; row.early = early; row.absent = absent;
         return row;
       });
       return { title: `Bảng công ngang ${PERIOD}`, columns, rows };
@@ -503,17 +506,18 @@ function buildReportRaw(type, from, to, filter) {
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
         ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 10 }]
-          : [{ key: 'cong', label: 'Tổng công', w: 10 }, { key: 'gio', label: 'Tổng giờ', w: 10 }, { key: 'ot', label: 'Tăng ca (giờ)', w: 12 }]),
+          : [{ key: 'cong', label: 'Tổng công', w: 10 }, { key: 'gio', label: 'Tổng giờ', w: 10 }, { key: 'ot', label: 'Tăng ca (giờ)', w: 12 }, { key: 'otWk', label: 'Công TC cuối tuần', w: 12 }]),
         { key: 'lateN', label: 'Trễ (lần)', w: 9 }, { key: 'lateM', label: 'Trễ (phút)', w: 10 },
         { key: 'earlyN', label: 'Sớm (lần)', w: 9 }, { key: 'earlyM', label: 'Sớm (phút)', w: 10 }, { key: 'vang', label: 'Vắng', w: 8 },
         ...leaveCols(ctx),
       ];
       const rows = ctx.employees.map((e) => {
-        let cong = 0, minutes = 0, ot = 0, lateN = 0, lateM = 0, earlyN = 0, earlyM = 0, vang = 0;
+        let cong = 0, minutes = 0, ot = 0, lateN = 0, lateM = 0, earlyN = 0, earlyM = 0, vang = 0, otWk = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           if (c) {
             cong += (c.work_unit || 0); minutes += (c.work_minutes || 0); ot += (c.ot_min || 0);
+            if (c.ot_type === 'cuoi_tuan') otWk += (c.ot_min || 0) / OT_DAY_MIN;   // 8 giờ tăng ca cuối tuần = 1 công
             if (c.late_min > 0) { lateN++; lateM += c.late_min; }
             if (c.early_min > 0) { earlyN++; earlyM += c.early_min; }
           }
@@ -521,7 +525,7 @@ function buildReportRaw(type, from, to, filter) {
         }
         return {
           id: e.id, code: e.code, name: e.full_name, dept: e.department || '',
-          cong: round2(cong), gio: round2(minutes / 60), ot: round2(ot / 60),
+          cong: round2(cong), gio: round2(minutes / 60), ot: round2(ot / 60), otWk: round2(otWk),
           lateN, lateM, earlyN, earlyM, vang, ...leaveCounts(ctx, e.id, days),
         };
       });

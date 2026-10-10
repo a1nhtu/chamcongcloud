@@ -32,3 +32,16 @@ test('trễ / về sớm vẫn nhận đúng ca gần nhất', () => {
 test('không có lượt quẹt → không chọn ca nào', () => {
   assert.deepEqual(pickShiftSet([S, C], [], '2026-11-02'), []);
 });
+
+// Đi làm vào ngày cuối tuần (Cài đặt) → cả thời gian làm thành tăng ca cuối tuần, không tính công thường
+import { weekendToOt } from '../server/attendance-calc.js';
+test('ngày cuối tuần + bật tùy chọn → 8 giờ làm thành 480 phút tăng ca, 0 công', () => {
+  const c = { early_min: 0, ot_min: 30, work_minutes: 480, work_unit: 1, ot_type: 'cuoi_tuan', day_status: 'lam_viec' };
+  assert.deepEqual(weekendToOt(c, { isWeekend: true, weekendOt: true }), { ...c, ot_min: 510, work_minutes: 0, work_unit: 0 });
+});
+test('tắt tùy chọn / ngày thường / ngày lễ → giữ nguyên công', () => {
+  const c = { ot_min: 0, work_minutes: 480, work_unit: 1, ot_type: 'thuong' };
+  assert.equal(weekendToOt(c, { isWeekend: true, weekendOt: false }), c);
+  assert.equal(weekendToOt(c, { isWeekend: false, weekendOt: true }), c);
+  assert.equal(weekendToOt(c, { isWeekend: true, isHoliday: true, weekendOt: true }), c);
+});
