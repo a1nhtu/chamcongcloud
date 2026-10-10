@@ -23,9 +23,9 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       hourly_merge_rule: getSetting('hourly_merge_rule', 'filo'), // theo giờ: filo | pairs (nhiều lần vào/ra)
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
       phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)
-      // Nếu bộ cài (config.txt) có đặt sẵn USE_DEVICE/USE_PHONE thì 2 mục này do bộ cài quyết (khoá UI)
-      use_device_locked: process.env.USE_DEVICE === '0' || process.env.USE_DEVICE === '1',
-      use_phone_locked: process.env.USE_PHONE === '0' || process.env.USE_PHONE === '1',
+      // Giá trị bộ cài (config.txt) đặt sẵn lúc cài — chỉ để hiện gợi ý; tài khoản tổng vẫn đổi được trên web
+      use_device_cfg: ['0', '1'].includes(process.env.USE_DEVICE) ? process.env.USE_DEVICE : '',
+      use_phone_cfg: ['0', '1'].includes(process.env.USE_PHONE) ? process.env.USE_PHONE : '',
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại

@@ -616,10 +616,15 @@ function migrateColumns() {
 
   // Chức năng chấm công đặt SẴN theo bộ cài (config.txt) — KHÔNG cần đăng nhập tài khoản tổng.
   //   USE_DEVICE=1/0 -> bật/tắt máy chấm công ; USE_PHONE=1/0 -> bật/tắt chấm công điện thoại.
-  //   Chỉ áp khi config có ghi rõ '0' hoặc '1' (bản cũ không có 2 dòng này thì giữ nguyên như trước).
+  //   Chỉ là GIÁ TRỊ BAN ĐẦU: áp khi config ghi rõ '0'/'1' VÀ khác lần áp trước (mới cài / vừa sửa config.txt).
+  //   Sau đó tài khoản tổng đổi trên web (Cài đặt › Hình thức chấm công) thì giữ nguyên qua các lần khởi động lại.
   const applyEnvFlag = (envName, settingName) => {
     const v = process.env[envName];
-    if (v === '0' || v === '1') setSetting(settingName, v);
+    if (v !== '0' && v !== '1') return;
+    const mark = 'cfg_applied_' + envName;
+    if (getSetting(mark) === v) return;
+    setSetting(settingName, v);
+    setSetting(mark, v);
   };
   applyEnvFlag('USE_DEVICE', 'device_enabled');
   applyEnvFlag('USE_PHONE', 'phone_enabled');
