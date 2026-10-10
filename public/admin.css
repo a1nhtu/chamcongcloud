@@ -152,3 +152,29 @@ table.dev-tbl td.num.zero { color: #cbd0d6; font-weight: 400; }
 .rep-scroll table.data td.pin { position: sticky; z-index: 1; background: #fff; }
 .rep-scroll table.data th.pin { z-index: 4; }
 .rep-scroll table.data tr:hover td.pin { background: #fcfbfa; }
+/* Phân ca > Bảng phân ca kiểu Excel */
+.as-sheet-box { position: relative; overflow: auto; outline: none; max-height: calc(100vh - 300px); }
+.as-sheet-box:focus { box-shadow: 0 0 0 2px #bfdbfe; }
+table.as-sheet { border-collapse: separate; border-spacing: 0; font-size: 12.5px; user-select: none; }
+table.as-sheet th, table.as-sheet td { border-right: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb; padding: 0 6px; height: 26px; white-space: nowrap; background: #fff; }
+table.as-sheet thead th { position: sticky; top: 0; z-index: 3; background: #f3f4f6; color: #374151; font-weight: 700; text-align: center; height: 36px; line-height: 1.15; }
+table.as-sheet thead th.d { min-width: 40px; cursor: pointer; padding: 0 2px; }
+table.as-sheet thead th.d .wd { font-weight: 400; font-size: 10.5px; color: #6b7280; }
+table.as-sheet thead th.sun { background: #86efac; } table.as-sheet thead th.sat { background: #e0f2fe; }
+table.as-sheet .pin { position: sticky; z-index: 2; }
+table.as-sheet thead .pin { z-index: 5; }
+table.as-sheet .p0 { left: 0; width: 38px; min-width: 38px; max-width: 38px; text-align: center; color: #6b7280; }
+table.as-sheet .p1 { left: 38px; width: 74px; min-width: 74px; max-width: 74px; overflow: hidden; text-overflow: ellipsis; }
+table.as-sheet .p2 { left: 112px; width: 170px; min-width: 170px; max-width: 170px; overflow: hidden; text-overflow: ellipsis; font-weight: 600; box-shadow: 1px 0 0 #9ca3af; }
+table.as-sheet td.rh { cursor: pointer; background: #f9fafb; }
+table.as-sheet td.dept { color: #6b7280; max-width: 120px; overflow: hidden; text-overflow: ellipsis; }
+table.as-sheet tbody tr:nth-child(even) td { background: #f7fbf7; }
+table.as-sheet td.c { text-align: center; cursor: cell; min-width: 40px; }
+table.as-sheet tbody td.c.sat { background: #f0f9ff; } table.as-sheet tbody td.c.sun { background: #bbf7d0; }
+table.as-sheet td.c.ph { color: #b3b9c2; } table.as-sheet td.c.ex { color: #0f172a; font-weight: 700; } table.as-sheet td.c.off { color: #b45309; font-weight: 700; }
+table.as-sheet tbody td.c.dirty { background: #fef08a; } table.as-sheet td.c.bad { color: #dc2626; text-decoration: underline wavy; }
+table.as-sheet tbody td.c.sel { background: #dbeafe; } table.as-sheet tbody td.c.sel.dirty { background: #e9eda5; }
+table.as-sheet td.c.anchor { outline: 2px solid #2563eb; outline-offset: -2px; }
+.as-editor { display: none; position: absolute; z-index: 6; border: 2px solid #2563eb; border-radius: 0; padding: 0 4px; font-size: 13px; font-weight: 700; text-align: center; box-sizing: border-box; background: #fff; text-transform: uppercase; }
+.as-code { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 2px 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; color: #0f172a; }
+.as-code:hover { background: #eff6ff; border-color: #2563eb; }

@@ -13,6 +13,32 @@ function monthDaysList(month) {
 }
 const vnWd = (d) => { const dow = new Date(d + 'T12:00:00Z').getUTCDay(); return dow === 0 ? 7 : dow; };
 
+// Bộ đọc giá trị 1 Ô phân ca (dùng chung cho Nhập Excel và Bảng phân ca gõ trực tiếp).
+// Giá trị: mã ca hoặc tên ca · "S+C" nhiều ca · NGHỈ/N/X/OFF · "-"/AUTO = bỏ phân ca ngày đó (về lịch đã phân).
+// Trả hàm apply(empId, date, value) → 'set:N' | 'off' | 'clear' | 'skip' | { error }
+function cellApplier() {
+  const shiftByCode = new Map();
+  const allShifts = db.prepare('SELECT id, code, name FROM shifts WHERE active=1').all();
+  for (const sh of allShifts) if ((sh.name || '').trim()) shiftByCode.set(sh.name.trim().toUpperCase(), sh.id);
+  for (const sh of allShifts) if ((sh.code || '').trim()) shiftByCode.set(sh.code.trim().toUpperCase(), sh.id);   // mã ca ưu tiên hơn tên
+  const del = db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id=? AND work_date=?');
+  const ins = db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,?)');
+  return (empId, date, value, emptyMeans = 'skip') => {
+    const v = String(value ?? '').trim();
+    const V = v.toUpperCase();
+    if (v === '') { if (emptyMeans !== 'clear') return 'skip'; del.run(empId, date); return 'clear'; }
+    if (['AUTO', 'TĐ', 'TU DONG', 'TỰ ĐỘNG', '-'].includes(V)) { del.run(empId, date); return 'clear'; }
+    if (['NGHỈ', 'NGHI', 'OFF', 'N', 'X'].includes(V)) { del.run(empId, date); ins.run(empId, date, null, 1); return 'off'; }
+    const codes = shiftByCode.has(V) ? [V] : V.split(/[+,/;]/).map((x) => x.trim()).filter(Boolean);
+    const sids = [];
+    for (const cd of codes) { const sid = shiftByCode.get(cd); if (!sid) return { error: cd }; sids.push(sid); }
+    const uniq = [...new Set(sids)];
+    del.run(empId, date);                       // thay toàn bộ ca ngày đó
+    for (const sid of uniq) ins.run(empId, date, sid, 0);
+    return 'set:' + uniq.length;
+  };
+}
+
 export function registerAssignmentRoutes(r, { need }) {
   /* ----------------------------- PHÂN CA THEO NGÀY ----------------------------- */
   // Danh sách NV + ca + các phân ca trong khoảng ngày
@@ -44,7 +70,24 @@ export function registerAssignmentRoutes(r, { need }) {
       'SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?'
     ).all(from, to);
 
-    const shifts = db.prepare('SELECT id, name, start_time, end_time FROM shifts WHERE active = 1 ORDER BY name').all();
+    // ?grid=1 → ca THỰC TẾ của từng NV từng ngày (đã tính ưu tiên: đổi ca ngày → phân ca khoảng → lịch trình → ca mặc định)
+    // mỗi ô: { l: nhãn ngắn, k: off | manual (đổi riêng ngày đó) | assign | schedule | default | none }
+    if (req.query.grid) {
+      const days = [];
+      for (let d = new Date(from + 'T12:00:00Z'); d <= new Date(to + 'T12:00:00Z') && days.length < 62; d.setUTCDate(d.getUTCDate() + 1)) days.push(d.toISOString().slice(0, 10));
+      const short = (sh) => ((sh.code || '').trim() || sh.name || '');
+      for (const e of employees) {
+        e.grid = days.map((d) => {
+          const rs = resolveShift(e.id, d);
+          if (rs.off) return { l: 'Nghỉ', k: 'off' };
+          if (rs.shift) return { l: short(rs.shift), k: rs.source === 'manual' ? 'manual' : rs.source === 'assign' ? 'assign' : 'default', t: rs.shift.name };
+          if (rs.source === 'schedule') return { l: '📋', k: (rs.scheduleName || '').endsWith('ca đã chọn') ? 'manual' : 'schedule', t: rs.scheduleName || 'Lịch trình' };
+          return { l: '', k: 'none' };
+        });
+      }
+    }
+
+    const shifts = db.prepare('SELECT id, code, name, start_time, end_time FROM shifts WHERE active = 1 ORDER BY name').all();
     res.json({ employees, assignments, shifts });
   });
 
@@ -222,7 +265,7 @@ export function registerAssignmentRoutes(r, { need }) {
     // Sheet chú thích mã ca
     const ws2 = wb.addWorksheet('Mã ca');
     ws2.addRow(['Mã ca', 'Tên ca', 'Giờ']).font = { bold: true };
-    for (const s of shifts) ws2.addRow([(s.code || '').trim(), s.name, `${s.start_time}-${s.end_time}`]);
+    for (const s of shifts) ws2.addRow([(s.code || '').trim() || s.name, s.name, `${s.start_time}-${s.end_time}`]);   // ca chưa có mã → gõ tên ca
     ws2.addRow(['NGHỈ', 'Ngày nghỉ', '']);
     ws2.addRow(['(trống)', 'Tự động tìm ca theo giờ chấm', '']);
     ws2.addRow(['VD: S+C', 'NHIỀU ca trong 1 ngày (ca gãy) — nối mã ca bằng dấu +', 'VD sáng + chiều']);
@@ -248,9 +291,7 @@ export function registerAssignmentRoutes(r, { need }) {
     if (!ws) return res.status(400).json({ error: 'File rỗng' });
 
     const empByCode = new Map(db.prepare("SELECT id, code FROM employees WHERE active=1").all().map((e) => [String(e.code).trim().toUpperCase(), e.id]));
-    const shiftByCode = new Map(db.prepare('SELECT id, code, name FROM shifts WHERE active=1').all()
-      .filter((s) => (s.code || '').trim())
-      .map((s) => [s.code.trim().toUpperCase(), s.id]));
+    const applyCell = cellApplier();
 
     // map cột → ngày (từ header dòng 1, phần số trước xuống dòng)
     const dayCol = new Map();
@@ -263,9 +304,6 @@ export function registerAssignmentRoutes(r, { need }) {
     });
 
     let updated = 0, cleared = 0, off = 0; const errors = [];
-    const del = db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id=? AND work_date=?');
-    const ins = db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,?)');
-    const up = (empId, date, sid, isOff) => { del.run(empId, date); ins.run(empId, date, sid, isOff); }; // 1 ca/ô = thay thế
 
     db.exec('BEGIN');
     try {
@@ -276,26 +314,39 @@ export function registerAssignmentRoutes(r, { need }) {
         const empId = empByCode.get(code);
         if (!empId) { errors.push(`Mã NV "${code}" không tồn tại`); continue; }
         for (const [col, date] of dayCol) {
-          const v = String(row.getCell(col).value ?? '').trim();
-          if (v === '') continue; // trống = không đổi
-          const V = v.toUpperCase();
-          if (['AUTO', 'TĐ', 'TU DONG', 'TỰ ĐỘNG', '-'].includes(V)) { del.run(empId, date); cleared++; continue; }
-          if (['NGHỈ', 'NGHI', 'OFF', 'N', 'X'].includes(V)) { up(empId, date, null, 1); off++; continue; }
-          // Nhiều ca gãy trong 1 ngày: nối mã bằng + , / hoặc ; (VD "S+C")
-          const codes = V.split(/[+,/;]/).map((s) => s.trim()).filter(Boolean);
-          const sids = [];
-          let bad = null;
-          for (const cd of codes) { const sid = shiftByCode.get(cd); if (!sid) { bad = cd; break; } sids.push(sid); }
-          if (bad) { errors.push(`Ngày ${date.slice(8)}: mã ca "${bad}" (NV ${code}) không tồn tại`); continue; }
-          const uniq = [...new Set(sids)];
-          del.run(empId, date);                       // thay toàn bộ ca ngày đó
-          for (const sid of uniq) ins.run(empId, date, sid, 0);
-          updated += uniq.length;
+          const out = applyCell(empId, date, row.getCell(col).value);   // ô trống = không đổi
+          if (out === 'clear') cleared++;
+          else if (out === 'off') off++;
+          else if (typeof out === 'string' && out.startsWith('set:')) updated += +out.slice(4);
+          else if (out && out.error) errors.push(`Ngày ${date.slice(8)}: mã ca "${out.error}" (NV ${code}) không tồn tại`);
         }
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/import', e); }
 
     res.json({ ok: true, updated, off, cleared, errors: errors.slice(0, 20), errorCount: errors.length });
+  });
+
+  // Lưu các ô sửa trực tiếp trên Bảng phân ca (kiểu Excel): { cells: [{ employee_id, date, value }] }
+  // value rỗng hoặc "-" = bỏ phân ca ngày đó (quay về lịch đã phân). Ô sai mã ca thì bỏ qua và báo lỗi, các ô khác vẫn lưu.
+  r.post('/assignments/cells', need('assignments'), (req, res) => {
+    const cells = Array.isArray(req.body?.cells) ? req.body.cells : [];
+    if (!cells.length) return res.status(400).json({ error: 'Không có ô nào để lưu' });
+    if (cells.length > 20000) return res.status(400).json({ error: 'Quá nhiều ô trong 1 lần lưu' });
+    const applyCell = cellApplier();
+    const empOk = new Set(db.prepare('SELECT id FROM employees WHERE active=1').all().map((e) => e.id));
+    let saved = 0; const errors = [];
+    db.exec('BEGIN');
+    try {
+      for (const c of cells) {
+        const eid = +c.employee_id, date = String(c.date || '').slice(0, 10);
+        if (!empOk.has(eid) || !/^\d{4}-\d{2}-\d{2}$/.test(date)) { errors.push({ employee_id: eid, date, error: 'Nhân viên hoặc ngày không hợp lệ' }); continue; }
+        const out = applyCell(eid, date, c.value, 'clear');
+        if (out && out.error) errors.push({ employee_id: eid, date, error: `Mã ca "${out.error}" không tồn tại` });
+        else saved++;
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/cells', e); }
+    res.json({ ok: true, saved, errors: errors.slice(0, 50), errorCount: errors.length });
   });
 }
