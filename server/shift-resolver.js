@@ -48,12 +48,41 @@ export function autoDetectShift(checkInIso, candidates, checkOutIso) {
   return scored[0].s;
 }
 
-// Phân ca theo KHOẢNG NGÀY (bảng shift_assignments) phủ ngày này — bản ghi mới nhất thắng.
+// Chuỗi phòng ban từ phòng của NV lên các cấp cha: [phòng, cha, ông…]
+function deptChain(name) {
+  const out = [], seen = new Set();
+  let cur = db.prepare('SELECT id, name, parent_id FROM departments WHERE name = ?').get(name);
+  if (!cur) return name ? [name] : [];
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id); out.push(cur.name);
+    cur = cur.parent_id ? db.prepare('SELECT id, name, parent_id FROM departments WHERE id = ?').get(cur.parent_id) : null;
+  }
+  return out;
+}
+// Lịch trình gán cho PHÒNG BAN phủ ngày này: phòng của NV trước, rồi tới phòng cấp trên có bật "bao gồm cấp dưới".
+export function deptShiftAssignment(employeeId, workDate) {
+  const e = db.prepare('SELECT department FROM employees WHERE id = ?').get(employeeId);
+  const dept = (e?.department || '').trim();
+  if (!dept) return null;
+  const chain = deptChain(dept);
+  for (let i = 0; i < chain.length; i++) {
+    const r = db.prepare(`SELECT * FROM dept_shift_assignments
+      WHERE department = ? AND active = 1 AND from_date <= ? AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
+        ${i > 0 ? 'AND include_children = 1' : ''}
+      ORDER BY id DESC LIMIT 1`).get(chain[i], workDate, workDate);
+    if (r) return r;
+  }
+  return null;
+}
+
+// Phân ca theo KHOẢNG NGÀY phủ ngày này — lịch RIÊNG của NV (shift_assignments, bản ghi mới nhất thắng);
+// NV không có lịch riêng thì theo lịch trình của PHÒNG BAN.
 export function rangedShiftAssignment(employeeId, workDate) {
-  return db.prepare(`SELECT * FROM shift_assignments
+  const own = db.prepare(`SELECT * FROM shift_assignments
     WHERE employee_id = ? AND active = 1 AND from_date <= ?
       AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
     ORDER BY id DESC LIMIT 1`).get(employeeId, workDate, workDate);
+  return own || deptShiftAssignment(employeeId, workDate);
 }
 
 // Quy tắc ghép log thực tế: ưu tiên ghi đè từ phân ca → quy tắc của ca → 'filo'.

@@ -157,6 +157,23 @@ export function initSchema() {
       created_at       TEXT NOT NULL DEFAULT (datetime('now'))
     );
 
+    -- Lịch trình gán cho PHÒNG BAN (kiểu ZKBio): mọi NV của phòng — kể cả người vào sau — đều theo,
+    -- trừ khi NV có lịch trình riêng (shift_assignments) hoặc đổi ca riêng ngày (daily_shift_assignments).
+    CREATE TABLE IF NOT EXISTS dept_shift_assignments (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      department       TEXT NOT NULL,                   -- tên phòng ban (khớp employees.department)
+      include_children INTEGER NOT NULL DEFAULT 1,      -- 1 = áp cả các phòng ban cấp dưới
+      mode             TEXT NOT NULL DEFAULT 'shift',   -- 'shift' | 'schedule'
+      shift_id         INTEGER REFERENCES shifts(id),
+      work_schedule_id INTEGER REFERENCES work_schedules(id),
+      from_date        TEXT NOT NULL,
+      to_date          TEXT,                            -- NULL = không thời hạn
+      merge_rule       TEXT NOT NULL DEFAULT 'default',
+      note             TEXT DEFAULT '',
+      active           INTEGER NOT NULL DEFAULT 1,
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
     -- Nhân viên tự đăng ký ca (chờ duyệt / tự áp dụng tuỳ cấu hình)
     CREATE TABLE IF NOT EXISTS shift_requests (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,

@@ -214,6 +214,45 @@ export function registerAssignmentRoutes(r, { need }) {
     res.json({ ok: true, count: n });
   });
 
+  /* -------------------- LỊCH TRÌNH PHÒNG BAN -------------------- */
+  r.get('/dept-shift-assignments', need('assignments'), (req, res) => {
+    const rows = db.prepare(`SELECT da.*, s.name AS shift_name, ws.name AS schedule_name
+      FROM dept_shift_assignments da
+      LEFT JOIN shifts s ON s.id = da.shift_id
+      LEFT JOIN work_schedules ws ON ws.id = da.work_schedule_id
+      WHERE da.active = 1 ORDER BY da.department, da.id DESC`).all();
+    res.json({ rows });
+  });
+  // { departments: ['Kế toán', …], include_children, mode, shift_id | work_schedule_id, from_date, to_date }
+  r.post('/dept-shift-assignments', need('assignments'), (req, res) => {
+    const b = req.body || {};
+    const depts = [...new Set((Array.isArray(b.departments) ? b.departments : []).map((x) => String(x || '').trim()).filter(Boolean))];
+    if (!depts.length) return res.status(400).json({ error: 'Chưa chọn phòng ban' });
+    const mode = b.mode === 'schedule' ? 'schedule' : 'shift';
+    const from = (b.from_date || '').slice(0, 10), to = (b.to_date || '').slice(0, 10) || null;
+    if (!from) return res.status(400).json({ error: 'Thiếu ngày bắt đầu' });
+    if (to && to < from) return res.status(400).json({ error: 'Ngày kết thúc phải sau ngày bắt đầu' });
+    const shiftId = mode === 'shift' ? (b.shift_id || null) : null;
+    const scheduleId = mode === 'schedule' ? (b.work_schedule_id || null) : null;
+    if (mode === 'shift' && !shiftId) return res.status(400).json({ error: 'Chưa chọn ca làm việc' });
+    if (mode === 'schedule' && !scheduleId) return res.status(400).json({ error: 'Chưa chọn lịch trình' });
+    const ins = db.prepare(`INSERT INTO dept_shift_assignments
+      (department, include_children, mode, shift_id, work_schedule_id, from_date, to_date, merge_rule, note) VALUES (?,?,?,?,?,?,?,?,?)`);
+    db.exec('BEGIN');
+    try {
+      for (const d of depts) ins.run(d, b.include_children === false ? 0 : 1, mode, shiftId, scheduleId, from, to, b.merge_rule || 'default', String(b.note || '').slice(0, 500));
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+    res.json({ ok: true, count: depts.length });
+  });
+  r.post('/dept-shift-assignments/delete', need('assignments'), (req, res) => {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : [];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn dòng nào để xoá' });
+    const del = db.prepare('DELETE FROM dept_shift_assignments WHERE id = ?');
+    let n = 0; for (const id of ids) n += del.run(id).changes;
+    res.json({ ok: true, count: n });
+  });
+
   /* -------------------- PHÂN CA BẰNG EXCEL -------------------- */
   // Xuất mẫu Excel phân ca tháng (lưới NV × ngày)
   r.get('/assignments/export.xlsx', need('assignments'), async (req, res) => {
