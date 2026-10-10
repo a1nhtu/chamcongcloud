@@ -215,6 +215,7 @@ async function handleProvision(request, env) {
   let mode = b.mode === "vps" ? "vps" : "office";
   let port = parseInt(b.port || "8686", 10) || 8686;
   if (port < 1024 || port > 65000) return jsonRes({ error: "Cổng app phải trong khoảng 1024–65000." }, 400);
+  const reqPort = port;
   let useDevice = b.useDevice === false ? "0" : "1";
   let usePhone = b.usePhone === false ? "0" : "1";
 
@@ -244,12 +245,15 @@ async function handleProvision(request, env) {
     }
     if (existing) {
       tunnelId = existing.tunnelId;
-      if (existing.port && existing.port !== port) { port = existing.port; portKept = true; }
+      // Setup.exe: cổng cũ bị trùng trên máy cài, người cài đã đồng ý đổi → trỏ tên miền về cổng mới
+      if (b.onlyExisting && b.setPort) port = reqPort;
+      else if (existing.port && existing.port !== port) { port = existing.port; portKept = true; }
     } else {
       if (list.length >= quota)
         return jsonRes({ error: `Đã đạt hạn mức ${quota} domain (đang dùng ${list.length}). Liên hệ quản trị để nâng hạn mức.`, count: list.length, quota }, 403);
       if (b.autoPort) port = nextFreePort(list);   // Setup.exe: khách mới tự lấy cổng trống tiếp theo
-      const clash = list.find((c) => c.port === port);
+      // Setup.exe bản mới (localPort): cổng do người cài chọn, đã kiểm tra trống TRÊN MÁY CÀI — cổng chỉ cần riêng trong 1 máy
+      const clash = b.localPort ? null : list.find((c) => c.port === port);
       if (clash)
         return jsonRes({ error: `Cổng ${port} đã cấp cho khách "${clash.slug}". Dùng cổng trống tiếp theo: ${nextFreePort(list)}.`, nextPort: nextFreePort(list) }, 409);
       const t = await cfProv(token, "POST", `/accounts/${accountId}/cfd_tunnel`, { name: tname, config_src: "cloudflare" });
