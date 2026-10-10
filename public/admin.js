@@ -89,17 +89,20 @@ async function afterLogin() {
     && !(key === 'shiftreq' && !selfShiftEnabled()));
   visible.forEach(([key, ic, label]) => {
     const b = el('button', { 'data-k': key }, el('span', {}, ic), label);
-    if (key === 'assignments') {
-      // Mục Phân ca có MENU CON: bấm mũi tên (hoặc bấm mục) để xổ ra / thu lại
-      const arrow = el('span', { class: 'nav-arrow', title: 'Mở / thu menu con' }, _asNavOpen ? '▾' : '▸');
+    // Mục có MENU CON (kiểu ZKBio): bấm mũi tên hoặc bấm mục để xổ ra / thu lại
+    const SUB = key === 'assignments' ? { id: 'nav-sub-as', tabs: AS_TABS, isOpen: () => _asNavOpen, setOpen: (o) => { _asNavOpen = o; }, pick: (tab) => { if (!asLeaveOk()) return false; _asTab = tab; _asAdd = null; return true; } }
+      : key === 'shifts' ? { id: 'nav-sub-sh', tabs: SH_TABS, isOpen: () => _shNavOpen, setOpen: (o) => { _shNavOpen = o; }, pick: (tab) => { _shView = tab; _schEdit = null; return true; } }
+        : null;
+    if (SUB) {
+      const arrow = el('span', { class: 'nav-arrow', title: 'Mở / thu menu con' }, SUB.isOpen() ? '▾' : '▸');
       b.append(el('span', { style: 'flex:1' }), arrow);
-      const subBox = el('div', { class: 'nav-sub', id: 'nav-sub-as', style: _asNavOpen ? '' : 'display:none' });
-      const setOpen = (o) => { _asNavOpen = o; arrow.textContent = o ? '▾' : '▸'; subBox.style.display = o ? '' : 'none'; };
-      arrow.addEventListener('click', (ev) => { ev.stopPropagation(); setOpen(!_asNavOpen); });
-      b.addEventListener('click', () => { if (!_asNavOpen) setOpen(true); else if (document.querySelector('#nav button[data-k="assignments"]').classList.contains('active')) { setOpen(false); return; } go(key); });
-      for (const [tab, sublabel] of AS_TABS) {
+      const subBox = el('div', { class: 'nav-sub', id: SUB.id, style: SUB.isOpen() ? '' : 'display:none' });
+      const setOpen = (o) => { SUB.setOpen(o); arrow.textContent = o ? '▾' : '▸'; subBox.style.display = o ? '' : 'none'; };
+      arrow.addEventListener('click', (ev) => { ev.stopPropagation(); setOpen(!SUB.isOpen()); });
+      b.addEventListener('click', () => { if (!SUB.isOpen()) setOpen(true); else if (b.classList.contains('active')) { setOpen(false); return; } go(key); });
+      for (const [tab, sublabel] of SUB.tabs) {
         const sb = el('button', { class: 'nav-sub-btn', 'data-as': tab }, sublabel);
-        sb.addEventListener('click', () => { if (!asLeaveOk()) return; _asTab = tab; _asAdd = null; go('assignments'); });
+        sb.addEventListener('click', () => { if (SUB.pick(tab)) go(key); });
         subBox.append(sb);
       }
       nav.append(b, subBox);
@@ -921,11 +924,15 @@ function deptEditModal(d, after) {
 
 /* ---------- 3) CA LÀM ---------- */
 async function pageShifts() {
+  document.querySelectorAll('#nav-sub-sh .nav-sub-btn').forEach((x) => x.classList.toggle('active', x.dataset.as === _shView));
+  if (_shView === 'schedules') return pageSchedules();
   const addBtn = hasPerm('shifts') ? el('button', { class: 'btn' }, '+ Thêm ca') : null;
-  const schedBtn = hasPerm('shifts') ? el('button', { class: 'btn ghost' }, '🗂️ Lịch trình ca') : null;
-  if (schedBtn) schedBtn.onclick = scheduleManageModal;
-  setMain(head('Ca làm', schedBtn, addBtn), loading());
+  // Màn hình hẹp không có menu con → vẫn để nút sang Lịch trình làm việc
+  const schedBtn = el('button', { class: 'btn ghost as-tabs', style: 'margin:0' }, '🗂️ Lịch trình làm việc');
+  schedBtn.onclick = () => { _shView = 'schedules'; _schEdit = null; pageShifts(); };
+  setMain(head('Ca làm việc', schedBtn, addBtn), loading());
   const { rows } = await api('/admin/shifts');
+  SHIFTS = rows;
   const tbl = el('table', { class: 'data' });
   tbl.innerHTML = `<thead><tr><th>Tên ca</th><th>Mã</th><th>Giờ vào</th><th>Giờ ra</th><th>Nhận diện tự động</th><th>Nghỉ giữa ca</th><th>Muộn/Sớm</th><th>Công/ca</th><th>OT</th><th>Ngày làm</th><th>TT</th><th></th></tr></thead>`;
   const tb = el('tbody');
@@ -948,10 +955,151 @@ async function pageShifts() {
   }
   tbl.append(tb);
   if (addBtn) addBtn.onclick = () => shiftModal(null);
-  setMain(head('Ca làm', schedBtn, addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Ca làm việc', schedBtn, addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
-/* ---------- Lịch trình ca ---------- */
+/* ---------- LỊCH TRÌNH LÀM VIỆC (kiểu "Ca làm việc" của ZKBio) ----------
+ * Một lịch trình = thứ nào / ngày nào làm ca nào, lặp theo chu kỳ (tuần · ngày · tháng). Ô trống = ngày nghỉ.
+ * Kiểu "tự dò" (cũ): chỉ là nhóm ca, hệ thống tự chọn ca theo giờ chấm. Lịch trình được chọn khi gán Lịch trình nhân viên / phòng ban. */
+let _shView = 'shifts';     // mục con đang xem của "Ca làm": shifts | schedules
+let _shNavOpen = false;
+let _schEdit = null;        // null = danh sách · { } = thêm mới · { id… } = đang sửa
+const SH_TABS = [['shifts', 'Ca làm việc'], ['schedules', 'Lịch trình làm việc']];
+const SCH_UNIT = { week: 'Tuần', day: 'Ngày', month: 'Tháng', auto: 'Tự dò theo giờ chấm' };
+const SCH_WD = ['Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy', 'Chủ Nhật'];
+
+async function pageSchedules() {
+  const canEdit = hasPerm('shifts');
+  let shifts = [], rows = [];
+  setMain(head('Lịch trình làm việc'), loading());
+  try { shifts = ((await api('/admin/shifts')).rows || []).filter((s) => s.active); SHIFTS = shifts; rows = (await api('/admin/schedules')).rows || []; SCHEDULES = rows; }
+  catch (e) { setMain(head('Lịch trình làm việc'), el('div', { class: 'empty' }, e.message)); return; }
+  const sName = new Map(shifts.map((s) => [s.id, (s.code || '').trim() || s.name]));
+
+  /* ===== Danh sách ===== */
+  if (!_schEdit) {
+    const addBtn = canEdit ? el('button', { class: 'btn' }, '+ Thêm lịch trình') : null;
+    if (addBtn) addBtn.onclick = () => { _schEdit = {}; pageSchedules(); };
+    const tbl = el('table', { class: 'data' });
+    tbl.append(el('thead', {}, el('tr', {}, el('th', {}, 'Tên'), el('th', {}, 'Đơn vị'), el('th', {}, 'Chu kỳ'), el('th', {}, 'Các ca trong lịch trình'), el('th', {}, 'Thao tác'))));
+    const tb = el('tbody'); tbl.append(tb);
+    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, '📭 Chưa có lịch trình nào. Bấm "+ Thêm lịch trình".'))));
+    for (const w of rows) {
+      const unit = w.unit || 'auto';
+      tb.append(el('tr', {}, el('td', {}, el('b', {}, w.name)), el('td', {}, SCH_UNIT[unit] || unit), el('td', {}, unit === 'auto' ? '—' : String(w.cycle || 1)),
+        el('td', { style: 'color:var(--muted)' }, (w.shifts || []).map((x) => x.name).join(', ') || '—'),
+        el('td', {}, canEdit ? el('div', { style: 'display:flex;gap:6px' }, btnSm('Chỉnh sửa', () => { _schEdit = w; pageSchedules(); }),
+          btnSm('Xoá', async () => { if (!confirm(`Xoá lịch trình "${w.name}"?`)) return; try { await api('/admin/schedules/' + w.id, { method: 'DELETE' }); toast('Đã xoá', 'ok'); pageSchedules(); } catch (e) { toast(e.message, 'err'); } }, 'ghost')) : '')));
+    }
+    setMain(head('Lịch trình làm việc', addBtn),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Lịch trình làm việc = thứ nào làm ca nào, lặp theo chu kỳ (VD Thứ Hai → Thứ Sáu ca Hành chính, Thứ Bảy ca Sáng, Chủ Nhật nghỉ). Tạo ở đây rồi gán cho nhân viên / phòng ban ở mục Phân ca.'),
+      el('div', { class: 'panel tbl-scroll' }, tbl));
+    return;
+  }
+
+  /* ===== Thêm / sửa (trái: tick ca · phải: tên, đơn vị, chu kỳ + bảng ngày) ===== */
+  const w = _schEdit;
+  const back = () => { _schEdit = null; pageSchedules(); };
+  const ticked = new Set();
+  const cells = new Map();   // idx → Set(shift_id)
+  for (const d of (w.days || [])) { if (!cells.has(d.idx)) cells.set(d.idx, new Set()); cells.get(d.idx).add(d.shift_id); }
+  const nameI = el('input', { value: w.name || '', placeholder: 'VD: Hành chính T2–T7', style: 'width:220px' });
+  const unitSel = el('select', { style: 'width:auto' }, ...['week', 'day', 'month', 'auto'].map((u) => el('option', { value: u, ...((w.unit || 'week') === u ? { selected: '' } : {}) }, SCH_UNIT[u])));
+  const cycI = el('input', { type: 'number', min: '1', max: '62', value: w.cycle || 1, style: 'width:80px' });
+  if (w.id && (w.unit || 'auto') === 'auto') for (const x of (w.shifts || [])) ticked.add(x.shift_id);
+
+  // Trái: danh sách ca để tick
+  const shSearch = el('input', { placeholder: 'Tên ca', style: 'margin-bottom:8px' });
+  const shTb = el('tbody');
+  const drawShifts = () => {
+    shTb.innerHTML = '';
+    const q = shSearch.value.trim().toLowerCase();
+    for (const s of shifts.filter((x) => !q || x.name.toLowerCase().includes(q))) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(ticked.has(s.id) ? { checked: '' } : {}) });
+      const tr = el('tr', { style: 'cursor:pointer' + (ticked.has(s.id) ? ';background:#f0fdf4' : '') }, el('td', {}, cb), el('td', {}, el('b', {}, s.name), s.code ? el('span', { class: 'pill muted', style: 'margin-left:6px' }, s.code) : ''), el('td', {}, s.start_time), el('td', {}, s.end_time), el('td', {}, String(s.break_minutes || 0)));
+      tr.onclick = (ev) => { if (ev.target !== cb) cb.checked = !cb.checked; if (cb.checked) ticked.add(s.id); else ticked.delete(s.id); drawShifts(); drawGrid(); };
+      shTb.append(tr);
+    }
+    if (!shifts.length) shTb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, 'Chưa có ca nào. Tạo ca ở mục Ca làm việc trước.'))));
+  };
+  shSearch.oninput = drawShifts;
+  const left = el('div', { class: 'panel', style: 'padding:14px' }, shSearch,
+    el('div', { class: 'tbl-scroll', style: 'max-height:calc(100vh - 300px);overflow:auto' }, el('table', { class: 'data emp-compact' },
+      el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', {}, 'Tên ca'), el('th', {}, 'Giờ vào'), el('th', {}, 'Giờ ra'), el('th', {}, 'Nghỉ (phút)'))), shTb)));
+
+  // Phải: bảng ngày × chu kỳ
+  const gridBox = el('div', {});
+  const setCell = (idx) => {
+    if (!ticked.size) { cells.delete(idx); return; }
+    const cur = cells.get(idx);
+    const same = cur && cur.size === ticked.size && [...ticked].every((x) => cur.has(x));
+    if (same) cells.delete(idx); else cells.set(idx, new Set(ticked));   // bấm lại ô đã có đúng các ca đó = xoá
+  };
+  const drawGrid = () => {
+    gridBox.innerHTML = '';
+    const unit = unitSel.value;
+    cycI.parentElement.style.display = unit === 'auto' ? 'none' : '';
+    if (unit === 'auto') {
+      gridBox.append(el('div', { class: 'map-hint' }, `Kiểu "Tự dò theo giờ chấm": chỉ cần tick các ca ở bảng bên trái (đang tick ${ticked.size} ca). Mỗi ngày hệ thống tự chọn ca khớp giờ chấm vào/ra của nhân viên — nên đặt "cửa sổ nhận diện" cho từng ca.`));
+      return;
+    }
+    const cyc = Math.max(1, Math.min(unit === 'day' ? 62 : 12, parseInt(cycI.value, 10) || 1));
+    const rowsN = unit === 'week' ? 7 : unit === 'month' ? 31 : cyc;
+    const colsN = unit === 'day' ? 1 : cyc;
+    const per = unit === 'week' ? 7 : unit === 'month' ? 31 : 1;
+    const idxOf = (r, c) => (unit === 'day' ? r : c * per + r);
+    const tbl = el('table', { class: 'data sch-grid' });
+    const hr = el('tr', {}, el('th', {}, ''));
+    for (let c = 0; c < colsN; c++) { const th = el('th', { title: 'Bấm để gán ca đang tick cho cả cột', style: 'cursor:pointer;text-align:center' }, unit === 'day' ? 'Ca' : 'Chu kỳ-' + (c + 1)); th.onclick = () => { for (let r = 0; r < rowsN; r++) { if (ticked.size) cells.set(idxOf(r, c), new Set(ticked)); else cells.delete(idxOf(r, c)); } drawGrid(); }; hr.append(th); }
+    tbl.append(el('thead', {}, hr));
+    const tb = el('tbody'); tbl.append(tb);
+    for (let r = 0; r < rowsN; r++) {
+      const lab = unit === 'week' ? SCH_WD[r] : 'Ngày ' + (r + 1);
+      const rh = el('td', { class: 'rh', title: 'Bấm để gán ca đang tick cho cả dòng' }, lab);
+      rh.onclick = () => { for (let c = 0; c < colsN; c++) { if (ticked.size) cells.set(idxOf(r, c), new Set(ticked)); else cells.delete(idxOf(r, c)); } drawGrid(); };
+      const tr = el('tr', {}, rh);
+      for (let c = 0; c < colsN; c++) {
+        const idx = idxOf(r, c), cur = cells.get(idx);
+        const td = el('td', { class: 'cell' + (cur && cur.size ? ' on' : ''), title: cur && cur.size ? 'Bấm để đổi / xoá' : 'Bấm để gán ca đang tick (để trống = ngày nghỉ)' }, cur && cur.size ? [...cur].map((id) => sName.get(id) || '?').join(' + ') : '');
+        td.onclick = () => { setCell(idx); drawGrid(); };
+        tr.append(td);
+      }
+      tb.append(tr);
+    }
+    gridBox.append(
+      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, ticked.size ? `Đang tick ${ticked.size} ca: bấm vào ô (hoặc tên thứ / tên cột) để gán. Ô để trống = ngày nghỉ.` : 'Tick 1 ca ở bảng bên trái, rồi bấm vào các ô ngày để gán. Không tick ca nào mà bấm ô = xoá ô đó.'),
+      el('div', { class: 'tbl-scroll', style: 'max-height:calc(100vh - 380px);overflow:auto' }, tbl),
+      el('div', { style: 'margin-top:8px;display:flex;gap:8px' }, btnSm('Gán ca đang tick cho mọi ô', () => { if (!ticked.size) return toast('Tick ca trước', 'err'); for (let r = 0; r < rowsN; r++) for (let c = 0; c < colsN; c++) cells.set(idxOf(r, c), new Set(ticked)); drawGrid(); }, 'ghost'), btnSm('Xoá hết ô', () => { cells.clear(); drawGrid(); }, 'ghost')));
+  };
+  unitSel.onchange = drawGrid; cycI.oninput = drawGrid;
+  const right = el('div', { class: 'panel', style: 'padding:14px' },
+    el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px' },
+      el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Tên'), nameI),
+      el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Đơn vị'), unitSel),
+      el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Chu kỳ'), cycI)),
+    gridBox);
+
+  const saveBtn = el('button', { class: 'btn green' }, 'Lưu');
+  saveBtn.onclick = async () => {
+    if (!nameI.value.trim()) return toast('Nhập tên lịch trình', 'err');
+    const unit = unitSel.value;
+    const body = { name: nameI.value.trim(), code: w.code || '', unit, cycle: parseInt(cycI.value, 10) || 1 };
+    if (unit === 'auto') { if (!ticked.size) return toast('Tick ít nhất 1 ca', 'err'); body.shift_ids = [...ticked]; }
+    else { body.days = [...cells].filter(([, set]) => set.size).map(([idx, set]) => ({ idx, shift_ids: [...set] })); if (!body.days.length) return toast('Chưa gán ca vào ô ngày nào', 'err'); }
+    saveBtn.disabled = true;
+    try {
+      if (w.id) await api('/admin/schedules/' + w.id, { method: 'PUT', body }); else await api('/admin/schedules', { method: 'POST', body });
+      toast('Đã lưu lịch trình', 'ok'); back();
+    } catch (e) { toast(e.message, 'err'); saveBtn.disabled = false; }
+  };
+  drawShifts(); drawGrid();
+  setMain(head('Lịch trình làm việc'),
+    el('div', { class: 'panel', style: 'padding:10px 16px;display:flex;align-items:center;gap:14px;margin-bottom:14px' },
+      btnSm('‹ Quay lại', back, 'ghost'), el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, w.id ? 'Chỉnh sửa' : 'Thêm'), el('span', { style: 'flex:1' }), canEdit ? saveBtn : ''),
+    el('div', { class: 'as-add', style: 'grid-template-columns:minmax(300px,1fr) minmax(0,1.5fr)' }, left, right));
+}
+
+/* ---------- Lịch trình ca (hộp thoại kiểu cũ, giữ lại để tương thích) ---------- */
 async function scheduleManageModal() {
   try { SHIFTS = (await api('/admin/shifts')).rows || SHIFTS; } catch {}   // luôn nạp danh sách ca mới nhất để form có ca mà tick
   const listBox = el('div', {}, loading());
@@ -1014,7 +1162,7 @@ function shiftModal(s) {
     return c;
   });
   const otChk = el('input', { type: 'checkbox', id: 's-allowot', style: 'width:auto', ...(s?.allow_ot ? { checked: '' } : {}) });
-  const body = [
+  const parts = [
     el('div', { class: 'two-col' }, field('Tên ca *', input('s-name', { value: s?.name || '', placeholder: 'Hành chính' })), field('Mã ca (cho Excel)', input('s-code', { value: s?.code || '', placeholder: 'VD: HC, S, C, DEM' }))),
     el('div', { class: 'two-col' }, field('Giờ vào * (24h, VD 08:00)', time24('s-start', s?.start_time || '08:00')), field('Giờ ra * (24h, VD 17:30)', time24('s-end', s?.end_time || '17:30'))),
     el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, '🌙 Ca qua đêm: đặt Giờ ra NHỎ HƠN Giờ vào (VD 22:00 → 06:00) — hệ thống tự hiểu là qua ngày hôm sau.'),
@@ -1072,6 +1220,13 @@ function shiftModal(s) {
     el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, 'Quy tắc ghép log = cách gộp nhiều lần quẹt máy thành giờ Vào/Ra. FILO hợp đa số. IDM cần đặt "số máy" cho từng máy (lẻ=Vào, chẵn=Ra). "Nhiều lần vào/ra": quẹt 1-2 là một cặp, 3-4 là cặp tiếp…, giờ công = tổng các cặp (giờ ra ngoài giữa chừng bị trừ, không trừ thêm nghỉ giữa ca). Các báo cáo (trừ "Giờ vào & ra đầu/cuối") hiện giờ vào/ra theo quy tắc này. Có thể ghi đè khi phân ca.'),
     el('div', {}, el('label', {}, 'Ngày làm việc'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...dayBoxes)),
   ];
+  // Chia form thành các TAB (như Ronald Jack) cho đỡ rối. Mọi ô vẫn nằm trong form, bấm Lưu một lần là lưu hết các tab.
+  const TABS = [['Thông tin chung', [0, 1, 2, 6, 5, 18]], ['Nhận diện ca & ghép giờ', [3, 4, 16, 17]], ['Tăng ca', [7, 8, 9, 10, 11, 14]], ['Nâng cao', [12, 13, 15]]];
+  const panes = TABS.map(([, idx]) => el('div', { class: 'tab-pane' }, ...idx.map((k) => parts[k])));
+  const tabBtns = TABS.map(([t], k) => { const b = el('button', { type: 'button', class: 'tab-btn' }, t); b.onclick = () => showTab(k); return b; });
+  const showTab = (k) => { panes.forEach((p, n) => { p.style.display = n === k ? 'flex' : 'none'; }); tabBtns.forEach((b, n) => b.classList.toggle('on', n === k)); };
+  showTab(0);
+  const body = [el('div', { class: 'tab-bar' }, ...tabBtns), ...panes];
   const save = el('button', { class: 'btn' }, 'Lưu');
   save.onclick = async () => {
     const work_days = [...document.querySelectorAll('.s-day:checked')].map(x => x.value).join(',') || '1,2,3,4,5,6';
@@ -1502,7 +1657,7 @@ async function pageAssignments() {
     let picked = null;   // 'shift:ID' | 'schedule:ID'
     const items = [
       ...data.shifts.map((s) => ({ key: 'shift:' + s.id, name: s.name, kind: 'Ca làm việc', info: `${s.start_time} – ${s.end_time}` })),
-      ...schedules.map((w) => ({ key: 'schedule:' + w.id, name: w.name, kind: 'Lịch trình (nhiều ca)', info: (w.shifts || []).map((x) => x.name).join(' + ') || 'chưa có ca' })),
+      ...schedules.map((w) => ({ key: 'schedule:' + w.id, name: w.name, kind: (w.unit || 'auto') === 'auto' ? 'Lịch trình · tự dò theo giờ' : `Lịch trình · ${SCH_UNIT[w.unit]} · chu kỳ ${w.cycle || 1}`, info: (w.shifts || []).map((x) => x.name).join(', ') || 'chưa có ca' })),
     ];
     const pickTb = el('tbody');
     const renderPick = () => {
@@ -1719,7 +1874,7 @@ async function pageAssignments() {
     const paint = (r, c) => {
       const td = cellEls[r][c], k = keyOf(r, c), dirty = _asDirty.has(k);
       const v = curVal(r, c), g = (emps[r].grid || [])[c] || {};
-      td.textContent = v || ((g.k !== 'manual' && g.k !== 'off') ? (g.l || '') : '');
+      td.textContent = v || g.l || '';   // chưa nhập riêng → hiện (chữ xám) ca theo lịch đã phân, kể cả "Nghỉ" theo chu kỳ
       td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph') + (dirty && norm(v).bad ? ' bad' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
       td.title = `${emps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập riêng ngày này)') : (g.k === 'none' ? 'tự động theo giờ chấm' : 'theo lịch đã phân: ' + (g.t || g.l || '')));
     };

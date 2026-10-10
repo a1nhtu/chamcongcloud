@@ -486,6 +486,17 @@ function migrateColumns() {
   add('shifts', 'weekend_as_ot',   'INTEGER NOT NULL DEFAULT 0');    // 1 = làm ca này vào cuối tuần → cả ca là tăng ca
   add('shifts', 'holiday_as_ot',   'INTEGER NOT NULL DEFAULT 0');    // 1 = làm ca này ngày lễ → cả ca là tăng ca
   add('shifts', 'compensate_late', 'INTEGER NOT NULL DEFAULT 0');    // 1 = bù trừ: đi trễ thì về trễ bù lại, không bị trừ giờ
+  // Lịch trình làm việc theo CHU KỲ (kiểu "Ca làm việc" của ZKBio): thứ nào / ngày nào làm ca nào.
+  //   unit: 'auto' = nhóm ca, tự dò theo giờ chấm (kiểu cũ) | 'week' | 'day' | 'month'; cycle = số tuần/ngày/tháng lặp lại
+  add('work_schedules', 'unit',  "TEXT NOT NULL DEFAULT 'auto'");
+  add('work_schedules', 'cycle', 'INTEGER NOT NULL DEFAULT 1');
+  db.exec(`CREATE TABLE IF NOT EXISTS work_schedule_days (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    work_schedule_id INTEGER NOT NULL REFERENCES work_schedules(id),
+    idx              INTEGER NOT NULL,   -- ô trong chu kỳ: tuần = chukỳ*7 + (thứ-1) · ngày = thứ tự ngày · tháng = chukỳ*31 + (ngày-1)
+    shift_id         INTEGER NOT NULL REFERENCES shifts(id),
+    UNIQUE(work_schedule_id, idx, shift_id)
+  )`);
   add('shifts', 'no_out_credit',   'INTEGER NOT NULL DEFAULT 0');    // 1 = thiếu giờ ra vẫn tính công (trừ phần đi trễ)
   add('shifts', 'grace_deduct',    'INTEGER NOT NULL DEFAULT 0');    // 1 = trễ/sớm chỉ tính phần VƯỢT số phút cho phép
   add('shifts', 'shift_as_ot',     'INTEGER NOT NULL DEFAULT 0');    // 1 = ca này là ca tăng ca (cả ca tính tăng ca, 0 công)

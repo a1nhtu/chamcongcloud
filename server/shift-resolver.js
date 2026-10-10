@@ -101,6 +101,35 @@ function dailyShiftObjs(da) {
 }
 
 // Ca hiển thị (chưa biết giờ chấm): phân ca ngày → phân ca khoảng → lịch trình (auto) → ca mặc định.
+// Ca của 1 lịch trình trong MỘT NGÀY cụ thể.
+//  - lịch trình kiểu cũ (unit 'auto'): trả cả nhóm ca, để tự dò theo giờ chấm → { pattern:false, off:false, shifts }
+//  - lịch trình theo chu kỳ (tuần / ngày / tháng): tra đúng ô của ngày đó; ô trống = NGÀY NGHỈ → { pattern:true, off, shifts }
+// anchor = ngày bắt đầu áp dụng (mốc đếm chu kỳ); không có thì lấy mốc cố định Thứ Hai 01/01/2024.
+const SCHED_ANCHOR = '2024-01-01';
+const dayNum = (d) => Math.round(Date.parse(d + 'T00:00:00Z') / 86400000);
+const wdOf = (d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return w === 0 ? 7 : w; };   // 1=T2 … 7=CN
+const mod = (a, n) => ((a % n) + n) % n;
+export function scheduleSlot(unit, cycle, workDate, anchor) {
+  const a = String(anchor || SCHED_ANCHOR).slice(0, 10);
+  const n = Math.max(1, cycle || 1);
+  if (unit === 'day') return mod(dayNum(workDate) - dayNum(a), n);
+  if (unit === 'month') {
+    const mi = (+workDate.slice(0, 4) * 12 + +workDate.slice(5, 7)) - (+a.slice(0, 4) * 12 + +a.slice(5, 7));
+    return mod(mi, n) * 31 + (+workDate.slice(8, 10) - 1);
+  }
+  const monday = (d) => dayNum(d) - (wdOf(d) - 1);
+  return mod(Math.floor((monday(workDate) - monday(a)) / 7), n) * 7 + (wdOf(workDate) - 1);
+}
+export function schedDay(scheduleId, workDate, anchor) {
+  const ws = db.prepare('SELECT unit, cycle FROM work_schedules WHERE id = ?').get(scheduleId);
+  const unit = ws?.unit || 'auto';
+  if (unit === 'auto') return { pattern: false, off: false, shifts: scheduleShifts(scheduleId) };
+  const idx = scheduleSlot(unit, ws.cycle, workDate, anchor);
+  const shifts = db.prepare(`SELECT s.* FROM work_schedule_days d JOIN shifts s ON s.id = d.shift_id
+    WHERE d.work_schedule_id = ? AND d.idx = ? AND s.active = 1 ORDER BY s.start_time`).all(scheduleId, idx);
+  return { pattern: true, off: !shifts.length, shifts };
+}
+
 export function resolveShift(employeeId, workDate) {
   const da = dailyAssignments(employeeId, workDate);
   if (da.length) {
@@ -112,15 +141,21 @@ export function resolveShift(employeeId, workDate) {
   const ra = rangedShiftAssignment(employeeId, workDate);
   if (ra) {
     if (ra.mode === 'shift' && ra.shift_id) { const s = getShift(ra.shift_id); if (s) return { off: false, shift: s, source: 'assign' }; }
-    if (ra.mode === 'schedule' && ra.work_schedule_id && scheduleShifts(ra.work_schedule_id).length) {
-      const ws = db.prepare('SELECT name FROM work_schedules WHERE id = ?').get(ra.work_schedule_id);
-      return { off: false, shift: null, source: 'schedule', scheduleName: ws?.name || '' };
+    if (ra.mode === 'schedule' && ra.work_schedule_id) {
+      const sd = schedDay(ra.work_schedule_id, workDate, ra.from_date);
+      const scheduleName = db.prepare('SELECT name FROM work_schedules WHERE id = ?').get(ra.work_schedule_id)?.name || '';
+      if (sd.off) return { off: true, shift: null, source: 'schedule', scheduleName };                       // ô trống trong chu kỳ = ngày nghỉ
+      if (sd.pattern && sd.shifts.length === 1) return { off: false, shift: sd.shifts[0], source: 'assign', scheduleName };
+      if (sd.shifts.length) return { off: false, shift: null, source: 'schedule', scheduleName };
     }
   }
   const emp = db.prepare('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
-  if (emp?.work_schedule_id && scheduleShifts(emp.work_schedule_id).length) {
-    const ws = db.prepare('SELECT name FROM work_schedules WHERE id = ?').get(emp.work_schedule_id);
-    return { off: false, shift: null, source: 'schedule', scheduleName: ws?.name || '' };
+  if (emp?.work_schedule_id) {
+    const sd = schedDay(emp.work_schedule_id, workDate, null);
+    const scheduleName = db.prepare('SELECT name FROM work_schedules WHERE id = ?').get(emp.work_schedule_id)?.name || '';
+    if (sd.off) return { off: true, shift: null, source: 'schedule', scheduleName };
+    if (sd.pattern && sd.shifts.length === 1) return { off: false, shift: sd.shifts[0], source: 'default', scheduleName };
+    if (sd.shifts.length) return { off: false, shift: null, source: 'schedule', scheduleName };
   }
   const shift = emp?.shift_id ? getShift(emp.shift_id) : null;
   return { off: false, shift, source: shift ? 'default' : 'none' };
@@ -143,13 +178,17 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOut
     const override = ra.merge_rule;
     if (ra.mode === 'shift' && ra.shift_id) { const s = getShift(ra.shift_id); if (s) return { off: false, shift: s, source: 'assign', mergeRule: effectiveMergeRule(s, override) }; }
     if (ra.mode === 'schedule' && ra.work_schedule_id) {
-      const cands = scheduleShifts(ra.work_schedule_id);
+      const sd = schedDay(ra.work_schedule_id, workDate, ra.from_date);
+      if (sd.off) return { off: false, shift: null, source: 'none', mergeRule: 'pairs' };   // ngày nghỉ theo chu kỳ: nếu vẫn có lượt quẹt thì tính như ngày không ca, không bỏ dữ liệu
+      const cands = sd.shifts;
       if (cands.length) { const s = autoDetectShift(checkInIso, cands, checkOutIso) || cands[0]; return { off: false, shift: s, source: 'schedule', mergeRule: effectiveMergeRule(s, override) }; }
     }
   }
   const emp = db.prepare('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
   if (emp?.work_schedule_id) {
-    const cands = scheduleShifts(emp.work_schedule_id);
+    const sd = schedDay(emp.work_schedule_id, workDate, null);
+    if (sd.off) return { off: false, shift: null, source: 'none', mergeRule: 'pairs' };
+    const cands = sd.shifts;
     if (cands.length) {
       const s = autoDetectShift(checkInIso, cands, checkOutIso) || cands[0];
       return { off: false, shift: s, source: 'schedule', mergeRule: effectiveMergeRule(s, null) };
@@ -176,13 +215,17 @@ export function resolveDayShifts(employeeId, workDate) {
     const override = ra.merge_rule;
     if (ra.mode === 'shift' && ra.shift_id) { const s = getShift(ra.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, override), source: 'assign', isSchedule: false }; }
     if (ra.mode === 'schedule' && ra.work_schedule_id) {
-      const cands = scheduleShifts(ra.work_schedule_id);
+      const sd = schedDay(ra.work_schedule_id, workDate, ra.from_date);
+      if (sd.off) return { off: false, shifts: [], mergeRule: null, source: 'auto', isSchedule: false, patternOff: true };   // ngày nghỉ theo chu kỳ: nếu vẫn có lượt quẹt thì tính như ngày không ca, không bỏ dữ liệu
+      const cands = sd.shifts;
       if (cands.length) return { off: false, shifts: cands, mergeRule: (override && override !== 'default') ? override : null, source: 'schedule', isSchedule: true };
     }
   }
   const emp = db.prepare('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
   if (emp?.work_schedule_id) {
-    const cands = scheduleShifts(emp.work_schedule_id);
+    const sd = schedDay(emp.work_schedule_id, workDate, null);
+    if (sd.off) return { off: false, shifts: [], mergeRule: null, source: 'auto', isSchedule: false, patternOff: true };
+    const cands = sd.shifts;
     if (cands.length) return { off: false, shifts: cands, mergeRule: null, source: 'schedule', isSchedule: true };
   }
   if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, null), source: 'default', isSchedule: false }; }

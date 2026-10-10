@@ -204,3 +204,15 @@ table.as-sheet td.c.anchor { outline: 2px solid #2563eb; outline-offset: -2px; }
 .as-form-row label { width: 120px; text-align: right; margin: 0; font-weight: 600; }
 .as-form-row input { width: 180px; }
 @media (max-width: 1000px) { .as-add { grid-template-columns: 1fr; } .as-add-left { flex-direction: column; } .as-col { border-right: none; border-bottom: 1px solid var(--line); } }
+/* Form có nhiều tab (khai báo ca) */
+.tab-bar { display: flex; gap: 4px; border-bottom: 2px solid var(--line); margin-bottom: 4px; flex-wrap: wrap; }
+.tab-btn { background: none; border: none; padding: 9px 14px; font-weight: 700; font-size: 13.5px; color: #6b7280; border-bottom: 3px solid transparent; margin-bottom: -2px; border-radius: 6px 6px 0 0; cursor: pointer; }
+.tab-btn:hover { background: #f6f3f0; }
+.tab-btn.on { color: var(--brand); border-bottom-color: var(--brand); }
+.tab-pane { display: none; flex-direction: column; gap: 14px; }
+/* Lịch trình làm việc: bảng ngày × chu kỳ */
+table.sch-grid td, table.sch-grid th { border: 1px solid var(--line); }
+table.sch-grid td.rh { background: #faf7f5; font-weight: 600; text-align: center; cursor: pointer; white-space: nowrap; width: 110px; }
+table.sch-grid td.cell { cursor: pointer; min-width: 120px; height: 38px; }
+table.sch-grid td.cell:hover { background: #fdece4; }
+table.sch-grid td.cell.on { color: #0f766e; font-weight: 700; background: #f0fdf4; }

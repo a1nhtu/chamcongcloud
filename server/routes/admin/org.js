@@ -22,26 +22,48 @@ function saveShiftExtra(id, b, old) {
   db.prepare(`UPDATE shifts SET ${keys.map((k) => k + '=?').join(', ')} WHERE id=?`).run(...keys.map(val), id);
 }
 
+// Đọc phần "chu kỳ" của lịch trình từ body: unit (auto|week|day|month), cycle, days:[{ idx, shift_ids:[...] }]
+function schedPattern(b) {
+  const unit = ['week', 'day', 'month'].includes(b.unit) ? b.unit : 'auto';
+  const cycle = Math.min(unit === 'day' ? 62 : 12, Math.max(1, parseInt(b.cycle, 10) || 1));
+  const maxIdx = unit === 'week' ? cycle * 7 : unit === 'month' ? cycle * 31 : unit === 'day' ? cycle : 0;
+  const cells = [];
+  if (unit !== 'auto') for (const d of (Array.isArray(b.days) ? b.days : [])) {
+    const idx = parseInt(d.idx, 10);
+    if (!(idx >= 0 && idx < maxIdx)) continue;
+    for (const sid of [...new Set((d.shift_ids || (d.shift_id ? [d.shift_id] : [])).map(Number).filter(Boolean))]) cells.push([idx, sid]);
+  }
+  return { unit, cycle, cells, shiftIds: [...new Set(cells.map((c) => c[1]))] };
+}
+function saveSchedDays(wsId, pat) {
+  db.prepare('DELETE FROM work_schedule_days WHERE work_schedule_id = ?').run(wsId);
+  const ins = db.prepare('INSERT OR IGNORE INTO work_schedule_days(work_schedule_id, idx, shift_id) VALUES (?,?,?)');
+  for (const [idx, sid] of pat.cells) ins.run(wsId, idx, sid);
+}
+
 export function registerOrgRoutes(r, { need }) {
   /* ----------------------------- LỊCH TRÌNH CA ----------------------------- */
   r.get('/schedules', (req, res) => {
     const rows = db.prepare('SELECT * FROM work_schedules WHERE active = 1 ORDER BY name').all();
     const links = db.prepare(`SELECT wss.work_schedule_id, wss.shift_id, wss.sort_order, s.name, s.code, s.start_time, s.end_time
       FROM work_schedule_shifts wss JOIN shifts s ON s.id = wss.shift_id WHERE s.active = 1 ORDER BY wss.sort_order`).all();
-    for (const ws of rows) ws.shifts = links.filter((l) => l.work_schedule_id === ws.id);
+    const days = db.prepare('SELECT work_schedule_id, idx, shift_id FROM work_schedule_days').all();
+    for (const ws of rows) { ws.shifts = links.filter((l) => l.work_schedule_id === ws.id); ws.days = days.filter((d) => d.work_schedule_id === ws.id).map((d) => ({ idx: d.idx, shift_id: d.shift_id })); }
     res.json({ rows });
   });
   r.post('/schedules', need('shifts'), (req, res) => {
     const b = req.body || {};
     if (!b.name) return res.status(400).json({ error: 'Nhập tên lịch trình' });
-    const ids = Array.isArray(b.shift_ids) ? b.shift_ids.map(Number).filter(Boolean) : [];
-    if (!ids.length) return res.status(400).json({ error: 'Chọn ít nhất 1 ca cho lịch trình' });
+    const pat = schedPattern(b);
+    const ids = pat.unit === 'auto' ? (Array.isArray(b.shift_ids) ? b.shift_ids.map(Number).filter(Boolean) : []) : pat.shiftIds;
+    if (!ids.length) return res.status(400).json({ error: pat.unit === 'auto' ? 'Chọn ít nhất 1 ca cho lịch trình' : 'Chưa gán ca vào ngày nào trong lịch trình' });
     db.exec('BEGIN');
     try {
-      const info = db.prepare('INSERT INTO work_schedules(code, name, description) VALUES (?,?,?)').run(b.code || '', b.name.trim(), b.description || '');
+      const info = db.prepare('INSERT INTO work_schedules(code, name, description, unit, cycle) VALUES (?,?,?,?,?)').run(b.code || '', b.name.trim(), b.description || '', pat.unit, pat.cycle);
       const wsId = info.lastInsertRowid;
       const ins = db.prepare('INSERT OR IGNORE INTO work_schedule_shifts(work_schedule_id, shift_id, sort_order) VALUES (?,?,?)');
       ids.forEach((sid, i) => ins.run(wsId, sid, i));
+      saveSchedDays(wsId, pat);
       db.exec('COMMIT');
       res.json({ ok: true, id: wsId });
     } catch (e) { db.exec('ROLLBACK'); sendCaughtError(res, 'POST /admin/schedules', e); }
@@ -50,12 +72,15 @@ export function registerOrgRoutes(r, { need }) {
     const b = req.body || {};
     const ws = db.prepare('SELECT * FROM work_schedules WHERE id = ?').get(req.params.id);
     if (!ws) return res.status(404).json({ error: 'Không tìm thấy lịch trình' });
-    const ids = Array.isArray(b.shift_ids) ? b.shift_ids.map(Number).filter(Boolean) : null;
+    const pat = b.unit != null ? schedPattern(b) : null;   // có gửi unit = sửa cả kiểu chu kỳ
+    const ids = pat && pat.unit !== 'auto' ? pat.shiftIds : (Array.isArray(b.shift_ids) ? b.shift_ids.map(Number).filter(Boolean) : null);
+    if (pat && !ids?.length) return res.status(400).json({ error: pat.unit === 'auto' ? 'Chọn ít nhất 1 ca cho lịch trình' : 'Chưa gán ca vào ngày nào trong lịch trình' });
     db.exec('BEGIN');
     try {
       db.prepare('UPDATE work_schedules SET code=?, name=?, description=?, active=? WHERE id=?').run(
         b.code ?? ws.code, b.name ?? ws.name, b.description ?? ws.description,
         b.active != null ? (b.active ? 1 : 0) : ws.active, ws.id);
+      if (pat) { db.prepare('UPDATE work_schedules SET unit=?, cycle=? WHERE id=?').run(pat.unit, pat.cycle, ws.id); saveSchedDays(ws.id, pat); }
       if (ids) {
         db.prepare('DELETE FROM work_schedule_shifts WHERE work_schedule_id = ?').run(ws.id);
         const ins = db.prepare('INSERT OR IGNORE INTO work_schedule_shifts(work_schedule_id, shift_id, sort_order) VALUES (?,?,?)');
@@ -68,6 +93,9 @@ export function registerOrgRoutes(r, { need }) {
   r.delete('/schedules/:id', need('shifts'), (req, res) => {
     const used = db.prepare('SELECT COUNT(*) c FROM employees WHERE work_schedule_id = ? AND active = 1').get(req.params.id).c;
     if (used > 0) return res.status(400).json({ error: `Còn ${used} nhân viên đang dùng lịch trình này` });
+    const used2 = db.prepare('SELECT COUNT(*) c FROM shift_assignments WHERE work_schedule_id = ? AND active = 1').get(req.params.id).c
+      + db.prepare('SELECT COUNT(*) c FROM dept_shift_assignments WHERE work_schedule_id = ? AND active = 1').get(req.params.id).c;
+    if (used2 > 0) return res.status(400).json({ error: `Lịch trình này đang được gán ở ${used2} dòng Lịch trình nhân viên / phòng ban. Xoá các dòng đó trước.` });
     db.prepare('UPDATE work_schedules SET active = 0 WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   });
