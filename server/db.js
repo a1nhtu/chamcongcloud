@@ -514,6 +514,9 @@ function migrateColumns() {
   )`);
   add('shift_assignments', 'inout_schedule_id', 'INTEGER');        // lịch trình vào ra gán kèm cho NV
   add('dept_shift_assignments', 'inout_schedule_id', 'INTEGER');   // … cho phòng ban
+  // Nguồn của dòng phân ca theo NGÀY: 'sheet' = nhập ở bảng Xem lịch trình (kiểu Excel) / Nhập Excel — ƯU TIÊN CAO NHẤT;
+  // 'temp' = Lịch trình tạm thời (không được đè lên ô đã nhập ở bảng Excel). Dòng cũ coi như 'sheet'.
+  add('daily_shift_assignments', 'source', "TEXT NOT NULL DEFAULT 'sheet'");
   add('shifts', 'no_out_credit',   'INTEGER NOT NULL DEFAULT 0');    // 1 = thiếu giờ ra vẫn tính công (trừ phần đi trễ)
   add('shifts', 'grace_deduct',    'INTEGER NOT NULL DEFAULT 0');    // 1 = trễ/sớm chỉ tính phần VƯỢT số phút cho phép
   add('shifts', 'shift_as_ot',     'INTEGER NOT NULL DEFAULT 0');    // 1 = ca này là ca tăng ca (cả ca tính tăng ca, 0 công)

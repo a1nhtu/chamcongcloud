@@ -1,7 +1,7 @@
 // Nhóm route PHÂN CA — theo ngày (lịch tuần), theo khoảng ngày (shift_assignments) và phân ca bằng Excel.
 import ExcelJS from 'exceljs';
-import { db, adminAttWhere } from '../../db.js';
-import { resolveShift } from '../../shift-resolver.js';
+import { db, adminAttWhere, getSetting } from '../../db.js';
+import { resolveShift, schedDay } from '../../shift-resolver.js';
 import { vnWeekday } from '../../attendance-calc.js';
 import { sendCaughtError } from '../../util.js';
 
@@ -67,7 +67,7 @@ export function registerAssignmentRoutes(r, { need }) {
     }
 
     const assignments = db.prepare(
-      'SELECT employee_id, work_date, shift_id, is_off FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?'
+      'SELECT employee_id, work_date, shift_id, is_off, source FROM daily_shift_assignments WHERE work_date >= ? AND work_date <= ?'
     ).all(from, to);
 
     // ?grid=1 → ca THỰC TẾ của từng NV từng ngày (đã tính ưu tiên: đổi ca ngày → phân ca khoảng → lịch trình → ca mặc định)
@@ -105,34 +105,73 @@ export function registerAssignmentRoutes(r, { need }) {
     res.json({ ok: true });
   });
 
-  // Gán hàng loạt: nhiều NV × khoảng ngày × lọc thứ
+  /* ----------------------------- LỊCH TRÌNH TẠM THỜI ----------------------------- */
+  // Thêm lịch tạm thời cho nhiều NV và/hoặc cả phòng ban trong một khoảng ngày → bung ra từng NV × từng ngày.
+  //   { employee_ids:[], departments:[tên], include_children, from, to, skip_off, weekdays:[1..7],
+  //     shift_id | work_schedule_id | is_off }   (không có cả 3 = BỎ lịch tạm thời trong khoảng đó)
+  // KHÔNG đè lên ô đã nhập ở bảng Xem lịch trình (kiểu Excel) — bảng đó ưu tiên cao nhất.
   r.post('/assignments/bulk', need('assignments'), (req, res) => {
     const b = req.body || {};
-    const empIds = Array.isArray(b.employee_ids) ? b.employee_ids : [];
     const from = (b.from || '').slice(0, 10), to = (b.to || '').slice(0, 10);
-    if (!empIds.length || !from || !to) return res.status(400).json({ error: 'Thiếu nhân viên hoặc khoảng ngày' });
+    if (!from || !to) return res.status(400).json({ error: 'Thiếu khoảng ngày' });
+    if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
+    // Nhân viên: tick trực tiếp + mọi người thuộc các phòng ban đã tick (kèm phòng cấp dưới nếu chọn)
+    const ids = new Set((Array.isArray(b.employee_ids) ? b.employee_ids : []).map(Number).filter(Boolean));
+    const deptNames = new Set((Array.isArray(b.departments) ? b.departments : []).map((x) => String(x || '').trim()).filter(Boolean));
+    if (deptNames.size && b.include_children !== false) {
+      const all = db.prepare('SELECT id, name, parent_id FROM departments').all();
+      let grew = true;
+      while (grew) { grew = false; for (const d of all) { const p = all.find((x) => x.id === d.parent_id); if (p && deptNames.has(p.name) && !deptNames.has(d.name)) { deptNames.add(d.name); grew = true; } } }
+    }
+    if (deptNames.size) for (const e of db.prepare("SELECT id, department FROM employees WHERE active = 1" + adminAttWhere()).all()) if (deptNames.has((e.department || '').trim())) ids.add(e.id);
+    if (!ids.size) return res.status(400).json({ error: 'Chưa chọn nhân viên hoặc phòng ban nào (hoặc phòng ban chưa có nhân viên)' });
+
     const weekdays = Array.isArray(b.weekdays) && b.weekdays.length ? new Set(b.weekdays.map(Number)) : null; // 1..7
     const isOff = b.is_off ? 1 : 0;
-    const shiftId = isOff ? null : (b.shift_id || null);
-    const clear = !isOff && !shiftId;
+    const scheduleId = !isOff && b.work_schedule_id ? +b.work_schedule_id : null;
+    const shiftId = !isOff && !scheduleId ? (b.shift_id || null) : null;
+    const clear = !isOff && !shiftId && !scheduleId;
+    const skipOff = !!b.skip_off && !clear;
+    const weekend = new Set(String(getSetting('weekend_days', '7')).split(',').map(Number));
+    const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date >= ? AND holiday_date <= ?').all(from, to).map((h) => h.holiday_date));
 
-    const insert = db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,?)');
-    const del = db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?');
+    const insert = db.prepare("INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off, source) VALUES (?,?,?,?, 'temp')");
+    const delTemp = db.prepare("DELETE FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ? AND source = 'temp'");
+    const hasSheet = db.prepare("SELECT 1 FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ? AND source <> 'temp' LIMIT 1");
 
-    let n = 0;
+    let n = 0, keptSheet = 0, skippedOff = 0;
     db.exec('BEGIN');
     try {
       for (let d = new Date(from + 'T12:00:00Z'); d <= new Date(to + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + 1)) {
         const ds = d.toISOString().slice(0, 10);
         if (weekdays && !weekdays.has(vnWeekday(ds))) continue;
-        for (const eid of empIds) {
-          del.run(eid, ds);                       // thay thế toàn bộ ca ngày đó
-          if (!clear) insert.run(eid, ds, shiftId, isOff);
+        const dayOff = holidays.has(ds) || weekend.has(vnWeekday(ds));
+        // lịch trình theo chu kỳ: ca của ngày này (mốc chu kỳ = ngày bắt đầu khoảng)
+        const sd = scheduleId ? schedDay(scheduleId, ds, from) : null;
+        for (const eid of ids) {
+          if (hasSheet.get(eid, ds)) { keptSheet++; continue; }                 // ô đã nhập ở bảng Excel → giữ nguyên
+          if (skipOff && (dayOff || (sd && sd.off))) { skippedOff++; continue; }  // bỏ qua ngày nghỉ
+          delTemp.run(eid, ds);
+          if (clear) { n++; continue; }
+          if (isOff || (sd && sd.off)) insert.run(eid, ds, null, 1);
+          else if (sd) for (const sh of sd.shifts) insert.run(eid, ds, sh.id, 0);
+          else insert.run(eid, ds, shiftId, 0);
           n++;
         }
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
+    res.json({ ok: true, count: n, employees: ids.size, keptSheet, skippedOff });
+  });
+  // Xoá nhiều dòng phân ca theo ngày: { items: [{ employee_id, date }] } (nhân viên quay về lịch đã gán)
+  r.post('/assignments/clear', need('assignments'), (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    if (!items.length) return res.status(400).json({ error: 'Chưa chọn dòng nào' });
+    const del = db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?');
+    let n = 0;
+    db.exec('BEGIN');
+    try { for (const it of items) n += del.run(+it.employee_id, String(it.date || '').slice(0, 10)).changes ? 1 : 0; db.exec('COMMIT'); }
+    catch (e) { db.exec('ROLLBACK'); throw e; }
     res.json({ ok: true, count: n });
   });
 

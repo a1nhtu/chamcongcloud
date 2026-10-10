@@ -964,7 +964,7 @@ async function pageShifts() {
 /* ---------- LỊCH TRÌNH VÀO RA (kiểu Ronald Jack) ----------
  * Khai báo RIÊNG cách xác định lượt quẹt nào là VÀO, lượt nào là RA (không còn nằm trong ca). Gán kèm khi Gán ca cho nhân viên / phòng ban. */
 const IO_RULES = [
-  ['filo', 'Giờ đầu là vào, giờ cuối là ra trong 1 ngày', 'Lần chấm công đầu tiên được xem là giờ VÀO, lần chấm công cuối cùng được xem là giờ RA. Bỏ qua tất cả các giờ chấm ở giữa, chỉ áp dụng chấm công trong ngày.'],
+  ['filo', 'Giờ đầu là vào, giờ cuối là ra', 'Lần chấm công đầu tiên được xem là giờ VÀO, lần chấm công cuối cùng được xem là giờ RA, bỏ qua tất cả các giờ chấm ở giữa. Tính trong khung giờ của ca: ca ngày lấy trong ngày; ca qua đêm lấy lượt VÀO buổi tối và lượt RA sáng hôm sau.'],
   ['pairs', 'Tự động - không qua đêm (không qua 12h)', 'Lần chấm đầu là VÀO, lần chấm kế tiếp là RA, rồi lại VÀO… Giờ làm = tổng các cặp vào–ra (thời gian ra ngoài giữa chừng bị trừ). Việc chọn lượt phụ thuộc ba thông số bên dưới.'],
   ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động" nhưng dùng cho ca đêm: lượt VÀO buổi tối ghép với lượt RA sáng hôm sau.'],
   ['idm', 'Theo ID máy', 'Khi chấm công ở máy có số máy lẻ (1, 3, 5, 7, 9) sẽ là VÀO. Khi chấm ở máy có số máy chẵn (2, 4, 6, 8, 10) sẽ là RA. Đặt "số máy" cho từng máy ở mục Máy chấm công.'],
@@ -1635,7 +1635,8 @@ let _asDept = '*';          // phòng ban đang chọn trên cây ('*' = tất c
 let _asSearch = '';
 let _asTreeHidden = (() => { try { return localStorage.getItem('as_tree_hidden') === '1'; } catch { return false; } })();   // ẩn cây phòng ban cho rộng màn hình
 const AS_TABS = [['list', '4. Gán ca cho nhân viên'], ['dept', '5. Gán ca cho phòng ban'], ['sheet', 'Xem lịch trình (kiểu Excel)'], ['temp', 'Lịch trình tạm thời']];
-let _asAdd = null;          // đang mở trang "Thêm": 'emp' (lịch trình nhân viên) | 'dept' (lịch trình phòng ban)
+let _asAdd = null;          // đang mở trang "Thêm": 'emp' (gán ca nhân viên) | 'dept' (gán ca phòng ban) | 'temp' (lịch trình tạm thời)
+let _asTmpSrc = '';         // lọc nguồn ở Lịch trình tạm thời: '' | 'temp' | 'sheet'
 // Cây phòng ban có cấp cha–con: [{ name, depth }], gồm cả tên phòng ban chỉ có ở hồ sơ nhân viên
 function asDeptNodes(master, extraNames) {
   const byName = (a, b) => a.name.localeCompare(b.name, 'vi');
@@ -1720,7 +1721,7 @@ async function pageAssignments() {
    * Trái: chọn đối tượng — nhân viên (bấm phòng ban → tick người, cộng dồn qua nhiều phòng) hoặc phòng ban (tick trên cây).
    * Giữa: danh sách "Đã chọn N mục" (bỏ từng mục bằng ×). Phải: ngày bắt đầu/kết thúc + chọn 1 ca hoặc 1 lịch trình. */
   if (_asAdd && canEdit) {
-    const isDept = _asAdd === 'dept';
+    const isDept = _asAdd === 'dept', isTemp = _asAdd === 'temp';
     let schedules = [], ios = [];
     try { schedules = (await api('/admin/schedules')).rows || []; } catch {}
     try { ios = (await api('/admin/inout-schedules')).rows || []; } catch {}
@@ -1731,13 +1732,15 @@ async function pageAssignments() {
 
     // ----- Phải: ngày + chọn ca / lịch trình -----
     const fromI = el('input', { type: 'date', value: todayVN() });
-    const toI = el('input', { type: 'date', value: '' });
+    const toI = el('input', { type: 'date', value: isTemp ? todayVN() : '' });
+    const skipOff = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
     const pickSearch = el('input', { placeholder: 'Tên ca / lịch trình' });
     let picked = null;   // 'shift:ID' | 'schedule:ID'
     const items = [
       ...data.shifts.map((s) => ({ key: 'shift:' + s.id, name: s.name, kind: 'Ca làm việc', info: `${s.start_time} – ${s.end_time}` })),
       ...schedules.map((w) => ({ key: 'schedule:' + w.id, name: w.name, kind: (w.unit || 'auto') === 'auto' ? 'Lịch trình · tự dò theo giờ' : `Lịch trình · ${SCH_UNIT[w.unit]} · chu kỳ ${w.cycle || 1}`, info: (w.shifts || []).map((x) => x.name).join(', ') || 'chưa có ca' })),
     ];
+    if (isTemp) items.push({ key: 'off:0', name: '🛌 Nghỉ', kind: 'Ngày nghỉ', info: 'cho nghỉ các ngày đã chọn' });
     const pickTb = el('tbody');
     const renderPick = () => {
       pickTb.innerHTML = '';
@@ -1754,12 +1757,20 @@ async function pageAssignments() {
     pickSearch.oninput = renderPick; renderPick();
     const pickTbl = el('table', { class: 'data emp-compact' }, el('thead', {}, el('tr', {}, el('th', {}, ''), el('th', {}, 'Tên'), el('th', {}, 'Loại'), el('th', {}, 'Giờ / các ca'))), pickTb);
     const right = el('div', { class: 'panel', style: 'padding:16px' },
-      el('div', { class: 'as-form-row' }, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Ngày bắt đầu:'), fromI),
-      el('div', { class: 'as-form-row' }, el('label', {}, 'Ngày kết thúc:'), toI),
-      el('div', { class: 'map-hint', style: 'margin:0 0 12px' }, 'Để trống ngày kết thúc = áp dụng không thời hạn.'),
-      el('div', { style: 'margin-bottom:12px' }, el('label', {}, 'Lịch trình vào ra (cách xác định VÀO / RA)'), ioSel,
-        ios.length ? '' : el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Chưa khai lịch trình vào ra nào (mục 2. Lịch trình vào ra) → dùng "giờ đầu là vào, giờ cuối là ra".')),
-      el('label', {}, 'Ca làm việc / Lịch trình ca làm việc'),
+      ...(isTemp ? [
+        el('div', { class: 'as-form-row' }, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Từ ngày:'), fromI),
+        el('div', { class: 'as-form-row' }, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Đến ngày:'), toI),
+        el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);margin:0 0 6px 130px' }, skipOff, 'Bỏ qua ngày nghỉ'),
+        el('div', { class: 'map-hint', style: 'margin:0 0 12px' }, 'Bỏ qua ngày nghỉ: không tạo lịch tạm thời vào ngày cuối tuần, ngày lễ, và ngày để trống trong lịch trình ca đã chọn.'),
+        el('label', {}, 'Ca làm việc / Lịch trình ca làm việc áp dụng tạm thời'),
+      ] : [
+        el('div', { class: 'as-form-row' }, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Ngày bắt đầu:'), fromI),
+        el('div', { class: 'as-form-row' }, el('label', {}, 'Ngày kết thúc:'), toI),
+        el('div', { class: 'map-hint', style: 'margin:0 0 12px' }, 'Để trống ngày kết thúc = áp dụng không thời hạn.'),
+        el('div', { style: 'margin-bottom:12px' }, el('label', {}, 'Lịch trình vào ra (cách xác định VÀO / RA)'), ioSel,
+          ios.length ? '' : el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Chưa khai lịch trình vào ra nào (mục 2. Lịch trình vào ra) → dùng "giờ đầu là vào, giờ cuối là ra".')),
+        el('label', {}, 'Ca làm việc / Lịch trình ca làm việc'),
+      ]),
       el('div', { style: 'display:flex;gap:8px;margin-bottom:10px' }, pickSearch),
       el('div', { class: 'tbl-scroll', style: 'max-height:calc(100vh - 430px);overflow:auto' }, pickTbl));
 
@@ -1774,7 +1785,7 @@ async function pageAssignments() {
       for (const [k, lab] of sel) {
         const x = el('span', { class: 'as-x', title: 'Bỏ chọn' }, '✕');
         x.onclick = () => { sel.delete(k); renderSel(); syncLeft(); };
-        selBox.append(el('div', { class: 'as-sel-item' }, el('span', {}, (isDept ? '📁 ' : '👤 ') + lab), x));
+        selBox.append(el('div', { class: 'as-sel-item' }, el('span', {}, (isDept || (typeof k === 'string' && k.startsWith('d:')) ? '📁 ' : '👤 ') + lab), x));
       }
     };
     const clearBtn = el('span', { class: 'as-x', title: 'Bỏ chọn tất cả', style: 'font-size:15px' }, '🗑');
@@ -1783,7 +1794,49 @@ async function pageAssignments() {
 
     // ----- Trái: cây phòng ban (+ danh sách nhân viên của phòng đang bấm) -----
     let leftCols;
-    if (isDept) {
+    if (isTemp) {
+      // Lịch tạm thời: tick được CẢ phòng ban (ô tick trên cây) lẫn TỪNG nhân viên (bấm tên phòng → tick người)
+      const incl = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
+      let curDept = nodes[0] ? nodes[0].name : '';
+      const empSearch = el('input', { placeholder: 'Tên hoặc mã nhân viên', style: 'margin-bottom:8px' });
+      const treeBox = el('div', { class: 'emp-tree', style: 'padding:0' });
+      const listHead = el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);margin-bottom:6px' });
+      const listBox = el('div', { class: 'as-sel-list' });
+      const lab = (e) => `${e.full_name} (${e.code})`;
+      const shown = () => {
+        const q = empSearch.value.trim().toLowerCase();
+        if (q) return data.employees.filter((e) => e.full_name.toLowerCase().includes(q) || String(e.code).toLowerCase().includes(q));
+        const set = descOf(curDept);
+        return data.employees.filter((e) => set.has(e.department || ''));
+      };
+      const draw = () => {
+        treeBox.innerHTML = '';
+        for (const n of nodes) {
+          const cb = el('input', { type: 'checkbox', style: 'width:auto', title: 'Tick = chọn cả phòng ban', ...(sel.has('d:' + n.name) ? { checked: '' } : {}) });
+          cb.onclick = (ev) => ev.stopPropagation();
+          cb.onchange = () => { const names = incl.checked ? [...descOf(n.name)] : [n.name]; for (const nm of names) { if (cb.checked) sel.set('d:' + nm, nm); else sel.delete('d:' + nm); } renderSel(); draw(); };
+          const row = el('div', { class: 'tn' + (curDept === n.name && !empSearch.value.trim() ? ' on' : ''), style: 'padding-left:' + (6 + n.depth * 16) + 'px;gap:8px', title: 'Bấm tên để xem nhân viên của phòng' }, cb, el('span', { class: 'nm' }, '📁 ' + n.name), el('span', { class: 'ct' }, String(countOf(n.name))));
+          row.onclick = () => { curDept = n.name; empSearch.value = ''; draw(); };
+          treeBox.append(row);
+        }
+        const list = shown();
+        const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => sel.has(e.id)) ? { checked: '' } : {}) });
+        all.onchange = () => { for (const e of list) { if (all.checked) sel.set(e.id, lab(e)); else sel.delete(e.id); } renderSel(); draw(); };
+        listHead.innerHTML = ''; listHead.append(all, `${list.length} mục`);
+        listBox.innerHTML = '';
+        if (!list.length) listBox.append(el('div', { class: 'empty', style: 'padding:14px 4px' }, 'Không có nhân viên.'));
+        for (const e of list) {
+          const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(sel.has(e.id) ? { checked: '' } : {}) });
+          cb.onchange = () => { if (cb.checked) sel.set(e.id, lab(e)); else sel.delete(e.id); renderSel(); draw(); };
+          listBox.append(el('label', { class: 'as-sel-item', style: 'justify-content:flex-start;gap:8px;cursor:pointer' }, cb, el('span', {}, '👤 ' + e.full_name), el('span', { style: 'color:#9ca3af;font-size:12px' }, e.code)));
+        }
+      };
+      empSearch.oninput = draw;
+      syncLeft = draw; draw();
+      leftCols = [el('div', { class: 'as-col' }, empSearch, el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);margin-bottom:8px' }, incl, 'Bao gồm cấp dưới'), treeBox),
+        el('div', { class: 'as-col' }, listHead, listBox), selCol];
+      var getBody = () => ({ url: '/admin/assignments/bulk', body: { employee_ids: [...sel.keys()].filter((k) => typeof k === 'number'), departments: [...sel.keys()].filter((k) => typeof k === 'string').map((k) => k.slice(2)), include_children: incl.checked } });
+    } else if (isDept) {
       const incl = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
       const treeBox = el('div', { class: 'emp-tree', style: 'padding:0' });
       const drawTree = () => {
@@ -1843,20 +1896,33 @@ async function pageAssignments() {
 
     const saveBtn = el('button', { class: 'btn green' }, 'Lưu');
     saveBtn.onclick = async () => {
-      if (!sel.size) return toast(isDept ? 'Chưa tick phòng ban nào' : 'Chưa tick nhân viên nào', 'err');
+      if (!sel.size) return toast(isTemp ? 'Chưa tick phòng ban / nhân viên nào' : isDept ? 'Chưa tick phòng ban nào' : 'Chưa tick nhân viên nào', 'err');
       if (!fromI.value) return toast('Chọn ngày bắt đầu', 'err');
+      if (isTemp && !toI.value) return toast('Chọn đến ngày', 'err');
       if (toI.value && toI.value < fromI.value) return toast('Ngày kết thúc phải sau ngày bắt đầu', 'err');
       if (!picked) return toast('Chọn 1 ca hoặc 1 lịch trình ở bảng bên phải', 'err');
       const [kind, id] = picked.split(':');
       const g = getBody();
-      const body = { ...g.body, mode: kind, from_date: fromI.value, to_date: toI.value || null, merge_rule: 'default', inout_schedule_id: ioSel.value ? +ioSel.value : null };
-      if (kind === 'shift') body.shift_id = +id; else body.work_schedule_id = +id;
+      let body;
+      if (isTemp) {
+        body = { ...g.body, from: fromI.value, to: toI.value, skip_off: skipOff.checked };
+        if (kind === 'off') body.is_off = true; else if (kind === 'shift') body.shift_id = +id; else body.work_schedule_id = +id;
+      } else {
+        body = { ...g.body, mode: kind, from_date: fromI.value, to_date: toI.value || null, merge_rule: 'default', inout_schedule_id: ioSel.value ? +ioSel.value : null };
+        if (kind === 'shift') body.shift_id = +id; else body.work_schedule_id = +id;
+      }
       saveBtn.disabled = true;
-      try { const r = await api(g.url, { method: 'POST', body }); toast(`Đã lưu lịch trình cho ${r.count} ${isDept ? 'phòng ban' : 'nhân viên'}`, 'ok'); back(); }
-      catch (e) { toast(e.message, 'err'); saveBtn.disabled = false; }
+      try {
+        const r = await api(g.url, { method: 'POST', body });
+        if (isTemp) {
+          toast(`Đã tạo ${r.count} dòng lịch tạm thời cho ${r.employees} nhân viên` + (r.skippedOff ? ` · bỏ qua ${r.skippedOff} ngày nghỉ` : '') + (r.keptSheet ? ` · giữ nguyên ${r.keptSheet} ô đã nhập ở bảng Excel` : ''), r.count ? 'ok' : 'err');
+          _asStart = fromI.value;
+        } else toast(`Đã lưu cho ${r.count} ${isDept ? 'phòng ban' : 'nhân viên'}`, 'ok');
+        back();
+      } catch (e) { toast(e.message, 'err'); saveBtn.disabled = false; }
     };
     const bar = el('div', { class: 'panel', style: 'padding:10px 16px;display:flex;align-items:center;gap:14px;margin-bottom:14px' },
-      btnSm('‹ Quay lại', back, 'ghost'), el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, isDept ? 'Gán ca cho phòng ban' : 'Gán ca cho nhân viên'), el('span', { style: 'flex:1' }), saveBtn);
+      btnSm('‹ Quay lại', back, 'ghost'), el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, isTemp ? 'Thêm lịch trình tạm thời' : isDept ? 'Gán ca cho phòng ban' : 'Gán ca cho nhân viên'), el('span', { style: 'flex:1' }), saveBtn);
     setMain(head(pageTitle), tabBar, bar, el('div', { class: 'as-add' }, el('div', { class: 'panel as-add-left' }, ...leftCols), right));
     return;
   }
@@ -1944,9 +2010,10 @@ async function pageAssignments() {
       return { v: t, bad: true };
     };
     // Giá trị ĐÃ LƯU của từng ô (ca nhập riêng cho ngày đó)
-    const saved = new Map();
+    const saved = new Map(), tempKeys = new Set();
     for (const a of data.assignments) {
       const k = a.employee_id + '|' + a.work_date;
+      if (a.source === 'temp') tempKeys.add(k);
       if (a.is_off) saved.set(k, 'NGHỈ');
       else if (saved.get(k) !== 'NGHỈ') { const c = codeOfShift.get(a.shift_id); if (c) saved.set(k, saved.has(k) ? saved.get(k) + '+' + c : c); }
     }
@@ -1958,8 +2025,8 @@ async function pageAssignments() {
       const td = cellEls[r][c], k = keyOf(r, c), dirty = _asDirty.has(k);
       const v = curVal(r, c), g = (emps[r].grid || [])[c] || {};
       td.textContent = v || g.l || '';   // chưa nhập riêng → hiện (chữ xám) ca theo lịch đã phân, kể cả "Nghỉ" theo chu kỳ
-      td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph') + (dirty && norm(v).bad ? ' bad' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
-      td.title = `${emps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập riêng ngày này)') : (g.k === 'none' ? 'tự động theo giờ chấm' : 'theo lịch đã phân: ' + (g.t || g.l || '')));
+      td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph') + (dirty && norm(v).bad ? ' bad' : '') + (!dirty && tempKeys.has(k) ? ' tmp' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
+      td.title = `${emps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : tempKeys.has(k) ? ' (lịch trình tạm thời — nhập đè vào đây sẽ được ưu tiên hơn)' : ' (nhập ở bảng này)') : (g.k === 'none' ? 'tự động theo giờ chấm' : 'theo lịch đã phân: ' + (g.t || g.l || '')));
     };
 
     // ----- vùng chọn -----
@@ -2208,68 +2275,70 @@ async function pageAssignments() {
       el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Lịch trình phòng ban áp cho mọi nhân viên của phòng, kể cả người mới thêm vào phòng sau này. Người nào có Lịch trình nhân viên riêng thì theo lịch riêng. Một phòng có nhiều dòng thì dòng mới nhất đang hiệu lực được dùng.'));
   }
 
-  /* ================= 3) ĐỔI CA TẠM THỜI ================= */
+  /* ================= LỊCH TRÌNH TẠM THỜI (kiểu ZKBio) =================
+   * Mỗi dòng = 1 nhân viên × 1 ngày được đổi ca / cho nghỉ khác với lịch đã gán. Bấm "+ Thêm" để tạo cho nhiều người / phòng ban trong một khoảng ngày.
+   * Ưu tiên: Xem lịch trình (kiểu Excel) → Lịch trình tạm thời → Gán ca nhân viên → Gán ca phòng ban → ca mặc định. */
   if (_asTab === 'temp') {
-    const empIds = new Set(emps.map((e) => e.id));
     const empById = new Map(data.employees.map((e) => [e.id, e]));
-    // Chọn nhân viên
-    const pickAll = el('input', { type: 'checkbox', style: 'width:auto' });
-    const pickBox = el('div', { style: 'max-height:170px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:6px 10px;min-width:260px' },
-      ...emps.map((e) => el('label', { style: 'display:flex;align-items:center;gap:8px;padding:2px 0;font-weight:500;color:var(--ink)' },
-        el('input', { type: 'checkbox', class: 'tmp-emp', value: e.id, style: 'width:auto' }), `${e.full_name} (${e.code})`)));
-    pickAll.onchange = () => { pickBox.querySelectorAll('.tmp-emp').forEach((c) => { c.checked = pickAll.checked; }); };
-    const bShift = el('select', {}, ...shiftOpts('', '↩ Bỏ đổi ca (về lịch đã phân)'));
-    const bFrom = el('input', { type: 'date', value: todayVN() }), bTo = el('input', { type: 'date', value: todayVN() });
-    const wdBoxes = [1, 2, 3, 4, 5, 6, 7].map((d) => el('label', { style: 'display:flex;align-items:center;gap:4px;font-weight:600;color:var(--ink)' },
-      el('input', { type: 'checkbox', class: 'bulk-wd', value: d, style: 'width:auto' }), WD[d]));
-    const apply = el('button', { class: 'btn' }, 'Áp dụng');
-    apply.onclick = async () => {
-      let ids = [...pickBox.querySelectorAll('.tmp-emp:checked')].map((x) => +x.value);
-      if (!ids.length) { if (!confirm(`Chưa tích nhân viên nào. Áp dụng cho TẤT CẢ ${emps.length} nhân viên của ${deptLabel}?`)) return; ids = emps.map((e) => e.id); }
-      if (!ids.length) return toast('Không có nhân viên', 'err');
-      if (!bFrom.value || !bTo.value) return toast('Chọn khoảng ngày', 'err');
-      if (bTo.value < bFrom.value) return toast('Đến ngày phải sau Từ ngày', 'err');
-      const v = bShift.value;
-      const body = { employee_ids: ids, from: bFrom.value, to: bTo.value, weekdays: [...document.querySelectorAll('.bulk-wd:checked')].map((x) => +x.value),
-        shift_id: (v === '' || v === 'off') ? null : +v, is_off: v === 'off' };
-      try { const r = await api('/admin/assignments/bulk', { method: 'POST', body }); toast(`Đã đổi ${r.count} lượt cho ${ids.length} nhân viên`, 'ok'); _asStart = bFrom.value; pageAssignments(); }
-      catch (e) { toast(e.message, 'err'); }
-    };
-    const form = canEdit ? el('div', { class: 'panel', style: 'padding:14px 16px;margin-bottom:14px' },
-      el('div', { style: 'font-weight:700;margin-bottom:4px' }, 'Đổi ca / cho nghỉ trong một khoảng ngày'),
-      el('div', { class: 'map-hint', style: 'margin:0 0 10px' }, 'Dùng khi vài ngày khác với lịch đã phân: đổi ca đột xuất, tăng cường, cho nghỉ. Hết khoảng ngày này nhân viên tự quay về ca/lịch trình đã phân.'),
-      el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start' },
-        el('div', {}, el('label', { style: 'display:flex;align-items:center;gap:6px' }, pickAll, `Nhân viên (${deptLabel})`), pickBox),
-        el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
-          el('div', {}, el('label', {}, 'Ca áp dụng'), bShift),
-          el('div', { style: 'display:flex;gap:10px;flex-wrap:wrap' }, el('div', {}, el('label', {}, 'Từ ngày'), bFrom), el('div', {}, el('label', {}, 'Đến ngày'), bTo)),
-          el('div', {}, el('label', {}, 'Chỉ các thứ (bỏ trống = mọi ngày)'), el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;padding-top:4px' }, ...wdBoxes)),
-          el('div', {}, apply)))) : null;
-    // Danh sách ngày đã đổi trong tháng
-    const rows = data.assignments.filter((a) => empIds.has(a.employee_id)).sort((a, b) => (a.work_date === b.work_date ? 0 : a.work_date < b.work_date ? -1 : 1));
-    const tbl = el('table', { class: 'data emp-compact' });
-    const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
-    tbl.append(el('thead', {}, el('tr', {}, el('th', {}, selAll), el('th', {}, 'Ngày'), el('th', {}, 'Thứ'), el('th', {}, 'Phòng ban'), el('th', {}, 'Mã NV'), el('th', {}, 'Tên nhân viên'), el('th', {}, 'Ca tạm thời'))));
-    const tb = el('tbody'); tbl.append(tb);
-    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Tháng này chưa có ngày nào đổi ca tạm thời.'))));
-    for (const a of rows) {
-      const e = empById.get(a.employee_id) || {};
-      tb.append(el('tr', {}, el('td', {}, el('input', { type: 'checkbox', class: 'tmp-pick', style: 'width:auto', 'data-emp': a.employee_id, 'data-date': a.work_date })),
-        el('td', {}, fmtD(a.work_date)), el('td', {}, WD[weekdayVN(a.work_date)]), el('td', {}, e.department || ''), el('td', {}, e.code || ''), el('td', {}, el('b', {}, e.full_name || '')),
-        el('td', { style: a.is_off ? 'color:#b45309;font-weight:700' : 'color:#c2410c;font-weight:600' }, a.is_off ? '🛌 Nghỉ' : (shiftName.get(a.shift_id) || 'Ca đã xoá'))));
+    const inSel = new Set(emps.map((e) => e.id));
+    // gom các dòng cùng NV × ngày (ngày có nhiều ca) thành 1 dòng
+    const byKey = new Map();
+    for (const a of data.assignments) {
+      if (!inSel.has(a.employee_id)) continue;
+      const k = a.employee_id + '|' + a.work_date;
+      const g = byKey.get(k) || { employee_id: a.employee_id, date: a.work_date, off: false, shifts: [], source: a.source || 'sheet' };
+      if (a.is_off) g.off = true; else g.shifts.push(shiftName.get(a.shift_id) || 'Ca đã xoá');
+      if ((a.source || 'sheet') !== 'temp') g.source = 'sheet';
+      byKey.set(k, g);
     }
+    const searchI = el('input', { placeholder: 'Tên nhân viên, mã nhân viên', value: _asSearch, style: 'width:220px' });
+    const srcSel = el('select', { style: 'width:auto' }, el('option', { value: '' }, 'Tất cả'), el('option', { value: 'temp' }, 'Lịch trình tạm thời'), el('option', { value: 'sheet' }, 'Nhập ở bảng Excel'));
+    srcSel.value = _asTmpSrc;
+    const tbl = el('table', { class: 'data' });
+    const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
+    tbl.append(el('thead', {}, el('tr', {}, el('th', {}, selAll), el('th', {}, 'Mã nhân viên'), el('th', {}, 'Tên nhân viên'), el('th', {}, 'Ngày'), el('th', {}, 'Ngày nghỉ'), el('th', {}, 'Ca làm việc'), el('th', {}, 'Nguồn'), el('th', {}, 'Thao tác'))));
+    const tb = el('tbody'); tbl.append(tb);
+    const WDL = { 1: 'Thứ Hai', 2: 'Thứ Ba', 3: 'Thứ Tư', 4: 'Thứ Năm', 5: 'Thứ Sáu', 6: 'Thứ Bảy', 7: 'Chủ Nhật' };
+    const info = el('span', { style: 'color:var(--muted);font-size:13px' }, '');
+    const clearItems = async (items, msg) => {
+      if (!confirm(msg)) return;
+      try { const r = await api('/admin/assignments/clear', { method: 'POST', body: { items } }); toast(`Đã xoá ${r.count} dòng`, 'ok'); pageAssignments(); } catch (e) { toast(e.message, 'err'); }
+    };
+    const renderRows = () => {
+      tb.innerHTML = '';
+      const q = _asSearch.trim().toLowerCase();
+      const rows = [...byKey.values()].filter((g) => { const e = empById.get(g.employee_id) || {}; return (!_asTmpSrc || g.source === _asTmpSrc) && (!q || (e.full_name || '').toLowerCase().includes(q) || String(e.code || '').toLowerCase().includes(q)); })
+        .sort((a, b) => (a.date === b.date ? ((empById.get(a.employee_id)?.full_name || '').localeCompare(empById.get(b.employee_id)?.full_name || '', 'vi')) : a.date < b.date ? -1 : 1));
+      const MAX = 500;
+      info.textContent = rows.length > MAX ? `Hiện ${MAX} / ${rows.length} dòng — lọc theo phòng ban hoặc tên để xem phần còn lại` : `${rows.length} dòng`;
+      if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Trống — tháng này chưa có lịch trình tạm thời nào. Bấm "+ Thêm".'))));
+      for (const g of rows.slice(0, MAX)) {
+        const e = empById.get(g.employee_id) || {};
+        tb.append(el('tr', {}, el('td', {}, el('input', { type: 'checkbox', class: 'tmp-pick', style: 'width:auto', 'data-emp': g.employee_id, 'data-date': g.date })),
+          el('td', {}, e.code || ''), el('td', {}, el('b', {}, e.full_name || '')),
+          el('td', {}, `${fmtD(g.date)} ${WDL[weekdayVN(g.date)]}`),
+          el('td', {}, g.off ? el('span', { class: 'pill warn' }, 'Nghỉ') : '-'),
+          el('td', { style: 'color:#0f766e;font-weight:700' }, g.off ? '-' : g.shifts.join(' + ')),
+          el('td', {}, g.source === 'temp' ? el('span', { class: 'chip' }, 'Tạm thời') : el('span', { class: 'chip g' }, 'Bảng Excel')),
+          el('td', {}, canEdit ? el('a', { href: '#', style: 'color:#dc2626;font-weight:600', onclick: (ev) => { ev.preventDefault(); clearItems([{ employee_id: g.employee_id, date: g.date }], `Xoá lịch ngày ${fmtD(g.date)} của ${e.full_name}? Nhân viên quay về lịch đã gán.`); } }, 'Xoá') : '')));
+      }
+      selAll.checked = false;
+    };
+    searchI.oninput = () => { _asSearch = searchI.value; renderRows(); };
+    srcSel.onchange = () => { _asTmpSrc = srcSel.value; renderRows(); };
     selAll.onchange = () => { tb.querySelectorAll('.tmp-pick').forEach((c) => { c.checked = selAll.checked; }); };
-    const delBtn = canEdit ? btnSm('↩ Bỏ đổi ca các dòng đã chọn', async () => {
-      const seen = new Set(), list = [];
-      for (const c of tb.querySelectorAll('.tmp-pick:checked')) { const k = c.dataset.emp + '|' + c.dataset.date; if (!seen.has(k)) { seen.add(k); list.push([+c.dataset.emp, c.dataset.date]); } }
-      if (!list.length) return toast('Chưa tích dòng nào', 'err');
-      if (!confirm(`Bỏ đổi ca ${list.length} ngày đã chọn (nhân viên quay về lịch đã phân)?`)) return;
-      try { for (const [eid, d] of list) await api('/admin/assignments', { method: 'POST', body: { employee_id: eid, work_date: d, shift_id: null, is_off: false } }); toast('Đã bỏ đổi ca', 'ok'); pageAssignments(); }
-      catch (e) { toast(e.message, 'err'); }
+    const addBtn = canEdit ? el('button', { class: 'btn' }, '+ Thêm') : null;
+    if (addBtn) addBtn.onclick = () => { _asAdd = 'temp'; pageAssignments(); };
+    const delBtn = canEdit ? btnSm('🗑 Xoá', () => {
+      const items = [...tb.querySelectorAll('.tmp-pick:checked')].map((c) => ({ employee_id: +c.dataset.emp, date: c.dataset.date }));
+      if (!items.length) return toast('Chưa tick dòng nào', 'err');
+      clearItems(items, `Xoá ${items.length} dòng đã chọn? Nhân viên quay về lịch đã gán.`);
     }, 'ghost') : null;
-    main.append(form,
-      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px' }, el('b', {}, 'Các ngày đã đổi ca trong tháng'), monthNav(), delBtn),
-      el('div', { class: 'panel tbl-scroll' }, tbl));
+    renderRows();
+    main.append(
+      el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px' }, searchI, monthNav(), srcSel, info, el('span', { style: 'flex:1' }), addBtn, delBtn, btnSm('⟳', () => pageAssignments(), 'ghost')),
+      el('div', { class: 'panel tbl-scroll' }, tbl),
+      el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Thứ tự ưu tiên khi tính ca của một ngày: ① ô nhập ở Xem lịch trình (kiểu Excel) → ② Lịch trình tạm thời → ③ Gán ca cho nhân viên → ④ Gán ca cho phòng ban → ⑤ ca mặc định ở hồ sơ. Lịch tạm thời không đè lên ô đã nhập ở bảng Excel.'));
   }
 
   setMain(head(pageTitle), tabBar, el('div', { class: 'emp-wrap' }, side, main));
