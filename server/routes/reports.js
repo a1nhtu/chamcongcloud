@@ -132,7 +132,7 @@ const effMode = (e) => (e.att_mode === 'shift' || e.att_mode === 'hourly' ? e.at
 function loadRange(from, to, filter) {
   const weekend = getSetting('weekend_days', '7');
   const ef = empFilterSql(filter);
-  const empSql = `SELECT id, code, full_name, department, position, shift_id, att_mode
+  const empSql = `SELECT id, code, full_name, department, position, shift_id, att_mode, start_date
                 FROM employees WHERE active = 1${adminAttWhere()}${ef.where} ORDER BY department, full_name`;
   let employees = db.prepare(empSql).all(...ef.args);
   // ?emode=shift|hourly: chỉ lấy nhân viên chấm công theo kiểu đó (công ty có cả 2 kiểu)
@@ -378,7 +378,7 @@ function buildReportRaw(type, from, to, filter) {
       ];
       let stt = 0;
       const rows = ctx.employees.map((e) => {
-        const row = { stt: ++stt, dept: e.department || '', code: e.code, name: e.full_name, hire: '', ...leaveCounts(ctx, e.id, days) };
+        const row = { stt: ++stt, dept: e.department || '', code: e.code, name: e.full_name, hire: e.start_date ? fmtDMY(e.start_date) : '', ...leaveCounts(ctx, e.id, days) };
         let mins = 0, V = 0, lateN = 0, earlyN = 0;
         const ot = { ot1: 0, ot2: 0, ot3: 0, ot4: 0, otE: 0, otH: 0 };
         for (const d of days) {
@@ -476,8 +476,9 @@ function buildReportRaw(type, from, to, filter) {
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           const io = ioOf(e.id, d, c);
-          rIn['d' + d + 'i'] = io.cin;
-          rIn['d' + d + 'o'] = io.cout;
+          const lv = !c && ctx.leaveDays.get(e.id + '|' + d);   // ngày nghỉ (đơn đã duyệt) → ký hiệu loại nghỉ
+          rIn['d' + d + 'i'] = lv ? lv.sym : io.cin;
+          rIn['d' + d + 'o'] = lv ? '' : io.cout;
           rCong['d' + d + 'i'] = c ? round2((c.work_minutes || 0) / 60) : ''; rCong['d' + d + 'o'] = '';
           rOt['d' + d + 'i'] = c ? round2((c.ot_min || 0) / 60) : ''; rOt['d' + d + 'o'] = '';
           if (c) { totalMin += c.work_minutes || 0; otMin += c.ot_min || 0; }
@@ -1028,19 +1029,20 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
 
   // Mỗi NV = 3 dòng
   let r = H + 2, stt = 0;
-  const hireDate = () => ''; // chưa lưu ngày vào làm
+  const hireDate = (e) => (e.start_date ? fmtDMY(e.start_date) : '');   // ngày vào làm (hồ sơ NV)
   for (const e of ctx.employees) {
     stt++;
     const rIn = r, rCong = r + 1, rOt = r + 2;
-    const fixedVals = [stt, e.department || '', e.code, e.full_name, hireDate()];
+    const fixedVals = [stt, e.department || '', e.code, e.full_name, hireDate(e)];
     fixedVals.forEach((v, i) => { ws.mergeCells(rIn, i + 1, rOt, i + 1); Object.assign(ws.getCell(rIn, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' } }); });
     for (let di = 0; di < days.length; di++) {
       const d = days[di], c1 = FIXED + di * 2 + 1;
       const c = ctx.cell.get(e.id + '|' + d);
       const weekend = ctx.isWeekend(d);
       const io = ioOf(e.id, d, c);
-      ws.getCell(rIn, c1).value = io.cin;
-      ws.getCell(rIn, c1 + 1).value = io.cout;
+      const lv = !c && ctx.leaveDays.get(e.id + '|' + d);   // ngày nghỉ (đơn đã duyệt) → ký hiệu loại nghỉ
+      ws.getCell(rIn, c1).value = lv ? lv.sym : io.cin;
+      ws.getCell(rIn, c1 + 1).value = lv ? '' : io.cout;
       if (io.pairs) { ws.getCell(rIn, c1).alignment = ws.getCell(rIn, c1 + 1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         ws.getRow(rIn).height = Math.max(ws.getRow(rIn).height || 15, 15 * io.pairs.length); }
       ws.mergeCells(rCong, c1, rCong, c1 + 1); ws.getCell(rCong, c1).value = c && c.work_minutes ? round2(c.work_minutes / 60) : 0;
@@ -1108,7 +1110,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   for (const e of ctx.employees) {
     stt++;
     let lines = 1;
-    [stt, e.department || '', e.code, e.full_name, ''].forEach((v, i) => {
+    [stt, e.department || '', e.code, e.full_name, e.start_date ? fmtDMY(e.start_date) : ''].forEach((v, i) => {
       const cell = ws.getCell(r, i + 1); cell.value = v; cell.border = border;
       cell.alignment = { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' };
     });

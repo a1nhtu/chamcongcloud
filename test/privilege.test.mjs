@@ -78,3 +78,23 @@ test('tra ưu đãi theo ngày: đúng khoảng ngày, nhiều dòng cộng dồ
   // CSDL chưa có bảng → không lỗi
   assert.equal(privilegeLookup({ prepare: () => { throw new Error('no table'); } })(7, '2026-10-05'), null);
 });
+
+test('nghỉ phép NỬA NGÀY: buổi nghỉ không tính trễ / sớm, giờ công vẫn đúng phần đã làm', async () => {
+  const { halfLeavePriv } = await import('../server/attendance-calc.js');
+  // nghỉ sáng, làm chiều 13–17 (ca không khai giờ nghỉ cố định → đầu chiều = 8:00 + 240 + 60 = 13:00)
+  const ps = halfLeavePriv(HC, WD, 'sang');
+  assert.equal(computeLate(HC, iso(WD, '13:00'), WD, 0, ps), 0);
+  assert.equal(computeLate(HC, iso(WD, '13:15'), WD, 0, ps), 15);
+  assert.equal(computeCheckout(HC, iso(WD, '13:00'), iso(WD, '17:00'), WD).work_minutes, 240);   // giờ công tính bằng priv gốc
+  // nghỉ chiều, làm sáng 8–12
+  const pc = halfLeavePriv(HC, WD, 'chieu');
+  assert.equal(computeCheckout(HC, iso(WD, '08:00'), iso(WD, '12:00'), WD, { priv: pc }).early_min, 0);
+  assert.equal(computeCheckout(HC, iso(WD, '08:00'), iso(WD, '11:30'), WD, { priv: pc }).early_min, 30);
+  // ca nghỉ trưa cố định 12–13
+  assert.equal(computeLate(HCB, iso(WD, '13:00'), WD, 0, halfLeavePriv(HCB, WD, 'sang')), 0);
+  assert.equal(computeLate(HCB, iso(WD, '13:20'), WD, 0, halfLeavePriv(HCB, WD, 'sang')), 20);
+  assert.equal(computeCheckout(HCB, iso(WD, '08:00'), iso(WD, '12:00'), WD, { priv: halfLeavePriv(HCB, WD, 'chieu') }).early_min, 0);
+  // giữ cả ưu đãi thai sản
+  assert.equal(computeLate(HC, iso(WD, '13:30'), WD, 0, halfLeavePriv(HC, WD, 'sang', P({ late: 30 }))), 0);
+  assert.equal(halfLeavePriv(HC, WD, '', null), null);
+});

@@ -2761,7 +2761,7 @@ async function pageLeaves() {
       const st = { pending: ['warn', 'Chờ duyệt'], approved: ['ok', 'Đã duyệt'], rejected: ['bad', 'Từ chối'] }[r.status];
       const delBtn = btnSm('Xoá', async () => {
         if (!confirm(`Xoá đơn "${r.type}" ${fmtD(r.from_date)}–${fmtD(r.to_date)} của ${r.full_name}?`)) return;
-        try { await api('/leaves/admin/' + r.id, { method: 'DELETE' }); toast('Đã xoá đơn', 'ok'); pageLeaves(); } catch (e) { toast(e.message, 'err'); }
+        try { await api('/leaves/admin/' + r.id, { method: 'DELETE' }); if (r.half && r.status === 'approved') await privRecompute([r.employee_id], r.from_date, r.to_date); toast('Đã xoá đơn', 'ok'); pageLeaves(); } catch (e) { toast(e.message, 'err'); }
       }, 'ghost');
       const act = r.status === 'pending' ? el('div', { style: 'display:flex;gap:6px' },
         btnSm('Duyệt', () => review(r, 'approve'), 'green'),
@@ -3008,6 +3008,7 @@ async function leaveAddModal() {
       let r;
       try { r = await api('/leaves/admin', { method: 'POST', body }); }
       catch (e) { if (!(e.data && e.data.canForce) || !confirm(e.message + '\n\nVẫn lưu (nghỉ vượt phép)?')) throw e; r = await api('/leaves/admin', { method: 'POST', body: { ...body, force: true } }); }
+      if (body.half) await privRecompute(body.employee_ids, body.from_date, body.to_date);   // nửa ngày nghỉ: bỏ trễ / sớm của buổi nghỉ
       toast(`Đã thêm ${r.count} đơn (đã duyệt)`, 'ok'); closeModal(); pageLeaves();
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
@@ -3022,10 +3023,11 @@ async function leaveAddModal() {
 async function review(r, action) {
   let note = '';
   if (action === 'reject') { note = prompt('Lý do từ chối (tuỳ chọn):') ?? ''; }
-  try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note } }); toast('Đã cập nhật', 'ok'); pageLeaves(); }
+  const after = async () => { if (action === 'approve' && r.half) await privRecompute([r.employee_id], r.from_date, r.to_date); };   // nửa ngày nghỉ: bỏ trễ / sớm buổi nghỉ
+  try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note } }); await after(); toast('Đã cập nhật', 'ok'); pageLeaves(); }
   catch (e) {
     if (e.data && e.data.canForce && confirm(e.message + '\n\nVẫn duyệt (nghỉ vượt phép)?')) {
-      try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note, force: true } }); toast('Đã duyệt', 'ok'); pageLeaves(); } catch (e2) { toast(e2.message, 'err'); }
+      try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note, force: true } }); await after(); toast('Đã duyệt', 'ok'); pageLeaves(); } catch (e2) { toast(e2.message, 'err'); }
     } else toast(e.message, 'err');
   }
 }

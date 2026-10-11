@@ -1,8 +1,8 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts } from './attendance-calc.js';
-import { privilegeLookup } from './privilege.js';
+import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
+import { privilegeLookup, halfLeaveLookup } from './privilege.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -38,6 +38,7 @@ export function payrollCtx(getSetting, db) {
       };
     })(),
     privOf: privilegeLookup(db),   // chế độ ưu đãi (thai sản…) của NV theo ngày — nạp 1 lần cho cả mẻ
+    halfOf: halfLeaveLookup(db),   // đơn nghỉ phép NỬA NGÀY đã duyệt ('sang' | 'chieu')
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
     // Kiểu chấm công của TỪNG nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung) — nạp 1 lần cho cả mẻ
     isHourly: (() => {
@@ -70,12 +71,16 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     priv: opts.empId && ctx.privOf ? ctx.privOf(opts.empId, workDate) : null,   // ưu đãi đến muộn / về sớm (thai sản…)
   };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
-  const late = (shift && inIso) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, flags.priv) : 0;
+  // nghỉ phép nửa ngày: nửa nghỉ không tính trễ / sớm (giờ công vẫn tính theo flags.priv gốc = đúng phần đã làm)
+  const half = shift && opts.empId && ctx.halfOf ? ctx.halfOf(opts.empId, workDate) : '';
+  const lePriv = half ? halfLeavePriv(shift, workDate, half, flags.priv) : flags.priv;
+  const late = (shift && inIso) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, lePriv) : 0;
 
   let c;
   if (inIso && outIso) {
     if (shift) {
       c = computeCheckout(shift, inIso, outIso, workDate, flags);
+      if (half) c.early_min = computeCheckout(shift, inIso, outIso, workDate, { ...flags, priv: lePriv }).early_min;
     } else {
       // Không ca (chế độ theo giờ): "theo cặp" ≥ 2 cặp → cộng từng cặp; còn lại = ra − vào (FILO)
       const wm = (pairs && pairs.length >= 2) ? sumPairsMinutes(pairs)

@@ -55,15 +55,35 @@ function breakOverlap(brk, a, b) {
 //  - ra sau giờ nghỉ trưa → trừ `early` (cuối ca được về sớm)
 //  - ra trước/trong giờ nghỉ trưa (chỉ làm sáng) → trừ `midOut` vào phần về sớm của buổi sáng
 // Ca không khai giờ nghỉ cố định: chỉ dùng `late` / `early` (midOut / midIn áp ở chế độ nhiều lần vào/ra).
+// halfIn / halfOut: phần ca thuộc nửa ngày NGHỈ PHÉP (xem halfLeavePriv) — trừ ở mọi đoạn
 function privAllowIn(priv, brk, t) {
   if (!priv) return 0;
-  if (brk && t > brk.bs) return Math.min(priv.midIn || 0, Math.max(0, mins(brk.be, t)));
-  return priv.late || 0;
+  const h = priv.halfIn || 0;
+  if (brk && t > brk.bs) return h + Math.min(priv.midIn || 0, Math.max(0, mins(brk.be, t)));
+  return h + (priv.late || 0);
 }
 function privAllowOut(priv, brk, t) {
   if (!priv) return 0;
-  if (brk && t < brk.be) return Math.min(priv.midOut || 0, Math.max(0, mins(t, brk.bs)));
-  return priv.early || 0;
+  const h = priv.halfOut || 0;
+  if (brk && t < brk.be) return h + Math.min(priv.midOut || 0, Math.max(0, mins(t, brk.bs)));
+  return h + (priv.early || 0);
+}
+
+// NGHỈ PHÉP NỬA NGÀY (đơn đã duyệt, half = 'sang' | 'chieu'): nửa ngày nghỉ KHÔNG tính đi trễ / về sớm.
+//  - nghỉ sáng: được "đến muộn" tới đầu buổi chiều · nghỉ chiều: được "về sớm" từ cuối buổi sáng
+//  - đầu/cuối buổi: theo giờ nghỉ trưa cố định của ca; ca không khai → nửa giờ chuẩn + thời gian nghỉ (HC 8–17 nghỉ 60' → 13:00 / 12:00)
+// Trả priv đã gộp (giữ ưu đãi thai sản nếu có). CHỈ dùng để tính số phút trễ / sớm — giờ công vẫn tính đúng phần đã làm
+// (nửa ngày nghỉ do đơn nghỉ phép trả), nên nơi gọi tính giờ công bằng priv gốc.
+export function halfLeavePriv(shift, workDate, half, priv = null) {
+  if (!shift || (half !== 'sang' && half !== 'chieu')) return priv;
+  const { start, end } = shiftBounds(workDate, shift);
+  const brk = breakWindow(workDate, shift, start);
+  const brkMin = shift.break_minutes || 0;
+  const halfStd = Math.round(Math.max(0, mins(start, end) - brkMin) / 2) + brkMin;
+  const p = { late: 0, midOut: 0, midIn: 0, early: 0, ...(priv || {}) };
+  if (half === 'sang') p.halfIn = brk ? mins(start, brk.bs) : halfStd;
+  else p.halfOut = brk ? mins(brk.be, end) : halfStd;
+  return p;
 }
 
 export function computeLate(shift, checkInIso, workDate, block = 0, priv = null) {
@@ -375,7 +395,10 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
   const { winStart, winEnd, start, end } = ruleWindow(workDate, shift, opts);
   const inWin = all.filter((p) => at(p) >= winStart && at(p) <= winEnd);
   const iso = (p) => (p ? p.punch_at : null);
-  const dupMs = Math.max(0, Number(opts.dupMin) || 0) * 60000;   // ngưỡng quẹt lặp: lượt ra phải cách lượt vào ít nhất chừng này
+  // ngưỡng quẹt lặp: lượt ra phải cách lượt vào ít nhất chừng này. NV có "Lịch trình vào ra" → dupMin là { min, gap, max }
+  // (lấy `min` = thời gian vào–ra nhỏ nhất); trước đây Number(object) = NaN → 0 nên quẹt 08:00 + 08:03 thành 1 cặp làm 3 phút
+  const dupRaw = opts.dupMin && typeof opts.dupMin === 'object' ? (opts.dupMin.min ?? opts.dupMin.gap) : opts.dupMin;
+  const dupMs = Math.max(0, Number(dupRaw) || 0) * 60000;
 
   // IDM (hoặc TĐ-QĐ/idm): máy lẻ = VÀO sớm nhất, máy chẵn = RA muộn nhất
   const useIdm = rule === 'idm' || (rule === 'tdqd' && (shift.tdqd_mode || 'pair') === 'idm');

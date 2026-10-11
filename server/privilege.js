@@ -39,3 +39,18 @@ export function privilegeLookup(db) {
     return sum((byEmp.get(empId) || []).filter((r) => active(r, date)));
   };
 }
+
+// Đơn NGHỈ PHÉP NỬA NGÀY đã duyệt của NV trong ngày: 'sang' | 'chieu' | '' (để không tính trễ / sớm phần nghỉ)
+const HALF_SQL = "SELECT employee_id, from_date, half FROM leave_requests WHERE status='approved' AND half IN ('sang','chieu') AND from_date=to_date";
+export function halfLeaveFor(db, empId, date) {
+  if (!empId || !date) return '';
+  try { return (db.prepare(HALF_SQL + ' AND employee_id=? AND from_date=?').get(empId, date) || {}).half || ''; } catch { return ''; }
+}
+export function halfLeaveLookup(db) {
+  let map = null;
+  return (empId, date) => {
+    if (!empId || !date) return '';
+    if (!map) { map = new Map(); try { for (const r of db.prepare(HALF_SQL).all()) map.set(r.employee_id + '|' + r.from_date, r.half); } catch { /* chưa có bảng */ } }
+    return map.get(empId + '|' + date) || '';
+  };
+}
