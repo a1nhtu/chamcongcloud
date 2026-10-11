@@ -335,6 +335,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const b = req.body || {};
     const ids = [...new Set((Array.isArray(b.employee_ids) ? b.employee_ids : [b.employee_id]).map(Number).filter(Boolean))];
     const date = String(b.date || '').slice(0, 10), tIn = hm(b.in), tOut = hm(b.out);
+    const outDate = /^\d{4}-\d{2}-\d{2}$/.test(String(b.out_date || '')) ? b.out_date : '';   // ngày RA khai riêng (ra sáng hôm sau…)
     if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Chọn ngày' });
     if (!tIn && !tOut) return res.status(400).json({ error: 'Nhập giờ vào hoặc giờ ra (dạng 08:00)' });
@@ -344,7 +345,7 @@ export function registerAttendanceRoutes(r, { need }) {
       for (const id of ids) {
         const emp = pinOf.get(id); if (!emp) continue;
         const a = tIn ? addPunch(emp, date, tIn, 'in') : null;
-        const o = tOut ? addPunch(emp, date, tOut, 'out', 0, a) : null;
+        const o = tOut ? addPunch(emp, outDate || date, tOut, 'out', 0, outDate ? null : a) : null;
         for (const iso of [a, o]) if (iso) keys.add(id + '|' + vnDate(new Date(iso)));
         keys.add(id + '|' + date); c++;
       }

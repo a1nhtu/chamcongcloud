@@ -302,3 +302,27 @@ input.att-inl-in { width: 74px !important; padding: 5px 6px; margin: 0; text-ali
 .bp-time { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .bp-time .lv-chk { width: 92px; align-items: center; }
 .bp-time input:not([type=checkbox]) { width: 84px !important; margin: 0; text-align: center; }
+
+/* Sửa giờ chấm công (bố cục Wise Eye): cây phòng ban | danh sách NV + lượt chấm */
+.ft-wrap { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; align-items: start; }
+.ft-left { padding: 8px; max-height: calc(100vh - 190px); overflow: auto; position: sticky; top: 12px; }
+.ft-tree { display: flex; flex-direction: column; gap: 2px; }
+.ft-node { display: flex; justify-content: space-between; align-items: center; gap: 6px; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 7px 10px; cursor: pointer; font: inherit; color: var(--ink); }
+.ft-node small { color: var(--muted); }
+.ft-node:hover { background: #f3f4f6; }
+.ft-node.on { background: #fff1e8; color: #c2410c; font-weight: 700; }
+.ft-right { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.ft-panel { padding: 0; overflow: hidden; }
+.ft-bar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #f8fafc; }
+.ft-bar > input { max-width: 260px; }
+.ft-sep { width: 1px; height: 24px; background: var(--line); margin: 0 4px; }
+.ft-scroll { max-height: 290px; overflow: auto; }
+table.ft-emps tbody tr, table.ft-punch tbody tr { cursor: pointer; }
+table.ft-emps tbody tr.sel td, table.ft-punch tbody tr.sel td { background: #ffedd5; }
+.ft-res { padding: 10px 12px; border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: 4px; }
+.ft-res:empty { display: none; }
+.ft-res-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13.5px; }
+.ft-addrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ft-addrow .lv-chk { width: 130px; align-items: center; }
+.ft-addrow input[type=date] { width: auto; }
+@media (max-width: 800px) { .ft-wrap { grid-template-columns: 1fr; } .ft-left { position: static; max-height: 200px; } }

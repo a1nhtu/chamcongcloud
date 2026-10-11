@@ -15,6 +15,7 @@ const NAV = [
   ['shiftreq', '🙋', 'Duyệt chọn ca', 'shift_requests'],
   ['devreq', '📱', 'Duyệt đổi thiết bị', 'employees'],
   ['editatt', '🧮', 'Tính công', 'attendance_edit'],
+  ['fixtime', '✏️', 'Sửa giờ chấm công', 'attendance_edit'],
   ['devices', '🔌', 'Máy chấm công', 'devices'],
   ['offices', '📍', 'Chi nhánh', 'offices'],
   ['leaves', '📝', 'Đơn từ', 'leaves'],
@@ -159,7 +160,7 @@ async function checkUpdateBanner() {
 }
 function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
-  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, logs: pageLogs, settings: pageSettings }[key])();
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, logs: pageLogs, settings: pageSettings }[key])();
 }
 
 /* ---------- Lựa chọn phụ khi chấm "Theo giờ": đầu–cuối (FILO) / theo cặp vào–ra ----------
@@ -3313,13 +3314,7 @@ async function pageEditAtt() {
     (() => { const b = el('button', { class: 'btn sm' + (view === 'summary' ? '' : ' ghost') }, 'Σ Tổng hợp'); b.onclick = () => { view = 'summary'; renderViewBar(); load(); }; return b; })());
   renderViewBar();
 
-  const addBtn = el('button', { class: 'btn sm' }, '+ Thêm giờ');
   const recalcBtn = el('button', { class: 'btn ghost sm' }, '↻ Tính lại');
-  const bulkBtn = el('button', { class: 'btn ghost sm' }, '📅 Thêm giờ hàng loạt');
-  const clearBtn = el('button', { class: 'btn ghost sm', style: 'color:#c0392b' }, '🗑 Xoá dữ liệu chấm công');
-  const scopeEmps = () => emps.filter((e) => e.role !== 'admin' && (!deptPick.size || deptPick.has(e.department || '')) && (!empPick.size || empPick.has(e.id)));
-  bulkBtn.onclick = () => bulkPunchModal(scopeEmps(), toI.value, load);
-  clearBtn.onclick = () => clearAttModal(scopeEmps(), fromI.value, toI.value, load);
   // Tích để hiện CẢ CÔNG TY (kể cả ngày chưa chấm) — chỉ áp cho tab Chi tiết
   const allChkInput = el('input', { type: 'checkbox', style: 'width:auto' });
   allChkInput.onchange = () => load();
@@ -3423,7 +3418,7 @@ async function pageEditAtt() {
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ — dòng chưa chấm gõ giờ vào là thêm mới. Bấm ô "Các lần chấm" để thêm / sửa / xoá từng lượt chấm (như Wise Eye). Nút "Sửa" để ghi lý do hoặc xoá giờ. Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Sửa giờ chấm công". Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
@@ -3460,11 +3455,6 @@ async function pageEditAtt() {
 
   const load = () => { view === 'summary' ? loadSummary() : loadDetail(); };
   fromI.onchange = load; toI.onchange = load;
-  addBtn.onclick = () => {
-    // đã lọc đúng 1 người → thêm cho người đó; còn lại → chọn nhân viên ngay trong form (được chọn nhiều người)
-    if (empPick.size === 1) return attEditModal(null, [...empPick][0], load, { date: toI.value });
-    attEditModal(null, null, load, { date: toI.value, emps: scopeEmps() });
-  };
   recalcBtn.onclick = async () => {
     let scopeTxt;
     if (empPick.size) scopeTxt = empPick.size + ' nhân viên đã chọn';
@@ -3481,7 +3471,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
-    allChk, markChk, addBtn, bulkBtn, clearBtn, recalcBtn);
+    allChk, markChk, recalcBtn);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }
@@ -3493,9 +3483,39 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
   const inI = time24('att-in', row?.check_in_at ? isoToHM(row.check_in_at) : '');
   const outI = time24('att-out', row?.check_out_at ? isoToHM(row.check_out_at) : '');
   const noteI = input('att-note', { placeholder: 'VD: Quên chấm, Đi công tác…', value: row?.note || '' });
+  // XOÁ RIÊNG 1 GIỜ (vào hoặc ra): giờ đó là lượt quẹt → xoá lượt quẹt, công tính lại theo các lượt còn lại;
+  // giờ nhập tay / chấm điện thoại → bỏ giờ ra (thành "Thiếu ra"), bỏ giờ vào thì giờ ra còn lại thành lượt duy nhất (giống máy: 1 lượt = vào, thiếu ra)
+  const addD = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  let punches = [];
+  if (row) { try { punches = (await api(`/admin/attendance/punches?employee_id=${employeeId}&from=${row.work_date}&to=${addD(row.work_date, 1)}`)).rows || []; } catch {} }
+  const delOne = async (which) => {
+    const t = which === 'in' ? isoToHM(row.check_in_at) : isoToHM(row.check_out_at);
+    const other = which === 'in' && row.check_out_at ? isoToHM(row.check_out_at) : '';
+    const same = punches.filter((x) => x.time === t);
+    const p = which === 'in' ? same.find((x) => x.date === row.work_date) : same[same.length - 1];
+    const what = which === 'in' ? 'giờ VÀO' : 'giờ RA';
+    if (!confirm(`Xoá ${what} ${t} ngày ${row.work_date.slice(8)}/${row.work_date.slice(5, 7)}?
+` + (p ? 'Đây là lượt quẹt — công ngày này sẽ tính lại theo các lượt còn lại.'
+      : which === 'out' ? 'Ngày này thành "Thiếu ra".' : other ? `Còn lại 1 giờ ${other} → thành giờ vào, ngày này "Thiếu ra".` : 'Đây là giờ duy nhất → xoá giờ chấm cả ngày.'))) return;
+    try {
+      if (p) await api('/admin/attendance/punches/' + p.id, { method: 'DELETE' });
+      else if (which === 'out') await api('/admin/attendance/' + row.id, { method: 'PUT', body: { check_out: '' } });
+      else if (other) await api('/admin/attendance/' + row.id, { method: 'PUT', body: { check_in: other, check_out: '' } });
+      else await api('/admin/attendance/' + row.id, { method: 'DELETE' });
+      toast(`Đã xoá ${what} ${t}`, 'ok'); closeModal(); reload();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const delLink = (which, has) => {
+    if (!has) return '';
+    const b = el('button', { class: 'btn ghost sm', type: 'button', style: 'color:#c0392b;margin-top:6px' }, which === 'in' ? '✕ Xoá giờ vào' : '✕ Xoá giờ ra');
+    b.onclick = () => delOne(which);
+    return b;
+  };
   const body = row ? [
     field('Ngày', dateI),
-    el('div', { class: 'two-col' }, field('Giờ vào', inI), field('Giờ ra (để trống nếu chưa ra)', outI)),
+    el('div', { class: 'two-col' },
+      el('div', {}, field('Giờ vào', inI), delLink('in', row.check_in_at)),
+      el('div', {}, field('Giờ ra (để trống nếu chưa ra)', outI), delLink('out', row.check_out_at))),
     field('Lý do / ghi chú', noteI),
     el('div', { class: 'map-hint' }, 'Giờ ra nhỏ hơn giờ vào sẽ được hiểu là ca qua đêm (sáng hôm sau).'),
   ] : [
@@ -3522,16 +3542,183 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
   };
   const footer = [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ')];
   if (row) {
-    const del = el('button', { class: 'btn ghost', style: 'color:#c0392b' }, '🗑 Xoá giờ');
+    // xoá CẢ NGÀY: bỏ dòng công + các lượt quẹt của ngày (không thì bấm "Tính lại" sẽ dựng lại từ lượt quẹt)
+    const del = el('button', { class: 'btn ghost', style: 'color:#c0392b' }, '🗑 Xoá cả ngày');
     del.onclick = async () => {
-      if (!confirm('XOÁ hẳn giờ chấm ngày ' + (row.work_date || '') + ' của người này?\nDùng khi chấm nhầm / nghịch. Không hoàn tác.')) return;
-      try { await api('/admin/attendance/' + row.id, { method: 'DELETE' }); toast('Đã xoá giờ chấm', 'ok'); closeModal(); reload(); }
-      catch (e) { toast(e.message, 'err'); }
+      if (!confirm('XOÁ hẳn giờ chấm CẢ NGÀY ' + (row.work_date || '').split('-').reverse().join('/') + ' của người này (cả các lượt quẹt)?\nDùng khi chấm nhầm / nghịch. Không hoàn tác.')) return;
+      try {
+        if (punches.some((x) => x.date === row.work_date)) await api('/admin/attendance/clear', { method: 'POST', body: { employee_ids: [employeeId], from: row.work_date, to: row.work_date, raw: true } });
+        else await api('/admin/attendance/' + row.id, { method: 'DELETE' });
+        toast('Đã xoá giờ chấm cả ngày', 'ok'); closeModal(); reload();
+      } catch (e) { toast(e.message, 'err'); }
     };
     footer.push(del);
   }
   footer.push(save);
   openModal(row ? 'Sửa giờ chấm' : 'Thêm giờ chấm', body, footer);
+}
+
+/* ---------- SỬA GIỜ CHẤM CÔNG (menu riêng, bố cục như Wise Eye) ----------
+ * Trái: cây phòng ban · Giữa: danh sách nhân viên · Dưới: các LƯỢT CHẤM của NV đang chọn theo ngày, thanh Thêm / Sửa / Xoá.
+ * Trên cùng: Thêm giờ hàng loạt · Xoá dữ liệu chấm công. Mọi thay đổi tự tính lại công ngày đó theo ca. */
+const _ft = { dept: '', empId: null, q: '', from: null, to: null, sel: null };
+async function pageFixTime() {
+  setMain(head('Sửa giờ chấm công'), loading());
+  if (!DEPARTMENTS.length) { try { DEPARTMENTS = (await api('/admin/departments')).rows || []; } catch {} }
+  let emps;
+  try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); }
+  catch (e) { return setMain(head('Sửa giờ chấm công'), el('div', { class: 'empty' }, e.message)); }
+  const today = todayVN();
+  if (!_ft.from) _ft.from = _ft.to = today;
+  const fmtD = (d) => d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
+  const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const WDS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  const wdOf = (d) => WDS[new Date(d + 'T12:00:00Z').getUTCDay()];
+
+  // ----- cây phòng ban (gồm bộ phận con) -----
+  const NONE = '\u0000none';
+  const kids = new Map();
+  for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+  const namesUnder = (d) => [d.name, ...(kids.get(d.id) || []).flatMap(namesUnder)];
+  const cntBy = new Map(); for (const e of emps) { const k = e.department || NONE; cntBy.set(k, (cntBy.get(k) || 0) + 1); }
+  const groups = new Map([['', null]]);
+  const tree = el('div', { class: 'ft-tree' });
+  const treeItem = (key, label, depth, n) => {
+    const b = el('button', { class: 'ft-node' + (_ft.dept === key ? ' on' : ''), style: `padding-left:${10 + depth * 14}px` }, el('span', {}, label), el('small', {}, String(n)));
+    b.onclick = () => { _ft.dept = key; tree.querySelectorAll('.ft-node').forEach((x) => x.classList.toggle('on', x === b)); drawEmps(); };
+    tree.append(b);
+  };
+  treeItem('', '🏢 Tất cả nhân viên', 0, emps.length);
+  for (const d of deptOrdered()) { const names = namesUnder(d); groups.set('d' + d.id, new Set(names)); treeItem('d' + d.id, d.name, d.depth + 1, names.reduce((a, x) => a + (cntBy.get(x) || 0), 0)); }
+  const known = new Set(DEPARTMENTS.map((d) => d.name));
+  for (const k of [...cntBy.keys()].filter((k) => k !== NONE && !known.has(k))) { groups.set('o' + k, new Set([k])); treeItem('o' + k, k, 1, cntBy.get(k)); }
+  if (cntBy.has(NONE)) { groups.set('none', new Set([NONE])); treeItem('none', 'Chưa có phòng ban', 1, cntBy.get(NONE)); }
+
+  // ----- danh sách nhân viên -----
+  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên', value: _ft.q, style: 'margin:0' });
+  const empTb = el('tbody');
+  const empTbl = el('table', { class: 'data ft-emps' }, el('thead', {}, el('tr', {}, el('th', {}, 'Mã NV'), el('th', {}, 'Số ID máy'), el('th', {}, 'Tên nhân viên'), el('th', {}, 'Bộ phận'))), empTb);
+  const empTotal = el('span', { class: 'muted' });
+  const drawEmps = () => {
+    const s = q.value.trim().toLowerCase(); _ft.q = q.value;
+    const g = groups.get(_ft.dept);
+    const list = emps.filter((e) => (!g || g.has(e.department || NONE)) && (!s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s) || String(e.device_pin || '').toLowerCase().includes(s)));
+    empTb.replaceChildren();
+    for (const e of list) {
+      const tr = el('tr', { class: e.id === _ft.empId ? 'sel' : '' }, el('td', {}, e.code || ''), el('td', {}, e.device_pin || '—'), el('td', {}, el('b', {}, e.full_name)), el('td', {}, e.department || '—'));
+      tr.onclick = () => { _ft.empId = e.id; _ft.sel = null; empTb.querySelectorAll('tr').forEach((x) => x.classList.toggle('sel', x === tr)); loadPunches(); };
+      empTb.append(tr);
+    }
+    if (!list.length) empTb.append(el('tr', {}, el('td', { colspan: 4 }, el('div', { class: 'empty' }, 'Không có nhân viên.'))));
+    empTotal.textContent = `Tổng: ${list.length}`;
+  };
+  q.oninput = drawEmps;
+
+  // ----- lượt chấm của NV đang chọn -----
+  const fromI = el('input', { type: 'date', value: _ft.from, style: 'width:auto;margin:0' });
+  const toI = el('input', { type: 'date', value: _ft.to, style: 'width:auto;margin:0' });
+  const prev = el('button', { class: 'btn ghost sm', title: 'Ngày trước' }, '◀'), next = el('button', { class: 'btn ghost sm', title: 'Ngày sau' }, '▶');
+  const addB = el('button', { class: 'btn sm' }, '+ Thêm'), editB = el('button', { class: 'btn ghost sm' }, '✎ Sửa'), delB = el('button', { class: 'btn ghost sm', style: 'color:#c0392b' }, '✕ Xoá');
+  const pTb = el('tbody');
+  const pTbl = el('table', { class: 'data ft-punch' }, el('thead', {}, el('tr', {}, ...['Mã chấm công', 'Ngày', 'Thứ', 'Giờ chấm', 'Loại', 'Máy / nguồn'].map((h) => el('th', {}, h)))), pTb);
+  const resBox = el('div', { class: 'ft-res' });
+  const empOf = () => emps.find((e) => e.id === _ft.empId);
+  let rows = [];
+  const setDates = (f, t) => { _ft.from = f; _ft.to = t < f ? f : t; fromI.value = _ft.from; toI.value = _ft.to; loadPunches(); };
+  fromI.onchange = () => setDates(fromI.value || today, toI.value < fromI.value ? fromI.value : toI.value);
+  toI.onchange = () => setDates(fromI.value, toI.value || fromI.value);
+  prev.onclick = () => setDates(addDays(_ft.from, -1), _ft.from === _ft.to ? addDays(_ft.from, -1) : addDays(_ft.to, -1));
+  next.onclick = () => setDates(addDays(_ft.from, 1), _ft.from === _ft.to ? addDays(_ft.from, 1) : addDays(_ft.to, 1));
+  const loadPunches = async () => {
+    const e = empOf();
+    pTb.replaceChildren(); resBox.replaceChildren();
+    if (!e) { pTb.append(el('tr', {}, el('td', { colspan: 6 }, el('div', { class: 'empty' }, 'Chọn 1 nhân viên ở danh sách bên trên.')))); return; }
+    pTb.append(el('tr', {}, el('td', { colspan: 6 }, loading())));
+    let d, g;
+    try { [d, g] = await Promise.all([api(`/admin/attendance/punches?employee_id=${e.id}&from=${_ft.from}&to=${_ft.to}`), api(`/admin/attendance/grid?mode=detail&ids=${e.id}&from=${_ft.from}&to=${_ft.to}`)]); }
+    catch (err) { pTb.replaceChildren(el('tr', {}, el('td', { colspan: 6 }, el('div', { class: 'empty' }, err.message)))); return; }
+    rows = d.rows || [];
+    pTb.replaceChildren();
+    for (const p of rows) {
+      const tr = el('tr', { class: p.id === _ft.sel ? 'sel' : '' },
+        el('td', {}, e.device_pin || e.code), el('td', {}, fmtD(p.date)), el('td', {}, wdOf(p.date)), el('td', {}, el('b', {}, p.time)),
+        el('td', {}, p.kind ? el('span', { class: 'pill' + (p.kind === 'Ra' ? ' muted' : '') }, p.kind) : el('span', { class: 'muted' }, 'theo máy')),
+        el('td', {}, p.manual ? el('span', { style: 'color:#e67e22;font-weight:600' }, '✎ Thêm tay') : p.source));
+      tr.onclick = () => { _ft.sel = p.id; pTb.querySelectorAll('tr').forEach((x) => x.classList.toggle('sel', x === tr)); };
+      tr.ondblclick = () => { _ft.sel = p.id; editPunch(); };
+      pTb.append(tr);
+    }
+    if (!rows.length) pTb.append(el('tr', {}, el('td', { colspan: 6 }, el('div', { class: 'empty' }, `${e.full_name} chưa có lượt chấm ${_ft.from === _ft.to ? 'ngày ' + fmtD(_ft.from) : 'trong khoảng này'}. Bấm "+ Thêm".`))));
+    // kết quả tính công của các ngày đang xem (sau khi thêm / sửa / xoá tự cập nhật)
+    const res = (g.rows || []).filter((r) => r.in || r.leave);
+    if (res.length) resBox.append(el('div', { class: 'map-hint', style: 'margin:0 0 4px' }, 'Kết quả tính công:'),
+      ...res.map((r) => el('div', { class: 'ft-res-row' }, el('b', {}, `${r.date.slice(8)}/${r.date.slice(5, 7)} ${r.wd}`), r.shift ? el('span', { class: 'pill' }, r.shift) : '',
+        r.in ? `Vào ${r.in} · Ra ${r.out || '—'}` : '', r.leave ? el('span', { class: 'pill warn' }, r.leave) : '',
+        r.late ? el('span', { style: 'color:#c0392b' }, `trễ ${r.late}'`) : '', r.early ? el('span', { style: 'color:#c0392b' }, `sớm ${r.early}'`) : '',
+        r.ot ? el('span', { style: 'color:#0a7' }, `TC ${r.ot}'`) : '', el('b', {}, `${r.cong ?? 0} công`), el('span', { class: 'muted' }, r.status || ''))));
+  };
+
+  // Thêm (như Wise Eye: tích Ngày giờ vào / Ngày giờ ra)
+  addB.onclick = () => {
+    const e = empOf(); if (!e) return toast('Chọn 1 nhân viên trước', 'err');
+    const ciChk = el('input', { type: 'checkbox', checked: '', style: 'width:auto' }), coChk = el('input', { type: 'checkbox', style: 'width:auto' });
+    const ciD = el('input', { type: 'date', value: _ft.from, style: 'margin:0' }), coD = el('input', { type: 'date', value: _ft.from, style: 'margin:0' });
+    const ciT = time24('ft-in', '07:30'), coT = time24('ft-out', '17:00');
+    for (const t of [ciT, coT]) { t.style.width = '96px'; t.style.margin = '0'; }
+    const line = (chk, label, dI, tI) => el('div', { class: 'ft-addrow' }, el('label', { class: 'lv-chk' }, chk, el('b', {}, label)), dI, tI);
+    const ok = el('button', { class: 'btn' }, 'Đồng ý');
+    ok.onclick = async () => {
+      if (!ciChk.checked && !coChk.checked) return toast('Tích "Ngày giờ vào" và/hoặc "Ngày giờ ra"', 'err');
+      try {
+        if (ciChk.checked) await api('/admin/attendance/punches', { method: 'POST', body: { employee_ids: [e.id], date: ciD.value, in: ciT.value } });
+        if (coChk.checked) await api('/admin/attendance/punches', { method: 'POST', body: { employee_ids: [e.id], date: coD.value, out: coT.value, out_date: coD.value } });
+        toast('Đã thêm giờ', 'ok'); closeModal(); loadPunches();
+      } catch (err) { toast(err.message, 'err'); }
+    };
+    openModal('Thêm giờ', [
+      el('div', { class: 'two-col' }, field('Mã chấm công', el('input', { value: e.device_pin || e.code, disabled: '' })), field('Tên nhân viên', el('input', { value: e.full_name, disabled: '' }))),
+      line(ciChk, 'Ngày giờ vào', ciD, ciT), line(coChk, 'Ngày giờ ra', coD, coT),
+      el('div', { class: 'map-hint' }, 'Thêm thành lượt chấm (như quẹt máy), công ngày đó tự tính lại theo ca. Ra sáng hôm sau thì chọn ngày ra là hôm sau.'),
+    ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ bỏ'), ok]);
+  };
+  // Sửa lượt đang chọn
+  const editPunch = () => {
+    const p = rows.find((x) => x.id === _ft.sel); if (!p) return toast('Bấm chọn 1 dòng giờ chấm ở bảng dưới trước', 'err');
+    const dI = el('input', { type: 'date', value: p.date, style: 'margin:0' }), tI = time24('ft-edit', p.time);
+    const ok = el('button', { class: 'btn' }, 'Lưu');
+    ok.onclick = async () => {
+      try { await api('/admin/attendance/punches/' + p.id, { method: 'PUT', body: { date: dI.value, time: tI.value } }); toast('Đã sửa giờ chấm', 'ok'); closeModal(); loadPunches(); }
+      catch (err) { toast(err.message, 'err'); }
+    };
+    openModal('Sửa giờ chấm', [el('div', { class: 'two-col' }, field('Ngày', dI), field('Giờ', tI)),
+      el('div', { class: 'map-hint' }, `Đang sửa lượt ${p.time} ngày ${fmtD(p.date)} (${p.manual ? 'thêm tay' : p.source}).`)],
+    [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), ok]);
+  };
+  editB.onclick = editPunch;
+  delB.onclick = async () => {
+    const p = rows.find((x) => x.id === _ft.sel); if (!p) return toast('Bấm chọn 1 dòng giờ chấm ở bảng dưới trước', 'err');
+    if (!confirm(`Xoá giờ chấm ${p.time} ngày ${fmtD(p.date)} của ${empOf()?.full_name || ''}?`)) return;
+    try { await api('/admin/attendance/punches/' + p.id, { method: 'DELETE' }); _ft.sel = null; toast('Đã xoá giờ chấm', 'ok'); loadPunches(); } catch (err) { toast(err.message, 'err'); }
+  };
+
+  // ----- thanh công cụ trên cùng (như ribbon Wise Eye) -----
+  const scopeEmps = () => { const g = groups.get(_ft.dept); return emps.filter((e) => !g || g.has(e.department || NONE)); };
+  const bulkBtn = el('button', { class: 'btn ghost' }, '📅 Thêm giờ hàng loạt');
+  bulkBtn.onclick = () => bulkPunchModal(scopeEmps(), _ft.from, loadPunches);
+  const clearBtn = el('button', { class: 'btn ghost', style: 'color:#c0392b' }, '🗑 Xoá dữ liệu chấm công');
+  clearBtn.onclick = () => clearAttModal(scopeEmps(), _ft.from, _ft.to, loadPunches);
+
+  const empPanel = el('div', { class: 'panel ft-panel' },
+    el('div', { class: 'ft-bar' }, q, empTotal),
+    el('div', { class: 'ft-scroll' }, empTbl));
+  const punchPanel = el('div', { class: 'panel ft-panel' },
+    el('div', { class: 'ft-bar ft-tools' }, addB, editB, delB, el('span', { class: 'ft-sep' }),
+      el('span', { class: 'muted' }, 'Chọn ngày'), prev, fromI, el('span', { class: 'muted' }, 'đến'), toI, next),
+    el('div', { class: 'tbl-scroll' }, pTbl), resBox);
+  setMain(head('Sửa giờ chấm công', bulkBtn, clearBtn),
+    el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Chọn phòng ban → bấm 1 nhân viên → các lượt chấm hiện ở bảng dưới. "+ Thêm" giờ vào / ra, bấm chọn 1 dòng rồi "✎ Sửa" (hoặc bấm đúp) / "✕ Xoá". Công ngày đó tự tính lại theo ca và quy tắc ghép vào–ra.'),
+    el('div', { class: 'ft-wrap' }, el('div', { class: 'panel ft-left' }, tree), el('div', { class: 'ft-right' }, empPanel, punchPanel)));
+  drawEmps(); loadPunches();
 }
 
 /* ---------- LƯỢT CHẤM (như "Sửa giờ chấm công" của Wise Eye): xem / thêm / sửa / xoá từng lượt chấm của 1 NV trong 1 ngày ---------- */
