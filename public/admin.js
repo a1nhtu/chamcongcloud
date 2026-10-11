@@ -2821,6 +2821,57 @@ async function pageLeaveQuota() {
     el('div', { style: 'margin-bottom:10px' }, q), el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
+// Ô chọn NHIỀU nhân viên dùng chung: lọc theo phòng ban (gồm cả bộ phận con) + tìm tên / mã;
+// "Chọn tất cả" chọn đúng danh sách đang lọc (chọn 1 phòng ban + Chọn tất cả = cả phòng ban đó)
+async function empMultiPicker(emps, maxH = 260) {
+  if (!DEPARTMENTS.length) { try { DEPARTMENTS = (await api('/admin/departments')).rows || []; } catch {} }
+  const picked = new Set();
+  const NONE = '\u0000none';
+  const kids = new Map();
+  for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+  const namesUnder = (d) => [d.name, ...(kids.get(d.id) || []).flatMap(namesUnder)];
+  const cntBy = new Map();
+  for (const e of emps) { const k = e.department || NONE; cntBy.set(k, (cntBy.get(k) || 0) + 1); }
+  const groups = new Map();   // giá trị ô chọn → tập tên phòng ban
+  const opts = [el('option', { value: '' }, `Tất cả phòng ban (${emps.length})`)];
+  for (const d of deptOrdered()) {
+    const names = namesUnder(d), n = names.reduce((a, x) => a + (cntBy.get(x) || 0), 0);
+    groups.set('d' + d.id, new Set(names));
+    opts.push(el('option', { value: 'd' + d.id }, '\u00a0\u00a0\u00a0'.repeat(d.depth) + d.name + ` (${n})`));
+  }
+  const known = new Set(DEPARTMENTS.map((d) => d.name));
+  for (const k of [...cntBy.keys()].filter((k) => k !== NONE && !known.has(k)).sort((a, b) => a.localeCompare(b, 'vi'))) {
+    groups.set('o' + k, new Set([k])); opts.push(el('option', { value: 'o' + k }, `${k} (${cntBy.get(k)})`));
+  }
+  if (cntBy.has(NONE)) { groups.set('none', new Set([NONE])); opts.push(el('option', { value: 'none' }, `Chưa có phòng ban (${cntBy.get(NONE)})`)); }
+  const deptSel = el('select', {}, ...opts);
+  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên' });
+  const listBox = el('div', { style: `max-height:${maxH}px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px` });
+  const cnt = el('b', {});
+  const draw = () => {
+    const s = q.value.trim().toLowerCase(), g = groups.get(deptSel.value);
+    const list = emps.filter((e) => (!g || g.has(e.department || NONE)) && (!s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s)));
+    listBox.innerHTML = '';
+    const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => picked.has(e.id)) ? { checked: '' } : {}) });
+    all.onchange = () => { for (const e of list) all.checked ? picked.add(e.id) : picked.delete(e.id); draw(); };
+    listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:4px 0;border-bottom:1px solid var(--line)' }, all,
+      `Chọn tất cả (${list.length})` + (g ? ' — ' + deptSel.selectedOptions[0].textContent.trim().replace(/\s*\(\d+\)$/, '') : '')));
+    for (const e of list) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(e.id) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(e.id) : picked.delete(e.id); cnt.textContent = `Đã chọn ${picked.size} người`; all.checked = list.every((x) => picked.has(x.id)); };
+      listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer' }, cb, el('span', {}, e.full_name), el('span', { style: 'color:#9ca3af;font-size:12px' }, (e.code || '') + (e.department ? ' · ' + e.department : ''))));
+    }
+    if (!list.length) listBox.append(el('div', { class: 'empty' }, 'Không có nhân viên.'));
+    cnt.textContent = `Đã chọn ${picked.size} người`;
+  };
+  q.oninput = draw; deptSel.onchange = draw; draw();
+  const node = el('div', {},
+    el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, el('label', { style: 'margin:0' }, 'Nhân viên'), cnt),
+    el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px' }, deptSel, q),
+    el('div', { style: 'height:6px' }), listBox);
+  return { node, picked };
+}
+
 /* ---------- CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…) ---------- */
 // Trong khoảng ngày áp dụng, nhân viên được đến muộn / về sớm số phút đã khai — không tính trễ/sớm, không trừ công.
 const PRIV_PRESETS = [
@@ -2873,23 +2924,8 @@ async function privModal(row) {
   const edit = !!row;
   let emps = [];
   if (!edit) { try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); } }
-  const picked = new Set();
-  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên' });
-  const listBox = el('div', { style: 'max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px' });
-  const cnt = el('b', {});
-  const draw = () => {
-    const s = q.value.trim().toLowerCase();
-    const list = emps.filter((e) => !s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s));
-    listBox.innerHTML = '';
-    for (const e of list) {
-      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(e.id) ? { checked: '' } : {}) });
-      cb.onchange = () => { cb.checked ? picked.add(e.id) : picked.delete(e.id); cnt.textContent = `Đã chọn ${picked.size} người`; };
-      listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer' }, cb, el('span', {}, e.full_name), el('span', { style: 'color:#9ca3af;font-size:12px' }, (e.code || '') + (e.department ? ' · ' + e.department : ''))));
-    }
-    if (!list.length) listBox.append(el('div', { class: 'empty' }, 'Không có nhân viên.'));
-    cnt.textContent = `Đã chọn ${picked.size} người`;
-  };
-  if (!edit) { q.oninput = draw; draw(); }
+  const pick = edit ? null : await empMultiPicker(emps, 200);
+  const picked = pick ? pick.picked : new Set();
   const kindSel = el('select', {}, ...['Mang thai', 'Nuôi con nhỏ', 'Khác'].map((k) => el('option', { value: k, ...(row && row.kind === k ? { selected: '' } : {}) }, k)));
   const fromI = el('input', { type: 'date', value: row ? row.from_date : todayVN() });
   const toI = el('input', { type: 'date', value: row ? row.to_date || '' : '' });
@@ -2934,7 +2970,7 @@ async function privModal(row) {
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   openModal(edit ? `Sửa chế độ ưu đãi — ${row.full_name}` : 'Thêm chế độ ưu đãi', [
-    edit ? '' : el('div', {}, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, el('label', { style: 'margin:0' }, 'Nhân viên'), cnt), q, el('div', { style: 'height:6px' }), listBox),
+    edit ? '' : pick.node,
     el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px' }, field('Chế độ', kindSel), field('Từ ngày', fromI), field('Đến ngày', toI)),
     el('div', { class: 'map-hint', style: 'margin-top:-6px' }, 'Bỏ trống "Đến ngày" = áp dụng tới khi xoá / sửa. Mang thai: đến ngày nghỉ sinh; nuôi con nhỏ: đến ngày con đủ 12 tháng.'),
     el('div', {}, el('label', {}, 'Mẫu nhanh'), presets),
@@ -2952,25 +2988,7 @@ async function privModal(row) {
 async function leaveAddModal() {
   let emps = [];
   try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); }
-  const picked = new Set();
-  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên' });
-  const listBox = el('div', { style: 'max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px' });
-  const cnt = el('b', {});
-  const draw = () => {
-    const s = q.value.trim().toLowerCase();
-    const list = emps.filter((e) => !s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s));
-    listBox.innerHTML = '';
-    const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => picked.has(e.id)) ? { checked: '' } : {}) });
-    all.onchange = () => { for (const e of list) all.checked ? picked.add(e.id) : picked.delete(e.id); draw(); };
-    listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:4px 0;border-bottom:1px solid var(--line)' }, all, `Chọn tất cả (${list.length})`));
-    for (const e of list) {
-      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(e.id) ? { checked: '' } : {}) });
-      cb.onchange = () => { cb.checked ? picked.add(e.id) : picked.delete(e.id); cnt.textContent = `Đã chọn ${picked.size} người`; all.checked = list.every((x) => picked.has(x.id)); };
-      listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer' }, cb, el('span', {}, e.full_name), el('span', { style: 'color:#9ca3af;font-size:12px' }, (e.code || '') + (e.department ? ' · ' + e.department : ''))));
-    }
-    cnt.textContent = `Đã chọn ${picked.size} người`;
-  };
-  q.oninput = draw; draw();
+  const pick = await empMultiPicker(emps), picked = pick.picked;
   let types = [];
   try { types = (await api('/leaves/types')).rows || []; } catch {}
   const typeSel = el('select', {}, ...types.map((t) => el('option', { value: t.type }, t.label || t.type)));
@@ -2994,9 +3012,9 @@ async function leaveAddModal() {
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   openModal('Thêm đơn nghỉ cho nhân viên', [
-    el('div', {}, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, el('label', { style: 'margin:0' }, 'Nhân viên'), cnt), q, el('div', { style: 'height:6px' }), listBox),
+    pick.node,
     el('div', { class: 'two-col' }, field('Loại đơn', typeSel), field('Lý do', reasonI)),
-    el('div', { style: 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px' }, field('Từ ngày', fromI), field('Đến ngày', toI), field('Thời gian', halfSel)),
+    el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px' }, field('Từ ngày', fromI), field('Đến ngày', toI), field('Thời gian', halfSel)),
     el('div', { class: 'map-hint' }, 'Đơn do quản lý thêm được duyệt luôn, hiện ngay ở Tính công và báo cáo. Nghỉ phép năm trừ vào quỹ phép; nghỉ nửa ngày chỉ chọn được khi từ ngày = đến ngày.'),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
