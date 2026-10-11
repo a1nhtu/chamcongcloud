@@ -970,7 +970,7 @@ const IO_RULES = [
   ['filo', 'Giờ đầu là vào, giờ cuối là ra', 'Lần chấm công đầu tiên được xem là giờ VÀO, lần chấm công cuối cùng được xem là giờ RA, bỏ qua tất cả các giờ chấm ở giữa. Tính trong khung giờ của ca: ca ngày lấy trong ngày; ca qua đêm lấy lượt VÀO buổi tối và lượt RA sáng hôm sau.'],
   ['pairs', 'Tự động - không qua đêm (không qua 12h)', 'Lần chấm đầu là VÀO, lần chấm kế tiếp là RA, rồi lại VÀO… Giờ làm = tổng các cặp vào–ra (thời gian ra ngoài giữa chừng bị trừ). Việc chọn lượt phụ thuộc ba thông số bên dưới.'],
   ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động" nhưng dùng cho ca đêm: lượt VÀO buổi tối ghép với lượt RA sáng hôm sau.'],
-  ['idm', 'Theo ID máy', 'Khi chấm công ở máy có số máy lẻ (1, 3, 5, 7, 9) sẽ là VÀO. Khi chấm ở máy có số máy chẵn (2, 4, 6, 8, 10) sẽ là RA. Đặt "số máy" cho từng máy ở mục Máy chấm công.'],
+  ['idm', 'Theo ID máy', 'Khi chấm công ở máy có số máy lẻ (1, 3, 5, 7, 9) sẽ là VÀO. Khi chấm ở máy có số máy chẵn (2, 4, 6, 8, 10) sẽ là RA. Đặt "ID máy" cho từng máy ở cột ID máy của mục Máy chấm công.'],
   ['state', 'Chọn từ máy', 'Giờ VÀO hay giờ RA nhận từ máy chấm công: bấm phím Check In trước khi chấm là VÀO, bấm Check Out trước khi chấm là RA.'],
   ['tdhc', 'Phân theo giờ', 'Giờ chấm nằm trong khung "Bắt đầu vào – Kết thúc vào" của ca là VÀO; nằm trong khung "Bắt đầu ra – Kết thúc ra" là RA (khai ở Ca làm việc).'],
 ];
@@ -3513,7 +3513,7 @@ async function pageDevices() {
 
   // Bảng danh sách máy
   const tbl = el('table', { class: 'data dev-tbl' });
-  tbl.innerHTML = `<thead><tr><th>Máy</th><th>Trạng thái</th><th class="c">Nhân viên</th><th class="c">Vân tay</th><th class="c">Khuôn mặt</th><th class="c">Thẻ</th><th>Kết nối gần nhất</th><th class="c">Số quẹt</th><th></th></tr></thead>`;
+  tbl.innerHTML = `<thead><tr><th>Máy</th><th>Trạng thái</th><th class="c" title="Như Ronald Jack: ID lẻ (1, 3, 5…) = máy VÀO, ID chẵn (2, 4, 6…) = máy RA, 0 = máy chấm cả vào lẫn ra. Dùng khi chọn lịch trình vào ra &quot;Theo ID máy&quot;.">ID máy</th><th class="c">Nhân viên</th><th class="c">Vân tay</th><th class="c">Khuôn mặt</th><th class="c">Thẻ</th><th>Kết nối gần nhất</th><th class="c">Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
   const countCells = {};   // serial -> {nv,fp,face,card} để tự làm mới số liệu
   // Copy serial máy (để dán vào trang cấp key, khỏi gõ tay). Bản LAN chạy http → không có navigator.clipboard nên có dự phòng execCommand.
@@ -3588,7 +3588,7 @@ async function pageDevices() {
       { group: 'Dữ liệu từ máy', label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại. Chờ chút rồi Làm mới.', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
       { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
       { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
-      { group: 'Cài đặt máy', hint: 'Ghép log kiểu IDM: máy số lẻ = VÀO, máy chẵn = RA', label: '🔢 Số máy (ghép log)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
+      false && { group: 'Cài đặt máy', hint: 'Ghép log kiểu IDM: máy số lẻ = VÀO, máy chẵn = RA', label: '🔢 Số máy (ghép log)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
       hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null,
       hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
       (hasPerm('devices') && m.key_ok) ? { group: 'Bản quyền & quản trị', label: '🔑 Gỡ key bản quyền máy', fn: async () => { if (confirm('Gỡ key bản quyền khỏi máy này?')) { await api('/admin/devices/' + m.id + '/key', { method: 'DELETE' }); toast('Đã gỡ key', 'ok'); pageDevices(); } } } : null,
@@ -3612,7 +3612,6 @@ async function pageDevices() {
     const online = !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
     const chips = [
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
-      m.machine_number ? el('span', { class: 'chip', title: 'Số máy' }, '№ ' + m.machine_number) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
     ].filter(Boolean);
     const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';
@@ -3627,6 +3626,7 @@ async function pageDevices() {
         m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'),
         // Máy đã có key thì ẩn nhãn cho đỡ rối; chỉ cảnh báo khi CHƯA có key
         (d.key_required && !m.key_ok) ? el('span', { class: 'pill warn' }, '🔑 Chưa có key') : '')),
+      idCell(m),
       cNV, cFP, cFace, cCard,
       el('td', {}, el('div', { class: 'dv-ip' }, m.last_ip || '—'), seen ? el('div', { class: 'dv-sub' }, seen) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
@@ -3650,15 +3650,6 @@ async function pageDevices() {
     if (document.body.contains(tbl)) setTimeout(tickCounts, 10000);
   };
   setTimeout(tickCounts, 10000);
-  const RB_LABEL = '🔄 Tính lại công (đổi số máy / chẵn-lẻ vào-ra)';
-  const rebuildBtn = el('button', { class: 'btn ghost', title: 'Dùng khi vừa đổi SỐ MÁY hoặc quy tắc chẵn/lẻ (VÀO/RA): ghép LẠI giờ vào/ra từ lượt quẹt của máy theo quy tắc mới rồi tính lại công. Khác "↻ Tính lại" bên Tính công (cái đó giữ nguyên giờ vào/ra, chỉ tính lại chỉ số).' }, RB_LABEL);
-  rebuildBtn.onclick = async () => {
-    if (!confirm('TÍNH LẠI CÔNG — dùng khi vừa đổi SỐ MÁY hoặc quy tắc chẵn/lẻ VÀO-RA.\n\nSẽ ghép LẠI giờ vào/ra từ lượt quẹt của máy theo quy tắc mới, rồi tính lại công cho các ngày có chấm.\n(Nếu chỉ đổi ca/cấu hình mà giờ vào/ra vẫn đúng → dùng "↻ Tính lại" bên trang Tính công.)\n\nTiếp tục?')) return;
-    rebuildBtn.disabled = true; rebuildBtn.textContent = 'Đang xử lý…';
-    try { const r = await api('/admin/devices/rebuild', { method: 'POST' }); toast(`Đã tính lại ${r.rebuilt} ngày công`, 'ok'); pageDevices(); }
-    catch (e) { toast(e.message, 'err'); }
-    finally { rebuildBtn.disabled = false; rebuildBtn.textContent = RB_LABEL; }
-  };
   // 1 nút "Đồng bộ" gộp: bấm ra menu chọn Đồng bộ thường (mặc định) hoặc Ép toàn bộ.
   const doResync = async (force) => {
     const msg = force
@@ -3678,7 +3669,24 @@ async function pageDevices() {
   resyncBtn.className = 'btn';   // nút chính (không phải kiểu mờ)
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
   usbBtn.onclick = usbImportModal;
-  setMain(head('Máy chấm công', usbBtn, resyncBtn, rebuildBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', usbBtn, resyncBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+// Ô "ID máy" (kiểu Ronald Jack) ngay trên bảng máy: gõ số là lưu; lẻ = máy VÀO, chẵn = máy RA, 0 = vào + ra.
+// Đổi xong chỉ cần bấm "↻ Tính lại" ở trang Tính công (ghép lại giờ vào/ra theo ID mới).
+function idCell(m) {
+  const can = hasPerm('devices');
+  const tag = el('div', { class: 'dv-sub', style: 'text-align:center' });
+  const show = (n) => { tag.textContent = !n ? 'vào + ra' : n % 2 ? 'máy VÀO' : 'máy RA'; tag.style.color = !n ? '' : n % 2 ? '#15803d' : '#b45309'; };
+  const inp = el('input', { type: 'number', min: 0, max: 99, value: m.machine_number || 0, style: 'width:62px;text-align:center;padding:5px 6px;margin:0', ...(can ? {} : { disabled: '' }) });
+  show(m.machine_number || 0);
+  inp.oninput = () => show(parseInt(inp.value, 10) || 0);
+  inp.onchange = async () => {
+    const n = Math.max(0, parseInt(inp.value, 10) || 0); inp.value = n;
+    try { await api('/admin/devices/' + m.id, { method: 'PUT', body: { machine_number: n } }); m.machine_number = n; toast('Đã lưu ID máy. Bấm "↻ Tính lại" ở trang Tính công để áp cho các ngày đã chấm', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  return el('td', { class: 'c' }, inp, tag);
 }
 
 // Nhập dữ liệu chấm công + nhân viên từ USB (máy không nối mạng)

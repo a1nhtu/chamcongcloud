@@ -61,6 +61,12 @@ export function registerAttendanceRoutes(r, { need }) {
     const dWhere = where.filter((w) => w !== 'a.check_in_at IS NOT NULL').map((w) => w.replace(/\ba\./g, 'p.'));
     const dArgs = args.slice();
     const dJoin = join.replace('e.id=a.employee_id', 'e.id=p.employee_id');
+    // Lượt quẹt chưa khớp NV (khai Số ID máy sau khi máy đã đẩy log) → gán lại trước khi ghép
+    for (const { pin } of db.prepare('SELECT DISTINCT pin FROM device_punches WHERE employee_id IS NULL').all()) {
+      const emp = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>'' AND active=1").get(pin)
+        || db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
+      if (emp) db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(emp.id, pin);
+    }
     const devDays = db.prepare(`SELECT DISTINCT p.employee_id, p.work_date FROM device_punches p${dJoin} WHERE p.employee_id IS NOT NULL${dWhere.length ? ' AND ' + dWhere.join(' AND ') : ''}`)
       .all(...dArgs).map((r) => r.employee_id + '|' + r.work_date);
     const devSet = new Set(devDays);
