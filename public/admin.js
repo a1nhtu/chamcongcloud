@@ -1662,7 +1662,7 @@ function asDeptNodes(master, extraNames) {
   for (const n of [...new Set(extraNames)].filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi'))) if (!out.some((o) => o.name === n)) out.push({ name: n, depth: 0 });
   return out;
 }
-let _asNavOpen = true;      // menu con của mục Phân ca ở menu trái đang mở
+let _asNavOpen = false;     // menu con của mục Phân ca ở menu trái: mặc định THU GỌN, bấm mục Phân ca mới xổ ra
 let _asStopDrag = null;
 document.addEventListener('mouseup', () => { if (_asStopDrag) _asStopDrag(); });
 const _asDirty = new Map();   // ô đang sửa chưa lưu trên Bảng phân ca: 'idNV|ngày' → giá trị mới ('' = bỏ ca ngày đó)
