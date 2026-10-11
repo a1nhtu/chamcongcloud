@@ -2735,7 +2735,9 @@ async function pageLeaves() {
     el('option', { value: '' }, 'Tất cả'),
     el('option', { value: 'approved' }, 'Đã duyệt'),
     el('option', { value: 'rejected' }, 'Từ chối'));
-  setMain(head('Đơn từ', sel), loading());
+  const addBtn = el('button', { class: 'btn' }, '+ Thêm đơn');
+  addBtn.onclick = () => leaveAddModal();
+  setMain(head('Đơn từ', sel, addBtn), loading());
   const load = async () => {
     const status = $('#lv-filter').value;
     const { rows } = await api('/leaves' + (status ? '?status=' + status : ''));
@@ -2745,9 +2747,13 @@ async function pageLeaves() {
     if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Không có đơn.'))));
     for (const r of rows) {
       const st = { pending: ['warn', 'Chờ duyệt'], approved: ['ok', 'Đã duyệt'], rejected: ['bad', 'Từ chối'] }[r.status];
+      const delBtn = btnSm('Xoá', async () => {
+        if (!confirm(`Xoá đơn "${r.type}" ${fmtD(r.from_date)}–${fmtD(r.to_date)} của ${r.full_name}?`)) return;
+        try { await api('/leaves/admin/' + r.id, { method: 'DELETE' }); toast('Đã xoá đơn', 'ok'); pageLeaves(); } catch (e) { toast(e.message, 'err'); }
+      }, 'ghost');
       const act = r.status === 'pending' ? el('div', { style: 'display:flex;gap:6px' },
         btnSm('Duyệt', () => review(r, 'approve'), 'green'),
-        btnSm('Từ chối', () => review(r, 'reject'), 'ghost')) : (r.review_note || '—');
+        btnSm('Từ chối', () => review(r, 'reject'), 'ghost')) : el('div', { style: 'display:flex;gap:8px;align-items:center' }, el('span', { style: 'color:var(--muted);font-size:13px' }, r.review_note || ''), delBtn);
       tb.append(el('tr', {},
         el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code + ' · ' + (r.department || ''))),
         el('td', {}, r.type),
@@ -2758,12 +2764,57 @@ async function pageLeaves() {
       ));
     }
     tbl.append(tb);
-    setMain(head('Đơn từ', sel), el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Đơn từ', sel, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / KL / CT / K) và báo cáo.'), el('div', { class: 'panel tbl-scroll' }, tbl));
     $('#lv-filter').value = status;
     $('#lv-filter').onchange = load;
   };
   sel.onchange = load; load();
 }
+// Quản lý khai nghỉ TRỰC TIẾP cho 1 hoặc nhiều nhân viên (đơn tự duyệt)
+async function leaveAddModal() {
+  let emps = [];
+  try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); }
+  const picked = new Set();
+  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên' });
+  const listBox = el('div', { style: 'max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px' });
+  const cnt = el('b', {});
+  const draw = () => {
+    const s = q.value.trim().toLowerCase();
+    const list = emps.filter((e) => !s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s));
+    listBox.innerHTML = '';
+    const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => picked.has(e.id)) ? { checked: '' } : {}) });
+    all.onchange = () => { for (const e of list) all.checked ? picked.add(e.id) : picked.delete(e.id); draw(); };
+    listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:4px 0;border-bottom:1px solid var(--line)' }, all, `Chọn tất cả (${list.length})`));
+    for (const e of list) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(e.id) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(e.id) : picked.delete(e.id); cnt.textContent = `Đã chọn ${picked.size} người`; all.checked = list.every((x) => picked.has(x.id)); };
+      listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer' }, cb, el('span', {}, e.full_name), el('span', { style: 'color:#9ca3af;font-size:12px' }, (e.code || '') + (e.department ? ' · ' + e.department : ''))));
+    }
+    cnt.textContent = `Đã chọn ${picked.size} người`;
+  };
+  q.oninput = draw; draw();
+  const typeSel = el('select', {}, ...['Nghỉ phép', 'Nghỉ không lương', 'Công tác', 'Khác'].map((t) => el('option', { value: t }, t)));
+  const fromI = el('input', { type: 'date', value: todayVN() }), toI = el('input', { type: 'date', value: todayVN() });
+  fromI.onchange = () => { if (!toI.value || toI.value < fromI.value) toI.value = fromI.value; };
+  const reasonI = el('input', { placeholder: 'Lý do (tuỳ chọn)' });
+  const save = el('button', { class: 'btn' }, 'Lưu (tự duyệt)');
+  save.onclick = async () => {
+    if (!picked.size) return toast('Chọn ít nhất 1 nhân viên', 'err');
+    if (!fromI.value || !toI.value || toI.value < fromI.value) return toast('Chọn từ ngày / đến ngày (đến ngày không trước từ ngày)', 'err');
+    save.disabled = true;
+    try {
+      const r = await api('/leaves/admin', { method: 'POST', body: { employee_ids: [...picked], type: typeSel.value, from_date: fromI.value, to_date: toI.value, reason: reasonI.value } });
+      toast(`Đã thêm ${r.count} đơn (đã duyệt)`, 'ok'); closeModal(); pageLeaves();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  };
+  openModal('Thêm đơn nghỉ cho nhân viên', [
+    el('div', {}, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, el('label', { style: 'margin:0' }, 'Nhân viên'), cnt), q, el('div', { style: 'height:6px' }), listBox),
+    el('div', { class: 'two-col' }, field('Loại đơn', typeSel), field('Lý do', reasonI)),
+    el('div', { class: 'two-col' }, field('Từ ngày', fromI), field('Đến ngày', toI)),
+    el('div', { class: 'map-hint' }, 'Đơn do quản lý thêm được duyệt luôn, hiện ngay ở Tính công và báo cáo.'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+}
+
 async function review(r, action) {
   let note = '';
   if (action === 'reject') { note = prompt('Lý do từ chối (tuỳ chọn):') ?? ''; }
