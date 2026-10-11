@@ -698,6 +698,8 @@ function empModal(e) {
     el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name))),
     el('div', { class: 'two-col' }, deptField, posField),
     el('div', { class: 'two-col' }, field('Số điện thoại', mk('phone', '', e?.phone)), pinField),
+    el('div', { class: 'two-col' }, field('Ngày vào làm (tính phép năm, thâm niên)', input('e-start', { type: 'date', value: e?.start_date || '' })),
+      field('Phép năm riêng, chưa gồm thâm niên (trống = mức chung)', input('e-leaveyear', { type: 'number', min: 0, step: 0.5, value: e?.leave_days_year ?? '', placeholder: 'theo Cài đặt' }))),
     field('Kiểu chấm công của nhân viên này',
       el('select', { id: 'e-attmode' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v, ...((e?.att_mode || '') === v ? { selected: '' } : {}) },
         v === '' ? `Theo cài đặt chung (hiện là: ${SETTINGS.attendance_mode === 'hourly' ? 'theo giờ' : 'theo ca'})` : ATT_MODE_LABEL[v])))),
@@ -725,6 +727,8 @@ function empModal(e) {
       username: f.username.value.trim(),
       password: $('#e-password').value || undefined,
       att_mode: $('#e-attmode') ? $('#e-attmode').value : undefined,
+      start_date: $('#e-start') ? $('#e-start').value : undefined,
+      leave_days_year: $('#e-leaveyear') ? $('#e-leaveyear').value : undefined,
     };
     // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
     if (!pinLocked) body.device_pin = f.device_pin.value.trim();
@@ -2729,7 +2733,10 @@ async function shiftAssignFormModal(onSaved, preset = {}) {
 }
 
 /* ---------- 5) ĐƠN TỪ ---------- */
+const HALF_TXT = { sang: 'nửa ngày sáng', chieu: 'nửa ngày chiều' };
+let _lvTab = 'list';
 async function pageLeaves() {
+  if (_lvTab === 'quota') return pageLeaveQuota();
   const sel = el('select', { id: 'lv-filter' },
     el('option', { value: 'pending' }, 'Chờ duyệt'),
     el('option', { value: '' }, 'Tất cả'),
@@ -2737,7 +2744,9 @@ async function pageLeaves() {
     el('option', { value: 'rejected' }, 'Từ chối'));
   const addBtn = el('button', { class: 'btn' }, '+ Thêm đơn');
   addBtn.onclick = () => leaveAddModal();
-  setMain(head('Đơn từ', sel, addBtn), loading());
+  const quotaBtn = el('button', { class: 'btn ghost' }, '📅 Quỹ phép năm');
+  quotaBtn.onclick = () => { _lvTab = 'quota'; pageLeaves(); };
+  setMain(head('Đơn từ', sel, quotaBtn, addBtn), loading());
   const load = async () => {
     const status = $('#lv-filter').value;
     const { rows } = await api('/leaves' + (status ? '?status=' + status : ''));
@@ -2757,19 +2766,58 @@ async function pageLeaves() {
       tb.append(el('tr', {},
         el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code + ' · ' + (r.department || ''))),
         el('td', {}, r.type),
-        el('td', {}, fmtD(r.from_date)), el('td', {}, fmtD(r.to_date)),
+        el('td', {}, fmtD(r.from_date)), el('td', {}, fmtD(r.to_date), r.half ? el('div', { style: 'font-size:12px;color:#b45309' }, HALF_TXT[r.half] || '') : ''),
         el('td', {}, r.reason || '—'),
         el('td', {}, el('span', { class: 'pill ' + st[0] }, st[1])),
         el('td', {}, act),
       ));
     }
     tbl.append(tb);
-    setMain(head('Đơn từ', sel, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / KL / CT / K) và báo cáo.'), el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Đơn từ', sel, quotaBtn, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / KL / CT / K) và báo cáo.'), el('div', { class: 'panel tbl-scroll' }, tbl));
     $('#lv-filter').value = status;
     $('#lv-filter').onchange = load;
   };
   sel.onchange = load; load();
 }
+// Quỹ phép năm của từng nhân viên: được hưởng, chuyển từ năm trước, đã nghỉ, chờ duyệt, còn lại
+let _lvYear = null;
+async function pageLeaveQuota() {
+  const y0 = +todayVN().slice(0, 4);
+  if (!_lvYear) _lvYear = y0;
+  const back = el('button', { class: 'btn ghost' }, '‹ Đơn từ');
+  back.onclick = () => { _lvTab = 'list'; pageLeaves(); };
+  const ySel = el('select', {}, ...[y0 + 1, y0, y0 - 1, y0 - 2].map((y) => el('option', { value: y, ...(y === _lvYear ? { selected: '' } : {}) }, 'Năm ' + y)));
+  ySel.onchange = () => { _lvYear = +ySel.value; pageLeaveQuota(); };
+  setMain(head('Quỹ phép năm', ySel, back), loading());
+  let d;
+  try { d = await api('/leaves/balances?year=' + _lvYear); } catch (e) { return setMain(head('Quỹ phép năm', ySel, back), el('div', { class: 'empty' }, e.message)); }
+  const S = d.settings || {};
+  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên', style: 'width:240px' });
+  const tbl = el('table', { class: 'data' });
+  tbl.innerHTML = '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Ngày vào làm</th><th class="c">Phép cả năm</th><th class="c">Được hưởng đến nay</th><th class="c">Năm trước chuyển sang</th><th class="c">Đã nghỉ</th><th class="c">Chờ duyệt</th><th class="c">Còn lại</th></tr></thead>';
+  const tb = el('tbody'); tbl.append(tb);
+  const n1 = (v) => String(v ?? 0).replace('.', ',');
+  const draw = () => {
+    const s = q.value.trim().toLowerCase();
+    tb.innerHTML = '';
+    const rows = d.rows.filter((r) => !s || (r.name || '').toLowerCase().includes(s) || String(r.code || '').toLowerCase().includes(s));
+    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 10 }, el('div', { class: 'empty' }, 'Không có nhân viên.'))));
+    for (const r of rows) tb.append(el('tr', {},
+      el('td', {}, r.code || ''), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || ''),
+      el('td', {}, r.start_date ? fmtD(r.start_date) + '/' + r.start_date.slice(0, 4) : el('span', { style: 'color:#bbb' }, 'chưa khai')),
+      el('td', { class: 'c' }, n1(r.full), r.own != null ? el('div', { style: 'font-size:11px;color:#b45309' }, 'mức riêng') : ''),
+      el('td', { class: 'c' }, n1(r.accrued)), el('td', { class: 'c' }, r.carry ? n1(r.carry) : '—'),
+      el('td', { class: 'c' }, n1(r.used)), el('td', { class: 'c' }, r.pending ? n1(r.pending) : '—'),
+      el('td', { class: 'c' }, el('b', { style: 'color:' + (r.remaining < 0 ? '#dc2626' : '#15803d') }, n1(r.remaining)))));
+  };
+  q.oninput = draw; draw();
+  const rule = `Đang áp: ${n1(S.perYear)} ngày/năm` + (S.senAdd > 0 && S.senYears > 0 ? `, cứ đủ ${S.senYears} năm làm việc +${n1(S.senAdd)} ngày` : '')
+    + (S.accrual === 'month' ? ', cộng dồn theo tháng' : ', cấp đủ đầu năm') + (S.prorate ? ', năm đầu vào làm tính theo số tháng' : '')
+    + (S.carryMax > 0 ? `, phép dư chuyển sang năm sau tối đa ${n1(S.carryMax)} ngày` + (S.carryUntil ? ` (dùng đến hết tháng ${S.carryUntil})` : '') : ', phép dư không chuyển sang năm sau') + '. Đổi ở Cài đặt › Phép năm; ngày vào làm / mức phép riêng khai ở hồ sơ nhân viên.';
+  setMain(head('Quỹ phép năm', ySel, back), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, rule),
+    el('div', { style: 'margin-bottom:10px' }, q), el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
 // Quản lý khai nghỉ TRỰC TIẾP cho 1 hoặc nhiều nhân viên (đơn tự duyệt)
 async function leaveAddModal() {
   let emps = [];
@@ -2793,25 +2841,33 @@ async function leaveAddModal() {
     cnt.textContent = `Đã chọn ${picked.size} người`;
   };
   q.oninput = draw; draw();
-  const typeSel = el('select', {}, ...['Nghỉ phép', 'Nghỉ không lương', 'Công tác', 'Khác'].map((t) => el('option', { value: t }, t)));
+  let types = [];
+  try { types = (await api('/leaves/types')).rows || []; } catch {}
+  const typeSel = el('select', {}, ...types.map((t) => el('option', { value: t.type }, t.label || t.type)));
   const fromI = el('input', { type: 'date', value: todayVN() }), toI = el('input', { type: 'date', value: todayVN() });
-  fromI.onchange = () => { if (!toI.value || toI.value < fromI.value) toI.value = fromI.value; };
+  const halfSel = el('select', {}, el('option', { value: '' }, 'Cả ngày'), el('option', { value: 'sang' }, 'Nửa ngày sáng'), el('option', { value: 'chieu' }, 'Nửa ngày chiều'));
+  const syncHalf = () => { const one = fromI.value && fromI.value === toI.value; halfSel.disabled = !one; if (!one) halfSel.value = ''; };
+  fromI.onchange = () => { if (!toI.value || toI.value < fromI.value) toI.value = fromI.value; syncHalf(); };
+  toI.onchange = syncHalf;
   const reasonI = el('input', { placeholder: 'Lý do (tuỳ chọn)' });
   const save = el('button', { class: 'btn' }, 'Lưu (tự duyệt)');
   save.onclick = async () => {
     if (!picked.size) return toast('Chọn ít nhất 1 nhân viên', 'err');
     if (!fromI.value || !toI.value || toI.value < fromI.value) return toast('Chọn từ ngày / đến ngày (đến ngày không trước từ ngày)', 'err');
     save.disabled = true;
+    const body = { employee_ids: [...picked], type: typeSel.value, from_date: fromI.value, to_date: toI.value, half: halfSel.value, reason: reasonI.value };
     try {
-      const r = await api('/leaves/admin', { method: 'POST', body: { employee_ids: [...picked], type: typeSel.value, from_date: fromI.value, to_date: toI.value, reason: reasonI.value } });
+      let r;
+      try { r = await api('/leaves/admin', { method: 'POST', body }); }
+      catch (e) { if (!(e.data && e.data.canForce) || !confirm(e.message + '\n\nVẫn lưu (nghỉ vượt phép)?')) throw e; r = await api('/leaves/admin', { method: 'POST', body: { ...body, force: true } }); }
       toast(`Đã thêm ${r.count} đơn (đã duyệt)`, 'ok'); closeModal(); pageLeaves();
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   openModal('Thêm đơn nghỉ cho nhân viên', [
     el('div', {}, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, el('label', { style: 'margin:0' }, 'Nhân viên'), cnt), q, el('div', { style: 'height:6px' }), listBox),
     el('div', { class: 'two-col' }, field('Loại đơn', typeSel), field('Lý do', reasonI)),
-    el('div', { class: 'two-col' }, field('Từ ngày', fromI), field('Đến ngày', toI)),
-    el('div', { class: 'map-hint' }, 'Đơn do quản lý thêm được duyệt luôn, hiện ngay ở Tính công và báo cáo.'),
+    el('div', { style: 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px' }, field('Từ ngày', fromI), field('Đến ngày', toI), field('Thời gian', halfSel)),
+    el('div', { class: 'map-hint' }, 'Đơn do quản lý thêm được duyệt luôn, hiện ngay ở Tính công và báo cáo. Nghỉ phép năm trừ vào quỹ phép; nghỉ nửa ngày chỉ chọn được khi từ ngày = đến ngày.'),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
 
@@ -2819,7 +2875,11 @@ async function review(r, action) {
   let note = '';
   if (action === 'reject') { note = prompt('Lý do từ chối (tuỳ chọn):') ?? ''; }
   try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note } }); toast('Đã cập nhật', 'ok'); pageLeaves(); }
-  catch (e) { toast(e.message, 'err'); }
+  catch (e) {
+    if (e.data && e.data.canForce && confirm(e.message + '\n\nVẫn duyệt (nghỉ vượt phép)?')) {
+      try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note, force: true } }); toast('Đã duyệt', 'ok'); pageLeaves(); } catch (e2) { toast(e2.message, 'err'); }
+    } else toast(e.message, 'err');
+  }
 }
 const fmtD = (d) => d ? d.slice(8) + '/' + d.slice(5, 7) : '—';
 
@@ -4675,7 +4735,37 @@ async function pageSettings() {
   const panel2 = el('div', { class: 'panel', style: 'padding:20px;max-width:520px' },
     el('h3', { style: 'margin-top:0' }, 'Đổi mật khẩu của tôi'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' }, field('Mật khẩu hiện tại', oldP), field('Mật khẩu mới', newP), savePw));
-  setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelHol, panelBackup, panelUpdate, panel2);
+  // ----- Phép năm -----
+  const lvNum = (v, min, max, step = 1) => el('input', { type: 'number', min, max, step, value: v, style: 'width:90px' });
+  const lvPer = lvNum(s.leave_days_per_year ?? 12, 0, 60, 0.5), lvSenY = lvNum(s.leave_seniority_years ?? 5, 0, 50), lvSenA = lvNum(s.leave_seniority_add ?? 1, 0, 30, 0.5);
+  const lvAcc = el('select', { style: 'width:auto' }, el('option', { value: 'year' }, 'Cấp đủ số ngày ngay từ đầu năm'), el('option', { value: 'month' }, 'Cộng dồn theo tháng (mỗi tháng 1/12)'));
+  lvAcc.value = s.leave_accrual === 'month' ? 'month' : 'year';
+  const lvPro = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.leave_prorate_new ?? '1') === '1' ? { checked: '' } : {}) });
+  const lvCar = lvNum(s.leave_carry_max ?? 0, 0, 60, 0.5), lvCarU = lvNum(s.leave_carry_until_month ?? 3, 0, 12);
+  const lvOver = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.leave_allow_over ?? '0') === '1' ? { checked: '' } : {}) });
+  // 1 hàng: nhãn trái | các ô + chữ đơn vị | (chuỗi cuối dài = ghi chú nhỏ bên dưới)
+  const lvRow = (label, ...ctl) => {
+    const hint = typeof ctl[ctl.length - 1] === 'string' && ctl[ctl.length - 1].length > 24 ? ctl.pop() : '';
+    return el('div', { class: 'lv-row' }, el('span', { class: 'lv-lab' }, label),
+      el('div', {}, el('div', { class: 'lv-ctl' }, ...ctl.map((c) => (typeof c === 'string' ? el('span', {}, c) : c))), hint ? el('div', { class: 'map-hint', style: 'margin-top:3px' }, hint) : ''));
+  };
+  const lvSave = el('button', { class: 'btn' }, 'Lưu phép năm');
+  lvSave.onclick = async () => {
+    try { await api('/admin/settings', { method: 'PUT', body: { leave_days_per_year: lvPer.value, leave_seniority_years: lvSenY.value, leave_seniority_add: lvSenA.value, leave_accrual: lvAcc.value, leave_prorate_new: lvPro.checked, leave_carry_max: lvCar.value, leave_carry_until_month: lvCarU.value, leave_allow_over: lvOver.checked } }); toast('Đã lưu cài đặt phép năm', 'ok'); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  const panelLeave = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, 'Phép năm'),
+    el('div', { class: 'lv-form' },
+      lvRow('Số ngày phép năm', lvPer, 'ngày / năm', 'Luật: 12 ngày; công việc nặng nhọc 14; đặc biệt nặng nhọc 16.'),
+      lvRow('Thâm niên', el('span', {}, 'cứ đủ'), lvSenY, 'năm làm việc cộng thêm', lvSenA, 'ngày', 'Luật: đủ 5 năm +1 ngày. Để 0 = không cộng thâm niên.'),
+      lvRow('Cách cấp phép trong năm', lvAcc),
+      lvRow('Phép dư chuyển sang năm sau', el('span', {}, 'tối đa'), lvCar, 'ngày, dùng đến hết tháng', lvCarU, 'Để 0 ngày = không chuyển; tháng 0 = dùng cả năm.'),
+      el('label', { class: 'lv-chk' }, lvPro, el('span', {}, el('b', {}, 'Năm đầu vào làm: tính phép theo số tháng làm việc'), el('span', { class: 'map-hint', style: 'display:block' }, 'VD vào làm 01/07 → năm đó được 12 × 6/12 = 6 ngày. Vào từ ngày 16 trở đi thì tháng đó không tính.'))),
+      el('label', { class: 'lv-chk' }, lvOver, el('span', {}, el('b', {}, 'Cho nhân viên xin nghỉ phép năm vượt số ngày còn lại'), el('span', { class: 'map-hint', style: 'display:block' }, 'Không tích: nhân viên không gửi được đơn vượt phép (phải chọn Nghỉ không lương); quản lý vẫn duyệt / thêm được sau khi xác nhận.'))),
+      el('div', { class: 'map-hint' }, 'Ngày vào làm và mức phép riêng khai ở hồ sơ từng nhân viên (mức riêng chưa gồm thâm niên). Xem số phép từng người ở Đơn từ › Quỹ phép năm. Nghỉ phép năm và Nghỉ có lương được tính lương; Nghỉ không lương thì không.'),
+      el('div', {}, lvSave))) : null;
+  setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelHol, panelBackup, panelUpdate, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
   loadLic();

@@ -16,6 +16,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       ot_rounding: getSetting('ot_rounding', '2'), ot_rounding_mode: getSetting('ot_rounding_mode', '0'),   // làm tròn số giờ tăng ca
       ot_rounding_type: getSetting('ot_rounding_type', 'hour'), ot_rounding_block: getSetting('ot_rounding_block', '15'),   // hour = theo số lẻ giờ · block = theo khối phút
       late_round_block: getSetting('late_round_block', '0'),
+      leave_days_per_year: getSetting('leave_days_per_year', '12'), leave_seniority_years: getSetting('leave_seniority_years', '5'),
+      leave_seniority_add: getSetting('leave_seniority_add', '1'), leave_accrual: getSetting('leave_accrual', 'year'),
+      leave_prorate_new: getSetting('leave_prorate_new', '1'), leave_carry_max: getSetting('leave_carry_max', '0'),
+      leave_carry_until_month: getSetting('leave_carry_until_month', '3'), leave_allow_over: getSetting('leave_allow_over', '0'),
       weekend_normal_depts: (() => { try { return JSON.parse(getSetting('weekend_normal_depts', '[]')) || []; } catch { return []; } })(),   // làm tròn LÊN đi trễ / về sớm theo khối phút (0 = không)
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
@@ -59,6 +63,16 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       setSetting('ot_rounding_block', String(v));
     }
     if (Array.isArray(b.weekend_normal_depts)) setSetting('weekend_normal_depts', JSON.stringify(b.weekend_normal_depts.map((x) => String(x).trim()).filter(Boolean)));
+    // Phép năm
+    for (const [k, lo, hi] of [['leave_days_per_year', 0, 60], ['leave_seniority_years', 0, 50], ['leave_seniority_add', 0, 30], ['leave_carry_max', 0, 60], ['leave_carry_until_month', 0, 12]]) {
+      if (b[k] == null) continue;
+      const v = parseFloat(b[k]);
+      if (!(Number.isFinite(v) && v >= lo && v <= hi)) return res.status(400).json({ error: `Giá trị phép năm không hợp lệ (${k})` });
+      setSetting(k, String(v));
+    }
+    if (b.leave_accrual != null) setSetting('leave_accrual', b.leave_accrual === 'month' ? 'month' : 'year');
+    if (b.leave_prorate_new != null) setSetting('leave_prorate_new', b.leave_prorate_new ? '1' : '0');
+    if (b.leave_allow_over != null) setSetting('leave_allow_over', b.leave_allow_over ? '1' : '0');
     if (b.late_round_block != null) {
       const v = parseInt(b.late_round_block, 10) || 0;
       if (!(v >= 0 && v <= 120)) return res.status(400).json({ error: 'Khối phút làm tròn đi trễ / về sớm phải từ 0 đến 120' });

@@ -193,7 +193,8 @@ function loadRange(from, to, filter) {
   for (const l of leaveRows) {
     if (l.status !== 'approved') continue;
     const kind = leaveKind(l.type);
-    for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) { leaveDays.set(l.employee_id + '|' + d, kind); usedKinds.add(kind.key); }
+    const k2 = l.half && l.from_date === l.to_date ? { ...kind, half: true } : kind;   // nửa ngày: đếm 0,5
+    for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) { leaveDays.set(l.employee_id + '|' + d, k2); usedKinds.add(kind.key); }
   }
   // Các loại nghỉ có phát sinh trong kỳ (giữ đúng thứ tự LEAVE_KINDS) → báo cáo thêm cột cho từng loại
   const leaveKinds = LEAVE_KINDS.filter((k) => usedKinds.has(k.key));
@@ -220,6 +221,7 @@ function loadRange(from, to, filter) {
 // Loại nghỉ theo đơn từ (cột "type" của leave_requests). Loại lạ → "Nghỉ khác".
 const LEAVE_KINDS = [
   { key: 'lvP', type: 'Nghỉ phép', label: 'Nghỉ phép', sym: 'P' },
+  { key: 'lvR', type: 'Nghỉ có lương', label: 'Nghỉ có lương', sym: 'R' },
   { key: 'lvKL', type: 'Nghỉ không lương', label: 'Không lương', sym: 'KL' },
   { key: 'lvCT', type: 'Công tác', label: 'Công tác', sym: 'CT' },
   { key: 'lvK', type: 'Khác', label: 'Nghỉ khác', sym: 'K' },
@@ -227,7 +229,7 @@ const LEAVE_KINDS = [
 function leaveKind(type) {
   const t = String(type || '').trim().toLowerCase();
   return LEAVE_KINDS.find((k) => k.type.toLowerCase() === t)
-    || (t.includes('không lương') ? LEAVE_KINDS[1] : t.includes('công tác') ? LEAVE_KINDS[2] : t.includes('phép') ? LEAVE_KINDS[0] : LEAVE_KINDS[3]);
+    || (t.includes('không lương') ? LEAVE_KINDS[2] : t.includes('có lương') ? LEAVE_KINDS[1] : t.includes('công tác') ? LEAVE_KINDS[3] : t.includes('phép') ? LEAVE_KINDS[0] : LEAVE_KINDS[4]);
 }
 // Cột số ngày nghỉ từng loại (chỉ những loại có phát sinh trong kỳ; `always` = luôn có cột Nghỉ phép)
 function leaveCols(ctx, always = false) {
@@ -237,7 +239,7 @@ function leaveCols(ctx, always = false) {
 // Đếm số ngày nghỉ từng loại của 1 NV trong danh sách ngày → { lvP: n, lvKL: n, ... }
 function leaveCounts(ctx, empId, days) {
   const out = Object.fromEntries(LEAVE_KINDS.map((k) => [k.key, 0]));
-  for (const d of days) { const k = ctx.leaveDays.get(empId + '|' + d); if (k) out[k.key]++; }
+  for (const d of days) { const k = ctx.leaveDays.get(empId + '|' + d); if (k) out[k.key] += k.half ? 0.5 : 1; }
   return out;
 }
 
@@ -733,7 +735,7 @@ function buildReportRaw(type, from, to, filter) {
       const rows = ctx.leaveRows.map((l) => ({
         code: l.code, name: l.full_name, dept: l.department || '', type: l.type,
         from: fmtDMY(l.from_date), to: fmtDMY(l.to_date),
-        days: Math.round((new Date(l.to_date) - new Date(l.from_date)) / 86400000) + 1,
+        days: l.half && l.from_date === l.to_date ? 0.5 : Math.round((new Date(l.to_date) - new Date(l.from_date)) / 86400000) + 1,
         reason: l.reason || '', status: stLabel[l.status] || l.status,
       }));
       return { title: `Nghỉ phép / đơn từ ${PERIOD}`, columns, rows };

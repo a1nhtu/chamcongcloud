@@ -49,6 +49,12 @@ function setEmpOffices(empId, officeIds) {
 
 const normAttMode = (v) => (v === 'shift' || v === 'hourly' ? v : '');
 
+// Ngày vào làm + số ngày phép năm riêng (để trống = theo cài đặt chung)
+function saveLeaveFields(id, b) {
+  if (b.start_date !== undefined) db.prepare('UPDATE employees SET start_date=? WHERE id=?').run(/^\d{4}-\d{2}-\d{2}$/.test(b.start_date || '') ? b.start_date : '', id);
+  if (b.leave_days_year !== undefined) { const v = parseFloat(b.leave_days_year); db.prepare('UPDATE employees SET leave_days_year=? WHERE id=?').run(Number.isFinite(v) && v >= 0 ? v : null, id); }
+}
+
 export function registerEmployeeRoutes(r, { need }) {
   // Danh mục quyền (cho giao diện dựng ô tích phân quyền)
   r.get('/perm-catalog', (req, res) => res.json({ permissions: PERMISSIONS }));
@@ -125,6 +131,7 @@ export function registerEmployeeRoutes(r, { need }) {
         (b.device_pin || '').trim());
       setEmpOffices(info.lastInsertRowid, b.office_ids);
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), info.lastInsertRowid);
+      saveLeaveFields(info.lastInsertRowid, b);
       const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
       res.json({ ok: true, id: info.lastInsertRowid, relinked });
     } catch (e) {
@@ -309,6 +316,7 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
       if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
+      saveLeaveFields(emp.id, b);
       res.json({ ok: true, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });

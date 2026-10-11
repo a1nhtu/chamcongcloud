@@ -478,13 +478,16 @@ async function renderDontu() {
     <div class="form-grid">
       <div><label>Loại đơn</label>
         <select id="lv-type">
-          <option>Nghỉ phép</option><option>Nghỉ không lương</option>
-          <option>Công tác</option><option>Khác</option>
-        </select></div>
+          <option value="Nghỉ phép">Nghỉ phép năm (có lương, trừ phép)</option><option value="Nghỉ có lương">Nghỉ có lương (cưới, tang…)</option>
+          <option value="Nghỉ không lương">Nghỉ không lương</option><option value="Công tác">Công tác</option><option value="Khác">Khác</option>
+        </select>
+        <div id="lv-bal" style="font-size:13px;color:#15803d;margin-top:6px"></div></div>
       <div style="display:flex;gap:10px">
         <div style="flex:1"><label>Từ ngày</label><input id="lv-from" type="date" /></div>
         <div style="flex:1"><label>Đến ngày</label><input id="lv-to" type="date" /></div>
       </div>
+      <div><label>Thời gian</label>
+        <select id="lv-half"><option value="">Cả ngày</option><option value="sang">Nửa ngày sáng</option><option value="chieu">Nửa ngày chiều</option></select></div>
       <div><label>Lý do</label><textarea id="lv-reason" rows="2" placeholder="Ghi rõ lý do để quản lý duyệt nhanh"></textarea></div>
       <button class="btn block" id="lv-submit">Gửi đơn</button>
     </div>`;
@@ -492,6 +495,14 @@ async function renderDontu() {
   const today = new Date().toISOString().slice(0, 10);
   form.querySelector('#lv-from').value = today; form.querySelector('#lv-to').value = today;
   form.querySelector('#lv-submit').addEventListener('click', submitLeave);
+  // nửa ngày chỉ khi nghỉ 1 ngày
+  const syncHalf = () => { const one = $('#lv-from').value === $('#lv-to').value; $('#lv-half').disabled = !one; if (!one) $('#lv-half').value = ''; };
+  form.querySelector('#lv-from').addEventListener('change', () => { if ($('#lv-to').value < $('#lv-from').value) $('#lv-to').value = $('#lv-from').value; syncHalf(); });
+  form.querySelector('#lv-to').addEventListener('change', syncHalf);
+  // số phép năm còn lại
+  api('/leaves/balance').then((b) => {
+    if (b && b.year) $('#lv-bal').textContent = `Phép năm ${b.year}: còn ${String(b.remaining).replace('.', ',')} ngày (được hưởng ${String(b.accrued + (b.carry || 0)).replace('.', ',')}, đã nghỉ ${String(b.used).replace('.', ',')}${b.pending ? ', đang chờ duyệt ' + String(b.pending).replace('.', ',') : ''})`;
+  }).catch(() => {});
 
   c.append(el('div', { class: 'sec-title' }, 'Đơn của tôi'));
   const list = el('div', { id: 'leave-list' }, el('div', { class: 'empty' }, 'Đang tải…'));
@@ -502,7 +513,7 @@ async function renderDontu() {
 async function submitLeave() {
   const body = {
     type: $('#lv-type').value, from_date: $('#lv-from').value,
-    to_date: $('#lv-to').value, reason: $('#lv-reason').value,
+    to_date: $('#lv-to').value, reason: $('#lv-reason').value, half: $('#lv-half').value,
   };
   if (!body.from_date || !body.to_date) return toast('Chọn ngày', 'err');
   try { await api('/leaves', { method: 'POST', body }); toast('Đã gửi đơn', 'ok'); $('#lv-reason').value = ''; loadMyLeaves(); }
@@ -521,7 +532,7 @@ async function loadMyLeaves() {
         el('div', { class: 'top' },
           el('b', {}, r.type),
           el('span', { class: 'pill ' + status[0] }, status[1])),
-        el('div', { class: 'meta' }, `${fmtD(r.from_date)} → ${fmtD(r.to_date)}${r.reason ? ' · ' + r.reason : ''}`),
+        el('div', { class: 'meta' }, `${fmtD(r.from_date)} → ${fmtD(r.to_date)}${r.half ? ' (' + (r.half === 'sang' ? 'nửa ngày sáng' : 'nửa ngày chiều') + ')' : ''}${r.reason ? ' · ' + r.reason : ''}`),
       );
       if (r.status === 'pending') {
         const del = el('button', { class: 'btn ghost sm', style: 'margin-top:8px' }, 'Xoá đơn');

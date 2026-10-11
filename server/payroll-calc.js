@@ -1,5 +1,6 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
 import { db, getSetting, adminAttWhere, empHourly } from './db.js';
+import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
 import { splitOtTiers } from './attendance-calc.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -86,13 +87,11 @@ export function computePayrollForEmployee(employeeId, from, to) {
   // Nghỉ phép có lương (đã duyệt, khác "không lương") — số ngày trong kỳ
   let paidLeaveDays = 0;
   const leaves = db.prepare(
-    "SELECT type, from_date, to_date FROM leave_requests WHERE employee_id = ? AND status='approved' AND from_date <= ? AND to_date >= ?"
+    "SELECT type, from_date, to_date, half FROM leave_requests WHERE employee_id = ? AND status='approved' AND from_date <= ? AND to_date >= ?"
   ).all(employeeId, to, from);
   for (const l of leaves) {
-    if ((l.type || '').includes('không lương')) continue;
-    const f = l.from_date < from ? from : l.from_date;
-    const t = l.to_date > to ? to : l.to_date;
-    if (t >= f) paidLeaveDays += Math.round((new Date(t) - new Date(f)) / 86400000) + 1;
+    if (!leaveTypeOf(l.type).paid) continue;          // nghỉ không lương
+    paidLeaveDays += leaveDaysIn(l, from, to);        // nửa ngày = 0,5
   }
 
   const workSalary = workUnits * dailyRate;
