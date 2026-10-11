@@ -1253,22 +1253,53 @@ function shiftForm(s, can) {
   const bEndI = time24('s-breakEnd', (s?.break_start && s?.break_minutes) ? m2hm(hm2m(s.break_start) + s.break_minutes) : '');
   const bMinI = num('s-break', s?.break_minutes ?? 0);
   const unitI = num('s-unit', s?.work_unit_value ?? 1.0, { step: '0.1' });
+  const breakWarn = el('div', { class: 'fwarn' });
   // Tổng giờ trong ca = (ra − vào) − nghỉ; nghỉ: nhập giờ bắt đầu + kết thúc → tự ra số phút (hoặc chỉ nhập số phút = không cố định giờ)
   const recalc = () => {
     const a = hm2m(startI.value), b = hm2m(endI.value);
     if (a == null || b == null) { totalI.value = ''; return; }
     const len = ((b - a + 1440) % 1440) || 1440;
-    const w = Math.max(0, len - (+bMinI.value || 0));
+    const bad = breakError();
+    const w = Math.max(0, len - (bad ? 0 : (+bMinI.value || 0)));
     totalI.value = (Math.round(w / 6) / 10).toString().replace('.', ',') + ' giờ' + (b <= a ? '  (ca qua đêm 🌙)' : '');
+    for (const i of [bStartI, bEndI, bMinI]) i.style.borderColor = bad ? '#dc2626' : '';
+    breakWarn.textContent = bad;
   };
-  const syncBreak = (from) => {
-    const bs = hm2m(bStartI.value), be = hm2m(bEndI.value);
-    if (from === 'min') { if (bs != null && (+bMinI.value || 0) > 0) bEndI.value = m2hm(bs + (+bMinI.value || 0)); else if (!(+bMinI.value)) bEndI.value = ''; }
-    else if (bs != null && be != null) bMinI.value = (be - bs + 1440) % 1440;
+  // Nghỉ giữa ca: 3 ô (bắt đầu, kết thúc, tổng phút) luôn khớp nhau
+  //  - đủ 2 giờ → tự ra số phút;  có 1 giờ + số phút → tự ra giờ còn lại;  xoá hết giờ → số phút (do máy tự tính) về 0
+  //  - chỉ nhập số phút, không nhập giờ = nghỉ KHÔNG cố định giờ
+  let autoMin = !!(s?.break_start && s?.break_minutes);   // số phút đang là số tự tính từ 2 ô giờ
+  const syncBreak = (from, who) => {
+    // vừa XOÁ 1 ô giờ → bỏ giờ nghỉ cố định: xoá luôn ô giờ kia; số phút do máy tự tính thì về 0 (tự gõ thì giữ = nghỉ không cố định giờ)
+    if (from === 'time' && who && !who.value.trim() && (bStartI.value || bEndI.value)) {
+      bStartI.value = ''; bEndI.value = '';
+      if (autoMin) { bMinI.value = 0; autoMin = false; }
+      recalc(); return;
+    }
+    const bs = hm2m(bStartI.value), be = hm2m(bEndI.value), mn = +bMinI.value || 0;
+    if (from === 'min') {
+      autoMin = false;
+      if (bs != null && mn > 0) bEndI.value = m2hm(bs + mn);
+      else if (be != null && mn > 0) bStartI.value = m2hm(be - mn);
+      else if (!mn) { bStartI.value = ''; bEndI.value = ''; }
+    } else if (bs != null && be != null) { bMinI.value = (be - bs + 1440) % 1440; autoMin = true; }
+    else if (bs != null && mn > 0) bEndI.value = m2hm(bs + mn);
+    else if (be != null && mn > 0) bStartI.value = m2hm(be - mn);
+    else if (bs == null && be == null && autoMin) { bMinI.value = 0; autoMin = false; }
     recalc();
   };
+  // Giờ nghỉ phải nằm TRONG giờ ca (VD ca 13:00–17:30 thì nghỉ 12:00–13:00 là sai). Trả câu báo lỗi hoặc ''.
+  const breakError = () => {
+    const a = hm2m(startI.value), b = hm2m(endI.value), bs = hm2m(bStartI.value), be = hm2m(bEndI.value), mn = +bMinI.value || 0;
+    if (a == null || b == null) return '';
+    const len = ((b - a + 1440) % 1440) || 1440;
+    if ((bs == null) !== (be == null)) return 'Nghỉ giữa ca: nhập cả giờ bắt đầu và giờ kết thúc, hoặc để trống cả hai (chỉ nhập số phút = nghỉ không cố định giờ).';
+    if (mn >= len) return 'Thời gian nghỉ phải ngắn hơn thời gian của ca.';
+    if (bs != null && mn > 0) { const rel = (bs - a + 1440) % 1440; if (rel + mn > len) return `Giờ nghỉ ${bStartI.value}–${bEndI.value} nằm ngoài giờ ca ${startI.value}–${endI.value}. Nghỉ giữa ca phải nằm trong giờ làm việc của ca.`; }
+    return '';
+  };
   for (const i of [startI, endI]) { i.addEventListener('blur', recalc); i.addEventListener('input', recalc); }
-  for (const i of [bStartI, bEndI]) i.addEventListener('blur', () => syncBreak('time'));
+  for (const i of [bStartI, bEndI]) i.addEventListener('blur', () => syncBreak('time', i));
   bMinI.addEventListener('input', () => syncBreak('min'));
   recalc();
 
@@ -1283,6 +1314,7 @@ function shiftForm(s, can) {
       R('Giờ bắt đầu nghỉ giữa ca', ph(bStartI, '(không cố định)'), '', 'Để trống = không cố định giờ'),
       R('Giờ kết thúc nghỉ giữa ca', ph(bEndI, '')),
       R('Tổng thời gian nghỉ', bMinI, 'phút'),
+      breakWarn,
       R('Công tính', unitI, 'công', 'Cả ngày = 1, nửa ngày = 0,5'),
       R('Bắt đầu vào', ph(time24('s-ciStart', s?.check_in_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm VÀO'),
       R('Kết thúc vào', ph(time24('s-ciEnd', s?.check_in_end || ''), '(tự động)')),
@@ -1356,6 +1388,10 @@ function shiftForm(s, can) {
     };
     if (!b.name) { toast('Nhập tên ca', 'err'); showTab(0); nameI.focus(); return; }
     if (hm2m(b.start_time) == null || hm2m(b.end_time) == null) { toast('Nhập giờ vào / giờ ra dạng HH:mm (VD 08:00)', 'err'); showTab(0); return; }
+    syncBreak('time');
+    const bErr = breakError();
+    if (bErr) { toast(bErr, 'err'); showTab(0); bStartI.focus(); return; }
+    b.break_minutes = +bMinI.value || 0; b.break_start = b.break_minutes > 0 ? (bStartI.value || '') : '';
     try {
       if (s) await api('/admin/shifts/' + s.id, { method: 'PUT', body: b });
       else { const r = await api('/admin/shifts', { method: 'POST', body: b }); _shSel = r.id || null; }

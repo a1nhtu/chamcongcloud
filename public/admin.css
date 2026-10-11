@@ -270,3 +270,6 @@ table.sh-list tbody tr.on { background: #fff1e8; box-shadow: inset 3px 0 0 var(-
 .fbox .frow .fin input { width: 110px; }
 @media (max-width: 1100px) { .sh-form { grid-template-columns: 1fr; } }
 @media (max-width: 820px) { .sh-wrap { grid-template-columns: 1fr; } .sh-left .tbl-scroll { max-height: 240px; } .frow { grid-template-columns: 1fr; row-gap: 3px; } }
+.fwarn { color: #dc2626; font-size: 12.5px; line-height: 1.4; margin-left: 200px; }
+.fwarn:empty { display: none; }
+@media (max-width: 820px) { .fwarn { margin-left: 0; } }
