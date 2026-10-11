@@ -324,8 +324,43 @@ export function registerOrgRoutes(r, { need }) {
     saveShiftExtra(s.id, b, s);
     res.json({ ok: true });
   });
+  // Xoá ca:
+  //  - chưa dùng ở đâu → XOÁ HẲN
+  //  - đang được phân ca / nằm trong lịch trình / là ca mặc định của NV (chưa có ngày công) → báo nơi đang dùng; ?force=1 thì gỡ hết rồi xoá
+  //  - đã có NGÀY CÔNG tính theo ca này → không xoá hẳn (mất lịch sử); ?off=1 thì TẮT ca (ẩn khỏi danh sách chọn)
   r.delete('/shifts/:id', need('shifts'), (req, res) => {
-    db.prepare('UPDATE shifts SET active = 0 WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
+    const id = +req.params.id;
+    const s = db.prepare('SELECT id, name FROM shifts WHERE id = ?').get(id);
+    if (!s) return res.status(404).json({ error: 'Không tìm thấy ca' });
+    const cnt = (sql) => db.prepare(sql).get(id).c;
+    const used = {
+      attendance: cnt('SELECT COUNT(*) c FROM attendance WHERE shift_id = ?'),
+      employees: cnt('SELECT COUNT(*) c FROM employees WHERE shift_id = ? AND active = 1'),
+      assign: cnt('SELECT COUNT(*) c FROM shift_assignments WHERE shift_id = ?') + cnt('SELECT COUNT(*) c FROM dept_shift_assignments WHERE shift_id = ?'),
+      daily: cnt('SELECT COUNT(*) c FROM daily_shift_assignments WHERE shift_id = ?'),
+      schedules: cnt('SELECT COUNT(DISTINCT work_schedule_id) c FROM (SELECT work_schedule_id, shift_id FROM work_schedule_shifts UNION SELECT work_schedule_id, shift_id FROM work_schedule_days) WHERE shift_id = ?'),
+    };
+    if (used.attendance > 0) {
+      if (req.query.off === '1') { db.prepare('UPDATE shifts SET active = 0 WHERE id = ?').run(id); return res.json({ ok: true, off: true }); }
+      return res.status(409).json({ error: `Ca "${s.name}" đã có ${used.attendance} ngày công tính theo ca này nên không xoá hẳn được (sẽ mất lịch sử). Có thể TẮT ca để ẩn khỏi danh sách chọn.`, used, canOff: true });
+    }
+    const inUse = used.employees + used.assign + used.daily + used.schedules;
+    if (inUse > 0 && req.query.force !== '1') {
+      const parts = [];
+      if (used.employees) parts.push(`ca mặc định của ${used.employees} nhân viên`);
+      if (used.assign) parts.push(`${used.assign} lượt gán ca (nhân viên / phòng ban)`);
+      if (used.daily) parts.push(`${used.daily} ô phân ca theo ngày`);
+      if (used.schedules) parts.push(`${used.schedules} lịch trình ca`);
+      return res.status(409).json({ error: `Ca "${s.name}" đang được dùng: ${parts.join(', ')}.`, used, canForce: true });
+    }
+    db.exec('BEGIN');
+    try {
+      db.prepare('UPDATE employees SET shift_id = NULL WHERE shift_id = ?').run(id);
+      for (const t of ['shift_assignments', 'dept_shift_assignments', 'daily_shift_assignments', 'work_schedule_shifts', 'work_schedule_days', 'shift_requests'])
+        db.prepare(`DELETE FROM ${t} WHERE shift_id = ?`).run(id);
+      db.prepare('DELETE FROM shifts WHERE id = ?').run(id);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'DELETE /admin/shifts/:id', e, { message: 'Không xoá được ca, vui lòng thử lại' }); }
+    res.json({ ok: true, hard: true });
   });
 }

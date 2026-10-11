@@ -30,7 +30,7 @@ export async function api(path, { method = 'GET', body, raw = false } = {}) {
   if (res.status === 401 && !path.startsWith('/auth/login')) { clearToken(); location.reload(); throw new Error('Hết phiên'); }
   if (raw) return res;
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) { const e = new Error(data.error || 'Có lỗi xảy ra'); e.code = data.code; e.status = res.status; throw e; }
+  if (!res.ok) { const e = new Error(data.error || 'Có lỗi xảy ra'); e.code = data.code; e.status = res.status; e.data = data; throw e; }
   return data;
 }
 

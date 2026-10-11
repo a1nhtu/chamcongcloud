@@ -952,7 +952,7 @@ async function pageShifts() {
       el('td', {}, el('b', {}, String(s.work_unit_value ?? 1))),
       el('td', {}, s.allow_ot ? el('span', { class: 'pill ok' }, 'Có') : el('span', { class: 'pill muted' }, 'Không')),
       el('td', {}, s.active ? el('span', { class: 'pill ok' }, 'Bật') : el('span', { class: 'pill bad' }, 'Tắt')),
-      el('td', {}, hasPerm('shifts') ? btnSm('Sửa', () => shiftModal(s)) : ''),
+      el('td', { style: 'white-space:nowrap' }, ...(hasPerm('shifts') ? [btnSm('Sửa', () => shiftModal(s)), ' ', btnSm('Xoá', () => deleteShift(s), 'ghost')] : [])),
     ));
   }
   tbl.append(tb);
@@ -2419,6 +2419,26 @@ async function pageAssignments() {
     $('#main .page-head').classList.add('as-head'); if (_asFull) document.body.classList.add('as-full');
     if (_asFocusSearch) { _asFocusSearch = false; const si = $('#main .page-head input[placeholder^="🔍"]'); if (si) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); } }
   }
+}
+
+// Xoá ca: chưa dùng → xoá hẳn; đang được phân ca → hỏi lại rồi gỡ phân ca + xoá; đã có ngày công → chỉ tắt (giữ lịch sử)
+async function deleteShift(s) {
+  if (!confirm(`Xoá ca "${s.name}"?`)) return;
+  const call = (q = '') => api('/admin/shifts/' + s.id + q, { method: 'DELETE' });
+  try {
+    await call();
+    toast('Đã xoá ca', 'ok');
+  } catch (e) {
+    const d = e.data || {};
+    if (d.canForce) {
+      if (!confirm(e.message + '\n\nXoá ca sẽ GỠ luôn các phân ca / lịch trình này. Vẫn xoá?')) return;
+      try { await call('?force=1'); toast('Đã xoá ca và gỡ các phân ca liên quan', 'ok'); } catch (e2) { toast(e2.message, 'err'); return; }
+    } else if (d.canOff) {
+      if (!confirm(e.message + '\n\nTắt ca này?')) return;
+      try { await call('?off=1'); toast('Đã tắt ca', 'ok'); } catch (e2) { toast(e2.message, 'err'); return; }
+    } else { toast(e.message, 'err'); return; }
+  }
+  pageShifts();
 }
 
 /* ---------- 4c) PHÂN CA LÀM VIỆC (gán ca/lịch trình theo khoảng ngày) ---------- */
