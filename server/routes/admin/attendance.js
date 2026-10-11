@@ -185,6 +185,7 @@ export function registerAttendanceRoutes(r, { need }) {
     for (const [key, lv] of leaveMap) {   // ngày CHỈ có nghỉ (không có bản ghi chấm)
       if (seen.has(key)) continue;
       const [eid, d] = key.split('|'); const e = empById.get(+eid); if (!e) continue;
+      seen.add(key);   // để phần "Cả công ty" không thêm dòng "Chưa chấm" trùng ngày nghỉ
       rows.push({ date: d, wd: WDVN[vnWd(d)], employee_id: +eid, code: e.code, name: e.full_name, dept: e.department || '',
         shift: '', in: '', out: '', punches: [], late: 0, early: 0, ot: 0, cong: 0, mins: 0, leave: lv.sym, status: lv.type, att_id: null });
     }

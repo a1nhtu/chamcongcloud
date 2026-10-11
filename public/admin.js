@@ -3334,6 +3334,42 @@ async function pageEditAtt() {
   };
   const mkIso = (date, hm) => hm ? new Date(`${date}T${hm}:00+07:00`).toISOString() : null;
   const openEdit = (r) => attEditModal({ id: r.att_id, work_date: r.date, check_in_at: mkIso(r.date, r.in), check_out_at: mkIso(r.date, r.out), note: '' }, r.employee_id, load);
+  const canEdit = hasPerm('attendance_edit');
+  // SỬA NGAY TRÊN BẢNG: bấm ô Vào / Ra → gõ giờ (VD 0800) → Enter hoặc bấm ra ngoài = lưu, Esc = huỷ.
+  // Dòng chưa có giờ (ngày chưa chấm / ngày nghỉ) gõ giờ vào là thêm mới cho đúng người, đúng ngày đó.
+  const inlineCell = (r, field, content) => {
+    const td = el('td', {}, ...content);
+    if (!canEdit) return td;
+    td.className = 'att-inl';
+    td.title = 'Bấm để sửa giờ ' + (field === 'in' ? 'vào' : 'ra');
+    td.onclick = () => {
+      if (td.querySelector('input')) return;
+      const old = r[field] || '';
+      const i = time24('', old);
+      i.className = 'att-inl-in';
+      td.replaceChildren(i); i.focus(); i.select();
+      let done = false;
+      const back = () => td.replaceChildren(...content);
+      const finish = async (save) => {
+        if (done) return; done = true;
+        const v = i.value.trim();
+        if (!save || v === old) return back();
+        if (!v && field === 'in') { toast('Muốn bỏ hẳn giờ chấm ngày này thì bấm "Sửa" → "🗑 Xoá giờ"', 'err'); return back(); }
+        if (!r.att_id && field === 'out' && !r.in) { toast('Nhập giờ vào trước', 'err'); return back(); }
+        i.disabled = true;
+        try {
+          if (r.att_id) await api('/admin/attendance/' + r.att_id, { method: 'PUT', body: { [field === 'in' ? 'check_in' : 'check_out']: v } });
+          else await api('/admin/attendance', { method: 'POST', body: { employee_id: r.employee_id, work_date: r.date, check_in: v, check_out: '' } });
+          toast(`Đã lưu giờ ${field === 'in' ? 'vào' : 'ra'} ${v || '(trống)'} — ${r.name || ''} ${r.date.slice(8)}/${r.date.slice(5, 7)}`, 'ok');
+          load();
+        } catch (e) { toast(e.message, 'err'); done = false; i.disabled = false; i.focus(); }
+      };
+      i.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); i.blur(); } else if (e.key === 'Escape') finish(false); });
+      i.addEventListener('blur', () => setTimeout(() => finish(true), 0));   // sau khi time24 chuẩn hoá giờ
+      i.onclick = (e) => e.stopPropagation();
+    };
+    return td;
+  };
 
   // Lưới CHI TIẾT: từng ngày, giờ vào/ra, ca, các lần chấm, nghỉ
   const loadDetail = async () => {
@@ -3357,8 +3393,8 @@ async function pageEditAtt() {
         el('td', {}, r.wd),
         ...(showNV ? [el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || '—')] : []),
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
-        el('td', {}, r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : ''),
-        el('td', {}, r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')),
+        inlineCell(r, 'in', [r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : '']),
+        inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')]),
         el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : '—'),
         ...(hrly ? [
           el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
@@ -3371,14 +3407,14 @@ async function pageEditAtt() {
         ]),
         el('td', { style: 'text-align:center' }, r.leave ? el('span', { class: 'pill warn' }, r.leave) : '—'),
         el('td', {}, r.status || '—'),
-        el('td', {}, r.att_id ? btnSm('Sửa', () => openEdit(r)) : ''),
+        el('td', {}, !canEdit ? '' : r.att_id ? btnSm('Sửa', () => openEdit(r)) : (() => { const t = btnSm('+ Thêm', () => attEditModal(null, r.employee_id, load, { date: r.date }), 'ghost'); t.style.whiteSpace = 'nowrap'; return t; })()),
       ];
       tb.append(el('tr', {}, ...cells));
     }
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Ký hiệu Nghỉ: P = phép · KL = không lương · CT = công tác · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày (VD chấm 4 lần). Bấm "Sửa" để chỉnh giờ.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ — dòng chưa chấm gõ giờ vào là thêm mới. Nút "Sửa" để ghi lý do hoặc xoá giờ. Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
@@ -3416,8 +3452,10 @@ async function pageEditAtt() {
   const load = () => { view === 'summary' ? loadSummary() : loadDetail(); };
   fromI.onchange = load; toI.onchange = load;
   addBtn.onclick = () => {
-    if (empPick.size !== 1) return toast('Chọn đúng 1 nhân viên (nút 👥) trước khi thêm giờ', 'err');
-    attEditModal(null, [...empPick][0], load);
+    // đã lọc đúng 1 người → thêm cho người đó; còn lại → chọn nhân viên ngay trong form (được chọn nhiều người)
+    if (empPick.size === 1) return attEditModal(null, [...empPick][0], load, { date: toI.value });
+    const list = emps.filter((e) => e.role !== 'admin' && (!deptPick.size || deptPick.has(e.department || '')) && (!empPick.size || empPick.has(e.id)));
+    attEditModal(null, null, load, { date: toI.value, emps: list });
   };
   recalcBtn.onclick = async () => {
     let scopeTxt;
@@ -3440,13 +3478,15 @@ async function pageEditAtt() {
   load();
 }
 
-function attEditModal(row, employeeId, reload) {
-  const date0 = row ? row.work_date : new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
+async function attEditModal(row, employeeId, reload, opts = {}) {
+  const pick = !row && !employeeId ? await empMultiPicker(opts.emps || [], 220) : null;   // chưa chọn NV → chọn trong form
+  const date0 = row ? row.work_date : (opts.date || new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' }));
   const dateI = input('att-date', { type: 'date', value: date0, ...(row ? { disabled: '' } : {}) });
   const inI = time24('att-in', row?.check_in_at ? isoToHM(row.check_in_at) : '');
   const outI = time24('att-out', row?.check_out_at ? isoToHM(row.check_out_at) : '');
   const noteI = input('att-note', { placeholder: 'VD: Quên chấm, Đi công tác…', value: row?.note || '' });
   const body = [
+    ...(pick ? [pick.node] : []),
     field('Ngày', dateI),
     el('div', { class: 'two-col' }, field('Giờ vào', inI), field('Giờ ra (để trống nếu chưa ra)', outI)),
     field('Lý do / ghi chú', noteI),
@@ -3457,9 +3497,15 @@ function attEditModal(row, employeeId, reload) {
     const b = { check_in: inI.value || '', check_out: outI.value || '', note: noteI.value };
     try {
       if (row) await api('/admin/attendance/' + row.id, { method: 'PUT', body: b });
-      else await api('/admin/attendance', { method: 'POST', body: { ...b, employee_id: employeeId, work_date: dateI.value } });
-      toast('Đã lưu', 'ok'); closeModal(); reload();
-    } catch (e) { toast(e.message, 'err'); }
+      else {
+        const ids = pick ? [...pick.picked] : [employeeId];
+        if (!ids.length) return toast('Chọn ít nhất 1 nhân viên', 'err');
+        if (!b.check_in) return toast('Nhập giờ vào', 'err');
+        save.disabled = true;
+        for (const id of ids) await api('/admin/attendance', { method: 'POST', body: { ...b, employee_id: id, work_date: dateI.value } });
+      }
+      toast(pick ? `Đã thêm giờ cho ${pick.picked.size} người` : 'Đã lưu', 'ok'); closeModal(); reload();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   const footer = [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ')];
   if (row) {

@@ -286,3 +286,8 @@ table.sh-list tbody tr.on { background: #fff1e8; box-shadow: inset 3px 0 0 var(-
 @media (max-width: 640px) { .lv-row { grid-template-columns: 1fr; } .lv-lab { padding-top: 0; } }
 .lv-chk .map-hint { margin-top: 2px; }
 .lv-chk b { color: var(--ink); font-weight: 600; }
+
+/* Tính công: sửa giờ ngay trên bảng */
+td.att-inl { cursor: pointer; border-radius: 6px; }
+td.att-inl:hover { background: #fff4ec; box-shadow: inset 0 0 0 1px #f3b48a; }
+input.att-inl-in { width: 74px !important; padding: 5px 6px; margin: 0; text-align: center; font-weight: 600; }
