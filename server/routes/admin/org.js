@@ -7,7 +7,7 @@ const SHIFT_EXTRA = {
   ot_before: 'bool', ot_before_min: 'int', ot_tier1_min: 'int', ot_tier2_min: 'int', ot_tier3_min: 'int',
   ot_tier2_rate: 'num', ot_tier3_rate: 'num', ot_tier4_rate: 'num',
   weekend_as_ot: 'bool', holiday_as_ot: 'bool', compensate_late: 'bool', no_out_credit: 'bool',
-  grace_deduct: 'bool', shift_as_ot: 'bool',
+  grace_deduct: 'bool', shift_as_ot: 'bool', break_start: 'hhmm',
 };
 function saveShiftExtra(id, b, old) {
   const keys = Object.keys(SHIFT_EXTRA).filter((k) => b[k] !== undefined);
@@ -15,6 +15,7 @@ function saveShiftExtra(id, b, old) {
   const val = (k) => {
     const t = SHIFT_EXTRA[k], v = b[k];
     if (t === 'bool') return v ? 1 : 0;
+    if (t === 'hhmm') return /^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : '';
     const n = Number(v);
     if (!Number.isFinite(n) || n < 0) return old[k] ?? 0;
     return t === 'int' ? Math.round(n) : n;

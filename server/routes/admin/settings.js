@@ -15,6 +15,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
       ot_rounding: getSetting('ot_rounding', '2'), ot_rounding_mode: getSetting('ot_rounding_mode', '0'),   // làm tròn số giờ tăng ca
       ot_rounding_type: getSetting('ot_rounding_type', 'hour'), ot_rounding_block: getSetting('ot_rounding_block', '15'),   // hour = theo số lẻ giờ · block = theo khối phút
+      late_round_block: getSetting('late_round_block', '0'),
+      weekend_normal_depts: (() => { try { return JSON.parse(getSetting('weekend_normal_depts', '[]')) || []; } catch { return []; } })(),   // làm tròn LÊN đi trễ / về sớm theo khối phút (0 = không)
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
@@ -55,6 +57,12 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       const v = parseInt(b.ot_rounding_block, 10);
       if (!(v >= 1 && v <= 240)) return res.status(400).json({ error: 'Khối phút làm tròn tăng ca phải từ 1 đến 240' });
       setSetting('ot_rounding_block', String(v));
+    }
+    if (Array.isArray(b.weekend_normal_depts)) setSetting('weekend_normal_depts', JSON.stringify(b.weekend_normal_depts.map((x) => String(x).trim()).filter(Boolean)));
+    if (b.late_round_block != null) {
+      const v = parseInt(b.late_round_block, 10) || 0;
+      if (!(v >= 0 && v <= 120)) return res.status(400).json({ error: 'Khối phút làm tròn đi trễ / về sớm phải từ 0 đến 120' });
+      setSetting('late_round_block', String(v));
     }
     if (b.pay_period_start_day != null) setSetting('pay_period_start_day', b.pay_period_start_day);
     // Hệ số tăng ca chung: NV đang dùng đúng hệ số chung CŨ (chưa đặt riêng) được đổi theo; NV đã đặt hệ số riêng giữ nguyên

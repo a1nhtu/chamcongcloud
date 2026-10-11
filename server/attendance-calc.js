@@ -26,19 +26,53 @@ const toMinute = (iso) => new Date(Math.floor(new Date(iso).getTime() / 60000) *
 // Tính đi muộn (phút) khi VÀO ca.
 // Dung sai (late_grace_min) chỉ là NGƯỠNG: trễ trong ngưỡng → bỏ qua (0);
 // vượt ngưỡng → ghi ĐÚNG số phút trễ thực tế (KHÔNG trừ dung sai).
-export function computeLate(shift, checkInIso, workDate) {
+// Làm tròn LÊN theo khối phút (quy tắc chung "Làm tròn đi trễ / về sớm", 0 = không làm tròn)
+// VD khối 15': trễ 1' → 15', trễ 16' → 30' (giống "đơn vị chấm công" của HR-ERP)
+export function roundUpBlock(m, block = 0) {
+  const v = Number(m) || 0;
+  if (v <= 0 || !(block > 0)) return Math.max(0, v);
+  return Math.ceil(v / block - 1e-9) * block;
+}
+
+// Khung NGHỈ GIỮA CA cố định giờ (ca có khai "Nghỉ giữa ca bắt đầu lúc"): [bs, be]; không khai → null
+export function breakWindow(workDate, shift, start) {
+  if (!shift || !shift.break_start || !(shift.break_minutes > 0)) return null;
+  let bs = vnInstant(workDate, shift.break_start);
+  if (bs < start) bs = new Date(bs.getTime() + 24 * HH);   // ca đêm: giờ nghỉ sau nửa đêm
+  return { bs, be: new Date(bs.getTime() + shift.break_minutes * 60000) };
+}
+// Số phút khoảng [a, b] trùng với giờ nghỉ (để đi trễ / về sớm / giờ công KHÔNG tính thời gian nghỉ)
+function breakOverlap(brk, a, b) {
+  if (!brk || !(b > a)) return 0;
+  const s = a > brk.bs ? a : brk.bs, e = b < brk.be ? b : brk.be;
+  return e > s ? mins(s, e) : 0;
+}
+
+export function computeLate(shift, checkInIso, workDate, block = 0) {
   if (!shift || !checkInIso) return 0;
   const { start } = shiftBounds(workDate, shift);
-  const raw = mins(start, toMinute(checkInIso));
+  const ciT = toMinute(checkInIso);
+  const raw = mins(start, ciT) - (ciT > start ? breakOverlap(breakWindow(workDate, shift, start), start, ciT) : 0);
   const grace = shift.late_grace_min || 0;
   if (raw <= grace) return 0;
-  return shift.grace_deduct ? raw - grace : raw;   // tùy chọn của ca: chỉ tính phần VƯỢT số phút cho phép
+  return roundUpBlock(shift.grace_deduct ? raw - grace : raw, block);   // tùy chọn của ca: chỉ tính phần VƯỢT số phút cho phép
 }
 
 // Làm tròn TĂNG CA theo quy tắc chung của công ty (Cài đặt > Quy tắc tính công), mode 0 = lùi (xuống), 1 = tới (lên):
 //  - block > 0: theo KHỐI PHÚT — VD khối 15', 47 phút → lùi 45 · tới 60
 //  - còn lại: số giờ giữ `decimals` chữ số thập phân — VD 40 phút = 0,666 giờ → 2 số lẻ: lùi 0,66 giờ (39,6 phút) · tới 0,67 giờ
 // Trả lại số PHÚT.
+// Làm tròn tổng tăng ca gồm nhiều ĐOẠN (trước ca / sau ca / cả ca ngày nghỉ): làm tròn từng đoạn rồi cộng.
+// parts thiếu hoặc không khớp tổng → làm tròn cả tổng như cũ.
+export function roundOtParts(total, parts, decimals = 2, mode = 0, block = 0) {
+  const t = Number(total) || 0;
+  const ps = (parts || []).map(Number).filter((x) => x > 0);
+  const sum = ps.reduce((a, b) => a + b, 0);
+  if (!ps.length || sum > t + 1e-9) return roundOtMinutes(t, decimals, mode, block);
+  if (t - sum > 1e-9) ps.push(t - sum);   // phần cộng thêm sau (VD làm ngày nghỉ: cả giờ làm thành tăng ca)
+  return ps.reduce((a, p) => a + roundOtMinutes(p, decimals, mode, block), 0);
+}
+
 export function roundOtMinutes(minutes, decimals = 2, mode = 0, block = 0) {
   const m = Number(minutes) || 0;
   if (m <= 0) return 0;
@@ -65,15 +99,16 @@ export function noShiftUnit(work_minutes, opts = {}) {
 }
 
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null, lateBlock = 0 } = opts;
   const ci = toMinute(checkInIso);
   const co = toMinute(checkOutIso);
   const { start, end } = shiftBounds(workDate, shift);
 
+  const brk = breakWindow(workDate, shift, start);
   // Về sớm — cùng cách với đi muộn: dung sai chỉ là NGƯỠNG; vượt ngưỡng → ghi ĐỦ số phút về sớm thực tế
-  const earlyRaw = mins(co, end);
+  const earlyRaw = mins(co, end) - (co < end ? breakOverlap(brk, co, end) : 0);
   const earlyGrace = shift.early_grace_min ?? 15;
-  const early_min = earlyRaw > earlyGrace ? (shift.grace_deduct ? earlyRaw - earlyGrace : earlyRaw) : 0;
+  const early_min = earlyRaw > earlyGrace ? roundUpBlock(shift.grace_deduct ? earlyRaw - earlyGrace : earlyRaw, lateBlock) : 0;
 
   // Trễ/sớm NẰM TRONG dung sai thì coi như đúng giờ: KHÔNG trừ giờ công (giống Ronald Jack/WiseEye:
   // giờ = giờ ca − phút trễ − phút sớm đã tính). Vượt dung sai → trừ đủ.
@@ -83,9 +118,10 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
 
   // Giờ công thực: kẹp trong khung ca, trừ nghỉ giữa ca nếu có mặt >= nửa ca
   // Ca bật "chỉ tính phần vượt số phút cho phép": giờ công cũng chỉ bị trừ phần vượt
-  const gIn = shift.grace_deduct ? lateGrace * 60000 : 0, gOut = shift.grace_deduct ? earlyGrace * 60000 : 0;
-  const adjIn = (t) => (t < start || inGraceIn(t) ? start : new Date(t.getTime() - gIn));
-  const adjOut = (t) => (t > end || inGraceOut(t) ? end : new Date(t.getTime() + gOut));
+  // Làm tròn đi trễ / về sớm theo khối (quy tắc chung): giờ công trừ ĐÚNG số phút trễ/sớm đã làm tròn
+  const gIn = shift.grace_deduct ? lateGrace : 0, gOut = shift.grace_deduct ? earlyGrace : 0;
+  const adjIn = (t) => (t < start || inGraceIn(t) ? start : new Date(start.getTime() + roundUpBlock(mins(start, t) - gIn, lateBlock) * 60000));
+  const adjOut = (t) => (t > end || inGraceOut(t) ? end : new Date(end.getTime() - roundUpBlock(mins(t, end) - gOut, lateBlock) * 60000));
   const effIn = adjIn(ci);
   const effOut = adjOut(co);
   const inShift = Math.max(0, mins(effIn, effOut));
@@ -103,13 +139,22 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
       if (k === full.length - 1) b = adjOut(b);  // lượt ra cuối: áp số phút cho phép về sớm
       work_minutes += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
     }
+  } else if (brk) {
+    // Nghỉ giữa ca CỐ ĐỊNH giờ: giờ công = giờ chuẩn − đi trễ − về sớm (đều đã bỏ phần trùng giờ nghỉ)
+    // VD ca 8–17 nghỉ 12–13: vào 12:19 → trễ 240' → đủ 4 tiếng chiều (như HR-ERP)
+    const lateRawB = ci > start ? mins(start, ci) - breakOverlap(brk, start, ci) : 0;
+    const lateDed = lateRawB > lateGrace ? roundUpBlock(lateRawB - gIn, lateBlock) : 0;
+    const earlyDed = early_min;
+    const stdB = Math.max(0, shiftLen - (shift.break_minutes || 0));
+    work_minutes = (ci >= end || co <= start || co <= ci) ? 0 : Math.max(0, stdB - lateDed - earlyDed);
   } else {
     const breakDed = inShift >= halfShift ? (shift.break_minutes || 0) : 0;
     work_minutes = Math.max(0, inShift - breakDed);
   }
 
   // Tăng ca SAU giờ tan ca: ở lại >= ngưỡng
-  let otAfterRaw = Math.max(0, mins(end, co));
+  // (vào SAU giờ tan ca → chỉ tính từ lúc có mặt, không tính từ giờ tan ca)
+  let otAfterRaw = Math.max(0, mins(ci > end ? ci : end, co));
   // Bù trừ (tùy chọn của ca): đi trễ quá dung sai thì phần ở lại sau giờ tan ca được BÙ vào giờ công
   // (tối đa bằng số phút trễ; phần dùng để bù KHÔNG tính tăng ca; giờ công không vượt giờ chuẩn của ca)
   const standard = Math.max(1, shiftLen - (shift.break_minutes || 0));
@@ -123,13 +168,14 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
     }
   }
   let ot_min = 0;
+  const ot_parts = [];   // từng ĐOẠN tăng ca (sau ca, trước ca) → làm tròn RIÊNG từng đoạn như HR-ERP / Ronald Jack
   if (shift.allow_ot) {
     const after = shift.ot_start_after_min ?? 30;
-    if (otAfterRaw >= after && otAfterRaw > 0) ot_min += otAfterRaw;
+    if (otAfterRaw >= after && otAfterRaw > 0) { ot_min += otAfterRaw; ot_parts.push(otAfterRaw); }
     // Tăng ca TRƯỚC giờ vào ca (tùy chọn): đến sớm >= ngưỡng
     if (shift.ot_before) {
-      const beforeRaw = Math.max(0, mins(ci, start));
-      if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) ot_min += beforeRaw;
+      const beforeRaw = Math.max(0, mins(ci, co < start ? co : start));   // ra trước giờ vào ca → chỉ tính tới lúc ra
+      if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) { ot_min += beforeRaw; ot_parts.push(beforeRaw); }
     }
   }
 
@@ -150,7 +196,7 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
     work_unit = 0;
   }
 
-  return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec', compensated };
+  return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec', compensated, ot_parts };
 }
 
 // Ca được xem là TĂNG CA cả ca: ca đánh dấu "ca này là ca tăng ca" (mọi ngày), hoặc làm vào ngày lễ mà ca bật tùy chọn.
@@ -172,13 +218,13 @@ export function weekendToOt(c, flags = {}) {
 // Chỉ có giờ VÀO, thiếu giờ RA. Mặc định 0 công (trạng thái "thiếu ra").
 // Ca bật "thiếu giờ ra vẫn tính công": tính đủ giờ chuẩn của ca TRỪ phần đi trễ (vượt dung sai) — như Ronald Jack.
 export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0 } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, lateBlock = 0 } = opts;
   const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
   const base = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type, day_status: 'thieu_ra' };
   if (!shift || !checkInIso || !shift.no_out_credit) return base;
   const { start, end } = shiftBounds(workDate, shift);
   const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
-  const late = computeLate(shift, checkInIso, workDate);
+  const late = computeLate(shift, checkInIso, workDate, lateBlock);
   const work_minutes = Math.max(0, standard - late);
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);
@@ -228,15 +274,25 @@ export function ruleWindow(workDate, shift, opts = {}) {
     winEnd = new Date(end.getTime() + 4 * HH);
   }
   const night = shift.cross_midnight || shift.end_time <= shift.start_time;
-  if (opts.toDayEnd && !night) {
+  if (opts.toDayEnd && !night && !shift.check_out_end) {   // ca đã khai "Kết thúc ra" → theo đúng khung đã khai
     const dayEnd = new Date(vnInstant(workDate, '23:59').getTime() + 59999);
     if (dayEnd > winEnd) winEnd = dayEnd;
   }
-  const before = shift.allow_ot && shift.ot_before ? 4 * HH : 2 * HH;   // có tăng ca trước giờ vào → nhận log sớm hơn
-  let winStart = new Date(start.getTime() - before);
+  // Nhận lượt VÀO sớm nhất: theo "Bắt đầu vào" của ca nếu có khai (như "quét trước ca" của HR-ERP);
+  // không khai → có tăng ca trước ca thì sớm hơn (ca đêm 22h làm từ 18h = 4 tiếng TC trước ca, đến sớm vài phút vẫn nhận → 6 tiếng)
+  let winStart;
+  if (shift.check_in_start) {
+    winStart = vnInstant(workDate, shift.check_in_start);
+    if (winStart - start > 12 * HH) winStart = new Date(winStart.getTime() - 24 * HH);   // VD ca 00:30 nhận vào từ 22:00 hôm trước
+    else if (winStart > start) winStart = start;
+  } else {
+    const before = shift.allow_ot && shift.ot_before ? (night ? 6 : 4) * HH : 2 * HH;
+    winStart = new Date(start.getTime() - before);
+  }
   // Ca NGÀY 1 ca/ngày: nhận cả lượt quẹt từ ĐẦU NGÀY (xếp Ca chiều mà đến từ 8h sáng → giờ vào là 8h, không thành "trễ 240' + thiếu ra").
   // Lượt quẹt sáng sớm là giờ ra ca đêm hôm trước đã được loại trước khi gọi (consumedByPrevDay).
-  if (opts.toDayEnd && !night) { const dayStart = vnInstant(workDate, '00:00'); if (dayStart < winStart) winStart = dayStart; }
+  // (ca đã khai "Bắt đầu vào" → theo đúng khung đã khai, như "quét trước ca" của HR-ERP)
+  if (opts.toDayEnd && !night && !shift.check_in_start) { const dayStart = vnInstant(workDate, '00:00'); if (dayStart < winStart) winStart = dayStart; }
   return { winStart, winEnd, start, end };
 }
 

@@ -532,6 +532,7 @@ function migrateColumns() {
   // Phân ca làm việc: quy tắc ghép log máy + ca đêm (dùng cho ghép punch máy ZKTeco)
   add('shifts', 'merge_rule',    "TEXT NOT NULL DEFAULT 'filo'");   // filo|tdhc|idm|tdqd — quy tắc ghép log mặc định của ca
   add('shifts', 'cross_midnight', 'INTEGER NOT NULL DEFAULT 0');    // 1 = ca đêm qua ngày hôm sau
+  add('shifts', 'break_start',    "TEXT DEFAULT ''");               // 'HH:MM' giờ BẮT ĐẦU nghỉ giữa ca ('' = không cố định giờ nghỉ)
   add('shifts', 'tdqd_mode',     "TEXT NOT NULL DEFAULT 'pair'");   // pair|idm — cách ghép log cho quy tắc TĐ-QĐ
   // Máy chấm công: số máy (IDM: máy lẻ = VÀO, máy chẵn = RA)
   add('push_devices', 'machine_number', 'INTEGER NOT NULL DEFAULT 0');
@@ -637,6 +638,17 @@ export function getSetting(key, fallback = null) {
 
 // Kiểu chấm công THỰC TẾ của 1 nhân viên: đặt riêng ở hồ sơ ('shift' | 'hourly'), không đặt thì theo cài đặt chung.
 // → công ty vừa có người chấm theo ca vừa có người chấm theo giờ vẫn tính đúng cho từng người.
+// Phòng ban đi làm NGÀY CUỐI TUẦN vẫn tính như ngày thường (VD bảo vệ trực CN) — Cài đặt > Quy tắc tính công
+export function weekendNormalDepts() {
+  try { const a = JSON.parse(getSetting('weekend_normal_depts', '[]')); return Array.isArray(a) ? a.map(String) : []; } catch { return []; }
+}
+export function isWeekendNormalEmp(empId) {
+  const list = weekendNormalDepts();
+  if (!list.length || !empId) return false;
+  const e = db.prepare('SELECT department FROM employees WHERE id=?').get(empId);
+  return !!(e && list.includes(String(e.department || '')));
+}
+
 export const globalAttMode = () => (getSetting('attendance_mode', 'shift') === 'hourly' ? 'hourly' : 'shift');
 export function empAttMode(employeeId) {
   const g = globalAttMode();

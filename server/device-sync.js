@@ -512,7 +512,7 @@ function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null)
   const hourly = ctx.isHourly(employeeId);
   const shift = hourly ? null : (presetShift !== undefined ? presetShift
     : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
-  return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs, { hourly });
+  return computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs, { hourly, empId: employeeId });
 }
 
 // Ngưỡng quẹt lặp khi ghép cặp vào/ra (phút) = ô "Bỏ qua lần chấm trùng trong N phút" ở Cài đặt;
