@@ -1296,8 +1296,10 @@ function shiftModal(s) {
     el('div', { class: 'map-hint' }, 'Ngày nghỉ cuối tuần đặt chung cho cả công ty ở Cài đặt > Quy tắc tính công (mặc định Chủ nhật).'),
   ];
   // Chia form thành các TAB (như Ronald Jack) cho đỡ rối. Mọi ô vẫn nằm trong form, bấm Lưu một lần là lưu hết các tab.
-  // (ô số 16, 17 = quy tắc ghép giờ kiểu cũ: KHÔNG còn khai ở ca — đã chuyển sang mục "Lịch trình vào ra")
-  const TABS = [['Ca làm việc', [0, 1, 2, 6, 5, 3, 4, 18]], ['Tăng ca', [7, 8, 9, 10, 11, 14]], ['Nâng cao', [12, 13, 15]]];
+  // (ô số 17, 18 = quy tắc ghép giờ kiểu cũ: KHÔNG còn khai ở ca — đã chuyển sang mục "Lịch trình vào ra")
+  // ⚠ Số dưới đây là VỊ TRÍ ô trong mảng parts — thêm/bớt ô ở giữa thì phải sửa lại các số phía sau (kiểm bằng dòng assert bên dưới).
+  const TABS = [['Ca làm việc', [0, 1, 2, 6, 7, 5, 3, 4, 19]], ['Tăng ca', [8, 9, 10, 11, 12, 15]], ['Nâng cao', [13, 14, 16]]];
+  if (parts.length !== 20) console.error('shiftModal: số ô của form ca đã đổi (' + parts.length + ') — cần sửa lại TABS');
   const panes = TABS.map(([, idx]) => el('div', { class: 'tab-pane' }, ...idx.map((k) => parts[k])));
   const tabBtns = TABS.map(([t], k) => { const b = el('button', { type: 'button', class: 'tab-btn' }, t); b.onclick = () => showTab(k); return b; });
   const showTab = (k) => { panes.forEach((p, n) => { p.style.display = n === k ? 'flex' : 'none'; }); tabBtns.forEach((b, n) => b.classList.toggle('on', n === k)); };
