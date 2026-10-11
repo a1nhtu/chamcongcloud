@@ -532,10 +532,25 @@ function migrateColumns() {
   // Phân ca làm việc: quy tắc ghép log máy + ca đêm (dùng cho ghép punch máy ZKTeco)
   add('shifts', 'merge_rule',    "TEXT NOT NULL DEFAULT 'filo'");   // filo|tdhc|idm|tdqd — quy tắc ghép log mặc định của ca
   add('shifts', 'cross_midnight', 'INTEGER NOT NULL DEFAULT 0');    // 1 = ca đêm qua ngày hôm sau
-  add('shifts', 'break_start',    "TEXT DEFAULT ''");
+  add('shifts', 'break_start',    "TEXT DEFAULT ''");               // 'HH:MM' giờ BẮT ĐẦU nghỉ giữa ca ('' = không cố định giờ nghỉ)
   add('employees', 'start_date',      "TEXT DEFAULT ''");   // ngày vào làm (tính phép năm theo tháng + thâm niên)
   add('employees', 'leave_days_year', 'REAL');              // số ngày phép năm riêng (NULL = theo cài đặt chung)
-  add('leave_requests', 'half',       "TEXT DEFAULT ''");   // '' cả ngày | 'sang' | 'chieu' (nửa ngày, chỉ khi từ ngày = đến ngày)               // 'HH:MM' giờ BẮT ĐẦU nghỉ giữa ca ('' = không cố định giờ nghỉ)
+  add('leave_requests', 'half',       "TEXT DEFAULT ''");   // '' cả ngày | 'sang' | 'chieu' (nửa ngày, chỉ khi từ ngày = đến ngày)
+  // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…): trong [from_date, to_date] NV được đến muộn / về sớm số phút này, không trừ công
+  db.exec(`CREATE TABLE IF NOT EXISTS employee_privileges (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL DEFAULT 'Mang thai',
+      from_date TEXT NOT NULL,
+      to_date TEXT DEFAULT '',
+      late_min INTEGER NOT NULL DEFAULT 0,      -- đầu ca được đến muộn
+      mid_out_min INTEGER NOT NULL DEFAULT 0,   -- trước giờ nghỉ trưa được về sớm
+      mid_in_min INTEGER NOT NULL DEFAULT 0,    -- sau giờ nghỉ trưa được đến muộn
+      early_min INTEGER NOT NULL DEFAULT 0,     -- cuối ca được về sớm
+      note TEXT DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_priv_emp ON employee_privileges(employee_id, from_date);`);
   add('shifts', 'tdqd_mode',     "TEXT NOT NULL DEFAULT 'pair'");   // pair|idm — cách ghép log cho quy tắc TĐ-QĐ
   // Máy chấm công: số máy (IDM: máy lẻ = VÀO, máy chẵn = RA)
   add('push_devices', 'machine_number', 'INTEGER NOT NULL DEFAULT 0');

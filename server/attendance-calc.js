@@ -48,11 +48,30 @@ function breakOverlap(brk, a, b) {
   return e > s ? mins(s, e) : 0;
 }
 
-export function computeLate(shift, checkInIso, workDate, block = 0) {
+// CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ… — server/privilege.js): priv = { late, midOut, midIn, early } phút.
+// Số phút được ưu đãi trừ thẳng vào phút đi trễ / về sớm, đúng ĐOẠN của ca:
+//  - vào trước giờ nghỉ trưa → trừ `late` (đầu ca được đến muộn)
+//  - vào sau giờ nghỉ trưa (chỉ làm chiều) → trừ `midIn` vào phần trễ của buổi chiều; buổi sáng vắng vẫn tính đủ
+//  - ra sau giờ nghỉ trưa → trừ `early` (cuối ca được về sớm)
+//  - ra trước/trong giờ nghỉ trưa (chỉ làm sáng) → trừ `midOut` vào phần về sớm của buổi sáng
+// Ca không khai giờ nghỉ cố định: chỉ dùng `late` / `early` (midOut / midIn áp ở chế độ nhiều lần vào/ra).
+function privAllowIn(priv, brk, t) {
+  if (!priv) return 0;
+  if (brk && t > brk.bs) return Math.min(priv.midIn || 0, Math.max(0, mins(brk.be, t)));
+  return priv.late || 0;
+}
+function privAllowOut(priv, brk, t) {
+  if (!priv) return 0;
+  if (brk && t < brk.be) return Math.min(priv.midOut || 0, Math.max(0, mins(t, brk.bs)));
+  return priv.early || 0;
+}
+
+export function computeLate(shift, checkInIso, workDate, block = 0, priv = null) {
   if (!shift || !checkInIso) return 0;
   const { start } = shiftBounds(workDate, shift);
   const ciT = toMinute(checkInIso);
-  const raw = mins(start, ciT) - (ciT > start ? breakOverlap(breakWindow(workDate, shift, start), start, ciT) : 0);
+  const brk = breakWindow(workDate, shift, start);
+  const raw = mins(start, ciT) - (ciT > start ? breakOverlap(brk, start, ciT) : 0) - (ciT > start ? privAllowIn(priv, brk, ciT) : 0);
   const grace = shift.late_grace_min || 0;
   if (raw <= grace) return 0;
   return roundUpBlock(shift.grace_deduct ? raw - grace : raw, block);   // tùy chọn của ca: chỉ tính phần VƯỢT số phút cho phép
@@ -99,29 +118,32 @@ export function noShiftUnit(work_minutes, opts = {}) {
 }
 
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null, lateBlock = 0 } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null, lateBlock = 0, priv = null } = opts;
   const ci = toMinute(checkInIso);
   const co = toMinute(checkOutIso);
   const { start, end } = shiftBounds(workDate, shift);
 
   const brk = breakWindow(workDate, shift, start);
   // Về sớm — cùng cách với đi muộn: dung sai chỉ là NGƯỠNG; vượt ngưỡng → ghi ĐỦ số phút về sớm thực tế
-  const earlyRaw = mins(co, end) - (co < end ? breakOverlap(brk, co, end) : 0);
+  const earlyRaw = mins(co, end) - (co < end ? breakOverlap(brk, co, end) + privAllowOut(priv, brk, co) : 0);
   const earlyGrace = shift.early_grace_min ?? 15;
   const early_min = earlyRaw > earlyGrace ? roundUpBlock(shift.grace_deduct ? earlyRaw - earlyGrace : earlyRaw, lateBlock) : 0;
 
   // Trễ/sớm NẰM TRONG dung sai thì coi như đúng giờ: KHÔNG trừ giờ công (giống Ronald Jack/WiseEye:
   // giờ = giờ ca − phút trễ − phút sớm đã tính). Vượt dung sai → trừ đủ.
   const lateGrace = shift.late_grace_min || 0;
-  const inGraceIn = (t) => { const raw = mins(start, t); return raw > 0 && raw <= lateGrace; };
-  const inGraceOut = (t) => { const raw = mins(t, end); return raw > 0 && raw <= earlyGrace; };
+  // phút trễ / sớm đã TRỪ phần được ưu đãi (chế độ thai sản…)
+  const lateOf = (t) => mins(start, t) - (t > start ? privAllowIn(priv, brk, t) : 0);
+  const earlyOf = (t) => mins(t, end) - (t < end ? privAllowOut(priv, brk, t) : 0);
+  const inGraceIn = (t) => { const raw = lateOf(t); return raw <= 0 || raw <= lateGrace; };
+  const inGraceOut = (t) => { const raw = earlyOf(t); return raw <= 0 || raw <= earlyGrace; };
 
   // Giờ công thực: kẹp trong khung ca, trừ nghỉ giữa ca nếu có mặt >= nửa ca
   // Ca bật "chỉ tính phần vượt số phút cho phép": giờ công cũng chỉ bị trừ phần vượt
   // Làm tròn đi trễ / về sớm theo khối (quy tắc chung): giờ công trừ ĐÚNG số phút trễ/sớm đã làm tròn
   const gIn = shift.grace_deduct ? lateGrace : 0, gOut = shift.grace_deduct ? earlyGrace : 0;
-  const adjIn = (t) => (t < start || inGraceIn(t) ? start : new Date(start.getTime() + roundUpBlock(mins(start, t) - gIn, lateBlock) * 60000));
-  const adjOut = (t) => (t > end || inGraceOut(t) ? end : new Date(end.getTime() - roundUpBlock(mins(t, end) - gOut, lateBlock) * 60000));
+  const adjIn = (t) => (t < start || inGraceIn(t) ? start : new Date(start.getTime() + roundUpBlock(lateOf(t) - gIn, lateBlock) * 60000));
+  const adjOut = (t) => (t > end || inGraceOut(t) ? end : new Date(end.getTime() - roundUpBlock(earlyOf(t) - gOut, lateBlock) * 60000));
   const effIn = adjIn(ci);
   const effOut = adjOut(co);
   const inShift = Math.max(0, mins(effIn, effOut));
@@ -139,10 +161,21 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
       if (k === full.length - 1) b = adjOut(b);  // lượt ra cuối: áp số phút cho phép về sớm
       work_minutes += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
     }
+    // Ưu đãi "về giữa giờ / đến muộn giữa giờ": phần ra ngoài giữa các cặp (trong khung ca, ngoài giờ nghỉ của ca)
+    // được bù lại tối đa midOut + midIn phút
+    if (priv && (priv.midOut || priv.midIn)) {
+      let gap = 0;
+      for (let k = 1; k < full.length; k++) {
+        const a = toMinute(full[k - 1][1]), b = toMinute(full[k][0]);
+        gap += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
+      }
+      const extra = Math.max(0, gap - (shift.break_minutes || 0));
+      work_minutes += Math.min(extra, (priv.midOut || 0) + (priv.midIn || 0));
+    }
   } else if (brk) {
     // Nghỉ giữa ca CỐ ĐỊNH giờ: giờ công = giờ chuẩn − đi trễ − về sớm (đều đã bỏ phần trùng giờ nghỉ)
     // VD ca 8–17 nghỉ 12–13: vào 12:19 → trễ 240' → đủ 4 tiếng chiều (như HR-ERP)
-    const lateRawB = ci > start ? mins(start, ci) - breakOverlap(brk, start, ci) : 0;
+    const lateRawB = ci > start ? mins(start, ci) - breakOverlap(brk, start, ci) - privAllowIn(priv, brk, ci) : 0;
     const lateDed = lateRawB > lateGrace ? roundUpBlock(lateRawB - gIn, lateBlock) : 0;
     const earlyDed = early_min;
     const stdB = Math.max(0, shiftLen - (shift.break_minutes || 0));
@@ -218,13 +251,13 @@ export function weekendToOt(c, flags = {}) {
 // Chỉ có giờ VÀO, thiếu giờ RA. Mặc định 0 công (trạng thái "thiếu ra").
 // Ca bật "thiếu giờ ra vẫn tính công": tính đủ giờ chuẩn của ca TRỪ phần đi trễ (vượt dung sai) — như Ronald Jack.
 export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, lateBlock = 0 } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, lateBlock = 0, priv = null } = opts;
   const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
   const base = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type, day_status: 'thieu_ra' };
   if (!shift || !checkInIso || !shift.no_out_credit) return base;
   const { start, end } = shiftBounds(workDate, shift);
   const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
-  const late = computeLate(shift, checkInIso, workDate, lateBlock);
+  const late = computeLate(shift, checkInIso, workDate, lateBlock, priv);
   const work_minutes = Math.max(0, standard - late);
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);

@@ -7,6 +7,7 @@ import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom } from '../day-metrics.js';
+import { privilegeFor } from '../privilege.js';
 
 const r = Router();
 r.use(authRequired);
@@ -30,6 +31,7 @@ function dayFlags(date, empId = null) {
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',
     lateBlock: Math.max(0, parseInt(getSetting('late_round_block', '0'), 10) || 0),
+    priv: privilegeFor(db, empId, date),   // chế độ ưu đãi (thai sản…): được đến muộn / về sớm
   };
 }
 function otTypeOf(date, empId = null) {
@@ -179,7 +181,7 @@ r.post('/check-in', (req, res) => {
     return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần một định vị được phép để chấm công.` });
   }
 
-  const late = shift ? computeLate(shift, at, date, dayFlags(date).lateBlock) : 0;
+  const late = shift ? (() => { const f = dayFlags(date, req.user.id); return computeLate(shift, at, date, f.lateBlock, f.priv); })() : 0;
   const otType = otTypeOf(date, req.user.id);
 
   let photoPath;
@@ -269,7 +271,7 @@ r.post('/check-out', (req, res) => {
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');
-  const finalLate = shift ? computeLate(shift, row.check_in_at, wdate, dayFlags(wdate, req.user.id).lateBlock) : row.late_min;
+  const finalLate = shift ? (() => { const f = dayFlags(wdate, req.user.id); return computeLate(shift, row.check_in_at, wdate, f.lateBlock, f.priv); })() : row.late_min;
 
   db.prepare(`UPDATE attendance SET check_out_at=?, check_out_lat=?, check_out_lng=?,
     check_out_photo=?, check_out_distance_m=?, work_minutes=?, early_min=?, ot_min=?,

@@ -224,12 +224,14 @@ const LEAVE_KINDS = [
   { key: 'lvR', type: 'Nghỉ có lương', label: 'Nghỉ có lương', sym: 'R' },
   { key: 'lvKL', type: 'Nghỉ không lương', label: 'Không lương', sym: 'KL' },
   { key: 'lvCT', type: 'Công tác', label: 'Công tác', sym: 'CT' },
+  { key: 'lvTS', type: 'Thai sản', label: 'Thai sản', sym: 'TS' },
   { key: 'lvK', type: 'Khác', label: 'Nghỉ khác', sym: 'K' },
 ];
 function leaveKind(type) {
   const t = String(type || '').trim().toLowerCase();
-  return LEAVE_KINDS.find((k) => k.type.toLowerCase() === t)
-    || (t.includes('không lương') ? LEAVE_KINDS[2] : t.includes('có lương') ? LEAVE_KINDS[1] : t.includes('công tác') ? LEAVE_KINDS[3] : t.includes('phép') ? LEAVE_KINDS[0] : LEAVE_KINDS[4]);
+  const k = (key) => LEAVE_KINDS.find((x) => x.key === key);
+  return LEAVE_KINDS.find((x) => x.type.toLowerCase() === t)
+    || (t.includes('không lương') ? k('lvKL') : t.includes('có lương') ? k('lvR') : t.includes('công tác') ? k('lvCT') : t.includes('thai sản') ? k('lvTS') : t.includes('phép') ? k('lvP') : k('lvK'));
 }
 // Cột số ngày nghỉ từng loại (chỉ những loại có phát sinh trong kỳ; `always` = luôn có cột Nghỉ phép)
 function leaveCols(ctx, always = false) {

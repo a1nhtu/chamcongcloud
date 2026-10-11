@@ -2,6 +2,7 @@
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
 import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts } from './attendance-calc.js';
+import { privilegeLookup } from './privilege.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -36,6 +37,7 @@ export function payrollCtx(getSetting, db) {
         return !!empId && set.has(empId);
       };
     })(),
+    privOf: privilegeLookup(db),   // chế độ ưu đãi (thai sản…) của NV theo ngày — nạp 1 lần cho cả mẻ
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
     // Kiểu chấm công của TỪNG nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung) — nạp 1 lần cho cả mẻ
     isHourly: (() => {
@@ -65,9 +67,10 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     roundingMode: ctx.roundingMode,
     lateBlock: ctx.lateBlock || 0,
     pairs,   // quy tắc "Nhiều lần vào/ra": các cặp vào–ra trong ngày (null = tính như cũ)
+    priv: opts.empId && ctx.privOf ? ctx.privOf(opts.empId, workDate) : null,   // ưu đãi đến muộn / về sớm (thai sản…)
   };
   const otType = flags.isHoliday ? 'le' : flags.isWeekend ? 'cuoi_tuan' : 'thuong';
-  const late = (shift && inIso) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0) : 0;
+  const late = (shift && inIso) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, flags.priv) : 0;
 
   let c;
   if (inIso && outIso) {

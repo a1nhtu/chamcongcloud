@@ -2737,6 +2737,7 @@ const HALF_TXT = { sang: 'nửa ngày sáng', chieu: 'nửa ngày chiều' };
 let _lvTab = 'list';
 async function pageLeaves() {
   if (_lvTab === 'quota') return pageLeaveQuota();
+  if (_lvTab === 'priv') return pagePrivileges();
   const sel = el('select', { id: 'lv-filter' },
     el('option', { value: 'pending' }, 'Chờ duyệt'),
     el('option', { value: '' }, 'Tất cả'),
@@ -2746,7 +2747,9 @@ async function pageLeaves() {
   addBtn.onclick = () => leaveAddModal();
   const quotaBtn = el('button', { class: 'btn ghost' }, '📅 Quỹ phép năm');
   quotaBtn.onclick = () => { _lvTab = 'quota'; pageLeaves(); };
-  setMain(head('Đơn từ', sel, quotaBtn, addBtn), loading());
+  const privBtn = el('button', { class: 'btn ghost' }, '🤰 Chế độ ưu đãi');
+  privBtn.onclick = () => { _lvTab = 'priv'; pageLeaves(); };
+  setMain(head('Đơn từ', sel, privBtn, quotaBtn, addBtn), loading());
   const load = async () => {
     const status = $('#lv-filter').value;
     const { rows } = await api('/leaves' + (status ? '?status=' + status : ''));
@@ -2773,7 +2776,7 @@ async function pageLeaves() {
       ));
     }
     tbl.append(tb);
-    setMain(head('Đơn từ', sel, quotaBtn, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / KL / CT / K) và báo cáo.'), el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Đơn từ', sel, privBtn, quotaBtn, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / R / KL / CT / TS / K) và báo cáo. Ưu đãi thai sản / nuôi con nhỏ (được đến muộn, về sớm) khai ở "🤰 Chế độ ưu đãi".'), el('div', { class: 'panel tbl-scroll' }, tbl));
     $('#lv-filter').value = status;
     $('#lv-filter').onchange = load;
   };
@@ -2816,6 +2819,133 @@ async function pageLeaveQuota() {
     + (S.carryMax > 0 ? `, phép dư chuyển sang năm sau tối đa ${n1(S.carryMax)} ngày` + (S.carryUntil ? ` (dùng đến hết tháng ${S.carryUntil})` : '') : ', phép dư không chuyển sang năm sau') + '. Đổi ở Cài đặt › Phép năm; ngày vào làm / mức phép riêng khai ở hồ sơ nhân viên.';
   setMain(head('Quỹ phép năm', ySel, back), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, rule),
     el('div', { style: 'margin-bottom:10px' }, q), el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+/* ---------- CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…) ---------- */
+// Trong khoảng ngày áp dụng, nhân viên được đến muộn / về sớm số phút đã khai — không tính trễ/sớm, không trừ công.
+const PRIV_PRESETS = [
+  ['Mang thai từ tháng 7 — về sớm 60 phút', 'Mang thai', { early_min: 60 }],
+  ['Nuôi con dưới 12 tháng — 30 phút giữa giờ + 30 phút cuối ca', 'Nuôi con nhỏ', { mid_out_min: 30, early_min: 30 }],
+  ['Nuôi con dưới 12 tháng — đến muộn 30 + về sớm 30', 'Nuôi con nhỏ', { late_min: 30, early_min: 30 }],
+];
+const privTxt = (p) => [['Đến muộn', p.late_min], ['Về sớm trước nghỉ trưa', p.mid_out_min], ['Đến muộn sau nghỉ trưa', p.mid_in_min], ['Về sớm cuối ca', p.early_min]]
+  .filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}'`).join(' · ');
+// Tính lại công những ngày ĐÃ QUA bị ảnh hưởng (số trễ/sớm/công đổi ngay, không phải vào Tính công bấm lại)
+async function privRecompute(ids, from, to) {
+  const today = todayVN();
+  const t = !to || to > today ? today : to;
+  if (!ids.length || !from || from > t) return;
+  try { await api(`/admin/recompute?ids=${ids.join(',')}&from=${from}&to=${t}`, { method: 'POST' }); }
+  catch (e) { toast('Đã lưu, nhưng chưa tính lại được công: ' + e.message + ' — vào Tính công bấm "Tính lại".', 'err'); }
+}
+async function pagePrivileges() {
+  const back = el('button', { class: 'btn ghost' }, '‹ Đơn từ');
+  back.onclick = () => { _lvTab = 'list'; pageLeaves(); };
+  const addBtn = el('button', { class: 'btn' }, '+ Thêm ưu đãi');
+  addBtn.onclick = () => privModal(null);
+  setMain(head('Chế độ ưu đãi', back, addBtn), loading());
+  let d;
+  try { d = await api('/leaves/privileges'); } catch (e) { return setMain(head('Chế độ ưu đãi', back, addBtn), el('div', { class: 'empty' }, e.message)); }
+  const today = todayVN();
+  const tbl = el('table', { class: 'data' });
+  tbl.innerHTML = '<thead><tr><th>Nhân viên</th><th>Chế độ</th><th>Từ ngày</th><th>Đến ngày</th><th>Được ưu đãi</th><th>Ghi chú</th><th></th></tr></thead>';
+  const tb = el('tbody'); tbl.append(tb);
+  if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Chưa khai chế độ ưu đãi nào. Bấm "+ Thêm ưu đãi".'))));
+  const fd = (s) => s ? s.slice(8) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4) : '';
+  for (const r of d.rows) {
+    const on = r.from_date <= today && (!r.to_date || r.to_date >= today);
+    const del = btnSm('Xoá', async () => {
+      if (!confirm(`Xoá chế độ "${r.kind}" của ${r.full_name}? Công những ngày đã qua sẽ được tính lại (không còn ưu đãi).`)) return;
+      try { await api('/leaves/privileges/' + r.id, { method: 'DELETE' }); await privRecompute([r.employee_id], r.from_date, r.to_date); toast('Đã xoá', 'ok'); pagePrivileges(); } catch (e) { toast(e.message, 'err'); }
+    }, 'ghost');
+    tb.append(el('tr', {},
+      el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, (r.code || '') + (r.department ? ' · ' + r.department : ''))),
+      el('td', {}, r.kind, on ? el('div', {}, el('span', { class: 'pill ok' }, 'Đang áp dụng')) : ''),
+      el('td', {}, fd(r.from_date)), el('td', {}, r.to_date ? fd(r.to_date) : el('span', { style: 'color:#9ca3af' }, 'không hạn')),
+      el('td', {}, privTxt(r)), el('td', {}, r.note || '—'),
+      el('td', {}, el('div', { style: 'display:flex;gap:6px' }, btnSm('Sửa', () => privModal(r)), del))));
+  }
+  setMain(head('Chế độ ưu đãi', back, addBtn),
+    el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Lao động nữ mang thai từ tháng thứ 7 (tháng thứ 6 nếu làm nghề nặng nhọc / vùng khó khăn) và nuôi con dưới 12 tháng được giảm 60 phút mỗi ngày, vẫn hưởng đủ lương. Khai số phút ở đúng vị trí: đến muộn đầu ca, về sớm trước nghỉ trưa, đến muộn sau nghỉ trưa, về sớm cuối ca — phần nằm trong số phút này không tính trễ/sớm và không trừ công. Nghỉ hẳn thai sản thì thêm đơn loại "Thai sản" ở Đơn từ.'),
+    el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+async function privModal(row) {
+  const edit = !!row;
+  let emps = [];
+  if (!edit) { try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); } }
+  const picked = new Set();
+  const q = el('input', { placeholder: 'Tìm tên / mã nhân viên' });
+  const listBox = el('div', { style: 'max-height:200px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:6px 10px' });
+  const cnt = el('b', {});
+  const draw = () => {
+    const s = q.value.trim().toLowerCase();
+    const list = emps.filter((e) => !s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s));
+    listBox.innerHTML = '';
+    for (const e of list) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(e.id) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(e.id) : picked.delete(e.id); cnt.textContent = `Đã chọn ${picked.size} người`; };
+      listBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 0;cursor:pointer' }, cb, el('span', {}, e.full_name), el('span', { style: 'color:#9ca3af;font-size:12px' }, (e.code || '') + (e.department ? ' · ' + e.department : ''))));
+    }
+    if (!list.length) listBox.append(el('div', { class: 'empty' }, 'Không có nhân viên.'));
+    cnt.textContent = `Đã chọn ${picked.size} người`;
+  };
+  if (!edit) { q.oninput = draw; draw(); }
+  const kindSel = el('select', {}, ...['Mang thai', 'Nuôi con nhỏ', 'Khác'].map((k) => el('option', { value: k, ...(row && row.kind === k ? { selected: '' } : {}) }, k)));
+  const fromI = el('input', { type: 'date', value: row ? row.from_date : todayVN() });
+  const toI = el('input', { type: 'date', value: row ? row.to_date || '' : '' });
+  const num = (v) => el('input', { type: 'number', min: 0, max: 480, step: 5, value: v || 0 });
+  const lateI = num(row?.late_min), midOutI = num(row?.mid_out_min), midInI = num(row?.mid_in_min), earlyI = num(row?.early_min);
+  const noteI = el('input', { placeholder: 'VD: dự sinh 12/2026, con sinh 05/03/2026…', value: row?.note || '' });
+  const total = el('div', { style: 'font-size:13px;font-weight:600' });
+  const sumUp = () => {
+    const t = [lateI, midOutI, midInI, earlyI].reduce((a, i) => a + (parseInt(i.value, 10) || 0), 0);
+    total.textContent = `Tổng ưu đãi: ${t} phút/ngày` + (t > 60 ? ' — luật quy định 60 phút, kiểm tra lại nếu không phải chế độ riêng của công ty' : '');
+    total.style.color = t > 60 ? '#b45309' : '#15803d';
+  };
+  for (const i of [lateI, midOutI, midInI, earlyI]) i.oninput = sumUp;
+  sumUp();
+  const presets = el('div', { style: 'display:flex;flex-wrap:wrap;gap:6px' }, ...PRIV_PRESETS.map(([label, kind, v]) => {
+    const b = el('button', { class: 'btn ghost sm', type: 'button' }, label);
+    b.onclick = () => { kindSel.value = kind; lateI.value = v.late_min || 0; midOutI.value = v.mid_out_min || 0; midInI.value = v.mid_in_min || 0; earlyI.value = v.early_min || 0; sumUp(); };
+    return b;
+  }));
+  const row4 = (label, inp, hint) => el('div', { class: 'lv-row' }, el('div', { class: 'lv-lab' }, label),
+    el('div', {}, el('div', { class: 'lv-ctl' }, inp, el('span', {}, 'phút')), el('div', { class: 'map-hint', style: 'margin-top:2px' }, hint)));
+  const save = el('button', { class: 'btn' }, 'Lưu');
+  save.onclick = async () => {
+    if (!edit && !picked.size) return toast('Chọn ít nhất 1 nhân viên', 'err');
+    if (toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau từ ngày', 'err');
+    const body = { kind: kindSel.value, from_date: fromI.value, to_date: toI.value, late_min: lateI.value, mid_out_min: midOutI.value, mid_in_min: midInI.value, early_min: earlyI.value, note: noteI.value };
+    save.disabled = true;
+    try {
+      if (edit) {
+        const r = await api('/leaves/privileges/' + row.id, { method: 'PUT', body });
+        // tính lại cả khoảng cũ lẫn khoảng mới (ngày vừa bỏ khỏi ưu đãi cũng phải về như thường)
+        const f = [r.old.from_date, fromI.value].sort()[0];
+        const t = !r.old.to_date || !toI.value ? '' : [r.old.to_date, toI.value].sort()[1];
+        await privRecompute([row.employee_id], f, t);
+        toast('Đã lưu, đã tính lại công', 'ok');
+      } else {
+        const r = await api('/leaves/privileges', { method: 'POST', body: { ...body, employee_ids: [...picked] } });
+        await privRecompute([...picked], fromI.value, toI.value);
+        toast(`Đã thêm ưu đãi cho ${r.count} người`, 'ok');
+      }
+      closeModal(); _lvTab = 'priv'; pagePrivileges();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  };
+  openModal(edit ? `Sửa chế độ ưu đãi — ${row.full_name}` : 'Thêm chế độ ưu đãi', [
+    edit ? '' : el('div', {}, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px' }, el('label', { style: 'margin:0' }, 'Nhân viên'), cnt), q, el('div', { style: 'height:6px' }), listBox),
+    el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px' }, field('Chế độ', kindSel), field('Từ ngày', fromI), field('Đến ngày', toI)),
+    el('div', { class: 'map-hint', style: 'margin-top:-6px' }, 'Bỏ trống "Đến ngày" = áp dụng tới khi xoá / sửa. Mang thai: đến ngày nghỉ sinh; nuôi con nhỏ: đến ngày con đủ 12 tháng.'),
+    el('div', {}, el('label', {}, 'Mẫu nhanh'), presets),
+    el('div', { class: 'lv-form' },
+      row4('Đầu ca được đến muộn', lateI, 'VD ca 8:00, được 30 phút → vào 8:30 vẫn đúng giờ'),
+      row4('Trước nghỉ trưa được về sớm', midOutI, 'Áp khi ca có khai giờ nghỉ cố định, hoặc ca chấm nhiều lần vào/ra'),
+      row4('Sau nghỉ trưa được đến muộn', midInI, 'Áp khi ca có khai giờ nghỉ cố định, hoặc ca chấm nhiều lần vào/ra'),
+      row4('Cuối ca được về sớm', earlyI, 'VD ca 17:00, được 60 phút → ra 16:00 vẫn đủ công')),
+    total,
+    field('Ghi chú', noteI),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
 
 // Quản lý khai nghỉ TRỰC TIẾP cho 1 hoặc nhiều nhân viên (đơn tự duyệt)

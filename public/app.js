@@ -479,7 +479,7 @@ async function renderDontu() {
       <div><label>Loại đơn</label>
         <select id="lv-type">
           <option value="Nghỉ phép">Nghỉ phép năm (có lương, trừ phép)</option><option value="Nghỉ có lương">Nghỉ có lương (cưới, tang…)</option>
-          <option value="Nghỉ không lương">Nghỉ không lương</option><option value="Công tác">Công tác</option><option value="Khác">Khác</option>
+          <option value="Nghỉ không lương">Nghỉ không lương</option><option value="Công tác">Công tác</option><option value="Thai sản">Nghỉ thai sản</option><option value="Khác">Khác</option>
         </select>
         <div id="lv-bal" style="font-size:13px;color:#15803d;margin-top:6px"></div></div>
       <div style="display:flex;gap:10px">
