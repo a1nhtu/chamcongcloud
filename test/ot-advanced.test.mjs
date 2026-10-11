@@ -98,9 +98,9 @@ test('ghép cặp: bỏ lượt quẹt lặp, không để 1 lần quẹt 2 phá
   const p = punchPairs([t('08:00'), t('08:02'), t('12:00'), t('13:00'), t('17:00')]);   // mặc định 5 phút
   assert.deepEqual(p, [[t('08:00'), t('12:00')], [t('13:00'), t('17:00')]]);
   assert.equal(sumPairsMinutes(p), 480);
-  // lặp ở lượt ra + nghỉ ngắn 10 phút vẫn là 1 cặp thật
+  // lặp ở lượt ra (giờ ra lấy lượt CUỐI của cụm: 10:03) + nghỉ ngắn 10 phút vẫn là 1 cặp thật
   const p2 = punchPairs([t('08:00'), t('10:00'), t('10:03'), t('10:10'), t('17:00')]);
-  assert.deepEqual(p2, [[t('08:00'), t('10:00')], [t('10:10'), t('17:00')]]);
+  assert.deepEqual(p2, [[t('08:00'), t('10:03')], [t('10:10'), t('17:00')]]);
   // ngưỡng tùy chỉnh 30 phút như mặc định của Ronald Jack
   assert.deepEqual(punchPairs([t('08:00'), t('08:20'), t('12:00')], 30), [[t('08:00'), t('12:00')]]);
 });
@@ -133,8 +133,8 @@ test('tùy chọn: ca này là ca tăng ca (mọi ngày)', () => {
 test('ghép cặp theo 3 thông số của Lịch trình vào ra', () => {
   const t = (hm) => iso(WD, hm);
   const io = { min: 30, gap: 30, max: 960 };
-  // 08:20 (RA quá sát VÀO) và 12:10 (VÀO quá sát RA trước) là quẹt lặp
-  assert.deepEqual(punchPairs([t('08:00'), t('08:20'), t('12:00'), t('12:10'), t('13:00'), t('17:00')], io), [[t('08:00'), t('12:00')], [t('13:00'), t('17:00')]]);
+  // 08:20 (RA quá sát VÀO) và 12:10 (quá sát RA trước) là quẹt lặp — giờ ra lấy lượt CUỐI của cụm (12:10)
+  assert.deepEqual(punchPairs([t('08:00'), t('08:20'), t('12:00'), t('12:10'), t('13:00'), t('17:00')], io), [[t('08:00'), t('12:10')], [t('13:00'), t('17:00')]]);
   // cặp dài hơn "lớn nhất" (quên quẹt ra hôm trước): bỏ lượt vào cũ, lượt sau thành VÀO mới
   assert.deepEqual(punchPairs([t('01:00'), t('18:30'), t('22:00')], { min: 30, gap: 30, max: 600 }), [[t('18:30'), t('22:00')]]);
 });

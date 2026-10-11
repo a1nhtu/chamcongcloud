@@ -4099,7 +4099,7 @@ async function pageSettings() {
       el('h3', { style: 'margin:0;font-size:15px' }, 'Chống chấm trùng liên tiếp'),
       el('label', { style: 'display:flex;gap:10px;align-items:center' },
         el('div', {}, el('b', {}, 'Bỏ qua lần chấm trùng trong '), dedupI, el('b', {}, ' phút'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Lượt quẹt/chấm của cùng một người cách lượt trước dưới số phút này chỉ tính 1 lần — chống bấm 2 lần trên app, quẹt máy liên tiếp, và không để lượt lặp làm lệch các cặp vào/ra. Mặc định 15. Nếu nhân viên có nghỉ giữa giờ ngắn hơn số này (và có quẹt) thì giảm xuống. Đặt 0 = lưu đủ mọi lượt quẹt (khi ghép cặp vào/ra vẫn tự bỏ lượt lặp dưới 5 phút).'))),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Lượt quẹt/chấm của cùng một người cách lượt trước dưới số phút này chỉ tính 1 lần (giờ VÀO lấy lượt đầu, giờ RA lấy lượt cuối của cụm quẹt lặp) — chống bấm 2 lần trên app, quẹt máy liên tiếp, và không để lượt lặp làm lệch các cặp vào/ra. Mặc định 15. Nếu nhân viên có nghỉ giữa giờ ngắn hơn số này (và có quẹt) thì giảm xuống. Đặt 0 = lưu đủ mọi lượt quẹt (khi ghép cặp vào/ra vẫn tự bỏ lượt lặp dưới 5 phút).'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Hình thức chấm công'),
       // Máy chấm công (ZKTeco)

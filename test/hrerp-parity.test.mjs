@@ -1,7 +1,7 @@
 // Các quy tắc thêm khi đối chiếu với HR-ERP (khách Bao Bì Thủ Đô, T2–T3/2025). Chạy: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeCheckout, computeLate, ruleWindow, roundUpBlock, roundOtParts } from '../server/attendance-calc.js';
+import { computeCheckout, computeLate, ruleWindow, roundUpBlock, roundOtParts, mergeDayPunches } from '../server/attendance-calc.js';
 
 const iso = (d, hm) => new Date(`${d}T${hm}:00+07:00`).toISOString();
 const WD = '2025-03-10'; // Thứ Hai
@@ -69,4 +69,14 @@ test('vào SAU giờ tan ca: tăng ca chỉ tính từ lúc có mặt', () => {
   const c = computeCheckout(HC, iso(WD, '18:07'), iso(WD, '18:55'), WD, {});
   assert.equal(c.work_minutes, 0);
   assert.equal(c.ot_min, 48);    // 18:07 → 18:55 (trước đây tính từ 17:00 = 115')
+});
+
+test('quẹt lặp: giờ VÀO lấy lượt đầu, giờ RA lấy lượt cuối; cả ngày 1 cụm lặp → thiếu giờ ra', () => {
+  const P = (hm) => ({ punch_at: iso(WD, hm), serial: 'A' });
+  const r = mergeDayPunches([P('07:55'), P('08:02'), P('17:59'), P('18:00')], HC, 'filo', {}, WD, { dupMin: 15 });
+  assert.equal(r.inIso, iso(WD, '07:55'));
+  assert.equal(r.outIso, iso(WD, '18:00'));
+  const one = mergeDayPunches([P('08:00'), P('08:05')], HC, 'filo', {}, WD, { dupMin: 15 });
+  assert.equal(one.inIso, iso(WD, '08:00'));
+  assert.equal(one.outIso, null);
 });

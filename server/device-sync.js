@@ -687,11 +687,18 @@ export function ingestAttlog(serial, rawBody) {
     if (isNaN(d)) continue;
     const punchIso = d.toISOString();
     const workDate = timeStr.slice(0, 10);
-    // Chống trùng: nếu Số ID này vừa có lượt quẹt trong vòng N phút → bỏ qua lượt này
+    // Chống trùng: cụm lượt quẹt cách nhau dưới N phút chỉ giữ lượt ĐẦU (dùng làm giờ VÀO) và lượt CUỐI (dùng làm giờ RA).
+    // VD quẹt ra 17:59 rồi 18:00 → giữ cả 2, giờ ra = 18:00 (trước đây chỉ giữ 17:59 → thành "về sớm 1 phút").
     if (dedupMs > 0) {
-      const near = db.prepare('SELECT punch_at FROM device_punches WHERE pin=? AND work_date=?').all(pin, workDate)
-        .some((r) => Math.abs(new Date(r.punch_at) - d) < dedupMs);
-      if (near) continue;
+      const near = db.prepare('SELECT id, punch_at FROM device_punches WHERE pin=? AND work_date=?').all(pin, workDate)
+        .filter((r) => Math.abs(new Date(r.punch_at) - d) < dedupMs).sort((a, b) => (a.punch_at < b.punch_at ? -1 : 1));
+      if (near.length) {
+        const first = near[0].punch_at, last = near[near.length - 1].punch_at;
+        if (punchIso >= first && punchIso <= last) continue;                     // nằm giữa cụm (hoặc trùng hẳn) → bỏ
+        // lượt mới là CUỐI cụm → bỏ các lượt giữa (giữ lượt đầu); là ĐẦU cụm (máy gửi bù lệch thứ tự) → giữ lượt cuối
+        const drop = punchIso > last ? near.slice(1) : near.slice(0, -1);
+        for (const r of drop) db.prepare('DELETE FROM device_punches WHERE id=?').run(r.id);
+      }
     }
     const emp = findEmpByPin(pin);
     const empId = emp?.id ?? null;

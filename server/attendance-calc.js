@@ -342,6 +342,7 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
   const { winStart, winEnd, start, end } = ruleWindow(workDate, shift, opts);
   const inWin = all.filter((p) => at(p) >= winStart && at(p) <= winEnd);
   const iso = (p) => (p ? p.punch_at : null);
+  const dupMs = Math.max(0, Number(opts.dupMin) || 0) * 60000;   // ngưỡng quẹt lặp: lượt ra phải cách lượt vào ít nhất chừng này
 
   // IDM (hoặc TĐ-QĐ/idm): máy lẻ = VÀO sớm nhất, máy chẵn = RA muộn nhất
   const useIdm = rule === 'idm' || (rule === 'tdqd' && (shift.tdqd_mode || 'pair') === 'idm');
@@ -377,14 +378,15 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
       coe = vnInstant(workDate, shift.check_out_end);
       if (coe < cos) coe = new Date(coe.getTime() + 24 * HH);
     } else { cos = new Date(end.getTime() - HH); coe = new Date(end.getTime() + 8 * HH); }
-    const outs = all.filter((p) => at(p) > at(ci) && at(p) >= cos && at(p) <= coe);
+    const outs = all.filter((p) => at(p) - at(ci) >= dupMs && at(p) > at(ci) && at(p) >= cos && at(p) <= coe);
     return { inIso: iso(ci), outIso: outs.length ? iso(outs[outs.length - 1]) : null };
   }
 
   // FILO (mặc định) & TĐ-QĐ/pair: sớm nhất VÀO, muộn nhất RA trong cửa sổ
   const ci = inWin[0];
   if (!ci) return { inIso: null, outIso: null };
-  const co = inWin.length > 1 ? inWin[inWin.length - 1] : null;
+  let co = inWin.length > 1 ? inWin[inWin.length - 1] : null;
+  if (co && at(co) - at(ci) < dupMs) co = null;   // cả ngày chỉ 1 cụm quẹt lặp → vẫn là thiếu giờ ra
   const res = { inIso: iso(ci), outIso: iso(co && co !== ci ? co : null) };
   if (rule === 'pairs') res.pairs = punchPairs(inWin.map((p) => p.punch_at), opts.dupMin);
   return res;
@@ -417,7 +419,8 @@ export function punchPairs(isoList, opt = PAIR_DUP_DEFAULT) {
   let inT = null, lastOut = null;
   for (const t of ts) {
     const x = new Date(t).getTime();
-    if (inT == null) { if (lastOut != null && x - lastOut < gap) continue; inT = t; continue; }
+    // quẹt lặp ngay sau lượt RA → lấy lượt CUỐI của cụm làm giờ ra (17:59, 18:00 → ra 18:00)
+    if (inT == null) { if (lastOut != null && x - lastOut < gap) { out[out.length - 1][1] = t; continue; } inT = t; continue; }
     const d = x - new Date(inT).getTime();
     if (d < min) continue;
     if (d > maxMs) { inT = t; continue; }
