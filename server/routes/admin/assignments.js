@@ -1,6 +1,7 @@
 // Nhóm route PHÂN CA — theo ngày (lịch tuần), theo khoảng ngày (shift_assignments) và phân ca bằng Excel.
 import ExcelJS from 'exceljs';
 import { db, adminAttWhere, getSetting } from '../../db.js';
+import { overrideAssignRanges } from '../../assign-normalize.js';
 import { resolveShift, schedDay } from '../../shift-resolver.js';
 import { vnWeekday } from '../../attendance-calc.js';
 import { sendCaughtError } from '../../util.js';
@@ -289,7 +290,8 @@ export function registerAssignmentRoutes(r, { need }) {
     let n = 0;
     db.exec('BEGIN');
     try {
-      for (const e of emps) { ins.run(e.id, mode, shiftId, scheduleId, from, to, shiftType, mergeRule, note, ioId); n++; }
+      // lịch mới THAY lịch cũ trùng ngày của cùng nhân viên (không để 2 lịch chồng nhau)
+      for (const e of emps) { overrideAssignRanges('shift_assignments', e.id, from, to); ins.run(e.id, mode, shiftId, scheduleId, from, to, shiftType, mergeRule, note, ioId); n++; }
       db.exec('COMMIT');
     } catch (err) { db.exec('ROLLBACK'); throw err; }
     res.json({ ok: true, count: n });
@@ -309,8 +311,14 @@ export function registerAssignmentRoutes(r, { need }) {
     if (mode === 'shift' && !db.prepare('SELECT 1 FROM shifts WHERE id = ?').get(shiftId)) return res.status(400).json({ error: 'Chưa chọn ca làm việc' });
     if (mode === 'schedule' && !db.prepare('SELECT 1 FROM work_schedules WHERE id = ?').get(scheduleId)) return res.status(400).json({ error: 'Chưa chọn lịch trình' });
     const ioId = b.inout_schedule_id ? +b.inout_schedule_id : null;
-    db.prepare(`UPDATE ${table} SET mode=?, shift_id=?, work_schedule_id=?, from_date=?, to_date=?, inout_schedule_id=? WHERE id=?`)
-      .run(mode, shiftId, scheduleId, from, to, ioId, row.id);
+    db.exec('BEGIN');
+    try {
+      // đổi ngày làm lấn sang lịch khác của cùng đối tượng → lịch đang sửa thắng, lịch kia bị cắt / thay
+      overrideAssignRanges(table, table === 'shift_assignments' ? row.employee_id : row.department, from, to, row.id);
+      db.prepare(`UPDATE ${table} SET mode=?, shift_id=?, work_schedule_id=?, from_date=?, to_date=?, inout_schedule_id=? WHERE id=?`)
+        .run(mode, shiftId, scheduleId, from, to, ioId, row.id);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
     if (table === 'dept_shift_assignments' && b.include_children != null)
       db.prepare('UPDATE dept_shift_assignments SET include_children=? WHERE id=?').run(b.include_children ? 1 : 0, row.id);
     res.json({ ok: true });
@@ -368,7 +376,7 @@ export function registerAssignmentRoutes(r, { need }) {
       (department, include_children, mode, shift_id, work_schedule_id, from_date, to_date, merge_rule, note, inout_schedule_id) VALUES (?,?,?,?,?,?,?,?,?,?)`);
     db.exec('BEGIN');
     try {
-      for (const d of depts) ins.run(d, b.include_children === false ? 0 : 1, mode, shiftId, scheduleId, from, to, b.merge_rule || 'default', String(b.note || '').slice(0, 500), ioId);
+      for (const d of depts) { overrideAssignRanges('dept_shift_assignments', d, from, to); ins.run(d, b.include_children === false ? 0 : 1, mode, shiftId, scheduleId, from, to, b.merge_rule || 'default', String(b.note || '').slice(0, 500), ioId); }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }
     res.json({ ok: true, count: depts.length });

@@ -10,6 +10,7 @@ import { initSchema, getSetting } from './db.js';
 import { UPLOAD_DIR } from './storage.js';
 import { ensureSeed } from './seed.js';
 import { maybeAutoBackup } from './backup.js';
+import { fixOverlappingAssignmentsOnce } from './assign-normalize.js';
 
 import authRoutes from './routes/auth.js';
 import attendanceRoutes from './routes/attendance.js';
@@ -26,6 +27,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 
 initSchema();
+fixOverlappingAssignmentsOnce();   // dọn 1 lần các lịch gán ca chồng ngày của bản cũ (chạy SAU khi CSDL đã khởi tạo)
 ensureSeed();
 
 // Tự động sao lưu dữ liệu: kiểm tra mỗi 5 phút, chạy khi tới giờ đã đặt (1 lần/ngày)
