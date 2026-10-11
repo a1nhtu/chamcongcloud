@@ -1823,10 +1823,11 @@ async function pageAssignments() {
     const fromI = el('input', { type: 'date', value: todayVN() });
     const toI = el('input', { type: 'date', value: isTemp ? todayVN() : '' });
     const skipOff = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
-    const pickSearch = el('input', { placeholder: 'Tên ca / lịch trình' });
+    const pickSearch = el('input', { placeholder: isTemp ? 'Tên ca / lịch trình' : 'Tên lịch trình' });
     let picked = null;   // 'shift:ID' | 'schedule:ID'
     const items = [
-      ...data.shifts.map((s) => ({ key: 'shift:' + s.id, name: s.name, kind: 'Ca làm việc', info: `${s.start_time} – ${s.end_time}` })),
+      // Gán cho NV / phòng ban: CHỈ chọn lịch trình ca làm việc (lịch trình đã chứa ca). Lịch tạm thời vẫn chọn được 1 ca lẻ.
+      ...(isTemp ? data.shifts.map((s) => ({ key: 'shift:' + s.id, name: s.name, kind: 'Ca làm việc', info: `${s.start_time} – ${s.end_time}` })) : []),
       ...schedules.map((w) => ({ key: 'schedule:' + w.id, name: w.name, kind: (w.unit || 'auto') === 'auto' ? 'Lịch trình · tự dò theo giờ' : `Lịch trình · ${SCH_UNIT[w.unit]} · chu kỳ ${w.cycle || 1}`, info: (w.shifts || []).map((x) => x.name).join(', ') || 'chưa có ca' })),
     ];
     if (isTemp) items.push({ key: 'off:0', name: '🛌 Nghỉ', kind: 'Ngày nghỉ', info: 'cho nghỉ các ngày đã chọn' });
@@ -1835,7 +1836,7 @@ async function pageAssignments() {
       pickTb.innerHTML = '';
       const q = pickSearch.value.trim().toLowerCase();
       const list = items.filter((it) => !q || it.name.toLowerCase().includes(q));
-      if (!list.length) pickTb.append(el('tr', {}, el('td', { colspan: 4 }, el('div', { class: 'empty' }, items.length ? 'Không tìm thấy.' : 'Chưa có ca làm việc nào. Khai báo ở mục Ca làm trước.'))));
+      if (!list.length) pickTb.append(el('tr', {}, el('td', { colspan: 4 }, el('div', { class: 'empty' }, items.length ? 'Không tìm thấy.' : (isTemp ? 'Chưa có ca làm việc nào. Khai báo ở mục Ca làm trước.' : 'Chưa có lịch trình ca làm việc nào. Tạo ở Ca làm › 3. Lịch trình ca làm việc (lịch trình có thể chỉ gồm 1 ca).')))));
       for (const it of list) {
         const rd = el('input', { type: 'radio', name: 'as-pick', style: 'width:auto', ...(picked === it.key ? { checked: '' } : {}) });
         const tr = el('tr', { style: 'cursor:pointer' + (picked === it.key ? ';background:#f0fdf4' : '') }, el('td', {}, rd), el('td', {}, el('b', {}, it.name)), el('td', {}, it.kind), el('td', { style: 'color:var(--muted)' }, it.info));
@@ -1858,7 +1859,7 @@ async function pageAssignments() {
         el('div', { class: 'map-hint', style: 'margin:0 0 12px' }, 'Để trống ngày kết thúc = áp dụng không thời hạn.'),
         el('div', { style: 'margin-bottom:12px' }, el('label', {}, 'Lịch trình vào ra (cách xác định VÀO / RA)'), ioSel,
           ios.length ? '' : el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Chưa khai lịch trình vào ra nào (mục 2. Lịch trình vào ra) → dùng "giờ đầu là vào, giờ cuối là ra".')),
-        el('label', {}, 'Ca làm việc / Lịch trình ca làm việc'),
+        el('label', {}, 'Lịch trình ca làm việc'),
       ]),
       el('div', { style: 'display:flex;gap:8px;margin-bottom:10px' }, pickSearch),
       el('div', { class: 'tbl-scroll', style: 'max-height:calc(100vh - 430px);overflow:auto' }, pickTbl));
@@ -1994,7 +1995,7 @@ async function pageAssignments() {
       if (!fromI.value) return toast('Chọn ngày bắt đầu', 'err');
       if (isTemp && !toI.value) return toast('Chọn đến ngày', 'err');
       if (toI.value && toI.value < fromI.value) return toast('Ngày kết thúc phải sau ngày bắt đầu', 'err');
-      if (!picked) return toast('Chọn 1 ca hoặc 1 lịch trình ở bảng bên phải', 'err');
+      if (!picked) return toast(isTemp ? 'Chọn 1 ca hoặc 1 lịch trình ở bảng bên phải' : 'Chọn 1 lịch trình ở bảng bên phải', 'err');
       const [kind, id] = picked.split(':');
       const g = getBody();
       let body;
@@ -2507,8 +2508,7 @@ async function editAssignModal(kind, r, shifts) {
   const cur = r.mode === 'schedule' ? 'schedule:' + r.work_schedule_id : 'shift:' + r.shift_id;
   const opt = (v, t) => el('option', { value: v, ...(v === cur ? { selected: '' } : {}) }, t);
   const pickSel = el('select', {},
-    el('optgroup', { label: 'Ca làm việc' }, ...shifts.map((s) => opt('shift:' + s.id, `${s.name} (${s.start_time}–${s.end_time})`)),
-      ...(r.mode !== 'schedule' && !shifts.some((s) => 'shift:' + s.id === cur) ? [opt(cur, (r.shift_name || 'Ca') + ' (ca đã tắt)')] : [])),
+    ...(r.mode !== 'schedule' ? [el('optgroup', { label: 'Đang gán ca lẻ (kiểu cũ)' }, opt(cur, (r.shift_name || 'Ca') + ' — đổi sang lịch trình bên dưới'))] : []),
     el('optgroup', { label: 'Lịch trình ca làm việc' }, ...schedules.map((w) => opt('schedule:' + w.id, '📋 ' + w.name))));
   const ioDef = ios.find((x) => x.is_default);
   const ioSel = el('select', {}, el('option', { value: '' }, ioDef ? `Mặc định — ${ioDef.name}` : 'Mặc định — giờ đầu là vào, giờ cuối là ra'),
@@ -2533,7 +2533,7 @@ async function editAssignModal(kind, r, shifts) {
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   openModal('Sửa gán ca — ' + who, [
-    field('Ca / lịch trình ca làm việc', pickSel),
+    field('Lịch trình ca làm việc', pickSel),
     field('Lịch trình vào ra', ioSel),
     el('div', { class: 'two-col' }, field('Ngày bắt đầu', fromI), field('Ngày kết thúc (trống = mãi mãi)', toI)),
     ...(incl ? [el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)' }, incl, 'Áp dụng cả phòng ban cấp dưới')] : []),
