@@ -923,41 +923,45 @@ function deptEditModal(d, after) {
 }
 
 /* ---------- 3) CA LÀM ---------- */
+let _shSel = null;   // ca đang chọn ở danh sách bên trái (id | 'new')
 async function pageShifts() {
   document.querySelectorAll('#nav-sub-sh .nav-sub-btn').forEach((x) => x.classList.toggle('active', x.dataset.as === _shView));
   if (_shView === 'schedules') return pageSchedules();
   if (_shView === 'inout') return pageInOut();
-  const addBtn = hasPerm('shifts') ? el('button', { class: 'btn' }, '+ Thêm ca') : null;
-  // Màn hình hẹp không có menu con → vẫn để nút sang Lịch trình làm việc
+  const can = hasPerm('shifts');
   // Màn hình hẹp (không có menu con): nút sang 2 mục còn lại
   const schedBtn = el('span', { class: 'as-tabs', style: 'margin:0' }, btnSm('Lịch trình vào ra', () => { _shView = 'inout'; pageShifts(); }, 'ghost'), btnSm('Lịch trình ca làm việc', () => { _shView = 'schedules'; _schEdit = null; pageShifts(); }, 'ghost'));
-  setMain(head('Ca làm việc', schedBtn, addBtn), loading());
+  const addBtn = can ? el('button', { class: 'btn' }, '+ Thêm mới') : null;
+  const saveBtn = can ? el('button', { class: 'btn' }, '💾 Lưu') : null;
+  const delBtn = can ? el('button', { class: 'btn ghost' }, '🗑 Xoá') : null;
+  const tools = [schedBtn, addBtn, saveBtn, delBtn];
+  setMain(head('Ca làm việc', ...tools), loading());
   const { rows } = await api('/admin/shifts');
   SHIFTS = rows;
-  const tbl = el('table', { class: 'data' });
-  tbl.innerHTML = `<thead><tr><th>Tên ca</th><th>Mã</th><th>Giờ vào</th><th>Giờ ra</th><th>Nhận diện tự động</th><th>Nghỉ giữa ca</th><th>Muộn/Sớm</th><th>Công/ca</th><th>OT</th><th>TT</th><th></th></tr></thead>`;
+  // Kiểu Ronald Jack: danh sách ca bên TRÁI, bấm 1 ca → khai báo hiện bên PHẢI
+  if (_shSel !== 'new' && !rows.some((r) => r.id === _shSel)) _shSel = rows.length ? rows[0].id : 'new';
+  const cur = _shSel === 'new' ? null : rows.find((r) => r.id === _shSel);
+  const tbl = el('table', { class: 'data sh-list' });
+  tbl.innerHTML = '<thead><tr><th>Ca làm việc</th><th>Giờ vào</th><th>Giờ ra</th></tr></thead>';
   const tb = el('tbody');
-  const dayNames = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
-  for (const s of rows) {
-    const overnight = s.end_time <= s.start_time;
-    tb.append(el('tr', {},
-      el('td', {}, el('b', {}, s.name), overnight ? el('span', { title: 'Ca qua đêm' }, ' 🌙') : '',
-        (s.merge_rule && s.merge_rule !== 'filo' && s.merge_rule !== 'default') ? el('div', { style: 'font-size:12px;color:#b45309;margin-top:2px' }, `Còn lưu cách ghép giờ riêng (kiểu cũ): ${(RULE_LABEL[s.merge_rule] || s.merge_rule).split(' —')[0]} `,
-          hasPerm('shifts') ? el('a', { href: '#', style: 'color:#dc2626;font-weight:700', onclick: async (ev) => { ev.preventDefault(); if (!confirm(`Bỏ cách ghép giờ riêng của ca "${s.name}"? Sau đó ca này ghép giờ theo Lịch trình vào ra.`)) return; try { await api('/admin/shifts/' + s.id + '/clear-merge-rule', { method: 'POST' }); toast('Đã bỏ', 'ok'); pageShifts(); } catch (e) { toast(e.message, 'err'); } } }, 'Bỏ') : '') : ''),
-      el('td', {}, s.code ? el('span', { class: 'pill muted' }, s.code) : '—'),
-      el('td', {}, s.start_time), el('td', {}, s.end_time),
-      el('td', {}, s.check_in_start && s.check_in_end ? `${s.check_in_start}–${s.check_in_end}` : el('span', { style: 'color:#bbb' }, 'tắt')),
-      el('td', {}, (s.break_minutes || 0) + ' phút'),
-      el('td', {}, `${s.late_grace_min || 0}/${s.early_grace_min ?? 15} phút`),
-      el('td', {}, el('b', {}, String(s.work_unit_value ?? 1))),
-      el('td', {}, s.allow_ot ? el('span', { class: 'pill ok' }, 'Có') : el('span', { class: 'pill muted' }, 'Không')),
-      el('td', {}, s.active ? el('span', { class: 'pill ok' }, 'Bật') : el('span', { class: 'pill bad' }, 'Tắt')),
-      el('td', { style: 'white-space:nowrap' }, ...(hasPerm('shifts') ? [btnSm('Sửa', () => shiftModal(s)), ' ', btnSm('Xoá', () => deleteShift(s), 'ghost')] : [])),
-    ));
+  for (const r of rows) {
+    const tr = el('tr', { class: r.id === _shSel ? 'on' : '' },
+      el('td', {}, el('b', {}, r.name), r.code ? el('span', { class: 'pill muted', style: 'margin-left:6px' }, r.code) : '', r.end_time <= r.start_time ? el('span', { title: 'Ca qua đêm' }, ' 🌙') : '',
+        r.active ? '' : el('span', { class: 'pill bad', style: 'margin-left:6px' }, 'Tắt')),
+      el('td', {}, r.start_time), el('td', {}, r.end_time));
+    tr.onclick = () => { _shSel = r.id; pageShifts(); };
+    tb.append(tr);
   }
+  if (_shSel === 'new') tb.append(el('tr', { class: 'on' }, el('td', { colspan: 3, style: 'color:var(--brand);font-weight:700' }, '＋ Ca mới (đang khai báo)')));
+  if (!rows.length && _shSel !== 'new') tb.append(el('tr', {}, el('td', { colspan: 3, style: 'color:var(--muted)' }, 'Chưa có ca nào.')));
   tbl.append(tb);
-  if (addBtn) addBtn.onclick = () => shiftModal(null);
-  setMain(head('Ca làm việc', schedBtn, addBtn), el('div', { class: 'panel tbl-scroll' }, tbl));
+  const form = shiftForm(cur, can);
+  if (addBtn) addBtn.onclick = () => { _shSel = 'new'; pageShifts(); };
+  if (saveBtn) saveBtn.onclick = form.save;
+  if (delBtn) delBtn.onclick = () => { if (cur) deleteShift(cur); else { _shSel = null; pageShifts(); } };
+  setMain(head('Ca làm việc', ...tools), el('div', { class: 'sh-wrap' },
+    el('div', { class: 'panel sh-left' }, el('div', { class: 'sh-cap' }, 'Danh sách ca làm việc'), el('div', { class: 'tbl-scroll' }, tbl)),
+    el('div', { class: 'panel sh-right' }, form.node)));
 }
 
 /* ---------- LỊCH TRÌNH VÀO RA (kiểu Ronald Jack) ----------
@@ -1227,108 +1231,138 @@ function scheduleFormModal(w, onSaved) {
 }
 // Ô tick nhỏ dùng trong form ca
 const chk = (id, on) => el('input', { type: 'checkbox', id, style: 'width:auto', ...(on ? { checked: '' } : {}) });
-function shiftModal(s) {
-  const days = (s?.work_days || '1,2,3,4,5,6').split(',');
-  const dayBoxes = [1, 2, 3, 4, 5, 6, 7].map(d => {
-    const c = el('label', { style: 'display:flex;align-items:center;gap:5px;font-weight:600;color:var(--ink)' },
-      el('input', { type: 'checkbox', class: 's-day', value: d, style: 'width:auto', ...(days.includes(String(d)) ? { checked: '' } : {}) }),
-      { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' }[d]);
-    return c;
-  });
-  const otChk = el('input', { type: 'checkbox', id: 's-allowot', style: 'width:auto', ...(s?.allow_ot ? { checked: '' } : {}) });
-  const parts = [
-    el('div', { class: 'two-col' }, field('Tên ca *', input('s-name', { value: s?.name || '', placeholder: 'Hành chính' })), field('Mã ca (cho Excel)', input('s-code', { value: s?.code || '', placeholder: 'VD: HC, S, C, DEM' }))),
-    el('div', { class: 'two-col' }, field('Giờ vào * (24h, VD 08:00)', time24('s-start', s?.start_time || '08:00')), field('Giờ ra * (24h, VD 17:30)', time24('s-end', s?.end_time || '17:30'))),
-    el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, '🌙 Ca qua đêm: đặt Giờ ra NHỎ HƠN Giờ vào (VD 22:00 → 06:00) — hệ thống tự hiểu là qua ngày hôm sau.'),
-    el('div', {}, el('label', {}, 'Bắt đầu vào – Kết thúc vào: khung giờ nhận lượt chấm VÀO của ca (tuỳ chọn — để tự tìm đúng ca)'),
-      el('div', { class: 'two-col' }, field('Nhận diện TỪ giờ', time24('s-ciStart', s?.check_in_start || '')), field('ĐẾN giờ', time24('s-ciEnd', s?.check_in_end || ''))),
-      el('div', { class: 'map-hint' }, 'Là MỘT khoảng giờ (từ → đến) để tự nhận đúng ca khi nhân viên chấm VÀO. VD ca Sáng 06:00→10:00, ca Chiều 12:00→15:00.')),
-    el('div', {}, el('label', {}, 'Bắt đầu ra – Kết thúc ra: khung giờ nhận lượt chấm RA của ca (để phân biệt ca CÙNG giờ vào)'),
-      el('div', { class: 'two-col' }, field('Nhận diện TỪ giờ', time24('s-coStart', s?.check_out_start || '')), field('ĐẾN giờ', time24('s-coEnd', s?.check_out_end || ''))),
-      el('div', { class: 'map-hint' }, 'Quan trọng khi 2 ca CÙNG giờ vào: VD ca Sáng (8:00) ra 11:30→13:00, ca Hành chính (8:00) ra 16:00→19:00 → hệ thống nhìn GIỜ RA để chọn đúng ca. Để trống = tự suy từ Giờ ra. Ca đêm: đặt cửa sổ ra buổi sáng hôm sau, VD 05:00→08:00.')),
-    el('div', { class: 'two-col' },
-      field('Cho phép đi muộn (phút)', input('s-grace', { type: 'number', value: s?.late_grace_min ?? 5, min: 0 })),
-      field('Cho phép về sớm (phút)', input('s-early', { type: 'number', value: s?.early_grace_min ?? 15, min: 0 }))),
-    el('div', { class: 'two-col' },
-      field('Nghỉ giữa ca (phút)', input('s-break', { type: 'number', value: s?.break_minutes ?? 0, min: 0 })),
-      field('Số công của ca (cả ngày=1, nửa ngày=0.5)', input('s-unit', { type: 'number', step: '0.1', value: s?.work_unit_value ?? 1.0, min: 0 }))),
-    el('div', { class: 'two-col' },
-      field('Nghỉ giữa ca bắt đầu lúc (để trống = không cố định)', time24('s-breakStart', s?.break_start || '')),
-      el('div', { class: 'map-hint', style: 'align-self:end' }, 'VD ca 8:00–17:00 nghỉ 60 phút bắt đầu 12:00 → nghỉ 12:00–13:00: vào 12:19 vẫn đủ 4 tiếng buổi chiều, đi trễ tính 240 phút (không tính thời gian nghỉ). Để trống = trừ nghỉ khi làm từ nửa ca trở lên.')),
-    el('div', {}, el('label', { style: 'display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:600' }, otChk, 'Cho phép tính tăng ca (OT) khi ở lại sau giờ tan ca')),
-    el('div', { class: 'two-col' },
-      field('OT: ở lại tối thiểu (phút)', input('s-otafter', { type: 'number', value: s?.ot_start_after_min ?? 30, min: 0 })),
-      el('div', { class: 'map-hint', style: 'align-self:end' }, 'Làm tròn tăng ca: đặt chung cho cả công ty ở Cài đặt > Quy tắc tính công.')),
-    el('div', { class: 'two-col' },
-      el('label', { style: 'display:flex;align-items:center;gap:8px;color:var(--ink);font-weight:600' }, chk('s-otbefore', s?.ot_before), 'Tính cả tăng ca TRƯỚC giờ vào ca (đến sớm)'),
-      field('Đến sớm tối thiểu (phút) mới tính', input('s-otbeforemin', { type: 'number', value: s?.ot_before_min ?? 30, min: 0 }))),
-    el('div', {}, el('label', {}, 'Chia mức tăng ca ngày thường TC1 → TC4 (để 0 = không chia, tất cả là TC1)'),
-      el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px' },
-        field('TC1 tối đa (phút)', input('s-t1', { type: 'number', value: s?.ot_tier1_min ?? 0, min: 0 })),
-        field('TC2 tối đa (phút)', input('s-t2', { type: 'number', value: s?.ot_tier2_min ?? 0, min: 0 })),
-        field('TC3 tối đa (phút)', input('s-t3', { type: 'number', value: s?.ot_tier3_min ?? 0, min: 0 })),
-        field('Hệ số lương TC2', input('s-r2', { type: 'number', step: '0.1', value: s?.ot_tier2_rate ?? 0, min: 0 })),
-        field('Hệ số lương TC3', input('s-r3', { type: 'number', step: '0.1', value: s?.ot_tier3_rate ?? 0, min: 0 })),
-        field('Hệ số lương TC4', input('s-r4', { type: 'number', step: '0.1', value: s?.ot_tier4_rate ?? 0, min: 0 }))),
-      el('div', { class: 'map-hint' }, 'VD TC1 = 120, TC2 = 120: tăng ca 5 tiếng → 2h TC1, 2h TC2, 1h TC3 (TC3 để 0 = nhận hết phần còn lại; dư nữa → TC4). TC1 tính theo hệ số OT ngày thường của nhân viên (trang Lương); hệ số TC2–TC4 để 0 = cũng như ngày thường.')),
-    el('div', {},
-      el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, chk('s-holidayot', s?.holiday_as_ot), 'Xem CẢ CA là tăng ca khi làm ca này vào ngày lễ'),
-      el('div', { class: 'map-hint' }, 'Bật thì ngày lễ không tính công; toàn bộ giờ làm thành tăng ca ngày lễ. (Đi làm ngày cuối tuần = tăng ca: đặt chung ở Cài đặt > Quy tắc tính công.)')),
-    el('label', { style: 'display:flex;align-items:flex-start;gap:8px;color:var(--ink);font-weight:600' }, chk('s-comp', s?.compensate_late),
-      el('span', {}, 'Tính bù trừ: đi trễ thì về trễ bù lại, không bị trừ giờ ', el('span', { style: 'font-weight:400;color:var(--muted)' }, '(phút ở lại để bù không tính tăng ca; vẫn ghi nhận số phút đi trễ)'))),
-    el('label', { style: 'display:flex;align-items:flex-start;gap:8px;color:var(--ink);font-weight:600' }, chk('s-gracededuct', s?.grace_deduct),
-      el('span', {}, 'Đi trễ / về sớm chỉ tính phần VƯỢT số phút cho phép ', el('span', { style: 'font-weight:400;color:var(--muted)' }, '(VD cho phép 5 phút, trễ 12 phút → ghi 7 phút. Không tick: ghi đủ 12 phút)'))),
-    el('label', { style: 'display:flex;align-items:flex-start;gap:8px;color:var(--ink);font-weight:600' }, chk('s-shiftot', s?.shift_as_ot),
-      el('span', {}, 'Ca này là CA TĂNG CA ', el('span', { style: 'font-weight:400;color:var(--muted)' }, '(ngày nào làm ca này cũng không tính công, toàn bộ giờ làm thành tăng ca)'))),
-    field('Khi chỉ có giờ VÀO, thiếu giờ RA',
-      el('select', { id: 's-noout' },
-        el('option', { value: '0', ...(!s?.no_out_credit ? { selected: '' } : {}) }, 'Không tính công (mặc định)'),
-        el('option', { value: '1', ...(s?.no_out_credit ? { selected: '' } : {}) }, 'Vẫn tính đủ công của ca, trừ phần đi trễ'))),
-    el('div', { class: 'two-col' },
-      field('Quy tắc ghép log máy (mặc định của ca)',
-        el('select', { id: 's-rule' }, ...MERGE_RULES.filter(([v]) => v !== 'default').map(([v, t]) =>
-          el('option', { value: v, ...(String(s?.merge_rule || 'filo') === v ? { selected: '' } : {}) }, t)))),
-      field('TĐ-QĐ ghép theo',
-        el('select', { id: 's-tdqd' },
-          el('option', { value: 'pair', ...((s?.tdqd_mode || 'pair') === 'pair' ? { selected: '' } : {}) }, 'Thời gian (vào trước/ra sau)'),
-          el('option', { value: 'idm', ...(s?.tdqd_mode === 'idm' ? { selected: '' } : {}) }, 'Máy lẻ/chẵn (IDM)')))),
-    el('div', { class: 'map-hint', style: 'margin:-4px 0 0' }, 'Quy tắc ghép log = cách gộp nhiều lần quẹt máy thành giờ Vào/Ra. FILO hợp đa số. IDM cần đặt "số máy" cho từng máy (lẻ=Vào, chẵn=Ra). "Nhiều lần vào/ra": quẹt 1-2 là một cặp, 3-4 là cặp tiếp…, giờ công = tổng các cặp (giờ ra ngoài giữa chừng bị trừ, không trừ thêm nghỉ giữa ca). Các báo cáo (trừ "Giờ vào & ra đầu/cuối") hiện giờ vào/ra theo quy tắc này. Có thể ghi đè khi phân ca.'),
-    el('div', { class: 'map-hint' }, 'Ngày nghỉ cuối tuần đặt chung cho cả công ty ở Cài đặt > Quy tắc tính công (mặc định Chủ nhật).'),
-  ];
-  // Chia form thành các TAB (như Ronald Jack) cho đỡ rối. Mọi ô vẫn nằm trong form, bấm Lưu một lần là lưu hết các tab.
-  // (ô số 17, 18 = quy tắc ghép giờ kiểu cũ: KHÔNG còn khai ở ca — đã chuyển sang mục "Lịch trình vào ra")
-  // ⚠ Số dưới đây là VỊ TRÍ ô trong mảng parts — thêm/bớt ô ở giữa thì phải sửa lại các số phía sau (kiểm bằng dòng assert bên dưới).
-  const TABS = [['Ca làm việc', [0, 1, 2, 6, 7, 5, 3, 4, 19]], ['Tăng ca', [8, 9, 10, 11, 12, 15]], ['Nâng cao', [13, 14, 16]]];
-  if (parts.length !== 20) console.error('shiftModal: số ô của form ca đã đổi (' + parts.length + ') — cần sửa lại TABS');
-  const panes = TABS.map(([, idx]) => el('div', { class: 'tab-pane' }, ...idx.map((k) => parts[k])));
+// Form khai báo ca (hiện bên phải danh sách) — bố cục kiểu Ronald Jack: nhãn bên trái, ô nhập bên phải, 2 tab.
+// Trả { node, save }. Mọi ô đều nằm trong DOM (tab chỉ ẩn/hiện) nên bấm Lưu là lưu cả 2 tab.
+function shiftForm(s, can) {
+  const hm2m = (v) => (/^\d{2}:\d{2}$/.test(v || '') ? (+v.slice(0, 2)) * 60 + (+v.slice(3)) : null);
+  const m2hm = (m) => { const x = ((m % 1440) + 1440) % 1440; return String(Math.floor(x / 60)).padStart(2, '0') + ':' + String(x % 60).padStart(2, '0'); };
+  const num = (id, v, attrs = {}) => input(id, { type: 'number', min: 0, value: v, ...attrs });
+  // 1 hàng: nhãn trái – ô nhập phải (– đơn vị / ghi chú)
+  // (ghi chú của ô hiện khi rê chuột — không in ra hàng để các hàng đều nhau)
+  const R = (label, ctl, unit, hint) => { if (hint) ctl.title = hint; return el('div', { class: 'frow', ...(hint ? { title: hint } : {}) }, el('label', { for: ctl.id || '' }, label),
+    el('div', { class: 'fin' }, ctl, unit ? el('span', { class: 'funit' }, unit) : '')); };
+  const ph = (i, t) => { i.placeholder = t; return i; };
+  const C = (id, on, text, hint) => el('label', { class: 'fchk' }, chk(id, on), el('span', {}, text, hint ? el('span', { class: 'fhint2' }, ' ' + hint) : ''));
+  const box = (title, ...kids) => el('fieldset', { class: 'fbox' }, el('legend', {}, title), ...kids);
+
+  const nameI = input('s-name', { value: s?.name || '', placeholder: 'VD: Hành chính' });
+  const codeI = input('s-code', { value: s?.code || '', placeholder: 'VD: HC, S, C, DEM' });
+  const startI = time24('s-start', s?.start_time || '08:00'), endI = time24('s-end', s?.end_time || '17:00');
+  const totalI = el('input', { id: 's-total', readonly: '', tabindex: -1, class: 'ro' });
+  const bStartI = time24('s-breakStart', s?.break_start || '');
+  const bEndI = time24('s-breakEnd', (s?.break_start && s?.break_minutes) ? m2hm(hm2m(s.break_start) + s.break_minutes) : '');
+  const bMinI = num('s-break', s?.break_minutes ?? 0);
+  const unitI = num('s-unit', s?.work_unit_value ?? 1.0, { step: '0.1' });
+  // Tổng giờ trong ca = (ra − vào) − nghỉ; nghỉ: nhập giờ bắt đầu + kết thúc → tự ra số phút (hoặc chỉ nhập số phút = không cố định giờ)
+  const recalc = () => {
+    const a = hm2m(startI.value), b = hm2m(endI.value);
+    if (a == null || b == null) { totalI.value = ''; return; }
+    const len = ((b - a + 1440) % 1440) || 1440;
+    const w = Math.max(0, len - (+bMinI.value || 0));
+    totalI.value = (Math.round(w / 6) / 10).toString().replace('.', ',') + ' giờ' + (b <= a ? '  (ca qua đêm 🌙)' : '');
+  };
+  const syncBreak = (from) => {
+    const bs = hm2m(bStartI.value), be = hm2m(bEndI.value);
+    if (from === 'min') { if (bs != null && (+bMinI.value || 0) > 0) bEndI.value = m2hm(bs + (+bMinI.value || 0)); else if (!(+bMinI.value)) bEndI.value = ''; }
+    else if (bs != null && be != null) bMinI.value = (be - bs + 1440) % 1440;
+    recalc();
+  };
+  for (const i of [startI, endI]) { i.addEventListener('blur', recalc); i.addEventListener('input', recalc); }
+  for (const i of [bStartI, bEndI]) i.addEventListener('blur', () => syncBreak('time'));
+  bMinI.addEventListener('input', () => syncBreak('min'));
+  recalc();
+
+  const actChk = chk('s-active', s ? !!s.active : true);
+  const tabCa = el('div', { class: 'sh-form' },
+    el('div', { class: 'sh-col' },
+      R('Ca làm việc *', nameI),
+      R('Mã ca (dùng trong Excel)', codeI),
+      R('Giờ vào làm việc *', startI),
+      R('Giờ kết thúc làm việc *', endI, '', 'Giờ ra nhỏ hơn giờ vào = ca qua đêm'),
+      R('Tổng giờ trong ca làm việc', totalI),
+      R('Giờ bắt đầu nghỉ giữa ca', ph(bStartI, '(không cố định)'), '', 'Để trống = không cố định giờ'),
+      R('Giờ kết thúc nghỉ giữa ca', ph(bEndI, '')),
+      R('Tổng thời gian nghỉ', bMinI, 'phút'),
+      R('Công tính', unitI, 'công', 'Cả ngày = 1, nửa ngày = 0,5'),
+      R('Bắt đầu vào', ph(time24('s-ciStart', s?.check_in_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm VÀO'),
+      R('Kết thúc vào', ph(time24('s-ciEnd', s?.check_in_end || ''), '(tự động)')),
+      R('Bắt đầu ra', ph(time24('s-coStart', s?.check_out_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm RA'),
+      R('Kết thúc ra', ph(time24('s-coEnd', s?.check_out_end || ''), '(tự động)')),
+      R('Khi có giờ vào, thiếu giờ ra', el('select', { id: 's-noout' },
+        el('option', { value: '0', ...(!s?.no_out_credit ? { selected: '' } : {}) }, 'Không tính công'),
+        el('option', { value: '1', ...(s?.no_out_credit ? { selected: '' } : {}) }, 'Tính đủ công, trừ phần đi trễ'))),
+      C('s-comp', s?.compensate_late, 'Tính bù trừ cho ca này', '(đi làm trễ thì về trễ bù lại để không bị trừ giờ; phần bù không tính tăng ca)'),
+      el('label', { class: 'fchk' }, actChk, el('span', {}, 'Đang dùng ca này', el('span', { class: 'fhint2' }, ' (bỏ tích = tắt ca, ẩn khỏi danh sách chọn)')))),
+    el('div', { class: 'sh-col' },
+      box('Đi trễ, về sớm',
+        R('Cho phép đi làm trễ', num('s-grace', s?.late_grace_min ?? 5), 'phút'),
+        R('Cho phép đi về sớm', num('s-early', s?.early_grace_min ?? 15), 'phút'),
+        C('s-gracededuct', s?.grace_deduct, 'Chỉ tính phần VƯỢT số phút cho phép', '(cho phép 5 phút, trễ 12 phút → ghi 7 phút; không tích → ghi đủ 12 phút)'),
+        el('div', { class: 'fhint' }, 'Trong số phút cho phép thì không tính trễ / sớm và không trừ giờ công. Làm tròn trễ / sớm theo khối phút: đặt ở Cài đặt › Quy tắc tính công.')),
+      box('Ghi chú',
+        el('div', { class: 'fhint' }, 'Ca qua đêm: đặt giờ kết thúc NHỎ HƠN giờ vào (VD 22:00 → 06:00). Công tính: cả ngày = 1, nửa ngày = 0,5.'),
+        el('div', { class: 'fhint' }, 'Để trống khung "Bắt đầu vào / Kết thúc ra" thì phần mềm tự nhận lượt chấm quanh giờ ca. Khai khung khi cần phân biệt các ca gần giờ nhau (VD ca Sáng 8:00 ra 11:30–13:00, ca Hành chính 8:00 ra 16:00–19:00) hoặc ca đêm vào sớm nhiều giờ (VD ca 22:00, bắt đầu vào 17:00).'),
+        el('div', { class: 'fhint' }, 'Nghỉ giữa ca có giờ cố định (VD 12:00–13:00): vào 12:19 vẫn đủ buổi chiều, đi trễ không tính thời gian nghỉ.'),
+        el('div', { class: 'fhint' }, 'Ngày nghỉ cuối tuần đặt chung cho cả công ty ở Cài đặt › Quy tắc tính công.'))));
+
+  const otChk = chk('s-allowot', s?.allow_ot);
+  const tabOt = el('div', { class: 'sh-form' },
+    el('div', { class: 'sh-col' },
+      el('label', { class: 'fchk' }, otChk, el('span', {}, 'Cho phép tính tăng ca cho ca này')),
+      R('Ở lại sau giờ ra tối thiểu', num('s-otafter', s?.ot_start_after_min ?? 30), 'phút', 'Ở lại ít hơn số này thì không tính tăng ca'),
+      C('s-otbefore', s?.ot_before, 'Tính cả tăng ca TRƯỚC giờ vào ca', '(đến sớm)'),
+      R('Đến sớm tối thiểu', num('s-otbeforemin', s?.ot_before_min ?? 30), 'phút'),
+      C('s-holidayot', s?.holiday_as_ot, 'Làm ca này vào NGÀY LỄ: cả ca là tăng ca', '(không tính công, toàn bộ giờ làm thành tăng ca ngày lễ)'),
+      C('s-shiftot', s?.shift_as_ot, 'Ca này là CA TĂNG CA', '(ngày nào làm ca này cũng không tính công, toàn bộ giờ làm thành tăng ca)'),
+      el('div', { class: 'fhint' }, 'Ở lại (hoặc đến sớm) ít hơn số phút tối thiểu thì không tính tăng ca. Làm tròn tăng ca và "đi làm cuối tuần = tăng ca": đặt chung cho cả công ty ở Cài đặt › Quy tắc tính công.')),
+    el('div', { class: 'sh-col' },
+      box('Chia mức tăng ca ngày thường (TC1 → TC4)',
+        R('TC1 tối đa', num('s-t1', s?.ot_tier1_min ?? 0), 'phút'),
+        R('TC2 tối đa', num('s-t2', s?.ot_tier2_min ?? 0), 'phút'),
+        R('TC3 tối đa', num('s-t3', s?.ot_tier3_min ?? 0), 'phút'),
+        R('Hệ số lương TC2', num('s-r2', s?.ot_tier2_rate ?? 0, { step: '0.1' })),
+        R('Hệ số lương TC3', num('s-r3', s?.ot_tier3_rate ?? 0, { step: '0.1' })),
+        R('Hệ số lương TC4', num('s-r4', s?.ot_tier4_rate ?? 0, { step: '0.1' })),
+        el('div', { class: 'fhint' }, 'Để 0 = không chia (tất cả là TC1). VD TC1 = 120, TC2 = 120: tăng ca 5 tiếng → 2h TC1, 2h TC2, 1h TC3. Hệ số để 0 = như tăng ca ngày thường.'))));
+
+  const TABS = [['Ca làm việc', tabCa], ['Tăng ca', tabOt]];
   const tabBtns = TABS.map(([t], k) => { const b = el('button', { type: 'button', class: 'tab-btn' }, t); b.onclick = () => showTab(k); return b; });
-  const showTab = (k) => { panes.forEach((p, n) => { p.style.display = n === k ? 'flex' : 'none'; }); tabBtns.forEach((b, n) => b.classList.toggle('on', n === k)); };
+  const showTab = (k) => { TABS.forEach(([, pane], n) => { pane.style.display = n === k ? '' : 'none'; }); tabBtns.forEach((b, n) => b.classList.toggle('on', n === k)); };
   showTab(0);
-  const body = [el('div', { class: 'tab-bar' }, ...tabBtns), ...panes];
-  const save = el('button', { class: 'btn' }, 'Lưu');
-  save.onclick = async () => {
-    const work_days = [...document.querySelectorAll('.s-day:checked')].map(x => x.value).join(',') || '1,2,3,4,5,6';
+  // Ca còn lưu cách ghép giờ riêng kiểu cũ → nhắc + cho bỏ
+  const oldRule = (s && s.merge_rule && s.merge_rule !== 'filo' && s.merge_rule !== 'default')
+    ? el('div', { style: 'font-size:12.5px;color:#b45309;margin-bottom:8px' }, `Ca này còn lưu cách ghép giờ riêng (kiểu cũ): ${(RULE_LABEL[s.merge_rule] || s.merge_rule).split(' —')[0]} `,
+      can ? el('a', { href: '#', style: 'color:#dc2626;font-weight:700', onclick: async (ev) => { ev.preventDefault(); if (!confirm(`Bỏ cách ghép giờ riêng của ca "${s.name}"? Sau đó ca này ghép giờ theo Lịch trình vào ra.`)) return; try { await api('/admin/shifts/' + s.id + '/clear-merge-rule', { method: 'POST' }); toast('Đã bỏ', 'ok'); pageShifts(); } catch (e) { toast(e.message, 'err'); } } }, 'Bỏ') : '')
+    : '';
+  const node = el('div', {}, oldRule, el('div', { class: 'tab-bar' }, ...tabBtns), tabCa, tabOt);
+  if (!can) node.querySelectorAll('input,select').forEach((x) => { x.disabled = true; });
+
+  const save = async () => {
     const b = {
-      name: $('#s-name').value.trim(), code: $('#s-code').value.trim(),
-      start_time: $('#s-start').value, end_time: $('#s-end').value,
+      name: nameI.value.trim(), code: codeI.value.trim(),
+      start_time: startI.value, end_time: endI.value,
       check_in_start: $('#s-ciStart').value || '', check_in_end: $('#s-ciEnd').value || '',
       check_out_start: $('#s-coStart').value || '', check_out_end: $('#s-coEnd').value || '',
       late_grace_min: +$('#s-grace').value || 0, early_grace_min: +$('#s-early').value || 0,
-      break_minutes: +$('#s-break').value || 0, work_unit_value: +$('#s-unit').value || 1,
+      break_minutes: +bMinI.value || 0, break_start: (+bMinI.value || 0) > 0 ? (bStartI.value || '') : '',
+      work_unit_value: +unitI.value || 1, active: actChk.checked,
       allow_ot: otChk.checked, ot_start_after_min: +$('#s-otafter').value || 0,
-
       ot_before: $('#s-otbefore').checked, ot_before_min: +$('#s-otbeforemin').value || 0,
       ot_tier1_min: +$('#s-t1').value || 0, ot_tier2_min: +$('#s-t2').value || 0, ot_tier3_min: +$('#s-t3').value || 0,
       ot_tier2_rate: +$('#s-r2').value || 0, ot_tier3_rate: +$('#s-r3').value || 0, ot_tier4_rate: +$('#s-r4').value || 0,
-      holiday_as_ot: $('#s-holidayot').checked,
+      holiday_as_ot: $('#s-holidayot').checked, shift_as_ot: $('#s-shiftot').checked,
       compensate_late: $('#s-comp').checked, no_out_credit: $('#s-noout').value === '1',
-      grace_deduct: $('#s-gracededuct').checked, shift_as_ot: $('#s-shiftot').checked,
-      break_start: $('#s-breakStart').value || '',
+      grace_deduct: $('#s-gracededuct').checked,
     };
-    try { if (s) await api('/admin/shifts/' + s.id, { method: 'PUT', body: b }); else await api('/admin/shifts', { method: 'POST', body: b }); toast('Đã lưu', 'ok'); closeModal(); pageShifts(); }
-    catch (err) { toast(err.message, 'err'); }
+    if (!b.name) { toast('Nhập tên ca', 'err'); showTab(0); nameI.focus(); return; }
+    if (hm2m(b.start_time) == null || hm2m(b.end_time) == null) { toast('Nhập giờ vào / giờ ra dạng HH:mm (VD 08:00)', 'err'); showTab(0); return; }
+    try {
+      if (s) await api('/admin/shifts/' + s.id, { method: 'PUT', body: b });
+      else { const r = await api('/admin/shifts', { method: 'POST', body: b }); _shSel = r.id || null; }
+      toast('Đã lưu', 'ok'); pageShifts();
+    } catch (err) { toast(err.message, 'err'); }
   };
-  openModal(s ? 'Sửa ca' : 'Thêm ca', body, [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+  return { node, save };
 }
 
 /* ---------- 4) CHI NHÁNH ---------- */
