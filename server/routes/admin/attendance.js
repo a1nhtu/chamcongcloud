@@ -168,6 +168,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const punchMap = new Map();
     for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : '')); }   // ✎ = lượt thêm tay
 
+    const marks = new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
     const rows = []; const seen = new Set();
     for (const a of att) {
       const e = empById.get(a.employee_id); if (!e) continue;
@@ -177,7 +178,7 @@ export function registerAttendanceRoutes(r, { need }) {
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
         punches: punchMap.get(key) || [], late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
-        cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || 0, leave: lv ? lv.sym : '',
+        cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: lv ? lv.sym : '',
         status: a.check_out_at ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
         att_id: a.id,
       });
@@ -307,7 +308,8 @@ export function registerAttendanceRoutes(r, { need }) {
     const left = db.prepare('SELECT COUNT(*) c FROM device_punches WHERE employee_id = ? AND work_date = ?');
     const delMan = db.prepare('DELETE FROM attendance WHERE employee_id = ? AND work_date = ? AND manual = 1');
     const delAll = db.prepare("DELETE FROM attendance WHERE employee_id = ? AND work_date = ? AND (manual = 1 OR shift_source = 'device')");
-    for (const k of keys) { const [e, d] = k.split('|'); (left.get(+e, d).c ? delMan : delAll).run(+e, d); }
+    const mark = db.prepare('INSERT OR IGNORE INTO att_edit_marks(employee_id, work_date) VALUES (?, ?)');
+    for (const k of keys) { const [e, d] = k.split('|'); (left.get(+e, d).c ? delMan : delAll).run(+e, d); mark.run(+e, d); }   // dấu (*): ngày có lượt chấm sửa tay
     rebuildDays([...keys]);
   };
   const tx = (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
@@ -426,7 +428,8 @@ export function registerAttendanceRoutes(r, { need }) {
       let a = 0, p = 0;
       const dA = db.prepare('DELETE FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?');
       const dP = db.prepare('DELETE FROM device_punches WHERE employee_id = ? AND work_date >= ? AND work_date <= ?');
-      for (const id of ids) { a += dA.run(id, from, to).changes; if (b.raw) p += dP.run(id, from, to).changes; }
+      const dM = db.prepare('DELETE FROM att_edit_marks WHERE employee_id = ? AND work_date >= ? AND work_date <= ?');
+      for (const id of ids) { a += dA.run(id, from, to).changes; if (b.raw) { p += dP.run(id, from, to).changes; dM.run(id, from, to); } }
       return { attendance: a, punches: p };
     });
     res.json({ ok: true, ...r2 });

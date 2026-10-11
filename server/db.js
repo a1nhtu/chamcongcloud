@@ -551,6 +551,10 @@ function migrateColumns() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_priv_emp ON employee_privileges(employee_id, from_date);`);
+  // Ngày có LƯỢT CHẤM được thêm / sửa / xoá bằng tay (menu Sửa giờ chấm công) → hiện dấu (*) như giờ sửa tay
+  db.exec(`CREATE TABLE IF NOT EXISTS att_edit_marks (
+      employee_id INTEGER NOT NULL, work_date TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (employee_id, work_date));`);
   add('shifts', 'tdqd_mode',     "TEXT NOT NULL DEFAULT 'pair'");   // pair|idm — cách ghép log cho quy tắc TĐ-QĐ
   // Máy chấm công: số máy (IDM: máy lẻ = VÀO, máy chẵn = RA)
   add('push_devices', 'machine_number', 'INTEGER NOT NULL DEFAULT 0');

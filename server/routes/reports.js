@@ -284,7 +284,7 @@ function buildManualTime(from, to) {
     { key: 'emp', label: 'Nhân viên', w: 22 }, { key: 'day', label: 'Ngày công', w: 11 },
     { key: 'gio', label: 'Giờ vào – ra', w: 14 }, { key: 'note', label: 'Ghi chú', w: 18 },
   ];
-  const acts = ['Thêm giờ chấm (tay)', 'Sửa giờ chấm', 'Xóa giờ chấm'];
+  const acts = ['Thêm giờ chấm (tay)', 'Sửa giờ chấm', 'Xóa giờ chấm', 'Thêm lượt chấm (tay)', 'Sửa lượt chấm', 'Xóa lượt chấm', 'Thêm giờ hàng loạt', 'Xóa dữ liệu chấm công (theo NV)'];
   const logs = db.prepare(`SELECT datetime(at,'+7 hours') at, user_name, username, role, action, detail
     FROM audit_logs WHERE action IN (${acts.map(() => '?').join(',')})
       AND date(at,'+7 hours') >= ? AND date(at,'+7 hours') <= ? ORDER BY at DESC`).all(...acts, from, to);
@@ -302,7 +302,13 @@ function buildManualTime(from, to) {
       const ci = d.check_in || d.check_in_at || '', co = d.check_out || d.check_out_at || '';
       gio = [ci, co].filter(Boolean).join(' – ');
       note = d.note || '';
-    } catch {}
+    } catch {
+      // nhật ký mới lưu CÂU tiếng Việt: "Tên NV ngày dd/mm/yyyy · vào 08:00 · ra 17:00 · Lý do: …" / "Tên NV ngày dd/mm/yyyy: lượt 08:05 → 07:50"
+      const t = String(l.detail || '');
+      const m = /^(.*?)\s*(?:·\s*)?ngày (\d{2}\/\d{2}\/\d{4})[:\s·]*(.*)$/.exec(t);
+      if (m) { emp = m[1].replace(/\s*·\s*$/, ''); day = m[2]; const rest = m[3]; const ly = /Lý do: (.*)$/.exec(rest); note = ly ? ly[1] : ''; gio = (ly ? rest.slice(0, ly.index) : rest).replace(/\s*·\s*$/, '').replace(/ · /g, ', '); }
+      else gio = t;
+    }
     return { at: l.at, user: l.user_name || l.username || '—', role: roleVi[l.role] || l.role || '', action: l.action, emp, day, gio, note };
   });
   return { title: `Giờ sửa/thêm bằng tay ${periodLabel(from, to)}`, columns, rows };
@@ -1170,7 +1176,9 @@ r.get('/attendance', (req, res) => {
   const args = [month + '%'];
   if (dept) { sql += ' AND e.department = ?'; args.push(dept); }
   sql += ' ORDER BY a.work_date DESC, e.full_name';
-  const rows = db.prepare(sql).all(...args).map((a) => ({ ...a, check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at) }));
+  const marks = new Set(db.prepare('SELECT employee_id, work_date FROM att_edit_marks WHERE work_date LIKE ?').all(month + '%').map((m) => m.employee_id + '|' + m.work_date));
+  const rows = db.prepare(sql).all(...args).map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
+    check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at) }));
   res.json({ month, rows });
 });
 
