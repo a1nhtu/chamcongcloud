@@ -295,6 +295,29 @@ export function registerAssignmentRoutes(r, { need }) {
     res.json({ ok: true, count: n });
   });
 
+  // Sửa 1 dòng gán ca (NV hoặc phòng ban): đổi ca / lịch trình, lịch trình vào ra, ngày bắt đầu – kết thúc
+  const editAssign = (table) => (req, res) => {
+    const row = db.prepare(`SELECT * FROM ${table} WHERE id = ?`).get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Không tìm thấy dòng gán ca' });
+    const b = req.body || {};
+    const mode = b.mode === 'schedule' ? 'schedule' : 'shift';
+    const from = (b.from_date || '').slice(0, 10), to = (b.to_date || '').slice(0, 10) || null;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from)) return res.status(400).json({ error: 'Thiếu ngày bắt đầu' });
+    if (to && to < from) return res.status(400).json({ error: 'Ngày kết thúc phải sau ngày bắt đầu' });
+    const shiftId = mode === 'shift' ? (+b.shift_id || null) : null;
+    const scheduleId = mode === 'schedule' ? (+b.work_schedule_id || null) : null;
+    if (mode === 'shift' && !db.prepare('SELECT 1 FROM shifts WHERE id = ?').get(shiftId)) return res.status(400).json({ error: 'Chưa chọn ca làm việc' });
+    if (mode === 'schedule' && !db.prepare('SELECT 1 FROM work_schedules WHERE id = ?').get(scheduleId)) return res.status(400).json({ error: 'Chưa chọn lịch trình' });
+    const ioId = b.inout_schedule_id ? +b.inout_schedule_id : null;
+    db.prepare(`UPDATE ${table} SET mode=?, shift_id=?, work_schedule_id=?, from_date=?, to_date=?, inout_schedule_id=? WHERE id=?`)
+      .run(mode, shiftId, scheduleId, from, to, ioId, row.id);
+    if (table === 'dept_shift_assignments' && b.include_children != null)
+      db.prepare('UPDATE dept_shift_assignments SET include_children=? WHERE id=?').run(b.include_children ? 1 : 0, row.id);
+    res.json({ ok: true });
+  };
+  r.put('/shift-assignments/:id', need('assignments'), editAssign('shift_assignments'));
+  r.put('/dept-shift-assignments/:id', need('assignments'), editAssign('dept_shift_assignments'));
+
   r.delete('/shift-assignments/:id', need('assignments'), (req, res) => {
     db.prepare('DELETE FROM shift_assignments WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
