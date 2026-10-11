@@ -1895,11 +1895,14 @@ async function pageAssignments() {
       const shown = () => {
         const q = empSearch.value.trim().toLowerCase();
         if (q) return data.employees.filter((e) => e.full_name.toLowerCase().includes(q) || String(e.code).toLowerCase().includes(q));
+        if (curDept === '*') return data.employees;   // "Tất cả nhân viên"
         const set = descOf(curDept);
         return data.employees.filter((e) => set.has(e.department || ''));
       };
       const draw = () => {
         treeBox.innerHTML = '';
+        { const allRow = el('div', { class: 'tn' + (curDept === '*' && !empSearch.value.trim() ? ' on' : ''), style: 'padding-left:6px;gap:8px;font-weight:700', title: 'Xem toàn bộ nhân viên rồi tích "Chọn tất cả"' }, el('span', { class: 'nm' }, '👥 Tất cả nhân viên'), el('span', { class: 'ct' }, String(data.employees.length)));
+          allRow.onclick = () => { curDept = '*'; empSearch.value = ''; draw(); }; treeBox.append(allRow); }
         for (const n of nodes) {
           const cb = el('input', { type: 'checkbox', style: 'width:auto', title: 'Tick = chọn cả phòng ban', ...(sel.has('d:' + n.name) ? { checked: '' } : {}) });
           cb.onclick = (ev) => ev.stopPropagation();
@@ -1911,7 +1914,7 @@ async function pageAssignments() {
         const list = shown();
         const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => sel.has(e.id)) ? { checked: '' } : {}) });
         all.onchange = () => { for (const e of list) { if (all.checked) sel.set(e.id, lab(e)); else sel.delete(e.id); } renderSel(); draw(); };
-        listHead.innerHTML = ''; listHead.append(all, `${list.length} mục`);
+        listHead.innerHTML = ''; listHead.append(all, `Chọn tất cả (${list.length})`);
         listBox.innerHTML = '';
         if (!list.length) listBox.append(el('div', { class: 'empty', style: 'padding:14px 4px' }, 'Không có nhân viên.'));
         for (const e of list) {
@@ -1947,7 +1950,7 @@ async function pageAssignments() {
         treeBox), selCol];
       var getBody = () => ({ url: '/admin/dept-shift-assignments', body: { departments: [...sel.keys()], include_children: incl.checked } });
     } else {
-      let curDept = _asDept === '*' ? (nodes[0] ? nodes[0].name : '') : _asDept;
+      let curDept = _asDept;   // đang xem "Tất cả phòng ban" → mở sẵn "Tất cả nhân viên"
       const empSearch = el('input', { placeholder: 'Tên hoặc mã nhân viên', style: 'margin-bottom:8px' });
       const treeBox = el('div', { class: 'emp-tree', style: 'padding:0' });
       const listHead = el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);margin-bottom:6px' });
@@ -1955,19 +1958,21 @@ async function pageAssignments() {
       const shown = () => {
         const q = empSearch.value.trim().toLowerCase();
         if (q) return data.employees.filter((e) => e.full_name.toLowerCase().includes(q) || String(e.code).toLowerCase().includes(q));   // tìm trên toàn công ty
+        if (curDept === '*') return data.employees;   // "Tất cả nhân viên"
         const set = descOf(curDept);
         return data.employees.filter((e) => set.has(e.department || ''));
       };
       const lab = (e) => `${e.full_name} (${e.code})`;
       const draw = () => {
         treeBox.innerHTML = '';
-        const tn = (key, text, depth) => { const d = el('div', { class: 'tn' + (curDept === key && !empSearch.value.trim() ? ' on' : ''), style: 'padding-left:' + (6 + depth * 16) + 'px' }, el('span', { class: 'nm' }, '📁 ' + text), el('span', { class: 'ct' }, String(countOf(key)))); d.onclick = () => { curDept = key; empSearch.value = ''; draw(); }; return d; };
+        const tn = (key, text, depth) => { const d = el('div', { class: 'tn' + (curDept === key && !empSearch.value.trim() ? ' on' : ''), style: 'padding-left:' + (6 + depth * 16) + 'px' + (key === '*' ? ';font-weight:700' : '') }, el('span', { class: 'nm' }, (key === '*' ? '👥 ' : '📁 ') + text), el('span', { class: 'ct' }, String(key === '*' ? data.employees.length : countOf(key)))); d.onclick = () => { curDept = key; empSearch.value = ''; draw(); }; return d; };
+        treeBox.append(tn('*', 'Tất cả nhân viên', 0));   // chọn cả công ty 1 lần: bấm dòng này rồi tích "Chọn tất cả"
         for (const n of nodes) treeBox.append(tn(n.name, n.name, n.depth));
         if (data.employees.some((e) => !(e.department || ''))) treeBox.append(tn('', '(Chưa có phòng ban)', 0));
         const list = shown();
         const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => sel.has(e.id)) ? { checked: '' } : {}) });
         all.onchange = () => { for (const e of list) { if (all.checked) sel.set(e.id, lab(e)); else sel.delete(e.id); } renderSel(); draw(); };
-        listHead.innerHTML = ''; listHead.append(all, `${list.length} mục`);
+        listHead.innerHTML = ''; listHead.append(all, `Chọn tất cả (${list.length})`);
         listBox.innerHTML = '';
         if (!list.length) listBox.append(el('div', { class: 'empty', style: 'padding:14px 4px' }, 'Không có nhân viên.'));
         for (const e of list) {
