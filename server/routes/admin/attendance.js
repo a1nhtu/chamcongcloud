@@ -164,9 +164,9 @@ export function registerAttendanceRoutes(r, { need }) {
     // detail
     const att = db.prepare(`SELECT a.*, s.name shift_name FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
       WHERE a.employee_id IN (${ph}) AND a.work_date>=? AND a.work_date<=?`).all(...empIds, from, to);
-    const punches = db.prepare(`SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
+    const punches = db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
     const punchMap = new Map();
-    for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at)); }
+    for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : '')); }   // ✎ = lượt thêm tay
 
     const rows = []; const seen = new Set();
     for (const a of att) {
@@ -279,5 +279,155 @@ export function registerAttendanceRoutes(r, { need }) {
     const a = db.prepare('DELETE FROM attendance WHERE work_date >= ? AND work_date <= ?').run(from, to).changes;
     const p = db.prepare('DELETE FROM device_punches WHERE work_date >= ? AND work_date <= ?').run(from, to).changes;
     res.json({ ok: true, attendance: a, punches: p });
+  });
+
+  /* -------------------- LƯỢT CHẤM GỐC (như "Sửa giờ chấm công" / "Thêm giờ hàng loạt" / "Xoá dữ liệu chấm công" của Wise Eye) --------------------
+   * Thêm / sửa / xoá từng LƯỢT CHẤM rồi tính lại công ngày đó theo đúng ca + quy tắc ghép cặp (như lượt quẹt máy).
+   * Lượt thêm tay lưu vào device_punches với máy ảo TAY_VAO (số máy 1, phím Vào) / TAY_RA (số máy 2, phím Ra)
+   * → quy tắc "theo ID máy" và "chọn từ máy" vẫn nhận đúng Vào / Ra. */
+  const TAY = { in: 'TAY_VAO', out: 'TAY_RA' };
+  const HM = /^([01]?\d|2[0-3]):?([0-5]\d)$/;
+  const hm = (v) => { const m = HM.exec(String(v || '').trim()); return m ? m[1].padStart(2, '0') + ':' + m[2] : ''; };
+  const vnDate = (d) => new Date(d.getTime() + 7 * 3600000).toISOString().slice(0, 10);
+  const vnHM = (iso) => new Date(new Date(iso).getTime() + 7 * 3600000).toISOString().slice(11, 16);
+  // (prepare lúc gọi, KHÔNG lúc đăng ký route — khi đó CSDL chưa tạo bảng, server chết im lặng)
+  const pinOf = { get: (id) => db.prepare('SELECT id, code, device_pin, full_name FROM employees WHERE id = ?').get(id) };
+  const insPunch = { run: (...a) => db.prepare('INSERT OR IGNORE INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES (?,?,?,?,?,0,?)').run(...a) };
+  // ghi 1 lượt: date 'YYYY-MM-DD' + giờ 'HH:MM' (+ giây), kind 'in'|'out'. after: ISO lượt vào cùng lần → giờ ra nhỏ hơn = sáng hôm sau
+  const addPunch = (emp, date, time, kind, sec = 0, after = null) => {
+    let d = new Date(`${date}T${time}:${String(sec).padStart(2, '0')}+07:00`);
+    if (after && d <= new Date(after)) d = new Date(d.getTime() + 86400000);   // ca qua đêm
+    const iso = d.toISOString();
+    insPunch.run(TAY[kind], String(emp.device_pin || emp.code), iso, vnDate(d), kind === 'out' ? 1 : 0, emp.id);
+    return iso;
+  };
+  // Tính lại các ngày (Set 'empId|date'): giờ sửa tay ở bảng công của ngày đó nhường cho lượt chấm vừa sửa;
+  // ngày không còn lượt chấm nào → bỏ dòng công dựng từ lượt chấm
+  const redoDays = (keys) => {
+    const left = db.prepare('SELECT COUNT(*) c FROM device_punches WHERE employee_id = ? AND work_date = ?');
+    const delMan = db.prepare('DELETE FROM attendance WHERE employee_id = ? AND work_date = ? AND manual = 1');
+    const delAll = db.prepare("DELETE FROM attendance WHERE employee_id = ? AND work_date = ? AND (manual = 1 OR shift_source = 'device')");
+    for (const k of keys) { const [e, d] = k.split('|'); (left.get(+e, d).c ? delMan : delAll).run(+e, d); }
+    rebuildDays([...keys]);
+  };
+  const tx = (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
+  const devName = () => new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
+
+  // Danh sách lượt chấm của 1 NV trong 1 ngày (hoặc khoảng ngày)
+  r.get('/attendance/punches', need('attendance_edit'), (req, res) => {
+    const eid = +req.query.employee_id;
+    const from = String(req.query.from || req.query.date || '').slice(0, 10), to = String(req.query.to || from).slice(0, 10);
+    if (!eid || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu nhân viên hoặc ngày' });
+    const dn = devName();
+    const rows = db.prepare('SELECT id, serial, punch_at, work_date, status FROM device_punches WHERE employee_id = ? AND work_date >= ? AND work_date <= ? ORDER BY punch_at')
+      .all(eid, from, to).map((p) => {
+        const manual = p.serial.startsWith('TAY_'), dv = dn.get(p.serial);
+        return { id: p.id, date: p.work_date, time: vnHM(p.punch_at), punch_at: p.punch_at, manual,
+          kind: manual ? (p.serial === TAY.out ? 'Ra' : 'Vào') : '',
+          source: manual ? 'Thêm tay' : (dv ? (dv.name || p.serial) + (dv.machine_number ? ` (máy ${dv.machine_number})` : '') : p.serial) };
+      });
+    const att = db.prepare('SELECT id, check_in_at, check_out_at, manual FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?').all(eid, from, to);
+    res.json({ rows, manualRow: att.some((a) => a.manual) });
+  });
+
+  // Thêm lượt chấm cho 1 hoặc nhiều NV trong 1 ngày: giờ vào và/hoặc giờ ra
+  r.post('/attendance/punches', need('attendance_edit'), (req, res) => {
+    const b = req.body || {};
+    const ids = [...new Set((Array.isArray(b.employee_ids) ? b.employee_ids : [b.employee_id]).map(Number).filter(Boolean))];
+    const date = String(b.date || '').slice(0, 10), tIn = hm(b.in), tOut = hm(b.out);
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Chọn ngày' });
+    if (!tIn && !tOut) return res.status(400).json({ error: 'Nhập giờ vào hoặc giờ ra (dạng 08:00)' });
+    const keys = new Set();
+    const n = tx(() => {
+      let c = 0;
+      for (const id of ids) {
+        const emp = pinOf.get(id); if (!emp) continue;
+        const a = tIn ? addPunch(emp, date, tIn, 'in') : null;
+        const o = tOut ? addPunch(emp, date, tOut, 'out', 0, a) : null;
+        for (const iso of [a, o]) if (iso) keys.add(id + '|' + vnDate(new Date(iso)));
+        keys.add(id + '|' + date); c++;
+      }
+      redoDays(keys);
+      return c;
+    });
+    res.json({ ok: true, count: n });
+  });
+
+  // Sửa giờ 1 lượt chấm (lượt máy hay lượt thêm tay đều sửa được)
+  r.put('/attendance/punches/:id', need('attendance_edit'), (req, res) => {
+    const p = db.prepare('SELECT * FROM device_punches WHERE id = ?').get(req.params.id);
+    if (!p || !p.employee_id) return res.status(404).json({ error: 'Không tìm thấy lượt chấm' });
+    const t = hm(req.body?.time), date = String(req.body?.date || p.work_date).slice(0, 10);
+    if (!t) return res.status(400).json({ error: 'Giờ không hợp lệ (dạng 08:00)' });
+    const d = new Date(`${date}T${t}:00+07:00`);
+    if (db.prepare('SELECT 1 FROM device_punches WHERE serial = ? AND pin = ? AND punch_at = ? AND id <> ?').get(p.serial, p.pin, d.toISOString(), p.id))
+      return res.status(409).json({ error: 'Đã có lượt chấm đúng giờ này' });
+    tx(() => {
+      db.prepare('UPDATE device_punches SET punch_at = ?, work_date = ? WHERE id = ?').run(d.toISOString(), vnDate(d), p.id);
+      redoDays(new Set([p.employee_id + '|' + p.work_date, p.employee_id + '|' + vnDate(d)]));
+    });
+    res.json({ ok: true });
+  });
+
+  // Xoá 1 lượt chấm
+  r.delete('/attendance/punches/:id', need('attendance_edit'), (req, res) => {
+    const p = db.prepare('SELECT * FROM device_punches WHERE id = ?').get(req.params.id);
+    if (!p) return res.status(404).json({ error: 'Không tìm thấy lượt chấm' });
+    tx(() => {
+      db.prepare('DELETE FROM device_punches WHERE id = ?').run(p.id);
+      if (p.employee_id) redoDays(new Set([p.employee_id + '|' + p.work_date]));
+    });
+    res.json({ ok: true });
+  });
+
+  // THÊM GIỜ HÀNG LOẠT: nhiều NV × nhiều ngày, giờ vào / giờ ra + "khoảng chạy" (lệch ngẫu nhiên 0…N phút cho tự nhiên)
+  r.post('/attendance/punches/bulk', need('attendance_edit'), (req, res) => {
+    const b = req.body || {};
+    const ids = [...new Set((Array.isArray(b.employee_ids) ? b.employee_ids : []).map(Number).filter(Boolean))];
+    const dates = [...new Set((Array.isArray(b.dates) ? b.dates : []).map((d) => String(d).slice(0, 10)).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d)))].sort();
+    const tIn = b.in && hm(b.in.time), tOut = b.out && hm(b.out.time);
+    const jIn = Math.max(0, Math.min(120, parseInt(b.in?.jitter, 10) || 0)), jOut = Math.max(0, Math.min(120, parseInt(b.out?.jitter, 10) || 0));
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    if (!dates.length) return res.status(400).json({ error: 'Chưa chọn ngày' });
+    if (!tIn && !tOut) return res.status(400).json({ error: 'Tích "Giờ vào" và/hoặc "Giờ ra" và nhập giờ' });
+    if (ids.length * dates.length > 40000) return res.status(400).json({ error: 'Quá nhiều (tối đa 40.000 lượt người × ngày mỗi lần)' });
+    const has = db.prepare('SELECT 1 FROM device_punches WHERE employee_id = ? AND work_date = ? LIMIT 1');
+    const rnd = (j) => Math.floor(Math.random() * (j * 60 + 1));   // giây lệch
+    const shift = (t, s) => { const [h, m] = t.split(':').map(Number); const tot = h * 3600 + m * 60 + s; return [String(Math.floor(tot / 3600) % 24).padStart(2, '0') + ':' + String(Math.floor(tot / 60) % 60).padStart(2, '0'), tot % 60]; };
+    const keys = new Set();
+    let added = 0, skipped = 0;
+    tx(() => {
+      for (const id of ids) {
+        const emp = pinOf.get(id); if (!emp) continue;
+        for (const date of dates) {
+          if (b.skip_existing && has.get(id, date)) { skipped++; continue; }
+          let a = null;
+          if (tIn) { const [t, s] = shift(tIn, rnd(jIn)); a = addPunch(emp, date, t, 'in', s); }
+          if (tOut) { const [t, s] = shift(tOut, rnd(jOut)); const o = addPunch(emp, date, t, 'out', s, a); keys.add(id + '|' + vnDate(new Date(o))); }
+          keys.add(id + '|' + date); added++;
+        }
+      }
+      redoDays(keys);
+    });
+    res.json({ ok: true, added, skipped });
+  });
+
+  // XOÁ DỮ LIỆU CHẤM CÔNG của các NV đã chọn trong khoảng ngày. raw = xoá cả lượt chấm gốc (Tính lại sẽ không còn giờ)
+  r.post('/attendance/clear', need('attendance_edit'), (req, res) => {
+    const b = req.body || {};
+    const ids = [...new Set((Array.isArray(b.employee_ids) ? b.employee_ids : []).map(Number).filter(Boolean))];
+    const from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10);
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Chọn từ ngày / đến ngày' });
+    if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau từ ngày' });
+    const r2 = tx(() => {
+      let a = 0, p = 0;
+      const dA = db.prepare('DELETE FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?');
+      const dP = db.prepare('DELETE FROM device_punches WHERE employee_id = ? AND work_date >= ? AND work_date <= ?');
+      for (const id of ids) { a += dA.run(id, from, to).changes; if (b.raw) p += dP.run(id, from, to).changes; }
+      return { attendance: a, punches: p };
+    });
+    res.json({ ok: true, ...r2 });
   });
 }

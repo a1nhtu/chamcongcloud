@@ -3315,6 +3315,11 @@ async function pageEditAtt() {
 
   const addBtn = el('button', { class: 'btn sm' }, '+ Thêm giờ');
   const recalcBtn = el('button', { class: 'btn ghost sm' }, '↻ Tính lại');
+  const bulkBtn = el('button', { class: 'btn ghost sm' }, '📅 Thêm giờ hàng loạt');
+  const clearBtn = el('button', { class: 'btn ghost sm', style: 'color:#c0392b' }, '🗑 Xoá dữ liệu chấm công');
+  const scopeEmps = () => emps.filter((e) => e.role !== 'admin' && (!deptPick.size || deptPick.has(e.department || '')) && (!empPick.size || empPick.has(e.id)));
+  bulkBtn.onclick = () => bulkPunchModal(scopeEmps(), toI.value, load);
+  clearBtn.onclick = () => clearAttModal(scopeEmps(), fromI.value, toI.value, load);
   // Tích để hiện CẢ CÔNG TY (kể cả ngày chưa chấm) — chỉ áp cho tab Chi tiết
   const allChkInput = el('input', { type: 'checkbox', style: 'width:auto' });
   allChkInput.onchange = () => load();
@@ -3395,7 +3400,11 @@ async function pageEditAtt() {
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
         inlineCell(r, 'in', [r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : '']),
         inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')]),
-        el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : '—'),
+        (() => {
+          const td = el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : el('span', { class: 'muted' }, canEdit ? '+ lượt chấm' : '—'));
+          if (canEdit) { td.className = 'att-inl'; td.title = 'Bấm để xem / thêm / sửa / xoá từng lượt chấm'; td.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
+          return td;
+        })(),
         ...(hrly ? [
           el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
           el('td', { style: 'text-align:center' }, r.mins ? (r.mins + ' phút') : '—'),
@@ -3414,7 +3423,7 @@ async function pageEditAtt() {
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ — dòng chưa chấm gõ giờ vào là thêm mới. Nút "Sửa" để ghi lý do hoặc xoá giờ. Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ — dòng chưa chấm gõ giờ vào là thêm mới. Bấm ô "Các lần chấm" để thêm / sửa / xoá từng lượt chấm (như Wise Eye). Nút "Sửa" để ghi lý do hoặc xoá giờ. Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
@@ -3454,8 +3463,7 @@ async function pageEditAtt() {
   addBtn.onclick = () => {
     // đã lọc đúng 1 người → thêm cho người đó; còn lại → chọn nhân viên ngay trong form (được chọn nhiều người)
     if (empPick.size === 1) return attEditModal(null, [...empPick][0], load, { date: toI.value });
-    const list = emps.filter((e) => e.role !== 'admin' && (!deptPick.size || deptPick.has(e.department || '')) && (!empPick.size || empPick.has(e.id)));
-    attEditModal(null, null, load, { date: toI.value, emps: list });
+    attEditModal(null, null, load, { date: toI.value, emps: scopeEmps() });
   };
   recalcBtn.onclick = async () => {
     let scopeTxt;
@@ -3473,7 +3481,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
-    allChk, markChk, addBtn, recalcBtn);
+    allChk, markChk, addBtn, bulkBtn, clearBtn, recalcBtn);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }
@@ -3485,12 +3493,16 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
   const inI = time24('att-in', row?.check_in_at ? isoToHM(row.check_in_at) : '');
   const outI = time24('att-out', row?.check_out_at ? isoToHM(row.check_out_at) : '');
   const noteI = input('att-note', { placeholder: 'VD: Quên chấm, Đi công tác…', value: row?.note || '' });
-  const body = [
-    ...(pick ? [pick.node] : []),
+  const body = row ? [
     field('Ngày', dateI),
     el('div', { class: 'two-col' }, field('Giờ vào', inI), field('Giờ ra (để trống nếu chưa ra)', outI)),
     field('Lý do / ghi chú', noteI),
     el('div', { class: 'map-hint' }, 'Giờ ra nhỏ hơn giờ vào sẽ được hiểu là ca qua đêm (sáng hôm sau).'),
+  ] : [
+    ...(pick ? [pick.node] : []),
+    field('Ngày', dateI),
+    el('div', { class: 'two-col' }, field('Giờ vào (để trống nếu chỉ thêm giờ ra)', inI), field('Giờ ra (để trống nếu chưa ra)', outI)),
+    el('div', { class: 'map-hint' }, 'Thêm thành LƯỢT CHẤM (như quẹt máy) — công ngày đó tự tính lại theo ca. Giờ ra nhỏ hơn giờ vào hiểu là sáng hôm sau. Xem / sửa / xoá từng lượt ở ô "Các lần chấm".'),
   ];
   const save = el('button', { class: 'btn' }, row ? 'Lưu thay đổi' : 'Thêm giờ');
   save.onclick = async () => {
@@ -3498,13 +3510,14 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
     try {
       if (row) await api('/admin/attendance/' + row.id, { method: 'PUT', body: b });
       else {
+        // thêm LƯỢT CHẤM vào / ra (như Wise Eye) → công ngày đó tính lại theo ca + quy tắc ghép vào–ra
         const ids = pick ? [...pick.picked] : [employeeId];
         if (!ids.length) return toast('Chọn ít nhất 1 nhân viên', 'err');
-        if (!b.check_in) return toast('Nhập giờ vào', 'err');
+        if (!b.check_in && !b.check_out) return toast('Nhập giờ vào và/hoặc giờ ra', 'err');
         save.disabled = true;
-        for (const id of ids) await api('/admin/attendance', { method: 'POST', body: { ...b, employee_id: id, work_date: dateI.value } });
+        await api('/admin/attendance/punches', { method: 'POST', body: { employee_ids: ids, date: dateI.value, in: b.check_in, out: b.check_out } });
       }
-      toast(pick ? `Đã thêm giờ cho ${pick.picked.size} người` : 'Đã lưu', 'ok'); closeModal(); reload();
+      toast(row ? 'Đã lưu' : `Đã thêm giờ cho ${pick ? pick.picked.size : 1} người`, 'ok'); closeModal(); reload();
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   const footer = [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ')];
@@ -3519,6 +3532,148 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
   }
   footer.push(save);
   openModal(row ? 'Sửa giờ chấm' : 'Thêm giờ chấm', body, footer);
+}
+
+/* ---------- LƯỢT CHẤM (như "Sửa giờ chấm công" của Wise Eye): xem / thêm / sửa / xoá từng lượt chấm của 1 NV trong 1 ngày ---------- */
+// Lưu xong phần mềm tự tính lại công ngày đó theo đúng ca + quy tắc ghép cặp (giống lượt quẹt từ máy).
+async function punchModal(emp, date, reload) {
+  let cur = date;
+  const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const dateI = el('input', { type: 'date', value: cur, style: 'width:auto;margin:0' });
+  const prev = el('button', { class: 'btn ghost sm', title: 'Ngày trước' }, '◀'), next = el('button', { class: 'btn ghost sm', title: 'Ngày sau' }, '▶');
+  const listBox = el('div', {}, loading());
+  const tIn = time24('pm-time', ''); tIn.style.width = '96px'; tIn.style.margin = '0';
+  const kindSel = el('select', { style: 'width:auto;margin:0' }, el('option', { value: 'in' }, 'Vào'), el('option', { value: 'out' }, 'Ra'));
+  const addBtn = el('button', { class: 'btn sm' }, '+ Thêm lượt');
+  const after = () => { reload && reload(); draw(); };
+  const draw = async () => {
+    dateI.value = cur;
+    let d;
+    try { d = await api(`/admin/attendance/punches?employee_id=${emp.id}&date=${cur}`); } catch (e) { listBox.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
+    const tbl = el('table', { class: 'data' });
+    tbl.innerHTML = '<thead><tr><th>#</th><th>Giờ chấm</th><th>Loại</th><th>Nguồn</th><th></th></tr></thead>';
+    const tb = el('tbody'); tbl.append(tb);
+    if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, 'Chưa có lượt chấm nào trong ngày này. Thêm ở bên dưới.'))));
+    d.rows.forEach((p, i) => {
+      const tdT = el('td', {}, el('b', {}, p.time), p.date !== cur ? el('span', { class: 'muted', style: 'font-size:12px' }, ' (' + p.date.slice(8) + '/' + p.date.slice(5, 7) + ')') : '');
+      const edit = btnSm('Sửa', () => {
+        const i2 = time24('', p.time); i2.className = 'att-inl-in';
+        const ok = btnSm('Lưu', async () => {
+          try { await api('/admin/attendance/punches/' + p.id, { method: 'PUT', body: { time: i2.value } }); toast('Đã sửa lượt chấm', 'ok'); after(); } catch (e) { toast(e.message, 'err'); }
+        });
+        i2.addEventListener('keydown', (e) => { if (e.key === 'Enter') { i2.blur(); setTimeout(() => ok.click(), 0); } if (e.key === 'Escape') draw(); });
+        tdT.replaceChildren(el('div', { style: 'display:flex;gap:6px;align-items:center' }, i2, ok, btnSm('Huỷ', draw, 'ghost')));
+        i2.focus(); i2.select();
+      }, 'ghost');
+      const del = btnSm('Xoá', async () => {
+        if (!confirm(`Xoá lượt chấm ${p.time} ngày ${cur.slice(8)}/${cur.slice(5, 7)} của ${emp.name}?`)) return;
+        try { await api('/admin/attendance/punches/' + p.id, { method: 'DELETE' }); toast('Đã xoá lượt chấm', 'ok'); after(); } catch (e) { toast(e.message, 'err'); }
+      }, 'ghost');
+      del.style.color = '#c0392b';
+      tb.append(el('tr', {}, el('td', {}, String(i + 1)), tdT,
+        el('td', {}, p.kind ? el('span', { class: 'pill' + (p.kind === 'Ra' ? ' muted' : '') }, p.kind) : el('span', { class: 'muted' }, 'theo máy')),
+        el('td', {}, p.manual ? el('span', { style: 'color:#e67e22;font-weight:600' }, '✎ Thêm tay') : p.source),
+        el('td', {}, el('div', { style: 'display:flex;gap:6px' }, edit, del))));
+    });
+    listBox.replaceChildren(el('div', { class: 'tbl-scroll' }, tbl),
+      d.manualRow ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, 'Ngày này đang có giờ sửa tay ở bảng công — thêm / sửa / xoá lượt chấm sẽ tính lại theo các lượt chấm ở đây.') : '');
+  };
+  prev.onclick = () => { cur = addDays(cur, -1); draw(); };
+  next.onclick = () => { cur = addDays(cur, 1); draw(); };
+  dateI.onchange = () => { if (dateI.value) { cur = dateI.value; draw(); } };
+  addBtn.onclick = async () => {
+    if (!tIn.value) return toast('Nhập giờ (VD 0800)', 'err');
+    const body = { employee_ids: [emp.id], date: cur, [kindSel.value]: tIn.value };
+    try { await api('/admin/attendance/punches', { method: 'POST', body }); tIn.value = ''; toast('Đã thêm lượt chấm', 'ok'); after(); } catch (e) { toast(e.message, 'err'); }
+  };
+  tIn.addEventListener('keydown', (e) => { if (e.key === 'Enter') { tIn.blur(); setTimeout(() => addBtn.click(), 0); } });
+  openModal(`Lượt chấm — ${emp.name}${emp.code ? ' (' + emp.code + ')' : ''}`, [
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('label', { style: 'margin:0' }, 'Ngày'), prev, dateI, next),
+    listBox,
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding-top:10px;border-top:1px solid var(--line)' },
+      el('label', { style: 'margin:0' }, 'Thêm lượt chấm'), tIn, kindSel, addBtn),
+    el('div', { class: 'map-hint' }, 'Mỗi lần thêm / sửa / xoá, công ngày đó được tính lại ngay theo ca và quy tắc ghép vào–ra (như lượt quẹt máy). "Vào / Ra" dùng cho quy tắc theo ID máy hoặc chọn từ máy; quy tắc đầu–cuối thì lượt sớm nhất là vào, muộn nhất là ra.'),
+  ], [el('button', { class: 'btn', onclick: closeModal }, 'Xong')]);
+  draw();
+}
+
+/* ---------- THÊM GIỜ HÀNG LOẠT: nhiều NV × nhiều ngày trong tháng, giờ vào / ra + khoảng chạy ---------- */
+async function bulkPunchModal(emps, month0, reload) {
+  const pick = await empMultiPicker(emps, 230);
+  const [y0, m0] = (month0 || todayVN()).slice(0, 7).split('-').map(Number);
+  const yI = el('select', { style: 'width:auto;margin:0' }, ...[y0 - 1, y0, y0 + 1].map((y) => el('option', { value: y, ...(y === y0 ? { selected: '' } : {}) }, 'Năm ' + y)));
+  const mI = el('select', { style: 'width:auto;margin:0' }, ...Array.from({ length: 12 }, (_, i) => el('option', { value: i + 1, ...(i + 1 === m0 ? { selected: '' } : {}) }, 'Tháng ' + (i + 1))));
+  const days = el('div', { class: 'bp-days' });
+  const picked = new Set();
+  const WDS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  const dayList = () => { const y = +yI.value, m = +mI.value, n = new Date(Date.UTC(y, m, 0)).getUTCDate(); return Array.from({ length: n }, (_, i) => `${y}-${String(m).padStart(2, '0')}-${String(i + 1).padStart(2, '0')}`); };
+  const wd = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
+  const cnt = el('b', {});
+  const drawDays = () => {
+    days.replaceChildren();
+    for (const d of dayList()) {
+      const cb = el('input', { type: 'checkbox', ...(picked.has(d) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(d) : picked.delete(d); cnt.textContent = `${picked.size} ngày`; };
+      days.append(el('label', { class: 'bp-day' + (wd(d) === 0 ? ' sun' : wd(d) === 6 ? ' sat' : '') }, cb, `${+d.slice(8)}`, el('small', {}, WDS[wd(d)])));
+    }
+    cnt.textContent = `${picked.size} ngày`;
+  };
+  const quick = (label, fn) => { const b = el('button', { class: 'btn ghost sm', type: 'button' }, label); b.onclick = () => { picked.clear(); for (const d of dayList()) if (fn(wd(d))) picked.add(d); drawDays(); }; return b; };
+  yI.onchange = mI.onchange = () => { picked.clear(); drawDays(); };
+  drawDays();
+  const chkIn = el('input', { type: 'checkbox', checked: '', style: 'width:auto' }), chkOut = el('input', { type: 'checkbox', checked: '', style: 'width:auto' });
+  const tIn = time24('bp-in', '07:30'), tOut = time24('bp-out', '17:00');
+  const jIn = el('input', { type: 'number', min: 0, max: 120, value: 10 }), jOut = el('input', { type: 'number', min: 0, max: 120, value: 10 });
+  const skip = el('input', { type: 'checkbox', checked: '', style: 'width:auto' });
+  const timeRow = (chk, label, t, j) => el('div', { class: 'bp-time' }, el('label', { class: 'lv-chk' }, chk, el('b', {}, label)),
+    t, el('span', {}, 'khoảng chạy'), j, el('span', {}, 'phút'));
+  const run = el('button', { class: 'btn' }, 'Thực hiện');
+  run.onclick = async () => {
+    if (!pick.picked.size) return toast('Chọn nhân viên', 'err');
+    if (!picked.size) return toast('Tích chọn ngày', 'err');
+    if (!chkIn.checked && !chkOut.checked) return toast('Tích "Giờ vào" và/hoặc "Giờ ra"', 'err');
+    const body = { employee_ids: [...pick.picked], dates: [...picked], skip_existing: skip.checked,
+      in: chkIn.checked ? { time: tIn.value, jitter: jIn.value } : null, out: chkOut.checked ? { time: tOut.value, jitter: jOut.value } : null };
+    if (!confirm(`Thêm giờ cho ${pick.picked.size} nhân viên × ${picked.size} ngày${chkIn.checked ? ', vào ' + tIn.value : ''}${chkOut.checked ? ', ra ' + tOut.value : ''}?`)) return;
+    run.disabled = true; run.textContent = 'Đang thực hiện…';
+    try {
+      const r = await api('/admin/attendance/punches/bulk', { method: 'POST', body });
+      toast(`Đã thêm giờ ${r.added} lượt người × ngày` + (r.skipped ? `, bỏ qua ${r.skipped} ngày đã có giờ` : ''), 'ok'); closeModal(); reload && reload();
+    } catch (e) { toast(e.message, 'err'); run.disabled = false; run.textContent = 'Thực hiện'; }
+  };
+  openModal('Thêm giờ hàng loạt', [
+    pick.node,
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, yI, mI,
+      quick('Cả tháng', () => true), quick('T2 → T6', (w) => w >= 1 && w <= 5), quick('T2 → T7', (w) => w >= 1), quick('Bỏ chọn', () => false), el('span', { style: 'margin-left:auto' }, 'Đã chọn ', cnt)),
+    days,
+    el('div', { style: 'display:flex;flex-direction:column;gap:8px' }, timeRow(chkIn, 'Giờ vào', tIn, jIn), timeRow(chkOut, 'Giờ ra', tOut, jOut)),
+    el('label', { class: 'lv-chk' }, skip, el('span', {}, 'Bỏ qua ngày nhân viên đã có giờ chấm (không chèn thêm vào ngày đã quẹt máy)')),
+    el('div', { class: 'map-hint' }, 'Khoảng chạy = giờ lệch ngẫu nhiên 0…N phút cho tự nhiên (VD vào 07:30, khoảng chạy 10 → 07:30–07:40). Giờ ra nhỏ hơn giờ vào hiểu là sáng hôm sau. Lượt thêm hiện dấu ✎ ở "Lượt chấm", xoá được từng lượt hoặc bằng "Xoá dữ liệu chấm công".'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), run]);
+}
+
+/* ---------- XOÁ DỮ LIỆU CHẤM CÔNG theo nhân viên + khoảng ngày ---------- */
+async function clearAttModal(emps, from, to, reload) {
+  const pick = await empMultiPicker(emps, 230);
+  const fI = el('input', { type: 'date', value: from }), tI = el('input', { type: 'date', value: to });
+  const raw = el('input', { type: 'checkbox', style: 'width:auto' });
+  const run = el('button', { class: 'btn', style: 'background:#c0392b;border-color:#c0392b' }, '🗑 Xoá');
+  run.onclick = async () => {
+    if (!pick.picked.size) return toast('Chọn nhân viên', 'err');
+    if (!fI.value || !tI.value || tI.value < fI.value) return toast('Chọn từ ngày / đến ngày', 'err');
+    if (!confirm(`XOÁ dữ liệu chấm công của ${pick.picked.size} nhân viên từ ${fI.value.split('-').reverse().join('/')} đến ${tI.value.split('-').reverse().join('/')}${raw.checked ? ' — XOÁ CẢ GIỜ GỐC (lượt quẹt máy), tính lại sẽ không còn giờ' : ''}?\nKhông hoàn tác được.`)) return;
+    run.disabled = true;
+    try {
+      const r = await api('/admin/attendance/clear', { method: 'POST', body: { employee_ids: [...pick.picked], from: fI.value, to: tI.value, raw: raw.checked } });
+      toast(`Đã xoá ${r.attendance} ngày công` + (raw.checked ? ` + ${r.punches} lượt chấm gốc` : ''), 'ok'); closeModal(); reload && reload();
+    } catch (e) { toast(e.message, 'err'); run.disabled = false; }
+  };
+  openModal('Xoá dữ liệu chấm công', [
+    el('div', { style: 'color:#c0392b;font-weight:700' }, 'Chọn đúng ngày và nhân viên trước khi xoá!'),
+    pick.node,
+    el('div', { class: 'two-col' }, field('Từ ngày', fI), field('Đến ngày', tI)),
+    el('label', { class: 'lv-chk' }, raw, el('span', {}, el('b', {}, 'Xoá cả giờ gốc'), ' (lượt quẹt máy / lượt thêm tay) — bấm Tính lại cũng không còn giờ. Không tích: chỉ xoá bảng công, bấm "↻ Tính lại" sẽ dựng lại từ lượt quẹt máy.')),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), run]);
 }
 
 /* ---------- DUYỆT ĐỔI THIẾT BỊ (chống chấm hộ) ---------- */

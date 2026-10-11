@@ -525,6 +525,7 @@ const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
 function deviceMachineMap() {
   const map = {};
   for (const d of db.prepare('SELECT serial, machine_number FROM push_devices').all()) map[d.serial] = d.machine_number || 0;
+  map.TAY_VAO = 1; map.TAY_RA = 2;   // lượt chấm THÊM TAY (Tính công › Lượt chấm): máy ảo lẻ = Vào, chẵn = Ra
   return map;
 }
 
