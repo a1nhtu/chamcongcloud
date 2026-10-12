@@ -326,3 +326,7 @@ table.ft-emps tbody tr.sel td, table.ft-punch tbody tr.sel td { background: #ffe
 .ft-addrow .lv-chk { width: 130px; align-items: center; }
 .ft-addrow input[type=date] { width: auto; }
 @media (max-width: 800px) { .ft-wrap { grid-template-columns: 1fr; } .ft-left { position: static; max-height: 200px; } }
+
+/* Nút xem CÔNG ẢO (audit) */
+.virt-tg { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 6px 12px; border: 1px dashed #d1d5db; border-radius: 999px; font-weight: 700; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.virt-tg.on { border: 1px solid #f59e0b; background: #fef3c7; color: #92400e; }

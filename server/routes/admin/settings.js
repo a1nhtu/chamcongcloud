@@ -2,6 +2,7 @@
 import { db, getSetting, setSetting, attModeMix } from '../../db.js';
 import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
 import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../../update.js';
+import { auditAllowed } from '../../virtual-att.js';
 
 export function registerSettingsRoutes(r, { need, adminOnly }) {
   /* ----------------------------- CÀI ĐẶT ----------------------------- */
@@ -34,6 +35,13 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       use_phone_cfg: ['0', '1'].includes(process.env.USE_PHONE) ? process.env.USE_PHONE : '',
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
+      audit_enabled: getSetting('audit_enabled', '0'),             // CÔNG ẢO / LƯƠNG ẢO — chỉ tài khoản tổng bật
+      ...(auditAllowed(req.user) ? {
+        audit_ot_day_min: getSetting('audit_ot_day_min', '240'), audit_ot_week_h: getSetting('audit_ot_week_h', '0'),
+        audit_ot_month_h: getSetting('audit_ot_month_h', '40'), audit_ot_year_h: getSetting('audit_ot_year_h', '200'),
+        audit_incl_weekend: getSetting('audit_incl_weekend', '1'), audit_incl_holiday: getSetting('audit_incl_holiday', '1'),
+        audit_method: getSetting('audit_method', 'ratio'), audit_block: getSetting('audit_block', '15'),
+      } : {}),
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
       payroll_include_admin: getSetting('payroll_include_admin', '0'), // tính công cho cả tài khoản Admin
       self_shift_enabled: getSetting('self_shift_enabled', '0'), // NV tự chọn ca
@@ -97,6 +105,16 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.phone_enabled != null) setSetting('phone_enabled', b.phone_enabled ? '1' : '0');
       if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
       if (b.device_key_required != null) setSetting('device_key_required', b.device_key_required ? '1' : '0');
+      if (b.audit_enabled != null) setSetting('audit_enabled', b.audit_enabled ? '1' : '0');
+    }
+    // Hạn mức công ảo: người được xem công ảo mới chỉnh được
+    if (auditAllowed(req.user)) {
+      const n = (v, max) => { const x = parseFloat(v); return Number.isFinite(x) && x >= 0 ? String(Math.min(max, x)) : null; };
+      for (const [k, max] of [['audit_ot_day_min', 1440], ['audit_ot_week_h', 168], ['audit_ot_month_h', 744], ['audit_ot_year_h', 8784], ['audit_block', 120]])
+        if (b[k] != null) { const v = n(b[k], max); if (v == null) return res.status(400).json({ error: 'Hạn mức tăng ca phải là số ≥ 0' }); setSetting(k, v); }
+      if (b.audit_incl_weekend != null) setSetting('audit_incl_weekend', b.audit_incl_weekend ? '1' : '0');
+      if (b.audit_incl_holiday != null) setSetting('audit_incl_holiday', b.audit_incl_holiday ? '1' : '0');
+      if (b.audit_method != null) setSetting('audit_method', b.audit_method === 'days' ? 'days' : 'ratio');
     }
     if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
     if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));

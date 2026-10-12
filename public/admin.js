@@ -32,6 +32,16 @@ const hourlyMode = () => (SETTINGS.any_shift != null ? !SETTINGS.any_shift : SET
 const mixedMode = () => !!(SETTINGS.any_shift && SETTINGS.any_hourly);
 const ATT_MODE_LABEL = { '': 'Theo cài đặt chung của công ty', shift: '🕐 Theo ca làm việc', hourly: '⏱️ Theo giờ (làm bao nhiêu tính bấy nhiêu)' };
 const deviceEnabled = () => SETTINGS.device_enabled === '1';
+// CÔNG ẢO / LƯƠNG ẢO (audit): tài khoản tổng bật tính năng + người dùng có quyền "audit" mới thấy
+const auditOn = () => SETTINGS.audit_enabled === '1' && hasPerm('audit');
+let _virt = false;   // đang xem công ảo (dùng chung cho Tính công / Báo cáo / Lương)
+function virtToggle(onChange) {
+  if (!auditOn()) return null;
+  const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(_virt ? { checked: '' } : {}) });
+  const lb = el('label', { class: 'virt-tg' + (_virt ? ' on' : ''), title: 'Công ảo: tăng ca cắt theo hạn mức ở Cài đặt › Công ảo / lương ảo. Công thật không đổi.' }, cb, '🎭 Công ảo');
+  cb.onchange = () => { _virt = cb.checked; lb.classList.toggle('on', _virt); onChange && onChange(); };
+  return lb;
+}
 const deviceLockEnabled = () => SETTINGS.device_lock_enabled === '1';
 const selfShiftEnabled = () => SETTINGS.self_shift_enabled === '1';
 // Quyền mặc định của "Quản lý" khi chưa cấu hình riêng (khớp server)
@@ -3138,14 +3148,15 @@ async function salaryPayrollView(tabs) {
   const monthI = el('input', { type: 'month', value: todayMonth() });
   const deptSel = el('select', {}, el('option', { value: '' }, '-- Tất cả phòng ban --'));
   const wrap = el('div', {}, loading());
-  const head2 = () => head('Lương', ...tabs, monthI, deptSel);
+  const vt = virtToggle(() => load());
+  const head2 = () => head('Lương', ...tabs, monthI, deptSel, vt);
   setMain(head2(), wrap);
   try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
 
   const load = async () => {
     wrap.innerHTML = ''; wrap.append(loading());
     let data;
-    try { data = await api(`/admin/payroll?month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}`); }
+    try { data = await api(`/admin/payroll?month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}` + (_virt && auditOn() ? '&virt=1' : '')); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const hourly = data.mode === 'hourly';
     const tbl = el('table', { class: 'data' });
@@ -3330,6 +3341,7 @@ async function pageEditAtt() {
     if (empPick.size) p += '&ids=' + [...empPick].join(',');
     else if (deptPick.size) p += '&depts=' + encodeURIComponent([...deptPick].join(','));
     if (allChkInput.checked) p += '&all=1';
+    if (_virt && auditOn()) p += '&virt=1';
     return p;
   };
   const mkIso = (date, hm) => hm ? new Date(`${date}T${hm}:00+07:00`).toISOString() : null;
@@ -3339,7 +3351,7 @@ async function pageEditAtt() {
   // Dòng chưa có giờ (ngày chưa chấm / ngày nghỉ) gõ giờ vào là thêm mới cho đúng người, đúng ngày đó.
   const inlineCell = (r, field, content) => {
     const td = el('td', {}, ...content);
-    if (!canEdit) return td;
+    if (!canEdit || _virt) return td;   // công ảo: chỉ xem
     td.className = 'att-inl';
     td.title = 'Bấm để sửa giờ ' + (field === 'in' ? 'vào' : 'ra');
     td.onclick = () => {
@@ -3397,7 +3409,7 @@ async function pageEditAtt() {
         inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')]),
         (() => {
           const td = el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : el('span', { class: 'muted' }, canEdit ? '+ lượt chấm' : '—'));
-          if (canEdit) { td.className = 'att-inl'; td.title = 'Bấm để xem / thêm / sửa / xoá từng lượt chấm'; td.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
+          if (canEdit && !_virt) { td.className = 'att-inl'; td.title = 'Bấm để xem / thêm / sửa / xoá từng lượt chấm'; td.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
           return td;
         })(),
         ...(hrly ? [
@@ -3411,7 +3423,7 @@ async function pageEditAtt() {
         ]),
         el('td', { style: 'text-align:center' }, r.leave ? el('span', { class: 'pill warn' }, r.leave) : '—'),
         el('td', {}, r.status || '—'),
-        el('td', {}, !canEdit ? '' : r.att_id ? btnSm('Sửa', () => openEdit(r)) : (() => { const t = btnSm('+ Thêm', () => attEditModal(null, r.employee_id, load, { date: r.date }), 'ghost'); t.style.whiteSpace = 'nowrap'; return t; })()),
+        el('td', {}, !canEdit || _virt ? '' : r.att_id ? btnSm('Sửa', () => openEdit(r)) : (() => { const t = btnSm('+ Thêm', () => attEditModal(null, r.employee_id, load, { date: r.date }), 'ghost'); t.style.whiteSpace = 'nowrap'; return t; })()),
       ];
       tb.append(el('tr', {}, ...cells));
     }
@@ -3471,7 +3483,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
-    allChk, markChk, recalcBtn);
+    allChk, markChk, recalcBtn, virtToggle(() => load()));
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }
@@ -4601,7 +4613,7 @@ async function pageReport() {
   // Phần lọc NV cho query: ưu tiên NV cụ thể (ids), rồi tới nhiều phòng ban (depts)
   const filterQS = () => (empPick.size ? '&ids=' + [...empPick].join(',')
     : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : ''))
-    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '');
+    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=1' : '');
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
   const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; };
 
@@ -4628,7 +4640,7 @@ async function pageReport() {
       }
       wrap.append(grid);
     }
-    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl), wrap);
+    setMain(head('Báo cáo', monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl, virtToggle(() => hub())), wrap);
   };
 
   // Xem 1 báo cáo cụ thể (có nút quay lại danh sách)
@@ -4638,7 +4650,7 @@ async function pageReport() {
     const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
     exportBtn.onclick = () => downloadExcel(type, fromI.value, toI.value, filterQS());
     const wrap = el('div', {}, loading());
-    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl, exportBtn), wrap);
+    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl, virtToggle(() => showReport(type)), exportBtn), wrap);
     const load = async () => {
       if (fromI.value && toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
       wrap.innerHTML = ''; wrap.append(loading());
@@ -4839,6 +4851,7 @@ async function pageSettings() {
   const geoChk = el('input', { type: 'checkbox', id: 'st-geo', style: 'width:auto', ...(s.geofence_enforce === '1' ? { checked: '' } : {}) });
   const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}) });
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}) });
+  const auditChk = el('input', { type: 'checkbox', id: 'st-audit', style: 'width:auto', ...(s.audit_enabled === '1' ? { checked: '' } : {}) });
   const inclAdminChk = el('input', { type: 'checkbox', id: 'st-incladmin', style: 'width:auto', ...(s.payroll_include_admin === '1' ? { checked: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
@@ -4853,6 +4866,7 @@ async function pageSettings() {
       if (isMaster()) {   // chỉ tài khoản tổng đổi được máy chấm công / chấm điện thoại
         body.device_enabled = devChk.checked;
         body.phone_enabled = phoneChk.checked;
+        body.audit_enabled = auditChk.checked;
       }
       await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
@@ -4912,6 +4926,10 @@ async function pageSettings() {
               el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Tắt nếu công ty chỉ dùng máy chấm công — nhân viên sẽ không thấy nút chấm công trên app điện thoại.'
                 + (s.use_phone_cfg ? ' (Lúc cài đặt chọn: ' + (s.use_phone_cfg === '1' ? 'BẬT' : 'TẮT') + ' — đổi ở đây là được.)' : ''))))
         : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.phone_enabled !== '0' ? '📱 Chấm điện thoại đang BẬT. ' : '📱 Chấm điện thoại đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.'),
+      // Công ảo / lương ảo: CHỈ tài khoản tổng thấy và bật/tắt (tắt thì người khác không biết có tính năng này)
+      isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, auditChk,
+        el('div', {}, el('b', {}, '🎭 Cho hiển thị công ảo / lương ảo (audit)'),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin (và người được cấp quyền "Xem công ảo") thấy nút "🎭 Công ảo" ở Tính công / Báo cáo / Lương và mục cài đặt hạn mức tăng ca. Công thật không thay đổi. Tắt: ẩn hoàn toàn.'))) : null,
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:4px' }, inclAdminChk,
         el('div', {}, el('b', {}, '👑 Tính công cho cả tài khoản Admin'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Mặc định người quyền Admin (chủ/quản trị) KHÔNG hiện ở Tính công / Báo cáo / Lương / Phân ca. Bật nếu Admin cũng là người đi làm cần chấm công.'))),
@@ -5303,7 +5321,39 @@ async function pageSettings() {
       el('label', { class: 'lv-chk' }, lvOver, el('span', {}, el('b', {}, 'Cho nhân viên xin nghỉ phép năm vượt số ngày còn lại'), el('span', { class: 'map-hint', style: 'display:block' }, 'Không tích: nhân viên không gửi được đơn vượt phép (phải chọn Nghỉ không lương); quản lý vẫn duyệt / thêm được sau khi xác nhận.'))),
       el('div', { class: 'map-hint' }, 'Ngày vào làm và mức phép riêng khai ở hồ sơ từng nhân viên (mức riêng chưa gồm thâm niên). Xem số phép từng người ở Đơn từ › Quỹ phép năm. Nghỉ phép năm và Nghỉ có lương được tính lương; Nghỉ không lương thì không.'),
       el('div', {}, lvSave))) : null;
-  setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelHol, panelBackup, panelUpdate, panel2);
+  // ----- Công ảo / lương ảo (audit) — hạn mức tăng ca -----
+  const panelAudit = auditOn() && hasPerm('settings') ? (() => {
+    const num = (v, step = '0.5') => el('input', { type: 'number', min: 0, step, value: v });
+    const auDay = num(s.audit_ot_day_min ?? 240, '5'), auWeek = num(s.audit_ot_week_h ?? 0), auMonth = num(s.audit_ot_month_h ?? 40), auYear = num(s.audit_ot_year_h ?? 200);
+    const auWk = el('input', { type: 'checkbox', ...(s.audit_incl_weekend !== '0' ? { checked: '' } : {}) });
+    const auHol = el('input', { type: 'checkbox', ...(s.audit_incl_holiday !== '0' ? { checked: '' } : {}) });
+    const auMethod = el('select', { style: 'width:auto;max-width:100%' }, el('option', { value: 'ratio' }, 'Chia đều theo tỷ lệ'), el('option', { value: 'days' }, 'Gỡ bớt nguyên ngày'));
+    auMethod.value = s.audit_method === 'days' ? 'days' : 'ratio';
+    const auBlock = el('select', {}, ...[[0, 'Không làm tròn (từng phút)'], [15, 'Khối 15 phút'], [30, 'Khối 30 phút'], [60, 'Khối 1 giờ']].map(([v, t]) => el('option', { value: v }, t)));
+    auBlock.value = String(s.audit_block ?? 15);
+    const save = el('button', { class: 'btn' }, 'Lưu hạn mức công ảo');
+    save.onclick = async () => {
+      try {
+        await api('/admin/settings', { method: 'PUT', body: { audit_ot_day_min: auDay.value, audit_ot_week_h: auWeek.value, audit_ot_month_h: auMonth.value, audit_ot_year_h: auYear.value,
+          audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value } });
+        SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    return el('div', { class: 'panel', style: 'padding:20px;max-width:640px;margin-bottom:16px;border:1px dashed #f59e0b' },
+      el('h3', { style: 'margin-top:0' }, '🎭 Công ảo / lương ảo (audit)'),
+      el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Công ảo dùng để in bảng công / bảng lương nộp kiểm tra: tăng ca vượt hạn mức bị cắt bớt, giờ ra (hoặc giờ vào khi tăng ca trước ca) lùi lại cho khớp, ngày chỉ toàn tăng ca bị cắt hết thì coi như không đi làm. Công THẬT không đổi. Xem bằng nút "🎭 Công ảo" ở Tính công / Báo cáo / Lương. Luật hiện hành: tối đa 4 giờ/ngày (50% giờ làm), 40 giờ/tháng, 200 giờ/năm (300 giờ với một số ngành). Để 0 = không giới hạn.'),
+      el('div', { class: 'lv-form' },
+        lvRow('Tăng ca tối đa mỗi ngày', auDay, 'phút'),
+        lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', '(thứ 2 → chủ nhật)'),
+        lvRow('Tăng ca tối đa mỗi tháng', auMonth, 'giờ', '(theo kỳ lương ở Cài đặt › Lương)'),
+        lvRow('Tăng ca tối đa mỗi năm', auYear, 'giờ', '(cộng dồn từ kỳ lương tháng 1)'),
+        lvRow('Cách cắt khi vượt', auMethod, 'Chia đều: mọi ngày có tăng ca đều giảm theo cùng tỷ lệ. Gỡ nguyên ngày: bỏ hẳn tăng ca của một số ngày (chọn ngẫu nhiên nhưng cố định, ngày thường trước, ngày nghỉ / lễ sau) như HR-ERP.'),
+        lvRow('Làm tròn tăng ca ảo', auBlock),
+        el('label', { class: 'lv-chk' }, auWk, el('div', {}, el('b', {}, 'Cộng cả tăng ca ngày nghỉ hằng tuần (chủ nhật…)'), el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Bật: tăng ca ngày nghỉ tuần tính vào hạn mức và cũng bị cắt. Tắt: giữ nguyên, không tính vào hạn mức.'))),
+        el('label', { class: 'lv-chk' }, auHol, el('div', {}, el('b', {}, 'Cộng cả tăng ca ngày lễ'), el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Bật: tăng ca ngày lễ tính vào hạn mức và cũng bị cắt. Tắt: giữ nguyên.')))),
+      el('div', { style: 'margin-top:14px' }, save));
+  })() : null;
+  setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelAudit, panelHol, panelBackup, panelUpdate, panel2);
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
   loadLic();

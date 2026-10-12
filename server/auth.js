@@ -122,6 +122,7 @@ export const PERMISSIONS = [
   ['devices',         'Máy chấm công'],
   ['door_open',       'Mở cửa từ xa (kiểm soát cửa)'],
   ['salary',          'Bảng lương'],
+  ['audit',           'Xem công ảo / lương ảo (audit)'],
   ['holidays',        'Ngày lễ'],
   ['recompute',       'Tính lại công'],
   ['backup',          'Sao lưu & phục hồi'],

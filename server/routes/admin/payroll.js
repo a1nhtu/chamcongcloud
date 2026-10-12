@@ -1,6 +1,7 @@
 // Nhóm route CẤU HÌNH LƯƠNG + bảng lương + ngày lễ.
 import { db, getSetting, adminAttWhere } from '../../db.js';
 import { computePayrollTable, companyOtRates } from '../../payroll-calc.js';
+import { auditAllowed } from '../../virtual-att.js';
 import { sendCaughtError } from '../../util.js';
 
 export function registerPayrollRoutes(r, { need }) {
@@ -42,7 +43,9 @@ export function registerPayrollRoutes(r, { need }) {
     const dept = req.query.dept || null;
     const m = /^(\d{4})-(\d{2})$/.exec(month);
     if (!m) return res.status(400).json({ error: 'Thiếu tháng (YYYY-MM)' });
-    const data = computePayrollTable(+m[1], +m[2], dept);
+    const virt = req.query.virt === '1';
+    if (virt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
+    const data = computePayrollTable(+m[1], +m[2], { dept, virt });
     res.json({ ...data, month, mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
   });
 

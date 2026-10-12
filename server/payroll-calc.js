@@ -2,6 +2,7 @@
 import { db, getSetting, adminAttWhere, empHourly } from './db.js';
 import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
 import { splitOtTiers } from './attendance-calc.js';
+import { virtualOt } from './virtual-att.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const round0 = (n) => Math.round(n || 0);
@@ -33,19 +34,23 @@ export function getSalaryConfig(employeeId) {
   return db.prepare('SELECT * FROM salary_configs WHERE employee_id = ?').get(employeeId) || { employee_id: employeeId, ...DEFAULT_CFG, ...companyOtRates() };
 }
 
-// Tính lương 1 nhân viên trong kỳ [from,to]
-export function computePayrollForEmployee(employeeId, from, to) {
+// Tính lương 1 nhân viên trong kỳ [from,to]. opts.virt = LƯƠNG ẢO (tăng ca theo công ảo); opts.vmap = map công ảo nạp sẵn
+export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   const cfg = getSalaryConfig(employeeId);
   const workingDays = cfg.working_days_per_month || 26;
   const dailyRate = (cfg.daily_rate != null && cfg.daily_rate > 0) ? cfg.daily_rate : (cfg.basic_salary || 0) / workingDays;
   const hourlyRate = dailyRate / 8;
 
-  const rows = db.prepare(
-    `SELECT a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,
+  let rows = db.prepare(
+    `SELECT a.id, a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,
             s.ot_tier1_min, s.ot_tier2_min, s.ot_tier3_min, s.ot_tier2_rate, s.ot_tier3_rate, s.ot_tier4_rate
      FROM attendance a LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ? AND a.work_date >= ? AND a.work_date <= ?`
   ).all(employeeId, from, to);
+  if (opts.virt) {   // lương ảo: số phút tăng ca lấy theo công ảo
+    const vm = opts.vmap || virtualOt([employeeId], from, to);
+    rows = rows.map((r) => (vm.has(r.id) ? { ...r, ot_min: vm.get(r.id).ot_min } : r));
+  }
 
   // Chế độ tính công theo GIỜ: lương = tổng giờ làm × đơn giá giờ + phụ cấp
   if (empHourly(employeeId)) {
@@ -128,6 +133,7 @@ export function computePayrollTable(year, month, filter) {
   else if (f.dept) { sql += ' AND department = ?'; args.push(f.dept); }
   sql += ' ORDER BY department, full_name';
   const emps = db.prepare(sql).all(...args);
-  const rows = emps.map((e) => ({ emp: e, pay: computePayrollForEmployee(e.id, from, to) }));
+  const vmap = f.virt ? virtualOt(emps.map((e) => e.id), from, to) : null;   // lương ảo: nạp công ảo 1 lần cho cả bảng
+  const rows = emps.map((e) => ({ emp: e, pay: computePayrollForEmployee(e.id, from, to, { virt: !!f.virt, vmap }) }));
   return { from, to, rows };
 }

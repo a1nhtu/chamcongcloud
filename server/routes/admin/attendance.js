@@ -6,6 +6,7 @@ import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays } from '../../device-sync.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
+import { virtualOt, applyVirtual, auditAllowed } from '../../virtual-att.js';
 
 const WDVN = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 // HH:MM giờ VN từ ISO (cho nội dung thông báo)
@@ -150,8 +151,14 @@ export function registerAttendanceRoutes(r, { need }) {
       while (d <= end) { leaveMap.set(l.employee_id + '|' + d, { sym: (leaveSym[l.type] || 'N') + (l.half ? '½' : ''), type: l.type + (l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d); }
     }
 
+    // CÔNG ẢO (chỉ xem): tăng ca + giờ ra theo hạn mức, không hiện lượt quẹt thật / dấu sửa tay
+    const virt = req.query.virt === '1';
+    if (virt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
+    const vmap = virt ? virtualOt(empIds, from, to) : null;
+
     if (mode === 'summary') {
-      const att = db.prepare(`SELECT employee_id, work_date, check_in_at, work_unit, work_minutes, ot_min, late_min, early_min FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to);
+      let att = db.prepare(`SELECT id, employee_id, work_date, check_in_at, work_unit, work_minutes, ot_min, late_min, early_min FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to);
+      if (vmap) att = applyVirtual(att, vmap);
       const agg = new Map();
       for (const e of emps) agg.set(e.id, { id: e.id, code: e.code, name: e.full_name, dept: e.department || '', cong: 0, minutes: 0, ot: 0, lateN: 0, lateM: 0, earlyN: 0, earlyM: 0, leaveN: 0, days: 0 });
       for (const a of att) { const g = agg.get(a.employee_id); if (!g) continue; g.cong += a.work_unit || 0; g.minutes += a.work_minutes || 0; g.ot += a.ot_min || 0; if (a.late_min > 0) { g.lateN++; g.lateM += a.late_min; } if (a.early_min > 0) { g.earlyN++; g.earlyM += a.early_min; } if (a.check_in_at) g.days++; }
@@ -162,13 +169,14 @@ export function registerAttendanceRoutes(r, { need }) {
     }
 
     // detail
-    const att = db.prepare(`SELECT a.*, s.name shift_name FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
+    let att = db.prepare(`SELECT a.*, s.name shift_name FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
       WHERE a.employee_id IN (${ph}) AND a.work_date>=? AND a.work_date<=?`).all(...empIds, from, to);
-    const punches = db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
+    if (vmap) att = applyVirtual(att, vmap).map((a) => ({ ...a, manual: 0 }));
+    const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
     const punchMap = new Map();
     for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : '')); }   // ✎ = lượt thêm tay
 
-    const marks = new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
+    const marks = vmap ? new Set() : new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
     const rows = []; const seen = new Set();
     for (const a of att) {
       const e = empById.get(a.employee_id); if (!e) continue;
@@ -177,7 +185,8 @@ export function registerAttendanceRoutes(r, { need }) {
       rows.push({
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
-        punches: punchMap.get(key) || [], late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
+        punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || []),   // công ảo: chỉ giờ vào · ra ảo
+        late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
         cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: lv ? lv.sym : '',
         status: a.check_out_at ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
         att_id: a.id,

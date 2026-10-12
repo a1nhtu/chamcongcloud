@@ -1,6 +1,6 @@
 // Nhóm route NHÂN VIÊN + phân quyền chi tiết + khoá thiết bị chấm công điện thoại.
 import ExcelJS from 'exceljs';
-import { db } from '../../db.js';
+import { db, getSetting } from '../../db.js';
 import { hashPassword, passwordHasher, PERMISSIONS } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
@@ -57,7 +57,8 @@ function saveLeaveFields(id, b) {
 
 export function registerEmployeeRoutes(r, { need }) {
   // Danh mục quyền (cho giao diện dựng ô tích phân quyền)
-  r.get('/perm-catalog', (req, res) => res.json({ permissions: PERMISSIONS }));
+  // quyền "công ảo" chỉ hiện khi tài khoản tổng đã bật tính năng (tắt thì không ai thấy tính năng này tồn tại)
+  r.get('/perm-catalog', (req, res) => res.json({ permissions: PERMISSIONS.filter(([k]) => k !== 'audit' || getSetting('audit_enabled', '0') === '1') }));
 
   // Đặt KIỂU CHẤM CÔNG hàng loạt: { mode: ''|'shift'|'hourly', department? | ids? } (không gửi phạm vi = tất cả NV)
   r.post('/employees/att-mode', need('employees'), (req, res) => {

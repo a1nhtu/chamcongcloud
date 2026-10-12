@@ -6,6 +6,7 @@ import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
+import { virtualOt, applyVirtual, auditAllowed } from '../virtual-att.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -98,7 +99,7 @@ const toPairs = (ts) => { const r = []; for (let i = 0; i < ts.length; i += 2) r
 //  - quy tắc "Nhiều lần vào/ra" (ca chọn "pairs", hoặc chế độ theo giờ chọn "theo cặp") và ngày có > 2 lần chấm
 //    → liệt kê từng cặp: cin/cout nhiều dòng, pairs = [[vào, ra], ...]
 //  - còn lại (FILO, IDM…) → giờ vào/ra của bản ghi công (đầu–cuối), pairs = null
-function inOutResolver(employees, from, to) {
+function inOutResolver(employees, from, to, virt = false) {
   const modeOf = new Map(employees.map((e) => [e.id, effMode(e)]));
   const hourlyOf = (empId) => (modeOf.get(empId) || globalAttMode()) === 'hourly';   // theo kiểu chấm công của từng NV
   const hourlyRule = getSetting('hourly_merge_rule', 'filo');
@@ -111,7 +112,7 @@ function inOutResolver(employees, from, to) {
   };
   function calc(empId, date, c) {
     const single = { cin: c && c.check_in_at ? isoToVnHM(c.check_in_at) : '', cout: c && c.check_out_at ? isoToVnHM(c.check_out_at) : '', pairs: null };
-    if (!c || !c.check_in_at) return single;
+    if (!c || !c.check_in_at || virt) return single;   // công ảo: chỉ giờ vào / ra ảo, không liệt kê lượt quẹt thật
     if (!timesOf) timesOf = dayTimesLoader(from, to, new Set(employees.map((e) => e.id)));
     const ts = timesOf(empId, date);
     if (ts.length <= 2) return single;
@@ -139,13 +140,16 @@ function loadRange(from, to, filter) {
   const emode = filter && typeof filter === 'object' ? filter.emode : null;
   if (emode) employees = employees.filter((e) => effMode(e) === emode);
 
-  const results = db.prepare(
+  const results0 = db.prepare(
     `SELECT a.*, e.code, e.full_name, e.department, s.name AS shift_name,
             s.start_time AS shift_start, s.end_time AS shift_end
      FROM attendance a JOIN employees e ON e.id = a.employee_id
      LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.work_date >= ? AND a.work_date <= ?`
   ).all(from, to);
+  // CÔNG ẢO: tăng ca cắt theo hạn mức, giờ ra / vào lùi tương ứng, ngày chỉ toàn tăng ca bị cắt hết thì bỏ
+  const virt = !!(filter && typeof filter === 'object' && filter.virt);
+  const results = virt ? applyVirtual(results0, virtualOt(employees.map((e) => e.id), from, to)) : results0;
   // shift join fallback: nếu không có phân ca ngày, lấy ca mặc định
   const shiftsById = new Map(db.prepare('SELECT * FROM shifts').all().map((s) => [s.id, s]));
   const empById = new Map(employees.map((e) => [e.id, e]));
@@ -215,7 +219,7 @@ function loadRange(from, to, filter) {
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
-  return { from, to, weekend, employees, cell, holidays, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend) };
+  return { from, to, weekend, employees, cell, holidays, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt };
 }
 
 // Loại nghỉ theo đơn từ (cột "type" của leave_requests). Loại lạ → "Nghỉ khác".
@@ -326,11 +330,11 @@ function buildReport(type, from, to, filter) {
 }
 
 function buildReportRaw(type, from, to, filter) {
-  if (type === 'manualtime') return buildManualTime(from, to);
+  if (type === 'manualtime') return filter && filter.virt ? { title: `Giờ sửa/thêm bằng tay ${periodLabel(from, to)}`, columns: [], rows: [] } : buildManualTime(from, to);
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
-  const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1]);   // giờ vào/ra theo quy tắc ghép log
+  const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1], ctx.virt);   // giờ vào/ra theo quy tắc ghép log
   const HOURLY = formHourly(filter);   // mẫu theo giờ: bỏ công/tăng ca, dùng tổng giờ
   const sortedResults = () => [...ctx.cell.values()].sort((a, b) =>
     a.full_name === b.full_name ? (a.work_date < b.work_date ? -1 : 1) : (a.full_name < b.full_name ? -1 : 1));
@@ -719,7 +723,7 @@ function buildReportRaw(type, from, to, filter) {
       ];
       // Số lần chấm: ưu tiên đếm từ máy (device_punches); NV chấm điện thoại thì đếm vào/ra
       const pcMap = new Map();
-      for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM device_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
+      if (!ctx.virt) for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM device_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
         pcMap.set(p.employee_id + '|' + p.work_date, p.c);
       const rows = sortedResults().filter((c) => c.check_in_at).map((c) => {
         const mins = c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
@@ -799,7 +803,7 @@ function buildReportRaw(type, from, to, filter) {
 async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly) {
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
-  const ioOf = inOutResolver(ctx.employees, from, to);
+  const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
   const HOURLY = formHourly(filter);
   const PAIRS = 4;
   const TITLE = onlyLateEarly ? 'BẢNG ĐI MUỘN / VỀ SỚM' : 'BẢNG CHI TIẾT CHẤM CÔNG';
@@ -998,7 +1002,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
 async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
-  const ioOf = inOutResolver(ctx.employees, from, to);   // giờ vào/ra theo quy tắc ghép log
+  const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);   // giờ vào/ra theo quy tắc ghép log
   const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
   const totalCols = FIXED + days.length * 2;
@@ -1111,7 +1115,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
     cell.border = border;
   }
 
-  const ioOf = inOutResolver(ctx.employees, from, to);
+  const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
   let r = H + 2, stt = 0;
   for (const e of ctx.employees) {
     stt++;
@@ -1196,17 +1200,19 @@ function filterFromQuery(q) {
   const ids = String(q.ids || '').split(',').map(Number).filter(Boolean);
   const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
   const m = (v) => (v === 'shift' || v === 'hourly' ? v : null);
-  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode) };
+  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: q.virt === '1' };
 }
+// công ảo chỉ cho người được phép (tính năng bật + quyền "audit")
+const virtGuard = (req, res, next) => (req.query.virt === '1' && !auditAllowed(req.user) ? res.status(403).json({ error: 'Không có quyền dùng chức năng này' }) : next());
 
-r.get('/data', (req, res) => {
+r.get('/data', virtGuard, (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const type = req.query.type || 'horizontal';
   res.json(buildReport(type, from, to, filterFromQuery(req.query)));
 });
 
 // Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to
-r.get('/export.xlsx', async (req, res) => {
+r.get('/export.xlsx', virtGuard, async (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const filter = filterFromQuery(req.query);
   const type = req.query.type || 'horizontal';
