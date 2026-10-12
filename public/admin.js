@@ -3478,6 +3478,7 @@ async function pageEditAtt() {
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
+      ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Sửa giờ chấm công". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
     startLazy(null);
@@ -3510,6 +3511,7 @@ async function pageEditAtt() {
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
+      ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên. Chọn phòng ban / nhân viên (nút 🏢 / 👥) rồi bấm "↻ Tính lại" để tính lại đúng phạm vi. Bấm "Chi tiết" để xem/sửa 1 người.`),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
@@ -3814,6 +3816,11 @@ function auditPanelEl(s) {
   const save = el('button', { class: 'btn' }, 'Lưu hạn mức công ảo');
   save.onclick = async () => {
     try {
+      if (String(auYear.value) !== String(s.audit_ot_year_h ?? 0)) {
+        let locked = [];
+        try { locked = ((await api('/admin/audit-locks')).rows || []).filter((r) => r.lock); } catch {}
+        if (locked.length && !confirm(`Đang có ${locked.length} tháng đã chốt công ảo. Đổi hạn mức NĂM chỉ áp cho các tháng CHƯA chốt (tháng đã chốt giữ nguyên số cũ, phần năm còn lại tính tiếp từ số đã chốt).\nVẫn đổi?`)) return;
+      }
       await api('/admin/settings', { method: 'PUT', body: { audit_ot_week_h: auWeek.value, audit_ot_month_h: auMonth.value, audit_ot_year_h: auYear.value,
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value } });
       SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
@@ -3834,6 +3841,45 @@ function auditPanelEl(s) {
     el('div', { style: 'margin-top:14px' }, save));
 }
 
+/* ---------- CHỐT KỲ công ảo: chốt / mở chốt từng tháng lương ---------- */
+function lockPanelEl() {
+  const box = el('div', {}, loading());
+  const panel = el('div', { class: 'panel', style: 'padding:20px;max-width:760px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, '🔒 Chốt kỳ công ảo'),
+    el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Chốt 1 tháng lương = giữ nguyên công ảo / lương ảo CẢ 3 MỨC của tháng đó đúng như lúc chốt: xem lại, in lại, tài khoản kiểm tra xem đều ra cùng số — kể cả khi sau này sửa giờ, tính lại công hay đổi hạn mức. Hạn mức NĂM của các tháng sau tính tiếp từ số đã chốt. Muốn tính lại tháng đó: bấm "Mở chốt".'),
+    box);
+  const dm = (d) => d.slice(8) + '/' + d.slice(5, 7);
+  const draw = async () => {
+    let d;
+    try { d = await api('/admin/audit-locks'); } catch (e) { box.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
+    const tb = el('tbody');
+    for (const m of d.rows) {
+      const L = m.lock, lbl = `${m.month.slice(5)}/${m.month.slice(0, 4)}`;
+      const st = L ? el('span', { class: 'pill ok' }, `🔒 Đã chốt ${L.locked_at.slice(8, 10)}/${L.locked_at.slice(5, 7)} ${L.locked_at.slice(11, 16)}` + (L.locked_by ? ' · ' + L.locked_by : ''))
+        : el('span', { class: 'pill ' + (m.ended ? 'muted' : 'warn') }, m.ended ? 'Chưa chốt' : 'Đang trong kỳ');
+      const btn = el('button', { class: 'btn sm' + (L ? ' ghost' : '') }, L ? 'Mở chốt' : '🔒 Chốt');
+      btn.onclick = async () => {
+        const ask = L ? `Mở chốt công ảo tháng ${lbl}?\nCông ảo tháng này sẽ tính lại theo dữ liệu và hạn mức hiện tại (có thể khác bản đã in).`
+          : `Chốt công ảo tháng ${lbl} (${dm(m.from)} → ${dm(m.to)})?\nTừ nay công ảo / lương ảo cả 3 mức của tháng này giữ nguyên như hiện tại.` + (m.ended ? '' : '\n\n⚠ Tháng này CHƯA KẾT THÚC — ngày công phát sinh sau khi chốt sẽ KHÔNG có trong công ảo.');
+        if (!confirm(ask)) return;
+        btn.disabled = true; btn.textContent = L ? 'Đang mở…' : 'Đang chốt…';
+        try {
+          if (L) { await api('/admin/audit-locks/' + m.month, { method: 'DELETE' }); toast('Đã mở chốt tháng ' + lbl, 'ok'); }
+          else { const r = await api('/admin/audit-locks', { method: 'POST', body: { month: m.month } }); toast(`Đã chốt tháng ${lbl}: ${r.rows.toLocaleString('vi')} dòng công, ${r.people} nhân viên`, 'ok'); }
+          draw();
+        } catch (e) { toast(e.message, 'err'); btn.disabled = false; btn.textContent = L ? 'Mở chốt' : '🔒 Chốt'; }
+      };
+      tb.append(el('tr', {}, el('td', {}, el('b', {}, 'Tháng ' + lbl)), el('td', { class: 'muted' }, `${dm(m.from)} → ${dm(m.to)}`), el('td', {}, st), el('td', {}, btn)));
+    }
+    box.replaceChildren(el('div', { class: 'tbl-scroll' }, el('table', { class: 'data' }, el('thead', {}, el('tr', {}, ...['Tháng lương', 'Kỳ', 'Trạng thái', ''].map((h) => el('th', {}, h)))), tb)));
+  };
+  draw();
+  return panel;
+}
+// Dòng báo "tháng đã chốt" khi đang xem công ảo (Tính công / Báo cáo)
+const lockNote = (locks) => (locks && locks.length && _virt ? el('div', { class: 'pill ok', style: 'display:inline-block;margin:0 0 8px' },
+  `🔒 Đã chốt công ảo: tháng ${locks.map((m) => m.slice(5) + '/' + m.slice(0, 4)).join(', ')} — số ảo giữ nguyên như lúc chốt`) : null);
+
 /* ---------- TRANG "CÔNG ẢO / LƯƠNG ẢO" (menu riêng, chỉ hiện khi tài khoản tổng bật) ---------- */
 async function pageAudit() {
   setMain(head('🎭 Công ảo / lương ảo'), loading());
@@ -3850,6 +3896,7 @@ async function pageAudit() {
       card('🧮', 'Bảng công ảo', 'Tính công theo ngày: giờ vào / ra, tăng ca ảo (chỉ xem)', 'editatt'),
       card('📅', 'Báo cáo công ảo', 'Mọi báo cáo theo Ảo 1 / 2 / 3 + 2 mẫu so sánh 3 mức (nhóm "Công ảo 3 mức")', 'report'),
       hasPerm('salary') ? card('💰', 'Bảng lương ảo', 'Bảng lương / phiếu lương với tiền tăng ca theo công ảo', 'salary') : null),
+    lockPanelEl(),
     hasPerm('settings') ? auditPanelEl(SETTINGS) : el('div', { class: 'map-hint' }, 'Hạn mức tăng ca do người có quyền Cài đặt chỉnh.'));
 }
 
@@ -5193,7 +5240,7 @@ async function pageReport() {
       // Khung bảng cao vừa màn hình, tự cuộn bên trong → thanh kéo ngang luôn nằm ở đáy khung (không phải kéo xuống cuối trang);
       // dòng tiêu đề + 2 cột đầu (mã, tên) đứng yên khi cuộn.
       const box = el('div', { class: 'panel rep-scroll' }, tbl);
-      wrap.append(el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title), box);
+      wrap.append(...[lockNote(data.locks)].filter(Boolean), el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title), box);
       const pinCols = data.columns.some(c => c.key.startsWith('d20')) ? (data.columns[0].key === 'stt' ? 4 : 2) : 0;
       setTimeout(() => {
         box.style.maxHeight = Math.max(300, innerHeight - box.getBoundingClientRect().top - 16) + 'px';

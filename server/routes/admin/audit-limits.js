@@ -3,7 +3,8 @@
 // Thứ tự áp: ô ngày → mức riêng NV → mặc định công ty (Cài đặt audit_l{n}_day; để trống = không giới hạn).
 // Công ảo tính lúc xem (virtual-att.js) nên lưu xong không cần "Tính lại".
 import { db, setSetting, adminAttWhere } from '../../db.js';
-import { auditAllowed, levelDefaults } from '../../virtual-att.js';
+import { auditAllowed, levelDefaults, payPeriod, payMonthOf, lockMonth, unlockMonth } from '../../virtual-att.js';
+import { vnDateStr } from '../../util.js';
 import { sendCaughtError } from '../../util.js';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
@@ -72,6 +73,25 @@ export function registerAuditLimitRoutes(r, { need }) {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/audit-limits/apply', e); }
     res.json({ ok: true, cells: n, people: ids.length, days: days.length });
+  });
+
+  // ---------- CHỐT KỲ công ảo: 12 tháng lương gần nhất + các tháng đã chốt ----------
+  r.get('/audit-locks', need('audit'), guard, (req, res) => {
+    const locks = new Map(db.prepare('SELECT month, from_date, to_date, locked_at, locked_by, rows FROM audit_locks').all().map((l) => [l.month, l]));
+    const today = vnDateStr(), cur = payMonthOf(today);
+    const months = [];
+    let y = +cur.slice(0, 4), m = +cur.slice(5, 7);
+    for (let i = 0; i < 13; i++) { months.push(`${y}-${String(m).padStart(2, '0')}`); m--; if (!m) { m = 12; y--; } }
+    for (const k of locks.keys()) if (!months.includes(k)) months.push(k);
+    months.sort().reverse();
+    res.json({ today, rows: months.map((k) => { const p = payPeriod(k); return { month: k, from: p.from, to: p.to, ended: p.to < today, lock: locks.get(k) || null }; }) });
+  });
+  r.post('/audit-locks', need('audit'), guard, (req, res) => {
+    try { res.json({ ok: true, ...lockMonth(String(req.body?.month || ''), req.user.full_name || req.user.username || '') }); }
+    catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); return sendCaughtError(res, 'POST /admin/audit-locks', e); }
+  });
+  r.delete('/audit-locks/:month', need('audit'), guard, (req, res) => {
+    try { unlockMonth(req.params.month); res.json({ ok: true }); } catch (e) { return sendCaughtError(res, 'DELETE /admin/audit-locks', e); }
   });
 
   // Sửa từng ô (sửa trực tiếp trên lưới / dán từ Excel): [{ employee_id, date ('*' = mức riêng NV), level, minutes }]

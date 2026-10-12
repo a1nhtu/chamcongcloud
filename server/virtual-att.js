@@ -71,6 +71,12 @@ function payKeyFn() {
   return { key, start, end };
 }
 
+// Kỳ lương 'YYYY-MM' → { from, to }
+export function payPeriod(month) { const P = payKeyFn(); const y = +month.slice(0, 4), m = +month.slice(5, 7); return { from: P.start(y, m), to: P.end(y, m) }; }
+export function payMonthOf(d) { return payKeyFn().key(d); }
+// Các tháng lương ĐÃ CHỐT giao với [from, to]
+export function locksIn(from, to) { return db.prepare('SELECT month, from_date, to_date FROM audit_locks WHERE to_date >= ? AND from_date <= ? ORDER BY month').all(from, to); }
+
 // Cắt tổng tăng ca của nhóm dòng `items` ({v}) xuống `cap` phút
 function reduce(items, cap, S, seed) {
   const total = items.reduce((a, x) => a + x.v, 0);
@@ -124,6 +130,20 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
   const ids = [...new Set(empIds.map(Number).filter(Boolean))];
   const lv = [1, 2, 3].includes(+level) ? +level : 1;
   const dayCap = dayLimitFn(ids, L, R, lv);
+  // CHỐT KỲ: tháng đã chốt giữ nguyên bản chụp; tăng ca đã chốt vẫn được cộng vào hạn mức NĂM của các tháng sau
+  const locks = locksIn(L, R);
+  const lockedDay = (d) => locks.some((k) => d >= k.from_date && d <= k.to_date);
+  const lockedUse = new Map();   // empId|tháng → tổng phút tăng ca ảo đã chốt (chỉ loại tính vào hạn mức)
+  if (locks.length) {
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      for (const r of db.prepare(`SELECT employee_id, month, thuong, cuoi_tuan, le FROM audit_lock_sums WHERE level=? AND month IN (${locks.map(() => '?').join(',')})
+          AND employee_id IN (${chunk.map(() => '?').join(',')})`).all(lv, ...locks.map((k) => k.month), ...chunk))
+        lockedUse.set(r.employee_id + '|' + r.month, (r.thuong || 0) + (S.inclWeekend ? r.cuoi_tuan || 0 : 0) + (S.inclHoliday ? r.le || 0 : 0));
+    }
+    const want = locks.filter((k) => k.to_date >= from && k.from_date <= to);
+    if (want.length) out.locked = { ranges: want.map((k) => ({ from: k.from_date < from ? from : k.from_date, to: k.to_date > to ? to : k.to_date })), rows: lockedRows(ids, want, lv, from, to) };
+  }
   const rows = [];
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
@@ -134,11 +154,12 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
   const counted = (t) => t === 'le' ? S.inclHoliday : t === 'cuoi_tuan' ? S.inclWeekend : true;
   const byEmp = new Map();
   for (const r of rows) {
-    if (!counted(r.ot_type || 'thuong')) continue;
+    if (!counted(r.ot_type || 'thuong') || lockedDay(r.work_date)) continue;   // tháng đã chốt: không tính lại
     if (!byEmp.has(r.employee_id)) byEmp.set(r.employee_id, []);
     byEmp.get(r.employee_id).push({ r, date: r.work_date, type: r.ot_type || 'thuong', v: r.ot_min || 0 });
   }
   const group = (items, keyFn) => { const m = new Map(); for (const x of items) { const k = keyFn(x.date); if (!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; };
+  if (S.yearMin > 0) for (const k of lockedUse.keys()) { const eid = +k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); }   // NV chỉ có tháng đã chốt
   for (const [eid, items] of byEmp) {
     items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     for (const [d, xs] of group(items, (d) => d)) { const cap = dayCap(eid, d); if (cap != null) reduce(xs, cap, S, eid * 7919 + Date.parse(d) / DAY + lv); }
@@ -147,8 +168,10 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
     if (S.monthMin > 0) for (const [k, xs] of months) reduce(xs, S.monthMin, S, eid * 1299709 + +k.replace('-', ''));
     if (S.yearMin > 0) {
       let year = null, used = 0;
-      for (const k of [...months.keys()].sort()) {
+      const lockedKs = locks.map((k) => k.month).filter((m) => lockedUse.has(eid + '|' + m));
+      for (const k of [...new Set([...months.keys(), ...lockedKs])].sort()) {
         if (k.slice(0, 4) !== year) { year = k.slice(0, 4); used = 0; }
+        if (!months.has(k)) { used += lockedUse.get(eid + '|' + k) || 0; continue; }   // tháng đã chốt: cộng đúng số đã chốt
         const xs = months.get(k);
         reduce(xs, Math.max(0, S.yearMin - used), S, eid * 15485863 + +k.replace('-', ''));
         used += xs.reduce((a, x) => a + x.v, 0);
@@ -188,14 +211,107 @@ function shiftTimes(r, cut, v) {
 }
 
 // Áp công ảo lên danh sách dòng attendance (có id): đổi ot_min / giờ vào ra; bỏ dòng bị ẩn
-export function applyVirtual(rows, vmap) {
-  if (!vmap || !vmap.size) return rows;
+// Công ảo đã chốt của mức `lv` cho các NV trong [from, to]: Map 'empId|ngày' → [dòng công ảo] (bỏ dòng bị ẩn)
+const toSec = (iso) => (iso ? Math.round(Date.parse(iso) / 1000) : null);
+const toIso = (sec) => (sec == null ? null : new Date(sec * 1000).toISOString());
+function lockedRows(ids, locks, lv, from, to) {
+  const mq = locks.map(() => '?').join(','), months = locks.map((k) => k.month);
+  const emp = new Map(), sh = new Map(db.prepare('SELECT id, name, start_time, end_time FROM shifts').all().map((x) => [x.id, x]));
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500), eq = chunk.map(() => '?').join(',');
+    for (const e of db.prepare(`SELECT id, code, full_name, department FROM employees WHERE id IN (${eq})`).all(...chunk)) emp.set(e.id, e);
+    const diff = new Map();
+    for (const d of db.prepare(`SELECT employee_id, work_date, i, cin, cout, ot, hidden FROM audit_lock_att WHERE level=? AND month IN (${mq}) AND employee_id IN (${eq}) AND work_date >= ? AND work_date <= ?`).all(lv, ...months, ...chunk, from, to))
+      diff.set(d.employee_id + '|' + d.work_date + '|' + d.i, d);
+    for (const b of db.prepare(`SELECT * FROM audit_lock_att WHERE level=0 AND month IN (${mq}) AND employee_id IN (${eq}) AND work_date >= ? AND work_date <= ? ORDER BY employee_id, work_date, i`).all(...months, ...chunk, from, to)) {
+      const k = b.employee_id + '|' + b.work_date, df = diff.get(k + '|' + b.i);
+      if (df && df.hidden) continue;
+      const e = emp.get(b.employee_id) || {}, x = sh.get(b.shift_id) || {};
+      const row = { id: b.att_id, employee_id: b.employee_id, work_date: b.work_date, shift_id: b.shift_id, check_in_at: toIso(df ? df.cin : b.cin), check_out_at: toIso(df ? df.cout : b.cout),
+        late_min: b.late || 0, early_min: b.early || 0, ot_min: df ? df.ot || 0 : b.ot || 0, ot_type: b.ot_type, work_minutes: b.wmin || 0, work_unit: b.wu || 0, day_status: b.day_status, manual: b.manual || 0,
+        shift_source: null, note: null, code: e.code, full_name: e.full_name, department: e.department, shift_name: x.name || null, shift_start: x.start_time || null, shift_end: x.end_time || null };
+      if (!out.has(k)) out.set(k, []);
+      out.get(k).push(row);
+    }
+  }
+  return out;
+}
+
+// CHỐT KỲ 1 tháng lương: lưu công ảo cả 3 mức (tính như hiện tại) vào CSDL → từ nay xem / in / lương ảo của tháng này luôn ra đúng số đã chốt
+export function lockMonth(month, by = '') {
+  if (!/^\d{4}-\d{2}$/.test(month)) throw Object.assign(new Error('Tháng không hợp lệ'), { status: 400 });
+  if (db.prepare('SELECT 1 FROM audit_locks WHERE month=?').get(month)) throw Object.assign(new Error('Tháng này đã chốt'), { status: 409 });
+  const { from, to } = payPeriod(month);
+  const rows = db.prepare(`SELECT a.* FROM attendance a JOIN employees e ON e.id = a.employee_id
+    WHERE a.work_date >= ? AND a.work_date <= ? AND IFNULL(e.audit_only, 0) = 0 ORDER BY a.employee_id, a.work_date, a.check_in_at, a.id`).all(from, to);
+  const ids = [...new Set(rows.map((r) => r.employee_id))];
+  const base = db.prepare(`INSERT INTO audit_lock_att(month, level, employee_id, work_date, i, att_id, shift_id, cin, cout, late, early, ot, ot_type, wmin, wu, day_status, manual, hidden)
+    VALUES (?,0,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0)`);
+  const dif = db.prepare('INSERT INTO audit_lock_att(month, level, employee_id, work_date, i, cin, cout, ot, hidden) VALUES (?,?,?,?,?,?,?,?,?)');
+  const sum = db.prepare('INSERT OR REPLACE INTO audit_lock_sums(month, level, employee_id, thuong, cuoi_tuan, le) VALUES (?,?,?,?,?,?)');
+  const vms = [1, 2, 3].map((lv) => virtualOt(ids, from, to, true, lv));   // tính TRƯỚC khi ghi khoá (tháng này chưa chốt)
+  db.exec('BEGIN');
+  try {
+    const idx = new Map();   // thứ tự dòng trong NV × ngày (khớp level 0)
+    for (const r of rows) {
+      const k = r.employee_id + '|' + r.work_date; const i = idx.get(k) || 0; idx.set(k, i + 1); r._i = i;
+      base.run(month, r.employee_id, r.work_date, i, r.id, r.shift_id, toSec(r.check_in_at), toSec(r.check_out_at), r.late_min || 0, r.early_min || 0, r.ot_min || 0, r.ot_type || null,
+        r.work_minutes || 0, r.work_unit || 0, r.day_status || null, r.manual ? 1 : 0);
+    }
+    [1, 2, 3].forEach((lv, j) => {
+      const vm = vms[j], tot = new Map();
+      for (const r of rows) {
+        const v = vm.get(r.id);
+        if (v) dif.run(month, lv, r.employee_id, r.work_date, r._i, toSec(v.check_in_at), toSec(v.check_out_at), v.ot_min || 0, v.hidden ? 1 : 0);
+        const ot = v ? (v.hidden ? 0 : v.ot_min) : (r.ot_min || 0); if (!ot) continue;
+        const t = tot.get(r.employee_id) || { thuong: 0, cuoi_tuan: 0, le: 0 }; const ty = r.ot_type === 'le' ? 'le' : r.ot_type === 'cuoi_tuan' ? 'cuoi_tuan' : 'thuong';
+        t[ty] += ot; tot.set(r.employee_id, t);
+      }
+      for (const [eid, t] of tot) sum.run(month, lv, eid, t.thuong, t.cuoi_tuan, t.le);
+    });
+    db.prepare('INSERT INTO audit_locks(month, from_date, to_date, locked_by, rows) VALUES (?,?,?,?,?)').run(month, from, to, by, rows.length);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return { month, from, to, rows: rows.length, people: ids.length };
+}
+export function unlockMonth(month) {
+  db.exec('BEGIN');
+  try {
+    for (const t of ['audit_lock_att', 'audit_lock_sums', 'audit_locks']) db.prepare(`DELETE FROM ${t} WHERE month=?`).run(month);
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+}
+
+// Tháng ĐÃ CHỐT: bỏ dòng công hiện tại, thay bằng đúng bản đã chốt (giữ các cột ghép thêm của nơi gọi, VD tên NV / ca);
+// ngày đã chốt mà nay không còn dòng thật vẫn hiện theo bản chốt.
+export function applyVirtual(rows, vmap, onlyEmp = null) {   // onlyEmp: map dùng chung nhiều NV → chỉ thêm ngày đã chốt của NV này
+  const LK = vmap && vmap.locked;
+  if (!vmap || (!vmap.size && !(LK && LK.ranges.length))) return rows;
+  const inLocked = (d) => !!LK && LK.ranges.some((r) => d >= r.from && d <= r.to);
+  const done = new Set();
   const res = [];
   for (const row of rows) {
+    if (inLocked(row.work_date)) {
+      const k = row.employee_id + '|' + row.work_date;
+      if (done.has(k)) continue;
+      done.add(k);
+      for (const s of LK.rows.get(k) || []) res.push({ ...row, ...s });
+      continue;
+    }
     const v = vmap.get(row.id);
     if (!v) { res.push(row); continue; }
     if (v.hidden) continue;
     res.push({ ...row, ot_min: v.ot_min, check_in_at: v.check_in_at, check_out_at: v.check_out_at });
+  }
+  if (LK) {
+    const extra = [];
+    for (const [k, arr] of LK.rows) if (!done.has(k) && (onlyEmp == null || k.startsWith(onlyEmp + '|'))) for (const s of arr) extra.push({ ...s });
+    if (extra.length) {   // ngày đã chốt mà nay không còn dòng thật → xếp vào đúng chỗ theo ngày (giữ chiều sắp xếp của nơi gọi)
+      const asc = !res.length || res[0].work_date <= res[res.length - 1].work_date;
+      res.push(...extra);
+      res.sort((p, q) => (p.work_date === q.work_date ? 0 : (p.work_date < q.work_date) === asc ? -1 : 1));
+    }
   }
   return res;
 }

@@ -6,7 +6,7 @@ import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
-import { virtualOt, applyVirtual, auditAllowed, virtLevel } from '../virtual-att.js';
+import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -335,19 +335,23 @@ function buildReport(type, from, to, filter) {
 function buildAudit3(type, from, to, filter) {
   const ctx = loadRange(from, to, { ...filter, virt: 0 });
   const emps = ctx.employees, ids = emps.map((e) => e.id);
-  const att = ids.length ? db.prepare(`SELECT id, employee_id, work_date, check_in_at, check_out_at, ot_min, work_unit FROM attendance
+  const att = ids.length ? db.prepare(`SELECT id, employee_id, work_date, check_in_at, check_out_at, ot_min, ot_type, work_unit, work_minutes, shift_id FROM attendance
     WHERE work_date >= ? AND work_date <= ? AND employee_id IN (${ids.map(() => '?').join(',')}) ORDER BY work_date, check_in_at`).all(from, to, ...ids) : [];
-  const vm = [null, ...[1, 2, 3].map((lv) => virtualOt(ids, from, to, false, lv))];
-  const at = (a, lv) => { const v = vm[lv].get(a.id); return !v ? a : v.hidden ? null : { ...a, ...v }; };
+  // gộp mỗi NV × ngày: vào sớm nhất, ra muộn nhất, cộng tăng ca / công — cho bản thật và từng mức ảo (tháng đã chốt = bản chốt)
+  const byKey = (rs) => { const m = new Map(); for (const a of rs) { const k = a.employee_id + '|' + a.work_date; const g = m.get(k);
+    if (!g) m.set(k, { employee_id: a.employee_id, work_date: a.work_date, check_in_at: a.check_in_at, check_out_at: a.check_out_at, ot_min: a.ot_min || 0, work_unit: a.work_unit || 0 });
+    else { if (a.check_in_at && (!g.check_in_at || a.check_in_at < g.check_in_at)) g.check_in_at = a.check_in_at; if (a.check_out_at && (!g.check_out_at || a.check_out_at > g.check_out_at)) g.check_out_at = a.check_out_at; g.ot_min += a.ot_min || 0; g.work_unit += a.work_unit || 0; } } return m; };
+  const V = [byKey(att), ...[1, 2, 3].map((lv) => byKey(applyVirtual(att, virtualOt(ids, from, to, false, lv))))];
+  const keys = [...new Set(V.flatMap((m) => [...m.keys()]))].sort((p, q) => (p.split('|')[1] < q.split('|')[1] ? -1 : 1));
   const h = (m) => round2((m || 0) / 60);
   const PERIOD = periodLabel(from, to);
   const base = [{ key: 'code', label: 'Mã NV' }, { key: 'name', label: 'Họ tên' }, { key: 'dept', label: 'Bộ phận' }];
   if (type === 'audit3') {
     const agg = new Map(emps.map((e) => [e.id, { code: e.code, name: e.full_name, dept: e.department || '', cong: 0, days: 0, ot0: 0, ot1: 0, ot2: 0, ot3: 0 }]));
-    for (const a of att) {
-      const g = agg.get(a.employee_id); if (!g) continue;
-      g.cong += a.work_unit || 0; if (a.check_in_at) g.days++; g.ot0 += a.ot_min || 0;
-      for (const lv of [1, 2, 3]) { const x = at(a, lv); if (x) g['ot' + lv] += x.ot_min || 0; }
+    for (const k of keys) {
+      const g = agg.get(+k.split('|')[0]); if (!g) continue;
+      const a = V[0].get(k); if (a) { g.cong += a.work_unit || 0; if (a.check_in_at) g.days++; g.ot0 += a.ot_min || 0; }
+      for (const lv of [1, 2, 3]) { const x = V[lv].get(k); if (x) g['ot' + lv] += x.ot_min || 0; }
     }
     const rows = [...agg.values()].filter((g) => g.days || g.ot0).map((g, i) => ({ stt: i + 1, ...g, cong: round2(g.cong), ot0: h(g.ot0), ot1: h(g.ot1), ot2: h(g.ot2), ot3: h(g.ot3) }));
     return { title: `Tổng hợp tăng ca 3 mức công ảo ${PERIOD}`, columns: [{ key: 'stt', label: 'STT' }, ...base, { key: 'days', label: 'Ngày đi làm' }, { key: 'cong', label: 'Công' },
@@ -355,11 +359,10 @@ function buildAudit3(type, from, to, filter) {
   }
   const empById = new Map(emps.map((e) => [e.id, e]));
   const rows = [];
-  for (const a of att) {
-    const e = empById.get(a.employee_id); if (!e) continue;
-    const r = { date: fmtDMY(a.work_date), wd: WD[vnWeekday(a.work_date)] || '', code: e.code, name: e.full_name, dept: e.department || '',
-      in0: isoToVnHM(a.check_in_at), out0: isoToVnHM(a.check_out_at), ot0: h(a.ot_min) };
-    for (const lv of [1, 2, 3]) { const x = at(a, lv); r['in' + lv] = x ? isoToVnHM(x.check_in_at) : '—'; r['out' + lv] = x ? isoToVnHM(x.check_out_at) : '—'; r['ot' + lv] = x ? h(x.ot_min) : 0; }
+  for (const k of keys) {
+    const [eid, d] = k.split('|'); const e = empById.get(+eid); if (!e) continue;
+    const r = { date: fmtDMY(d), wd: WD[vnWeekday(d)] || '', code: e.code, name: e.full_name, dept: e.department || '' };
+    for (const lv of [0, 1, 2, 3]) { const x = V[lv].get(k); r['in' + lv] = x ? isoToVnHM(x.check_in_at) : '—'; r['out' + lv] = x ? isoToVnHM(x.check_out_at) : '—'; r['ot' + lv] = x ? h(x.ot_min) : 0; }
     rows.push(r);
   }
   rows.sort((p, q) => (p.code < q.code ? -1 : p.code > q.code ? 1 : 0));
@@ -1260,7 +1263,8 @@ const virtGuard = (req, res, next) => {
 r.get('/data', virtGuard, (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const type = req.query.type || 'horizontal';
-  res.json(buildReport(type, from, to, filterFromQuery(req.query, req)));
+  const f = filterFromQuery(req.query, req);
+  res.json({ ...buildReport(type, from, to, f), ...(f.virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
 });
 
 // Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to

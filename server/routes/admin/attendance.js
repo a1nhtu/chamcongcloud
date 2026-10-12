@@ -6,7 +6,7 @@ import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays } from '../../device-sync.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
-import { virtualOt, applyVirtual, auditAllowed, virtLevel } from '../../virtual-att.js';
+import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../../virtual-att.js';
 
 const WDVN = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 // HH:MM giờ VN từ ISO (cho nội dung thông báo)
@@ -165,7 +165,7 @@ export function registerAttendanceRoutes(r, { need }) {
       for (const key of leaveMap.keys()) { const g = agg.get(+key.split('|')[0]); if (g) g.leaveN++; }
       const r2 = (n) => Math.round(n * 100) / 100;
       const rows = [...agg.values()].map((g) => ({ id: g.id, code: g.code, name: g.name, dept: g.dept, cong: r2(g.cong), gio: r2(g.minutes / 60), ot: r2(g.ot / 60), lateN: g.lateN, lateM: g.lateM, earlyN: g.earlyN, earlyM: g.earlyM, leaveN: g.leaveN, days: g.days }));
-      return res.json({ mode, rows });
+      return res.json({ mode, rows, ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
     }
 
     // detail
@@ -215,7 +215,7 @@ export function registerAttendanceRoutes(r, { need }) {
       }
     }
     rows.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return res.json({ mode, rows });
+    return res.json({ mode, rows, ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
   });
 
   /* -------------------- SỬA / THÊM / XOÁ GIỜ CHẤM (bằng tay) -------------------- */

@@ -2,7 +2,7 @@
 import { db, getSetting, adminAttWhere, empHourly, deptWithChildren } from './db.js';
 import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
 import { splitOtTiers } from './attendance-calc.js';
-import { virtualOt } from './virtual-att.js';
+import { virtualOt, applyVirtual } from './virtual-att.js';
 
 const pad = (n) => String(n).padStart(2, '0');
 const round0 = (n) => Math.round(n || 0);
@@ -42,14 +42,14 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   const hourlyRate = dailyRate / 8;
 
   let rows = db.prepare(
-    `SELECT a.id, a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,
+    `SELECT a.id, a.employee_id, a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,
             s.ot_tier1_min, s.ot_tier2_min, s.ot_tier3_min, s.ot_tier2_rate, s.ot_tier3_rate, s.ot_tier4_rate
      FROM attendance a LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ? AND a.work_date >= ? AND a.work_date <= ?`
   ).all(employeeId, from, to);
   if (opts.virt) {   // lương ảo: số phút tăng ca lấy theo công ảo
     const vm = opts.vmap || virtualOt([employeeId], from, to, false, opts.virt);
-    rows = rows.map((r) => (vm.has(r.id) ? { ...r, ot_min: vm.get(r.id).ot_min } : r));
+    rows = applyVirtual(rows, vm, employeeId);   // tăng ca theo công ảo; tháng đã chốt = đúng bản chốt
   }
 
   // Chế độ tính công theo GIỜ: lương = tổng giờ làm × đơn giá giờ + phụ cấp

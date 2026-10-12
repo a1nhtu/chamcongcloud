@@ -552,6 +552,25 @@ function migrateColumns() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_priv_emp ON employee_privileges(employee_id, from_date);`);
+  // CHỐT KỲ công ảo: tháng lương đã chốt (audit_locks) + công ảo đã chốt lưu thành CỘT SỐ trong audit_lock_att:
+  //   level 0 = dòng công lúc chốt (đủ cột), level 1–3 = chỉ những dòng mức đó khác level 0 (tăng ca, giờ vào/ra ảo, ẩn ngày).
+  //   Giờ lưu số giây (epoch) cho nhẹ. audit_lock_sums = tổng tăng ca ảo đã chốt mỗi NV × tháng × mức (cho hạn mức NĂM).
+  db.exec(`CREATE TABLE IF NOT EXISTS audit_locks (
+      month TEXT PRIMARY KEY, from_date TEXT NOT NULL, to_date TEXT NOT NULL,
+      locked_at TEXT NOT NULL DEFAULT (datetime('now')), locked_by TEXT DEFAULT '', rows INTEGER DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS audit_lock_att (
+      month TEXT NOT NULL, level INTEGER NOT NULL, employee_id INTEGER NOT NULL, work_date TEXT NOT NULL, i INTEGER NOT NULL,
+      att_id INTEGER, shift_id INTEGER, cin INTEGER, cout INTEGER, late INTEGER, early INTEGER, ot INTEGER, ot_type TEXT,
+      wmin INTEGER, wu REAL, day_status TEXT, manual INTEGER, hidden INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_ala ON audit_lock_att(level, employee_id, work_date);
+    CREATE INDEX IF NOT EXISTS idx_ala_m ON audit_lock_att(month);
+    CREATE TABLE IF NOT EXISTS audit_lock_sums (
+      month TEXT NOT NULL, level INTEGER NOT NULL, employee_id INTEGER NOT NULL,
+      thuong INTEGER DEFAULT 0, cuoi_tuan INTEGER DEFAULT 0, le INTEGER DEFAULT 0, PRIMARY KEY (month, level, employee_id)
+    );
+    DROP TABLE IF EXISTS audit_lock_rows;`);
   // CÔNG ẢO 3 mức: tăng ca tối đa (phút) mỗi NV × ngày × mức; work_date='*' = mức riêng của NV (mọi ngày chưa khai)
   db.exec(`CREATE TABLE IF NOT EXISTS audit_ot_max (
       employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
