@@ -360,17 +360,27 @@ export function pickShiftSet(cands, punches, workDate) {
   const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
   if (!list.length || !ps.length) return [];
   const t = (p) => toMinute(p.punch_at).getTime();
+  const vnDay = (p) => new Date(new Date(p.punch_at).getTime() + 7 * HH).toISOString().slice(0, 10);   // ngày (giờ VN) của lượt quẹt
+  const dayEnd = vnInstant(workDate, '00:00').getTime() + 24 * HH;   // nửa đêm cuối ngày làm việc
   let best = null;
   for (let mask = 1; mask < (1 << list.length); mask++) {
     const set = list.filter((_, i) => mask & (1 << i)).sort((a, b) => a.start - b.start);
     if (set.some((x, i) => i && x.start < set[i - 1].end)) continue;          // chồng giờ nhau → không cùng làm được
     const got = set.map(() => []);
     for (const p of ps) {
-      let bi = 0, bd = Infinity;
-      set.forEach((x, i) => { const v = t(p); const d = v >= x.start && v <= x.end ? 0 : Math.min(Math.abs(v - x.start), Math.abs(v - x.end)); if (d < bd) { bd = d; bi = i; } });
-      got[bi].push(p);
+      // Lượt quẹt của NGÀY HÔM SAU chỉ thuộc ca có giờ ra sang hôm sau (ca đêm); tổ hợp không có ca đêm thì bỏ qua lượt đó
+      const nextDay = vnDay(p) > workDate;
+      let bi = -1, bd = Infinity;
+      set.forEach((x, i) => {
+        if (nextDay && !(x.end > dayEnd)) return;
+        const v = t(p); const d = v >= x.start && v <= x.end ? 0 : Math.min(Math.abs(v - x.start), Math.abs(v - x.end)); if (d < bd) { bd = d; bi = i; }
+      });
+      if (bi >= 0) got[bi].push(p);
     }
     if (got.some((g) => !g.length)) continue;
+    // Giờ VÀO của mỗi ca phải thuộc ngày này và không sớm hơn giờ vào ca quá 8 tiếng
+    // (trước đây: làm ca sáng 05:52–11:33 thì lượt 05:55 sáng hôm sau bị lấy làm "vào Ca đêm" → 1 lượt dùng cho 2 ngày)
+    if (got.some((g, i) => vnDay(g[0]) > workDate || t(g[0]) < set[i].start - 8 * HH)) continue;
     let dev = 0, used = 0;
     set.forEach((x, i) => {
       const g = got[i], a = t(g[0]), b = g.length > 1 ? t(g[g.length - 1]) : null;

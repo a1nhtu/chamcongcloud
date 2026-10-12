@@ -98,3 +98,16 @@ test('nghỉ phép NỬA NGÀY: buổi nghỉ không tính trễ / sớm, giờ 
   assert.equal(computeLate(HC, iso(WD, '13:30'), WD, 0, halfLeavePriv(HC, WD, 'sang', P({ late: 30 }))), 0);
   assert.equal(halfLeavePriv(HC, WD, '', null), null);
 });
+
+test('tự dò ca (lịch nhiều ca): lượt quẹt sáng hôm sau không bị lấy làm giờ VÀO ca đêm của hôm trước', async () => {
+  const { pickShiftSet } = await import('../server/attendance-calc.js');
+  const S = { id: 2, name: 'Sáng', start_time: '06:00', end_time: '11:30' };
+  const C = { id: 3, name: 'Chiều', start_time: '13:00', end_time: '17:30' };
+  const D = { id: 4, name: 'Đêm', start_time: '22:00', end_time: '06:00', cross_midnight: 1 };
+  const ps = [iso('2026-10-01', '05:52'), iso('2026-10-01', '11:33'), iso('2026-10-02', '05:55')].map((punch_at) => ({ punch_at }));
+  const r = pickShiftSet([S, C, D], ps, '2026-10-01');
+  assert.deepEqual(r.map((x) => x.shift.name), ['Sáng']);
+  // ca đêm thật: vào 21:51 hôm nay, ra 06:05 sáng mai → vẫn nhận ca đêm
+  const n = pickShiftSet([S, C, D], [iso('2026-10-08', '21:51'), iso('2026-10-09', '06:05')].map((punch_at) => ({ punch_at })), '2026-10-08');
+  assert.deepEqual(n.map((x) => x.shift.name), ['Đêm']);
+});
