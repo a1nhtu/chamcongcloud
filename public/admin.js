@@ -22,6 +22,7 @@ const NAV = [
   ['salary', '💰', 'Lương', 'salary'],
   ['report', '📅', 'Báo cáo', 'reports'],
   ['audit', '🎭', 'Công ảo / lương ảo', 'audit'],
+  ['auditlimits', '⏱️', 'Tăng ca tối đa (ảo)', 'audit'],
   ['logs', '🧾', 'Nhật ký', 'logs'],
   ['settings', '⚙️', 'Cài đặt', 'settings'],
 ];
@@ -37,13 +38,16 @@ const deviceEnabled = () => SETTINGS.device_enabled === '1';
 // TÀI KHOẢN KIỂM TRA (audit_only): luôn công ảo, không có nút bật/tắt, không thấy chữ "ảo", chỉ xem
 const isInspector = () => !!(ME && ME.audit_only);
 const auditOn = () => SETTINGS.audit_enabled === '1' && hasPerm('audit') && !isInspector();
-let _virt = false;   // đang xem công ảo (dùng chung cho Tính công / Báo cáo / Lương)
+let _virt = 0;   // đang xem: 0 = công thật, 1/2/3 = công ảo mức đó (dùng chung cho Tính công / Báo cáo / Lương)
 function virtToggle(onChange) {
   if (!auditOn()) return null;
-  const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(_virt ? { checked: '' } : {}) });
-  const lb = el('label', { class: 'virt-tg' + (_virt ? ' on' : ''), title: 'Công ảo: tăng ca cắt theo hạn mức ở Cài đặt › Công ảo / lương ảo. Công thật không đổi.' }, cb, '🎭 Công ảo');
-  cb.onchange = () => { _virt = cb.checked; lb.classList.toggle('on', _virt); onChange && onChange(); };
-  return lb;
+  const box = el('div', { class: 'virt-seg', title: 'Xem công THẬT hay công ẢO mức 1 / 2 / 3 (tăng ca cắt theo menu "⏱️ Tăng ca tối đa"). Công thật không bao giờ bị đổi.' });
+  for (const [v, t] of [[0, 'Thật'], [1, '🎭 Ảo 1'], [2, 'Ảo 2'], [3, 'Ảo 3']]) {
+    const b = el('button', { type: 'button', class: (v === 0 ? 'real' : '') + (_virt === v ? ' on' : '') }, t);
+    b.onclick = () => { if (_virt === v) return; _virt = v; box.querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b)); onChange && onChange(); };
+    box.append(b);
+  }
+  return box;
 }
 const deviceLockEnabled = () => SETTINGS.device_lock_enabled === '1';
 const selfShiftEnabled = () => SETTINGS.self_shift_enabled === '1';
@@ -93,7 +97,7 @@ async function afterLogin() {
   $('#app-view').classList.remove('hidden');
   $('#me-name').textContent = ME.full_name;
   $('#me-role').textContent = ME.role === 'admin' ? 'Quản trị viên' : 'Quản lý';
-  if (isInspector()) _virt = true;   // tài khoản kiểm tra: máy chủ cũng ép công ảo cho mọi dữ liệu
+  if (isInspector()) _virt = 1;   // tài khoản kiểm tra: máy chủ cũng ép công ảo cho mọi dữ liệu
   try { SETTINGS = await api('/admin/settings'); } catch { SETTINGS = {}; }
   try { PERM_CATALOG = (await api('/admin/perm-catalog')).permissions; } catch { PERM_CATALOG = []; }
   const nav = $('#nav'); nav.innerHTML = '';
@@ -104,7 +108,7 @@ async function afterLogin() {
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())
     && !(key === 'shiftreq' && !selfShiftEnabled())
-    && !(key === 'audit' && SETTINGS.audit_enabled !== '1'));   // công ảo: chỉ hiện khi tài khoản tổng đã bật
+    && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1'));   // công ảo: chỉ hiện khi tài khoản tổng đã bật
   visible.forEach(([key, ic, label]) => {
     const b = el('button', { 'data-k': key }, el('span', {}, ic), label);
     // Mục có MENU CON (kiểu ZKBio): bấm mũi tên hoặc bấm mục để xổ ra / thu lại
@@ -177,7 +181,7 @@ async function checkUpdateBanner() {
 }
 function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
-  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, logs: pageLogs, settings: pageSettings }[key])();
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings }[key])();
 }
 
 /* ---------- Lựa chọn phụ khi chấm "Theo giờ": đầu–cuối (FILO) / theo cặp vào–ra ----------
@@ -3169,7 +3173,7 @@ async function salaryPayrollView(tabs) {
   const load = async () => {
     wrap.innerHTML = ''; wrap.append(loading());
     let data;
-    try { data = await api(`/admin/payroll?month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}` + (_virt && auditOn() ? '&virt=1' : '')); }
+    try { data = await api(`/admin/payroll?month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}` + (_virt && auditOn() ? '&virt=' + _virt : '')); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const hourly = data.mode === 'hourly';
     const tbl = el('table', { class: 'data' });
@@ -3354,7 +3358,7 @@ async function pageEditAtt() {
     if (empPick.size) p += '&ids=' + [...empPick].join(',');
     else if (deptPick.size) p += '&depts=' + encodeURIComponent([...deptPick].join(','));
     if (allChkInput.checked) p += '&all=1';
-    if (_virt && auditOn()) p += '&virt=1';
+    if (_virt && auditOn()) p += '&virt=' + _virt;
     return p;
   };
   const mkIso = (date, hm) => hm ? new Date(`${date}T${hm}:00+07:00`).toISOString() : null;
@@ -3754,7 +3758,7 @@ function auditPanelEl(s) {
       el('div', {}, el('div', { class: 'lv-ctl' }, ...ctl.map((c) => (typeof c === 'string' ? el('span', {}, c) : c))), hint ? el('div', { class: 'map-hint', style: 'margin-top:3px' }, hint) : ''));
   };
   const num = (v, step = '0.5') => el('input', { type: 'number', min: 0, step, value: v });
-  const auDay = num(s.audit_ot_day_min ?? 240, '5'), auWeek = num(s.audit_ot_week_h ?? 0), auMonth = num(s.audit_ot_month_h ?? 40), auYear = num(s.audit_ot_year_h ?? 200);
+  const auWeek = num(s.audit_ot_week_h ?? 0), auMonth = num(s.audit_ot_month_h ?? 0), auYear = num(s.audit_ot_year_h ?? 0);
   const auWk = el('input', { type: 'checkbox', ...(s.audit_incl_weekend !== '0' ? { checked: '' } : {}) });
   const auHol = el('input', { type: 'checkbox', ...(s.audit_incl_holiday !== '0' ? { checked: '' } : {}) });
   const auMethod = el('select', { style: 'width:auto;max-width:100%' }, el('option', { value: 'ratio' }, 'Chia đều theo tỷ lệ'), el('option', { value: 'days' }, 'Gỡ bớt nguyên ngày'));
@@ -3764,16 +3768,16 @@ function auditPanelEl(s) {
   const save = el('button', { class: 'btn' }, 'Lưu hạn mức công ảo');
   save.onclick = async () => {
     try {
-      await api('/admin/settings', { method: 'PUT', body: { audit_ot_day_min: auDay.value, audit_ot_week_h: auWeek.value, audit_ot_month_h: auMonth.value, audit_ot_year_h: auYear.value,
+      await api('/admin/settings', { method: 'PUT', body: { audit_ot_week_h: auWeek.value, audit_ot_month_h: auMonth.value, audit_ot_year_h: auYear.value,
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value } });
       SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
     } catch (e) { toast(e.message, 'err'); }
   };
   return el('div', { class: 'panel', style: 'padding:20px;max-width:640px;margin-bottom:16px;border:1px dashed #f59e0b' },
     el('h3', { style: 'margin-top:0' }, '🎭 Công ảo / lương ảo (audit)'),
-    el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Công ảo dùng để in bảng công / bảng lương nộp kiểm tra: tăng ca vượt hạn mức bị cắt bớt, giờ ra (hoặc giờ vào khi tăng ca trước ca) lùi lại cho khớp, ngày chỉ toàn tăng ca bị cắt hết thì coi như không đi làm. Công THẬT không đổi. Xem bằng nút "🎭 Công ảo" ở Tính công / Báo cáo / Lương. Luật hiện hành: tối đa 4 giờ/ngày (50% giờ làm), 40 giờ/tháng, 200 giờ/năm (300 giờ với một số ngành). Để 0 = không giới hạn.'),
+    el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Công ảo dùng để in bảng công / bảng lương nộp kiểm tra: tăng ca vượt hạn mức bị cắt bớt, giờ ra (hoặc giờ vào khi tăng ca trước ca) lùi lại cho khớp, ngày chỉ toàn tăng ca bị cắt hết thì coi như không đi làm. Công THẬT không đổi. Xem bằng thanh "Thật · Ảo 1 · Ảo 2 · Ảo 3" ở Tính công / Báo cáo / Lương. Các hạn mức tuần / tháng / năm dưới đây áp chung cho cả 3 mức. Luật hiện hành: tối đa 4 giờ/ngày (50% giờ làm), 40 giờ/tháng, 200 giờ/năm (300 giờ với một số ngành). Để 0 = không giới hạn.'),
     el('div', { class: 'lv-form' },
-      lvRow('Tăng ca tối đa mỗi ngày', auDay, 'phút'),
+      lvRow('Tăng ca tối đa mỗi ngày', (() => { const b = el('button', { class: 'btn ghost sm', type: 'button' }, '⏱️ Khai theo 3 mức →'); b.onclick = () => go('auditlimits'); return b; })(), 'Mỗi mức Ảo 1 / 2 / 3 một số phút riêng, đặt được theo từng NV, từng ngày.'),
       lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', '(thứ 2 → chủ nhật)'),
       lvRow('Tăng ca tối đa mỗi tháng', auMonth, 'giờ', '(theo kỳ lương ở Cài đặt › Lương)'),
       lvRow('Tăng ca tối đa mỗi năm', auYear, 'giờ', '(cộng dồn từ kỳ lương tháng 1)'),
@@ -3790,16 +3794,231 @@ async function pageAudit() {
   try { SETTINGS = await api('/admin/settings'); } catch {}
   const card = (ic, title, desc, key) => {
     const b = el('button', { class: 'au-card', type: 'button' }, el('div', { class: 'au-ic' }, ic), el('div', {}, el('b', {}, title), el('div', { class: 'map-hint', style: 'margin:3px 0 0' }, desc)));
-    b.onclick = () => { _virt = true; if (key === 'salary') _salTab = 'payroll'; go(key); };
+    b.onclick = () => { if (key !== 'auditlimits' && !_virt) _virt = 1; if (key === 'salary') _salTab = 'payroll'; go(key); };
     return b;
   };
   setMain(head('🎭 Công ảo / lương ảo'),
-    el('div', { class: 'map-hint', style: 'margin:-6px 0 12px;max-width:820px' }, 'Bấm 1 mục bên dưới để xem số liệu ẢO (tăng ca đã cắt theo hạn mức). Trên các màn đó có nút "🎭 Công ảo" màu vàng để bật / tắt — tắt là về số thật. Công thật không bao giờ bị thay đổi.'),
+    el('div', { class: 'map-hint', style: 'margin:-6px 0 12px;max-width:820px' }, 'Có 3 mức công ảo (Ảo 1 / Ảo 2 / Ảo 3), mỗi mức có tăng ca tối đa / ngày riêng — khai ở "⏱️ Tăng ca tối đa". Trên Tính công / Báo cáo / Lương có thanh vàng "Thật · Ảo 1 · Ảo 2 · Ảo 3" để chuyển. Công thật không bao giờ bị thay đổi.'),
     el('div', { class: 'au-cards' },
+      card('⏱️', 'Tăng ca tối đa / ngày (3 mức)', 'Khai số phút tăng ca tối đa cho Ảo 1 / 2 / 3 theo từng NV, từng ngày; đặt mặc định công ty', 'auditlimits'),
       card('🧮', 'Bảng công ảo', 'Tính công theo ngày: giờ vào / ra, tăng ca ảo (chỉ xem)', 'editatt'),
-      card('📅', 'Báo cáo công ảo', '19 báo cáo, xem và xuất Excel theo công ảo', 'report'),
+      card('📅', 'Báo cáo công ảo', 'Mọi báo cáo theo Ảo 1 / 2 / 3 + 2 mẫu so sánh 3 mức (nhóm "Công ảo 3 mức")', 'report'),
       hasPerm('salary') ? card('💰', 'Bảng lương ảo', 'Bảng lương / phiếu lương với tiền tăng ca theo công ảo', 'salary') : null),
     hasPerm('settings') ? auditPanelEl(SETTINGS) : el('div', { class: 'map-hint' }, 'Hạn mức tăng ca do người có quyền Cài đặt chỉnh.'));
+}
+
+/* ---------- TĂNG CA TỐI ĐA / NGÀY — 3 MỨC CÔNG ẢO (như "TGLT tối đa / tối đa 2 / tối đa 3" của HR-ERP) ----------
+ * Trái: cây phòng ban · Phải: lưới NV × ngày, mỗi ô = số phút tăng ca tối đa của mức đó.
+ * Ô đậm = đã khai riêng cho ngày đó; ô xám = đang theo mức riêng NV / mặc định công ty; "—" = không giới hạn.
+ * Sửa: bấm ô gõ số (Enter lưu, để trống = theo mặc định) · dán cả khối số copy từ Excel · áp nhanh nhiều NV × nhiều ngày. */
+const _al = { dept: '', q: '', from: null, to: null, tab: 'all', picked: new Set() };
+async function pageAuditLimits() {
+  const T = '⏱️ Tăng ca tối đa (công ảo)';
+  setMain(head(T), loading());
+  if (!DEPARTMENTS.length) { try { DEPARTMENTS = (await api('/admin/departments')).rows || []; } catch {} }
+  const today = todayVN();
+  if (!_al.from) _al.from = _al.to = today;
+  const addDays = (d, n) => { const x = new Date(d + 'T12:00:00Z'); x.setUTCDate(x.getUTCDate() + n); return x.toISOString().slice(0, 10); };
+  const nDays = (f, t) => Math.round((Date.parse(t) - Date.parse(f)) / 86400000) + 1;
+  const WDS = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+  const wdOf = (d) => new Date(d + 'T12:00:00Z').getUTCDay();
+  const LV = ['', 'Mức 1', 'Mức 2', 'Mức 3'];
+  let data;
+  try { data = await api(`/admin/audit-limits?from=${_al.from}&to=${_al.to}`); }
+  catch (e) { return setMain(head(T), el('div', { class: 'empty' }, e.message)); }
+  let cell = new Map();
+  const index = () => { cell = new Map(); for (const [e, d, l, m] of data.cells) cell.set(`${e}|${d}|${l}`, m); };
+  index();
+  // giá trị đang áp cho 1 ô + nguồn: day = khai riêng ngày · emp = mức riêng NV · def = mặc định công ty
+  const eff = (eid, d, lv) => {
+    const k = `${eid}|${d}|${lv}`;
+    if (cell.has(k)) return { v: cell.get(k), src: d === '*' ? 'emp' : 'day' };
+    if (d !== '*' && cell.has(`${eid}|*|${lv}`)) return { v: cell.get(`${eid}|*|${lv}`), src: 'emp' };
+    const dv = data.defaults[lv];
+    return { v: dv == null ? null : dv, src: 'def' };
+  };
+  const emps = data.emps;
+
+  // ----- cây phòng ban (gồm bộ phận con) -----
+  const NONE = '\u0000none';
+  const kids = new Map();
+  for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+  const namesUnder = (d) => [d.name, ...(kids.get(d.id) || []).flatMap(namesUnder)];
+  const cntBy = new Map(); for (const e of emps) { const k = e.department || NONE; cntBy.set(k, (cntBy.get(k) || 0) + 1); }
+  const groups = new Map([['', null]]);
+  const tree = el('div', { class: 'ft-tree' });
+  const treeItem = (key, label, depth, n) => {
+    const b = el('button', { class: 'ft-node' + (_al.dept === key ? ' on' : ''), style: `padding-left:${10 + depth * 14}px` }, el('span', {}, label), el('small', {}, String(n)));
+    b.onclick = () => { _al.dept = key; tree.querySelectorAll('.ft-node').forEach((x) => x.classList.toggle('on', x === b)); draw(); };
+    tree.append(b);
+  };
+  treeItem('', '🏢 Tất cả nhân viên', 0, emps.length);
+  for (const d of deptOrdered()) { const names = namesUnder(d); const n = names.reduce((a, x) => a + (cntBy.get(x) || 0), 0); if (!n) continue; groups.set('d' + d.id, new Set(names)); treeItem('d' + d.id, d.name, d.depth + 1, n); }
+  const known = new Set(DEPARTMENTS.map((d) => d.name));
+  for (const k of [...cntBy.keys()].filter((k) => k !== NONE && !known.has(k))) { groups.set('o' + k, new Set([k])); treeItem('o' + k, k, 1, cntBy.get(k)); }
+  if (cntBy.has(NONE)) { groups.set('none', new Set([NONE])); treeItem('none', 'Chưa có phòng ban', 1, cntBy.get(NONE)); }
+
+  // ----- mặc định công ty -----
+  const defI = [0, 1, 2, 3].map((lv) => (lv ? el('input', { type: 'number', min: 0, max: 1440, step: 5, placeholder: 'không giới hạn', value: data.defaults[lv] ?? '', style: 'width:120px;margin:0' }) : null));
+  const inspSel = el('select', { style: 'width:auto;margin:0' }, ...[1, 2, 3].map((lv) => el('option', { value: lv }, LV[lv])));
+  inspSel.value = String(data.defaults.inspector || 1);
+  const saveDef = el('button', { class: 'btn sm' }, 'Lưu mặc định');
+  saveDef.onclick = async () => {
+    try {
+      const r = await api('/admin/audit-limits/defaults', { method: 'PUT', body: { 1: defI[1].value, 2: defI[2].value, 3: defI[3].value, inspector: inspSel.value } });
+      data.defaults = r.defaults; toast('Đã lưu mặc định', 'ok'); draw();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const defPanel = el('div', { class: 'panel al-def' },
+    el('b', {}, 'Mặc định công ty (phút / ngày)'),
+    ...[1, 2, 3].map((lv) => el('label', {}, LV[lv], defI[lv])),
+    el('label', { title: 'Tài khoản kiểm tra (chỉ xem công ảo) thấy số liệu theo mức này' }, '🔍 Tài khoản kiểm tra xem', inspSel),
+    saveDef,
+    el('div', { class: 'map-hint', style: 'flex-basis:100%;margin:0' }, 'NV / ngày nào chưa khai thì lấy mức riêng của NV, chưa có nữa thì lấy mặc định này. Để trống = không giới hạn; 0 = không cho tăng ca. Công ảo tính ngay lúc xem, không cần bấm Tính lại.'));
+
+  // ----- khoảng ngày + mức đang xem -----
+  const fromI = el('input', { type: 'date', value: _al.from, style: 'width:auto;margin:0' });
+  const toI = el('input', { type: 'date', value: _al.to, style: 'width:auto;margin:0' });
+  const prev = el('button', { class: 'btn ghost sm', title: 'Lùi' }, '◀'), next = el('button', { class: 'btn ghost sm', title: 'Tới' }, '▶');
+  const monthB = el('button', { class: 'btn ghost sm' }, 'Cả tháng');
+  const setRange = async (f, t) => {
+    if (t < f) t = f;
+    const maxN = _al.tab === 'all' ? 7 : 31;
+    if (nDays(f, t) > maxN) { t = addDays(f, maxN - 1); toast(_al.tab === 'all' ? 'Xem cả 3 mức: tối đa 7 ngày (chọn 1 mức để xem cả tháng)' : 'Xem tối đa 31 ngày', 'err'); }
+    _al.from = f; _al.to = t; pageAuditLimits();
+  };
+  fromI.onchange = () => setRange(fromI.value || today, toI.value < fromI.value ? fromI.value : toI.value);
+  toI.onchange = () => setRange(fromI.value, toI.value || fromI.value);
+  const span = nDays(_al.from, _al.to);
+  prev.onclick = () => setRange(addDays(_al.from, -span), addDays(_al.to, -span));
+  next.onclick = () => setRange(addDays(_al.from, span), addDays(_al.to, span));
+  monthB.onclick = () => { if (_al.tab === 'all') _al.tab = '1'; const m = _al.from.slice(0, 7); const ds = monthDaysArr(m); setRange(ds[0], ds[ds.length - 1]); };
+  const tabs = el('div', { class: 'al-tabs' }, ...[['all', 'Cả 3 mức'], ['1', LV[1]], ['2', LV[2]], ['3', LV[3]]].map(([k, t]) => {
+    const b = el('button', { class: 'btn sm' + (_al.tab === k ? '' : ' ghost') }, t);
+    b.onclick = () => { _al.tab = k; if (k === 'all' && span > 7) setRange(_al.from, addDays(_al.from, 6)); else pageAuditLimits(); };
+    return b;
+  }));
+  const q = el('input', { placeholder: 'Tìm tên / mã NV', value: _al.q, style: 'margin:0;width:180px' });
+  q.oninput = () => { _al.q = q.value; draw(); };
+
+  // ----- áp nhanh -----
+  const bLv = el('select', { style: 'width:auto;margin:0' }, ...[1, 2, 3].map((lv) => el('option', { value: lv }, LV[lv])));
+  if (_al.tab !== 'all') bLv.value = _al.tab;
+  const bMin = el('input', { type: 'number', min: 0, max: 1440, step: 5, placeholder: 'số phút', title: 'Để trống = xoá ô đã khai (về mặc định)', style: 'width:100px;margin:0' });
+  const bFrom = el('input', { type: 'date', value: _al.from, style: 'width:auto;margin:0' }), bTo = el('input', { type: 'date', value: _al.to, style: 'width:auto;margin:0' });
+  const bSun = el('input', { type: 'checkbox', style: 'width:auto;margin:0', checked: '' }), bSat = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+  const bScope = el('select', { style: 'width:auto;margin:0' }, el('option', { value: 'list' }, 'Tất cả NV đang lọc'), el('option', { value: 'picked' }, 'Chỉ NV đã tích'));
+  const bDays = el('button', { class: 'btn sm' }, 'Áp cho các ngày'), bEmp = el('button', { class: 'btn ghost sm', title: 'Ghi làm mức riêng của NV — áp cho mọi ngày chưa khai riêng' }, 'Đặt làm mức riêng NV');
+  const doApply = async (target) => {
+    const ids = bScope.value === 'picked' ? [..._al.picked] : visible().map((e) => e.id);
+    if (!ids.length) return toast(bScope.value === 'picked' ? 'Tích chọn nhân viên ở lưới trước' : 'Không có nhân viên nào', 'err');
+    const what = `${LV[bLv.value]} = ${bMin.value === '' ? 'theo mặc định (xoá ô đã khai)' : bMin.value + ' phút'}`;
+    if (!confirm(`${what}\n${target === 'default' ? 'Đặt làm MỨC RIÊNG' : `Từ ${bFrom.value} đến ${bTo.value}`} cho ${ids.length} nhân viên?`)) return;
+    try {
+      const r = await api('/admin/audit-limits/apply', { method: 'POST', body: { level: +bLv.value, minutes: bMin.value, employee_ids: ids, target, from: bFrom.value, to: bTo.value, skip_sun: bSun.checked, skip_sat: bSat.checked } });
+      toast(`Đã cập nhật ${r.cells} ô (${r.people} NV)`, 'ok'); pageAuditLimits();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  bDays.onclick = () => doApply('days'); bEmp.onclick = () => doApply('default');
+  const applyPanel = el('div', { class: 'panel al-apply' },
+    el('b', {}, 'Áp nhanh'), bLv, bMin, el('span', { class: 'muted' }, 'phút (trống = về mặc định) · từ'), bFrom, el('span', { class: 'muted' }, 'đến'), bTo,
+    el('label', {}, bSun, 'Bỏ qua chủ nhật'), el('label', {}, bSat, 'Bỏ qua thứ 7'), bScope, bDays, bEmp);
+
+  // ----- lưới NV × ngày -----
+  const visible = () => {
+    const g = groups.get(_al.dept), s = _al.q.trim().toLowerCase();
+    return emps.filter((e) => (!g || g.has(e.department || NONE)) && (!s || (e.full_name || '').toLowerCase().includes(s) || String(e.code || '').toLowerCase().includes(s)));
+  };
+  const levels = _al.tab === 'all' ? [1, 2, 3] : [+_al.tab];
+  const days = []; for (let d = _al.from; d <= _al.to; d = addDays(d, 1)) days.push(d);
+  const cols = [...levels.map((lv) => ({ d: '*', lv })), ...days.flatMap((d) => levels.map((lv) => ({ d, lv })))];
+  const allChk = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+  const thead = el('thead', {}, el('tr', {}, el('th', {}, allChk), el('th', {}, 'Mã NV'), el('th', {}, 'Họ tên'), el('th', {}, 'Bộ phận'),
+    ...cols.map((c) => el('th', { class: 'al-h' + (c.d === '*' ? ' emp' : wdOf(c.d) === 0 ? ' sun' : '') },
+      c.d === '*' ? 'Riêng NV' : c.d.slice(8) + '/' + c.d.slice(5, 7), el('br'), el('small', {}, c.d === '*' ? LV[c.lv] : (levels.length > 1 ? LV[c.lv] : WDS[wdOf(c.d)]))))));
+  const tbody = el('tbody');
+  const tbl = el('table', { class: 'data al-grid' }, thead, tbody);
+  const total = el('span', { class: 'muted' });
+  let list = [];
+  const tdFor = (e, c) => {
+    const f = eff(e.id, c.d, c.lv);
+    const empCol = c.d === '*', unset = empCol && f.src === 'def';   // cột "Riêng NV" chưa đặt → để trống (đang theo mặc định công ty)
+    const td = el('td', { class: 'al-c ' + f.src + (c.d !== '*' && wdOf(c.d) === 0 ? ' sun' : ''), tabindex: 0,
+      title: unset ? 'Chưa đặt mức riêng — theo mặc định công ty' : f.src === 'day' ? 'Khai riêng ngày này' : f.src === 'emp' ? 'Mức riêng của NV' : 'Mặc định công ty' }, unset ? '' : f.v == null ? '—' : String(f.v));
+    td._k = { e, c };
+    return td;
+  };
+  const draw = () => {
+    list = visible();
+    tbody.replaceChildren();
+    const frag = document.createDocumentFragment();
+    for (const e of list) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(_al.picked.has(e.id) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? _al.picked.add(e.id) : _al.picked.delete(e.id); };
+      frag.append(el('tr', {}, el('td', {}, cb), el('td', {}, e.code || ''), el('td', {}, el('b', {}, e.full_name)), el('td', { class: 'muted al-dept', title: e.department || '' }, e.department || '—'), ...cols.map((c) => tdFor(e, c))));
+    }
+    if (!list.length) frag.append(el('tr', {}, el('td', { colspan: 4 + cols.length }, el('div', { class: 'empty' }, 'Không có nhân viên.'))));
+    tbody.append(frag);
+    allChk.checked = list.length > 0 && list.every((e) => _al.picked.has(e.id));
+    total.textContent = `${list.length} nhân viên · ${_al.picked.size} đã tích`;
+  };
+  allChk.onchange = () => { for (const e of list) allChk.checked ? _al.picked.add(e.id) : _al.picked.delete(e.id); draw(); };
+  // lưu nhiều ô 1 lần rồi vẽ lại
+  const saveCells = async (changes) => {
+    if (!changes.length) return;
+    try {
+      await api('/admin/audit-limits/cells', { method: 'POST', body: { cells: changes } });
+      for (const c of changes) { const k = `${c.employee_id}|${c.date}|${c.level}`; if (c.minutes === '' || c.minutes == null) cell.delete(k); else cell.set(k, +c.minutes); }
+      draw(); toast(changes.length > 1 ? `Đã lưu ${changes.length} ô` : 'Đã lưu', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const posOf = (td) => [list.indexOf(td._k.e), cols.indexOf(td._k.c)];
+  const focusAt = (r, c) => { const tr = tbody.children[r]; const td = tr && tr.children[4 + c]; if (td) td.focus(); };
+  const edit = (td) => {
+    const { e, c } = td._k; const cur = cell.get(`${e.id}|${c.d}|${c.lv}`);
+    const inp = el('input', { type: 'number', min: 0, max: 1440, value: cur ?? '', class: 'al-inp' });
+    td.replaceChildren(inp); inp.focus(); inp.select();
+    let done = false;
+    const finish = (save) => {
+      if (done) return; done = true;
+      if (save && String(inp.value) !== String(cur ?? '')) saveCells([{ employee_id: e.id, date: c.d, level: c.lv, minutes: inp.value }]);
+      else draw();
+    };
+    inp.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const [r, ci] = posOf(td); finish(true); setTimeout(() => focusAt(r + 1, ci), 60); } else if (ev.key === 'Escape') finish(false); };
+    inp.onblur = () => finish(true);
+  };
+  tbody.addEventListener('click', (ev) => { const td = ev.target.closest('td.al-c'); if (td && !td.querySelector('input')) edit(td); });
+  tbody.addEventListener('keydown', (ev) => {
+    const td = ev.target.closest && ev.target.closest('td.al-c'); if (!td || ev.target.tagName === 'INPUT') return;
+    const [r, c] = posOf(td);
+    const mv = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[ev.key];
+    if (mv) { ev.preventDefault(); focusAt(r + mv[0], c + mv[1]); }
+    else if (ev.key === 'Enter' || ev.key === 'F2') { ev.preventDefault(); edit(td); }
+    else if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); saveCells([{ employee_id: td._k.e.id, date: td._k.c.d, level: td._k.c.lv, minutes: '' }]); }
+    else if (/^[0-9]$/.test(ev.key)) { edit(td); }
+  });
+  // dán khối số copy từ Excel: ô đang chọn là góc trên-trái
+  tbody.addEventListener('paste', (ev) => {
+    const td = ev.target.closest && ev.target.closest('td.al-c'); if (!td) return;
+    const txt = (ev.clipboardData || window.clipboardData).getData('text'); if (!txt) return;
+    ev.preventDefault();
+    const [r0, c0] = posOf(td); const changes = [];
+    txt.replace(/\r/g, '').replace(/\n$/, '').split('\n').forEach((line, i) => line.split('\t').forEach((v, j) => {
+      const e = list[r0 + i], c = cols[c0 + j]; if (!e || !c) return;
+      const s = v.trim(); if (s !== '' && !/^\d+$/.test(s)) return;
+      changes.push({ employee_id: e.id, date: c.d, level: c.lv, minutes: s });
+    }));
+    saveCells(changes);
+  });
+  draw();
+
+  setMain(head(T, fromI, toI, prev, next, monthB, tabs),
+    defPanel, applyPanel,
+    el('div', { class: 'ft-wrap' }, el('div', { class: 'panel ft-left' }, tree),
+      el('div', { class: 'panel', style: 'padding:10px;min-width:0' },
+        el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px' }, q, total,
+          el('span', { class: 'map-hint', style: 'margin:0' }, 'Bấm ô để sửa · Enter lưu · Delete xoá · mũi tên di chuyển · copy cả khối số từ Excel rồi Ctrl+V vào ô góc trên-trái. Ô đậm = khai riêng ngày; ô xám = theo mức riêng / mặc định; — = không giới hạn.')),
+        el('div', { class: 'al-scroll' }, tbl))));
 }
 
 /* ---------- LƯỢT CHẤM (như "Sửa giờ chấm công" của Wise Eye): xem / thêm / sửa / xoá từng lượt chấm của 1 NV trong 1 ngày ---------- */
@@ -4618,6 +4837,10 @@ const REPORT_GROUPS = [
     ['leave', '🌴', 'Nghỉ phép / đơn từ', 'Tổng nghỉ phép và chi tiết theo loại'],
     ['payroll', '💰', 'Bảng lương', 'Bảng lương tháng theo kỳ lương đã cấu hình'],
   ]],
+  ['Công ảo 3 mức', [
+    ['audit3', '🎭', 'Tổng hợp tăng ca 3 mức', 'Mỗi NV: ngày đi làm, công, tăng ca THẬT và tăng ca Ảo 1 / Ảo 2 / Ảo 3 (giờ)'],
+    ['audit3day', '🎭', 'Chi tiết công ảo 3 mức theo ngày', 'Mỗi NV × ngày: giờ vào / ra + tăng ca của Thật, Ảo 1, Ảo 2, Ảo 3'],
+  ]],
   ['Kiểm soát', [
     ['manualtime', '✍️', 'Giờ sửa/thêm bằng tay', 'Vết ai (quản trị/quản lý) sửa/thêm giờ, ngày giờ nào — theo thời gian sửa'],
   ]],
@@ -4682,7 +4905,7 @@ async function pageReport() {
   // Phần lọc NV cho query: ưu tiên NV cụ thể (ids), rồi tới nhiều phòng ban (depts)
   const filterQS = () => (empPick.size ? '&ids=' + [...empPick].join(',')
     : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : ''))
-    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=1' : '');
+    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=' + _virt : '');
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
   const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; };
 
@@ -4693,7 +4916,7 @@ async function pageReport() {
     const wrap = el('div', {});
     wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
     for (const [gname, cards] of REPORT_GROUPS) {
-      const list = cards.filter(([v]) => formSel.value !== 'hourly' || !['late', 'ot', 'symbol'].includes(v));
+      const list = cards.filter(([v]) => (formSel.value !== 'hourly' || !['late', 'ot', 'symbol'].includes(v)) && (auditOn() || !v.startsWith('audit3')));
       if (!list.length) continue;
       wrap.append(el('div', { style: 'font-weight:800;color:var(--ink);margin:18px 0 10px;font-size:15px' }, gname));
       const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px' });

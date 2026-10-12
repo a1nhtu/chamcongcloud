@@ -335,3 +335,31 @@ table.ft-emps tbody tr.sel td, table.ft-punch tbody tr.sel td { background: #ffe
 .au-card { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 16px; border: 1.5px solid #fcd34d; background: #fffbeb; border-radius: 14px; cursor: pointer; font: inherit; color: var(--ink); }
 .au-card:hover { box-shadow: 0 6px 18px rgba(245, 158, 11, .2); transform: translateY(-1px); }
 .au-ic { font-size: 28px; line-height: 1; }
+
+/* Chọn chế độ xem: Thật / Ảo 1 / Ảo 2 / Ảo 3 */
+.virt-seg { display: inline-flex; border: 1.5px solid #f59e0b; border-radius: 999px; overflow: hidden; background: #fffbeb; white-space: nowrap; }
+.virt-seg button { border: 0; background: none; padding: 6px 11px; font: inherit; font-size: 13px; font-weight: 700; color: #b45309; cursor: pointer; }
+.virt-seg button + button { border-left: 1px solid #fcd34d; }
+.virt-seg button.on { background: #f59e0b; color: #fff; }
+.virt-seg button.real.on { background: #475569; }
+
+/* Tăng ca tối đa / ngày — 3 mức công ảo */
+.al-def, .al-apply { display: flex; gap: 10px 14px; align-items: center; flex-wrap: wrap; padding: 12px 14px; margin-bottom: 12px; }
+.al-def label, .al-apply label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-weight: 600; font-size: 13px; }
+.al-def { border: 1px dashed #f59e0b; }
+.al-tabs { display: inline-flex; gap: 4px; }
+.al-scroll { max-height: calc(100vh - 330px); overflow: auto; }
+table.al-grid { font-size: 13px; }
+table.al-grid th { position: sticky; top: 0; z-index: 1; text-align: center; white-space: nowrap; }
+table.al-grid th.al-h small { font-weight: 500; color: var(--muted); }
+table.al-grid th.emp { background: #fef3c7; }
+table.al-grid th.sun small { color: #dc2626; }
+table.al-grid td { white-space: nowrap; }
+td.al-c { text-align: center; min-width: 54px; cursor: cell; font-variant-numeric: tabular-nums; }
+td.al-c.day { font-weight: 800; color: #92400e; background: #fffbeb; }
+td.al-c.emp { color: #475569; font-weight: 600; }
+td.al-c.def { color: #9ca3af; }
+td.al-c.sun { background: #fff1f2; }
+td.al-c:focus { outline: 2px solid #f59e0b; outline-offset: -2px; }
+td.al-c .al-inp { width: 64px; margin: 0; padding: 3px 4px; text-align: center; }
+table.al-grid td.al-dept { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }

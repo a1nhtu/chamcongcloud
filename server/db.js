@@ -552,6 +552,14 @@ function migrateColumns() {
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_priv_emp ON employee_privileges(employee_id, from_date);`);
+  // CÔNG ẢO 3 mức: tăng ca tối đa (phút) mỗi NV × ngày × mức; work_date='*' = mức riêng của NV (mọi ngày chưa khai)
+  db.exec(`CREATE TABLE IF NOT EXISTS audit_ot_max (
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      work_date   TEXT NOT NULL,
+      level       INTEGER NOT NULL,
+      minutes     INTEGER NOT NULL,
+      PRIMARY KEY (employee_id, work_date, level)
+    );`);
   // Ngày có LƯỢT CHẤM được thêm / sửa / xoá bằng tay (menu Sửa giờ chấm công) → hiện dấu (*) như giờ sửa tay
   db.exec(`CREATE TABLE IF NOT EXISTS att_edit_marks (
       employee_id INTEGER NOT NULL, work_date TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')),

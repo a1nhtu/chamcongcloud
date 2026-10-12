@@ -1,4 +1,4 @@
-// CÔNG ẢO / LƯƠNG ẢO (audit) — giống "công khách (K)" của HR-ERP.
+// CÔNG ẢO / LƯƠNG ẢO (audit) — giống "công khách (K)" của HR-ERP. Có 3 MỨC (Ảo 1 / 2 / 3), khác nhau ở tăng ca tối đa / ngày.
 // Công THẬT giữ nguyên trong bảng attendance; khi xem ở chế độ ảo, tăng ca được cắt theo hạn mức
 //   ngày (phút) → tuần (giờ, T2–CN) → tháng (giờ, theo kỳ lương) → năm (giờ, cộng dồn từ kỳ lương tháng 1)
 // rồi giờ ra (hoặc giờ vào, nếu tăng ca trước ca) được lùi lại cho khớp số tăng ca còn lại.
@@ -15,16 +15,42 @@ export function auditSettings() {
   const num = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v >= 0 ? v : d; };
   return {
     enabled: getSetting('audit_enabled', '0') === '1',
-    dayMin: num('audit_ot_day_min', 240),            // tăng ca tối đa / ngày (phút)        — 0 = không giới hạn
     weekMin: num('audit_ot_week_h', 0) * 60,         // tối đa / tuần (giờ)
-    monthMin: num('audit_ot_month_h', 40) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
-    yearMin: num('audit_ot_year_h', 200) * 60,       // tối đa / năm (giờ)
+    monthMin: num('audit_ot_month_h', 0) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
+    yearMin: num('audit_ot_year_h', 0) * 60,       // tối đa / năm (giờ)
     inclWeekend: getSetting('audit_incl_weekend', '1') === '1',   // tăng ca ngày nghỉ tuần (CN…) tính vào hạn mức & bị cắt
     inclHoliday: getSetting('audit_incl_holiday', '1') === '1',   // tăng ca ngày lễ tính vào hạn mức & bị cắt
     method: getSetting('audit_method', 'ratio') === 'days' ? 'days' : 'ratio',   // chia đều tỷ lệ | gỡ bớt nguyên ngày
     block: Math.max(0, parseInt(getSetting('audit_block', '15'), 10) || 0),       // làm tròn phút tăng ca ảo theo khối
   };
 }
+// 3 MỨC công ảo (như "TGLT tối đa / tối đa 2 / tối đa 3" của HR-ERP): mỗi mức có tăng ca tối đa / ngày riêng.
+// Mặc định công ty (phút; null = không giới hạn) + mức tài khoản kiểm tra được xem. Mức 1 kế thừa audit_ot_day_min cũ (> 0).
+export function levelDefaults() {
+  const rd = (k) => { const v = getSetting(k, ''); if (v === '' || v == null) return null; const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : null; };
+  let l1 = rd('audit_l1_day');
+  if (l1 == null && getSetting('audit_l1_day', null) == null) { const old = parseInt(getSetting('audit_ot_day_min', '0'), 10); if (old > 0) l1 = old; }
+  const insp = parseInt(getSetting('audit_inspector_level', '1'), 10);
+  return { 1: l1, 2: rd('audit_l2_day'), 3: rd('audit_l3_day'), inspector: [1, 2, 3].includes(insp) ? insp : 1 };
+}
+// Mức công ảo đang xem từ query ?virt=1|2|3 (0 = công thật). Tài khoản kiểm tra: luôn đúng mức chủ đã chọn cho họ.
+export function virtLevel(q, req) {
+  if (req && req.forceVirt) return levelDefaults().inspector;
+  const v = parseInt(q && q.virt, 10);
+  return [1, 2, 3].includes(v) ? v : 0;
+}
+// Hàm tra tăng ca tối đa (phút) của NV eid ngày d ở mức `level`: ô ngày → mức riêng NV ('*') → mặc định công ty; null = không giới hạn
+function dayLimitFn(ids, L, R, level) {
+  const cells = new Map();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    for (const c of db.prepare(`SELECT employee_id, work_date, minutes FROM audit_ot_max WHERE level=? AND employee_id IN (${chunk.map(() => '?').join(',')})
+        AND ((work_date >= ? AND work_date <= ?) OR work_date='*')`).all(level, ...chunk, L, R)) cells.set(c.employee_id + '|' + c.work_date, c.minutes);
+  }
+  const def = levelDefaults()[level];
+  return (eid, d) => { const k = eid + '|' + d; if (cells.has(k)) return cells.get(k); const e = eid + '|*'; return cells.has(e) ? cells.get(e) : def; };
+}
+
 // Người dùng có được xem công ảo không (tính năng bật + là admin / tài khoản tổng / có quyền "audit")
 export function auditAllowed(user) {
   if (getSetting('audit_enabled', '0') !== '1' || !user) return false;
@@ -83,7 +109,7 @@ function reduce(items, cap, S, seed) {
 // Map attendance.id → { ot_min, check_in_at, check_out_at, hidden, cut } cho các NV trong [from, to].
 // Dòng không bị cắt không có trong map. Tính năng tắt → map rỗng.
 // force = tài khoản kiểm tra: luôn công ảo (kể cả khi tài khoản tổng đã tắt tính năng)
-export function virtualOt(empIds, from, to, force = false) {
+export function virtualOt(empIds, from, to, force = false, level = 1) {
   const S = auditSettings();
   const out = new Map();
   if ((!S.enabled && !force) || !empIds || !empIds.length) return out;
@@ -95,6 +121,8 @@ export function virtualOt(empIds, from, to, force = false) {
   let R = P.end(+kT.slice(0, 4), +kT.slice(5, 7)); if (to > R) R = to;
   R = addDays(monday(R), 6);
   const ids = [...new Set(empIds.map(Number).filter(Boolean))];
+  const lv = [1, 2, 3].includes(+level) ? +level : 1;
+  const dayCap = dayLimitFn(ids, L, R, lv);
   const rows = [];
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
@@ -112,7 +140,7 @@ export function virtualOt(empIds, from, to, force = false) {
   const group = (items, keyFn) => { const m = new Map(); for (const x of items) { const k = keyFn(x.date); if (!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; };
   for (const [eid, items] of byEmp) {
     items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    if (S.dayMin > 0) for (const [d, xs] of group(items, (d) => d)) reduce(xs, S.dayMin, S, eid * 7919 + Date.parse(d) / DAY);
+    for (const [d, xs] of group(items, (d) => d)) { const cap = dayCap(eid, d); if (cap != null) reduce(xs, cap, S, eid * 7919 + Date.parse(d) / DAY + lv); }
     if (S.weekMin > 0) for (const [w, xs] of group(items, monday)) reduce(xs, S.weekMin, S, eid * 104729 + Date.parse(w) / DAY);
     const months = group(items, P.key);
     if (S.monthMin > 0) for (const [k, xs] of months) reduce(xs, S.monthMin, S, eid * 1299709 + +k.replace('-', ''));

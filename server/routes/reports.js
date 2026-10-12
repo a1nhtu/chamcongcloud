@@ -6,7 +6,7 @@ import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
-import { virtualOt, applyVirtual, auditAllowed } from '../virtual-att.js';
+import { virtualOt, applyVirtual, auditAllowed, virtLevel, levelDefaults } from '../virtual-att.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -150,7 +150,7 @@ function loadRange(from, to, filter) {
   ).all(from, to);
   // CÔNG ẢO: tăng ca cắt theo hạn mức, giờ ra / vào lùi tương ứng, ngày chỉ toàn tăng ca bị cắt hết thì bỏ
   const virt = !!(filter && typeof filter === 'object' && filter.virt);
-  const results = virt ? applyVirtual(results0, virtualOt(employees.map((e) => e.id), from, to, !!filter.force)) : results0;
+  const results = virt ? applyVirtual(results0, virtualOt(employees.map((e) => e.id), from, to, !!filter.force, filter.virt)) : results0;
   // shift join fallback: nếu không có phân ca ngày, lấy ca mặc định
   const shiftsById = new Map(db.prepare('SELECT * FROM shifts').all().map((s) => [s.id, s]));
   const empById = new Map(employees.map((e) => [e.id, e]));
@@ -330,7 +330,46 @@ function buildReport(type, from, to, filter) {
   return rep;
 }
 
+// CÔNG ẢO 3 MỨC: so tăng ca THẬT với Ảo 1 / Ảo 2 / Ảo 3 (mỗi mức cắt theo tăng ca tối đa / ngày riêng).
+// audit3 = tổng hợp mỗi NV · audit3day = chi tiết mỗi NV × ngày (giờ vào / ra + tăng ca của từng mức).
+function buildAudit3(type, from, to, filter) {
+  const ctx = loadRange(from, to, { ...filter, virt: 0 });
+  const emps = ctx.employees, ids = emps.map((e) => e.id);
+  const att = ids.length ? db.prepare(`SELECT id, employee_id, work_date, check_in_at, check_out_at, ot_min, work_unit FROM attendance
+    WHERE work_date >= ? AND work_date <= ? AND employee_id IN (${ids.map(() => '?').join(',')}) ORDER BY work_date, check_in_at`).all(from, to, ...ids) : [];
+  const vm = [null, ...[1, 2, 3].map((lv) => virtualOt(ids, from, to, false, lv))];
+  const at = (a, lv) => { const v = vm[lv].get(a.id); return !v ? a : v.hidden ? null : { ...a, ...v }; };
+  const h = (m) => round2((m || 0) / 60);
+  const PERIOD = periodLabel(from, to);
+  const base = [{ key: 'code', label: 'Mã NV' }, { key: 'name', label: 'Họ tên' }, { key: 'dept', label: 'Bộ phận' }];
+  if (type === 'audit3') {
+    const agg = new Map(emps.map((e) => [e.id, { code: e.code, name: e.full_name, dept: e.department || '', cong: 0, days: 0, ot0: 0, ot1: 0, ot2: 0, ot3: 0 }]));
+    for (const a of att) {
+      const g = agg.get(a.employee_id); if (!g) continue;
+      g.cong += a.work_unit || 0; if (a.check_in_at) g.days++; g.ot0 += a.ot_min || 0;
+      for (const lv of [1, 2, 3]) { const x = at(a, lv); if (x) g['ot' + lv] += x.ot_min || 0; }
+    }
+    const rows = [...agg.values()].filter((g) => g.days || g.ot0).map((g, i) => ({ stt: i + 1, ...g, cong: round2(g.cong), ot0: h(g.ot0), ot1: h(g.ot1), ot2: h(g.ot2), ot3: h(g.ot3) }));
+    return { title: `Tổng hợp tăng ca 3 mức công ảo ${PERIOD}`, columns: [{ key: 'stt', label: 'STT' }, ...base, { key: 'days', label: 'Ngày đi làm' }, { key: 'cong', label: 'Công' },
+      { key: 'ot0', label: 'TC thật (giờ)' }, { key: 'ot1', label: 'TC Ảo 1 (giờ)' }, { key: 'ot2', label: 'TC Ảo 2 (giờ)' }, { key: 'ot3', label: 'TC Ảo 3 (giờ)' }], rows };
+  }
+  const empById = new Map(emps.map((e) => [e.id, e]));
+  const rows = [];
+  for (const a of att) {
+    const e = empById.get(a.employee_id); if (!e) continue;
+    const r = { date: fmtDMY(a.work_date), wd: WD[vnWeekday(a.work_date)] || '', code: e.code, name: e.full_name, dept: e.department || '',
+      in0: isoToVnHM(a.check_in_at), out0: isoToVnHM(a.check_out_at), ot0: h(a.ot_min) };
+    for (const lv of [1, 2, 3]) { const x = at(a, lv); r['in' + lv] = x ? isoToVnHM(x.check_in_at) : '—'; r['out' + lv] = x ? isoToVnHM(x.check_out_at) : '—'; r['ot' + lv] = x ? h(x.ot_min) : 0; }
+    rows.push(r);
+  }
+  rows.sort((p, q) => (p.code < q.code ? -1 : p.code > q.code ? 1 : 0));
+  const lvCols = (lv, t) => [{ key: 'in' + lv, label: `${t} vào` }, { key: 'out' + lv, label: `${t} ra` }, { key: 'ot' + lv, label: `${t} TC (giờ)` }];
+  return { title: `Chi tiết công ảo 3 mức theo ngày ${PERIOD}`, columns: [{ key: 'date', label: 'Ngày' }, { key: 'wd', label: 'Thứ' }, ...base,
+    ...lvCols(0, 'Thật'), ...lvCols(1, 'Ảo 1'), ...lvCols(2, 'Ảo 2'), ...lvCols(3, 'Ảo 3')], rows };
+}
+
 function buildReportRaw(type, from, to, filter) {
+  if (AUDIT3.includes(type)) return buildAudit3(type, from, to, filter);
   if (type === 'manualtime') return filter && filter.virt ? { title: `Giờ sửa/thêm bằng tay ${periodLabel(from, to)}`, columns: [], rows: [] } : buildManualTime(from, to);
   const ctx = loadRange(from, to, filter);
   const days = daysBetween(from, to);
@@ -1184,7 +1223,7 @@ r.get('/attendance', (req, res) => {
   const marks = new Set(db.prepare('SELECT employee_id, work_date FROM att_edit_marks WHERE work_date LIKE ?').all(month + '%').map((m) => m.employee_id + '|' + m.work_date));
   let raw = db.prepare(sql).all(...args);
   if (req.forceVirt) {   // tài khoản kiểm tra: danh sách Tổng quan cũng là công ảo, không dấu sửa tay
-    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], month + '-01', month + '-31', true)).map((a) => ({ ...a, manual: 0 }));
+    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], month + '-01', month + '-31', true, levelDefaults().inspector)).map((a) => ({ ...a, manual: 0 }));
     marks.clear();
   }
   const rows = raw.map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
@@ -1207,10 +1246,16 @@ function filterFromQuery(q, req) {
   const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
   const m = (v) => (v === 'shift' || v === 'hourly' ? v : null);
   const force = !!(req && req.forceVirt);   // tài khoản kiểm tra: luôn công ảo
-  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: q.virt === '1' || force, force };
+  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: virtLevel(q, req), force };
 }
 // công ảo chỉ cho người được phép (tính năng bật + quyền "audit")
-const virtGuard = (req, res, next) => (req.query.virt === '1' && !req.forceVirt && !auditAllowed(req.user) ? res.status(403).json({ error: 'Không có quyền dùng chức năng này' }) : next());
+// báo cáo so 3 mức công ảo (có cả số thật): chỉ người được xem công ảo, KHÔNG cho tài khoản kiểm tra
+const AUDIT3 = ['audit3', 'audit3day'];
+const virtGuard = (req, res, next) => {
+  const a3 = AUDIT3.includes(req.query.type);
+  const deny = a3 ? (!!req.forceVirt || !auditAllowed(req.user)) : (+req.query.virt > 0 && !req.forceVirt && !auditAllowed(req.user));
+  return deny ? res.status(403).json({ error: 'Không có quyền dùng chức năng này' }) : next();
+};
 
 r.get('/data', virtGuard, (req, res) => {
   const { from, to } = resolvePeriod(req.query);

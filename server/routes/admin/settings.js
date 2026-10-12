@@ -37,8 +37,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
       audit_enabled: req.forceVirt ? '0' : getSetting('audit_enabled', '0'),   // CÔNG ẢO / LƯƠNG ẢO — chỉ tài khoản tổng bật (tài khoản kiểm tra: luôn '0')
       ...(auditAllowed(req.user) && !req.forceVirt ? {
-        audit_ot_day_min: getSetting('audit_ot_day_min', '240'), audit_ot_week_h: getSetting('audit_ot_week_h', '0'),
-        audit_ot_month_h: getSetting('audit_ot_month_h', '40'), audit_ot_year_h: getSetting('audit_ot_year_h', '200'),
+        audit_ot_day_min: getSetting('audit_ot_day_min', '0'), audit_ot_week_h: getSetting('audit_ot_week_h', '0'),
+        audit_ot_month_h: getSetting('audit_ot_month_h', '0'), audit_ot_year_h: getSetting('audit_ot_year_h', '0'),
         audit_incl_weekend: getSetting('audit_incl_weekend', '1'), audit_incl_holiday: getSetting('audit_incl_holiday', '1'),
         audit_method: getSetting('audit_method', 'ratio'), audit_block: getSetting('audit_block', '15'),
       } : {}),

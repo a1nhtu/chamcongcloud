@@ -570,6 +570,21 @@ function consumedByPrevDay(employeeId, workDate) {
   return r && r.m && r.m >= new Date(workDate + 'T00:00:00+07:00').toISOString() ? r.m : null;
 }
 
+// Khung RA của ca hôm nay kéo sang sáng hôm sau (VD ca 14h–22h nhận ra tới 6h sáng): lượt quẹt sáng hôm sau nằm trong
+// khung VÀO của ca hôm sau và gần giờ bắt đầu ca hôm sau hơn giờ kết thúc ca hôm nay → là giờ VÀO hôm sau, không lấy làm giờ ra
+// (như HR-ERP). Trả hàm (punchIso, endCaHomNay) → true nếu lượt đó thuộc hôm sau; null nếu không cần xét.
+function nextDayClaim(employeeId, workDate, winEnd, hourly) {
+  const nx = new Date(workDate + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
+  const nd = nx.toISOString().slice(0, 10);
+  const ndStart = new Date(nd + 'T00:00:00+07:00');
+  if (hourly || winEnd <= ndStart) return null;
+  const plan = resolveDayShifts(employeeId, nd);
+  if (plan.off || !plan.shifts.length) return null;
+  const firsts = plan.shifts.map((s) => ruleWindow(nd, s)).sort((a, b) => a.start - b.start)[0];
+  const from = Math.max(firsts.winStart.getTime(), ndStart.getTime()), st = firsts.start.getTime();
+  return (iso, end) => { const t = Date.parse(iso); return t >= from && Math.abs(st - t) < Math.abs(t - end.getTime()); };
+}
+
 // Dựng lại nhiều ngày theo đúng THỨ TỰ (từng NV, ngày tăng dần) — ngày hôm trước phải xong trước để biết
 // lượt quẹt sáng sớm nào đã là giờ ra ca đêm. keys: Set/mảng 'empId|YYYY-MM-DD'. Tự thêm ngày kế tiếp (ca đêm lấn sang).
 export function rebuildDays(keys) {
@@ -632,8 +647,10 @@ export function rebuildDay(employeeId, workDate) {
   let inIso, outIso, pairs = null;
   if (shift) {
     const wopts = { toDayEnd: !isNightShift(shift), dupMin: dup };
-    const { winStart, winEnd } = ruleWindow(workDate, shift, wopts);
+    const { winStart, winEnd, end } = ruleWindow(workDate, shift, wopts);
     let punches = punchesInWin(winStart, winEnd);
+    const claim = nextDayClaim(employeeId, workDate, winEnd, hourly);
+    if (claim) punches = punches.filter((p) => !claim(p.punch_at, end));
     if (!punches.length) punches = prov;
     ({ inIso, outIso, pairs = null } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate, wopts));
     if (!inIso) {
