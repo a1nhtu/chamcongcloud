@@ -3857,7 +3857,7 @@ async function pageAudit() {
  * Trái: cây phòng ban · Phải: lưới NV × ngày, mỗi ô = số phút tăng ca tối đa của mức đó.
  * Ô đậm = đã khai riêng cho ngày đó; ô xám = đang theo mức riêng NV / mặc định công ty; "—" = không giới hạn.
  * Sửa: bấm ô gõ số (Enter lưu, để trống = theo mặc định) · dán cả khối số copy từ Excel · áp nhanh nhiều NV × nhiều ngày. */
-const _al = { dept: '', q: '', from: null, to: null, tab: 'all', picked: new Set() };
+const _al = { dept: '', q: '', from: null, to: null, tab: 'all', picked: new Set(), bulk: null };   // bulk: ô "Áp nhanh" (giữ khi lưới tải lại)
 async function pageAuditLimits() {
   const T = '⏱️ Tăng ca tối đa (công ảo)';
   setMain(head(T), loading());
@@ -3925,10 +3925,17 @@ async function pageAuditLimits() {
   const toI = el('input', { type: 'date', value: _al.to, style: 'width:auto;margin:0' });
   const prev = el('button', { class: 'btn ghost sm', title: 'Lùi' }, '◀'), next = el('button', { class: 'btn ghost sm', title: 'Tới' }, '▶');
   const monthB = el('button', { class: 'btn ghost sm' }, 'Cả tháng');
-  const setRange = async (f, t) => {
+  // fromBulk: đổi ngày ở "Áp nhanh" → lưới chuyển theo để thấy chỗ sắp áp (lưới tối đa 31 ngày; khoảng áp vẫn giữ đủ)
+  const setRange = async (f, t, fromBulk = false) => {
     if (t < f) t = f;
+    if (fromBulk && _al.tab === 'all' && nDays(f, t) > 7) _al.tab = String(bLv.value);   // cả 3 mức chỉ xem được 7 ngày → xem đúng mức đang áp
     const maxN = _al.tab === 'all' ? 7 : 31;
-    if (nDays(f, t) > maxN) { t = addDays(f, maxN - 1); toast(_al.tab === 'all' ? 'Xem cả 3 mức: tối đa 7 ngày (chọn 1 mức để xem cả tháng)' : 'Xem tối đa 31 ngày', 'err'); }
+    if (nDays(f, t) > maxN) {
+      t = addDays(f, maxN - 1);
+      if (fromBulk) toast(`Lưới hiện ${maxN} ngày đầu; "Áp nhanh" vẫn áp đủ khoảng đã chọn`, 'ok');
+      else toast(_al.tab === 'all' ? 'Xem cả 3 mức: tối đa 7 ngày (chọn 1 mức để xem cả tháng)' : 'Xem tối đa 31 ngày', 'err');
+    }
+    if (!fromBulk && _al.bulk) { _al.bulk.from = f; _al.bulk.to = t; }   // đổi ngày xem ở trên → khoảng áp nhanh theo
     _al.from = f; _al.to = t; pageAuditLimits();
   };
   fromI.onchange = () => setRange(fromI.value || today, toI.value < fromI.value ? fromI.value : toI.value);
@@ -3947,10 +3954,22 @@ async function pageAuditLimits() {
 
   // ----- áp nhanh -----
   const bLv = el('select', { style: 'width:auto;margin:0' }, ...[1, 2, 3].map((lv) => el('option', { value: lv }, LV[lv])));
-  if (_al.tab !== 'all') bLv.value = _al.tab;
-  const bMin = el('input', { type: 'number', min: 0, max: 1440, step: 5, placeholder: 'số phút', title: 'Để trống = xoá ô đã khai (về mặc định)', style: 'width:100px;margin:0' });
-  const bFrom = el('input', { type: 'date', value: _al.from, style: 'width:auto;margin:0' }), bTo = el('input', { type: 'date', value: _al.to, style: 'width:auto;margin:0' });
-  const bSun = el('input', { type: 'checkbox', style: 'width:auto;margin:0', checked: '' }), bSat = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+  const B = _al.bulk || { lv: _al.tab !== 'all' ? _al.tab : '1', min: '', from: _al.from, to: _al.to, sun: true, sat: false };
+  bLv.value = B.lv;
+  const bMin = el('input', { type: 'number', min: 0, max: 1440, step: 5, placeholder: 'số phút', title: 'Để trống = xoá ô đã khai (về mặc định)', value: B.min, style: 'width:100px;margin:0' });
+  const bFrom = el('input', { type: 'date', value: B.from, style: 'width:auto;margin:0' }), bTo = el('input', { type: 'date', value: B.to, style: 'width:auto;margin:0' });
+  const bSun = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(B.sun ? { checked: '' } : {}) }), bSat = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(B.sat ? { checked: '' } : {}) });
+  const saveBulk = () => { _al.bulk = { lv: bLv.value, min: bMin.value, from: bFrom.value, to: bTo.value, sun: bSun.checked, sat: bSat.checked }; };
+  for (const x of [bLv, bMin, bSun, bSat]) x.addEventListener('change', saveBulk);
+  bMin.addEventListener('input', saveBulk);
+  // đổi khoảng áp → lưới chuyển sang đúng khoảng đó (để thấy trước chỗ sắp áp)
+  const bulkRange = () => {
+    if (!bFrom.value || !bTo.value) return;
+    if (bTo.value < bFrom.value) bTo.value = bFrom.value;
+    saveBulk(); setRange(bFrom.value, bTo.value, true);
+  };
+  let brT = null; const bulkRangeSoon = () => { saveBulk(); clearTimeout(brT); brT = setTimeout(bulkRange, 700); };   // gõ tay từng số năm → chỉ tải 1 lần khi gõ xong
+  bFrom.addEventListener('change', bulkRangeSoon); bTo.addEventListener('change', bulkRangeSoon);
   const bScope = el('select', { style: 'width:auto;margin:0' }, el('option', { value: 'list' }, 'Tất cả NV đang lọc'), el('option', { value: 'picked' }, 'Chỉ NV đã tích'));
   const bDays = el('button', { class: 'btn sm' }, 'Áp cho các ngày'), bEmp = el('button', { class: 'btn ghost sm', title: 'Ghi làm mức riêng của NV — áp cho mọi ngày chưa khai riêng' }, 'Đặt làm mức riêng NV');
   const doApply = async (target) => {
