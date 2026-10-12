@@ -404,3 +404,12 @@ body.nav-mini #btn-logout::before { content: '🚪'; font-size: 16px; }
 .apply-dt.pending { box-shadow: 0 0 0 3px rgba(22, 163, 74, .3); animation: aplPulse 1.6s ease-in-out infinite; }
 @keyframes aplPulse { 50% { box-shadow: 0 0 0 6px rgba(22, 163, 74, .12); } }
 @media (prefers-reduced-motion: reduce) { .apply-dt.pending { animation: none; } }
+/* Menu thu gọn: biểu tượng thẳng 1 cột (ô cố định, căn giữa), ẩn phần phụ + thanh cuộn */
+@media (min-width: 781px) {
+  body.nav-mini .sidebar { scrollbar-width: none; overflow-x: hidden; }
+  body.nav-mini .sidebar::-webkit-scrollbar { display: none; }
+  body.nav-mini .sidebar nav button { gap: 0; padding: 10px 0; }
+  body.nav-mini .sidebar nav button > span:not(:first-child) { display: none !important; }
+  body.nav-mini .sidebar nav button > span:first-child { width: 28px; text-align: center; font-size: 18px; line-height: 1; display: inline-block; }
+  body.nav-mini #nav-toggle { margin: 8px auto 0; display: block; width: 44px; }
+}
