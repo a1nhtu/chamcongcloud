@@ -3446,7 +3446,7 @@ async function pageEditAtt() {
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tb = el('tbody');
     if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: heads.length }, el('div', { class: 'empty' }, 'Không có dữ liệu trong khoảng ngày này.'))));
-    for (const r of rows) {
+    const mkRow = (r) => {
       const cells = [
         el('td', {}, r.date.slice(8) + '/' + r.date.slice(5, 7)),
         el('td', {}, r.wd),
@@ -3472,13 +3472,15 @@ async function pageEditAtt() {
         el('td', {}, r.status || '—'),
         el('td', {}, !canEdit || _virt ? '' : r.att_id ? btnSm('Sửa', () => openEdit(r)) : (() => { const t = btnSm('+ Thêm', () => attEditModal(null, r.employee_id, load, { date: r.date }), 'ghost'); t.style.whiteSpace = 'nowrap'; return t; })()),
       ];
-      tb.append(el('tr', {}, ...cells));
-    }
+      return el('tr', {}, ...cells);
+    };
+    const startLazy = lazyRows(tb, rows, mkRow, heads.length);   // vẽ dần, không tính lại gì
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Sửa giờ chấm công". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
+    startLazy(null);
   };
 
   // Lưới TỔNG HỢP: mỗi NV 1 dòng + tick chọn để tính lại vài người
@@ -3910,11 +3912,10 @@ async function pageAuditLimits() {
   saveDef.onclick = async () => {
     try {
       const r = await api('/admin/audit-limits/defaults', { method: 'PUT', body: { 1: defI[1].value, 2: defI[2].value, 3: defI[3].value } });
-      data.defaults = r.defaults; toast('Đã lưu mặc định', 'ok'); draw();
+      data.defaults = r.defaults; toast('Đã lưu mặc định', 'ok'); draw(); defFold.refresh();
     } catch (e) { toast(e.message, 'err'); }
   };
   const defPanel = el('div', { class: 'panel al-def' },
-    el('b', {}, 'Mặc định công ty (phút / ngày)'),
     ...[1, 2, 3].map((lv) => el('label', {}, LV[lv], defI[lv])),
     saveDef,
     el('div', { class: 'map-hint', style: 'flex-basis:100%;margin:0' }, 'NV / ngày nào chưa khai thì lấy mức riêng của NV, chưa có nữa thì lấy mặc định này. Để trống = không giới hạn; 0 = không cho tăng ca. Công ảo tính ngay lúc xem, không cần bấm Tính lại. Tài khoản kiểm tra xem mức nào: chọn ở Nhân viên › sửa tài khoản › "Tài khoản kiểm tra".'));
@@ -3964,8 +3965,13 @@ async function pageAuditLimits() {
   };
   bDays.onclick = () => doApply('days'); bEmp.onclick = () => doApply('default');
   const applyPanel = el('div', { class: 'panel al-apply' },
-    el('b', {}, 'Áp nhanh'), bLv, bMin, el('span', { class: 'muted' }, 'phút (trống = về mặc định) · từ'), bFrom, el('span', { class: 'muted' }, 'đến'), bTo,
+    bLv, bMin, el('span', { class: 'muted' }, 'phút (trống = về mặc định) · từ'), bFrom, el('span', { class: 'muted' }, 'đến'), bTo,
     el('label', {}, bSun, 'Bỏ qua chủ nhật'), el('label', {}, bSat, 'Bỏ qua thứ 7'), bScope, bDays, bEmp);
+
+  // 2 khung trên thu gọn được (nút ▼/▶) để lấy chỗ cho lưới
+  const showDef = (lv) => (data.defaults[lv] == null ? 'không giới hạn' : data.defaults[lv] + "'");
+  const defFold = foldPanel(defPanel, 'al_def', 'Mặc định công ty (phút / ngày)', () => `Mức 1: ${showDef(1)} · Mức 2: ${showDef(2)} · Mức 3: ${showDef(3)}`);
+  foldPanel(applyPanel, 'al_apply', 'Áp nhanh', () => 'Áp 1 số phút cho nhiều NV × nhiều ngày, hoặc đặt mức riêng NV — bấm để mở');
 
   // ----- lưới NV × ngày -----
   const visible = () => {
@@ -4896,6 +4902,45 @@ const REPORT_GROUPS = [
   ]],
 ];
 
+// KHUNG THU GỌN được: nút tam giác ▼/▶ cạnh tiêu đề; gọn = chỉ còn 1 dòng tiêu đề + tóm tắt (nhường chỗ cho lưới chính).
+// Nhớ trạng thái trên máy theo `key`. summary(): chữ tóm tắt hiện khi đang gọn.
+function foldPanel(panel, key, title, summary) {
+  const tg = el('button', { type: 'button', class: 'fold-tg', title: 'Thu gọn / mở rộng' });
+  const sum = el('span', { class: 'fold-sum muted' });
+  const head = el('div', { class: 'fold-head' }, tg, el('b', {}, title), sum);
+  panel.prepend(head);
+  let folded = false; try { folded = localStorage.getItem('fold_' + key) === '1'; } catch {}
+  const apply = () => { panel.classList.toggle('folded', folded); tg.textContent = folded ? '▶' : '▼'; sum.textContent = folded && summary ? summary() : ''; };
+  head.onclick = (ev) => { if (ev.target.closest('input,select,button:not(.fold-tg)')) return; folded = !folded; try { localStorage.setItem('fold_' + key, folded ? '1' : '0'); } catch {} apply(); };
+  apply();
+  return { refresh: apply };
+}
+
+// VẼ DẦN bảng dài (VD 650 NV × 30 ngày = hàng chục nghìn dòng — vẽ 1 lần làm trình duyệt đơ):
+// vẽ 200 dòng đầu, cuộn gần cuối bảng thì vẽ tiếp 200 (dữ liệu đã tải đủ, chỉ chưa vẽ) + nút "Hiện tất cả".
+// Trả start(scrollRoot) — gọi SAU khi bảng đã gắn vào trang; scrollRoot = khung cuộn chứa bảng (null = cả trang).
+function lazyRows(tb, rows, mkRow, colspan) {
+  const CHUNK = 200; let shown = 0, io = null, root = null;
+  const txt = el('span', { class: 'muted' });
+  const more = el('tr', { class: 'more-row' }, el('td', { colspan, style: 'text-align:center;padding:14px' }, txt, ' ', btnSm('Hiện tất cả', () => add(rows.length), 'ghost')));
+  const near = () => more.getBoundingClientRect().top < (root ? root.getBoundingClientRect().bottom : innerHeight) + 400;
+  const add = (n) => {
+    const end = Math.min(rows.length, shown + n), frag = document.createDocumentFragment();
+    for (; shown < end; shown++) frag.append(mkRow(rows[shown]));
+    tb.insertBefore(frag, more);
+    if (shown >= rows.length) { more.remove(); if (io) io.disconnect(); return; }
+    txt.textContent = `Đang hiện ${shown.toLocaleString('vi')} / ${rows.length.toLocaleString('vi')} dòng — cuộn xuống để xem tiếp`;
+    if (more.isConnected) requestAnimationFrame(() => { if (more.isConnected && near()) add(CHUNK); });
+  };
+  if (rows.length) { tb.append(more); add(CHUNK); }
+  return (scrollRoot = null) => {
+    if (!more.isConnected) return;
+    root = scrollRoot;
+    io = new IntersectionObserver((es) => { if (es.some((x) => x.isIntersecting)) add(CHUNK); }, { root, rootMargin: '400px' });
+    io.observe(more);
+  };
+}
+
 // KHOẢNG NGÀY Từ → Đến: đổi ngày KHÔNG tự tải (tránh tải 2 lần / tải khoảng quá dài khi đang chọn dở).
 // Nút "✓ Áp dụng" sáng xanh khi đã đổi mà chưa xem; bấm nút hoặc Enter trong ô ngày → run() 1 lần.
 // Trả { btn, synced }: gọi synced() sau mỗi lần đã tải theo ngày đang chọn (nút mờ lại).
@@ -5085,7 +5130,8 @@ async function pageReport() {
       tbl.append(el('thead', {}, thead));
       const tb = el('tbody');
       if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
-      for (const row of data.rows) {
+      let pinLefts = null;   // vị trí các cột ghim (tính sau khi vẽ) → áp cả cho dòng vẽ sau
+      const mkRow = (row) => {
         const tr = el('tr', {});
         for (const c of data.columns) {
           const v = row[c.key];
@@ -5095,8 +5141,10 @@ async function pageReport() {
             style: (c.weekend ? 'background:#fffaf3;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
           }, v === '' || v == null ? '' : String(v)));
         }
-        tb.append(tr);
-      }
+        if (pinLefts) pinLefts.forEach((L, i) => { const td = tr.children[i]; if (td) { td.classList.add('pin'); td.style.left = L + 'px'; } });
+        return tr;
+      };
+      const startLazy = lazyRows(tb, data.rows, mkRow, data.columns.length);
       tbl.append(tb);
       wrap.innerHTML = '';
       // Khung bảng cao vừa màn hình, tự cuộn bên trong → thanh kéo ngang luôn nằm ở đáy khung (không phải kéo xuống cuối trang);
@@ -5106,6 +5154,7 @@ async function pageReport() {
       const pinCols = data.columns.some(c => c.key.startsWith('d20')) ? (data.columns[0].key === 'stt' ? 4 : 2) : 0;
       setTimeout(() => {
         box.style.maxHeight = Math.max(300, innerHeight - box.getBoundingClientRect().top - 16) + 'px';
+        startLazy(box);
         if (!pinCols) return;
         const ths = [...tbl.querySelectorAll('thead th')].slice(0, pinCols);
         let left = 0;
@@ -5115,6 +5164,7 @@ async function pageReport() {
           tbl.querySelectorAll(`tbody tr > td:nth-child(${i + 1})`).forEach(td => { td.classList.add('pin'); td.style.left = L + 'px'; });
           left += th.getBoundingClientRect().width;
         });
+        pinLefts = ths.map((th) => parseFloat(th.style.left) || 0);
       });
     };
     const snapAndLoad = () => { snapMonth(); load(); };

@@ -413,3 +413,11 @@ body.nav-mini #btn-logout::before { content: '🚪'; font-size: 16px; }
   body.nav-mini .sidebar nav button > span:first-child { width: 28px; text-align: center; font-size: 18px; line-height: 1; display: inline-block; }
   body.nav-mini #nav-toggle { margin: 8px auto 0; display: block; width: 44px; }
 }
+/* Khung thu gọn được (nút tam giác ▼/▶) */
+.fold-head { display: flex; align-items: center; gap: 8px; cursor: pointer; flex-basis: 100%; min-width: 0; }
+.fold-head .fold-sum { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fold-tg { border: 0; background: #f3f4f6; color: #6b7280; width: 24px; height: 24px; border-radius: 6px; font-size: 10px; cursor: pointer; flex: none; padding: 0; }
+.fold-tg:hover { background: #ffedd5; color: var(--brand); }
+.panel.folded { padding-top: 8px !important; padding-bottom: 8px !important; }
+.panel.folded > :not(.fold-head) { display: none !important; }
+.ft-node > span:not(.dt-tg) { flex: 1; text-align: left; min-width: 0; }   /* tên bộ phận sát nút ▶, thẳng cột theo cấp */
