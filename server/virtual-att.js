@@ -82,10 +82,11 @@ function reduce(items, cap, S, seed) {
 
 // Map attendance.id → { ot_min, check_in_at, check_out_at, hidden, cut } cho các NV trong [from, to].
 // Dòng không bị cắt không có trong map. Tính năng tắt → map rỗng.
-export function virtualOt(empIds, from, to) {
+// force = tài khoản kiểm tra: luôn công ảo (kể cả khi tài khoản tổng đã tắt tính năng)
+export function virtualOt(empIds, from, to, force = false) {
   const S = auditSettings();
   const out = new Map();
-  if (!S.enabled || !empIds || !empIds.length) return out;
+  if ((!S.enabled && !force) || !empIds || !empIds.length) return out;
   const P = payKeyFn();
   // nạp từ đầu NĂM lương (hạn mức năm cộng dồn) tới hết kỳ lương chứa `to`, mở rộng đủ tuần
   const y0 = +P.key(from).slice(0, 4);

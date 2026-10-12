@@ -42,7 +42,7 @@ export function publicUser(emp) {
   const office = emp.office_id ? db.prepare('SELECT id,name,lat,lng,radius_m,address FROM offices WHERE id = ?').get(emp.office_id) : null;
   const shift = emp.shift_id ? db.prepare('SELECT id,name,start_time,end_time,late_grace_min FROM shifts WHERE id = ?').get(emp.shift_id) : null;
   return {
-    id: emp.id, code: emp.code, full_name: emp.full_name,
+    id: emp.id, code: emp.code, full_name: emp.full_name, audit_only: emp.audit_only ? 1 : 0,
     department: emp.department, position: emp.position, phone: emp.phone,
     role: emp.role, username: emp.username, office, shift,
     permissions: effectivePermissions(emp),

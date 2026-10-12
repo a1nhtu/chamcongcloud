@@ -152,9 +152,9 @@ export function registerAttendanceRoutes(r, { need }) {
     }
 
     // CÔNG ẢO (chỉ xem): tăng ca + giờ ra theo hạn mức, không hiện lượt quẹt thật / dấu sửa tay
-    const virt = req.query.virt === '1';
-    if (virt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
-    const vmap = virt ? virtualOt(empIds, from, to) : null;
+    const virt = req.query.virt === '1' || !!req.forceVirt;   // tài khoản kiểm tra: luôn công ảo
+    if (virt && !req.forceVirt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
+    const vmap = virt ? virtualOt(empIds, from, to, !!req.forceVirt) : null;
 
     if (mode === 'summary') {
       let att = db.prepare(`SELECT id, employee_id, work_date, check_in_at, work_unit, work_minutes, ot_min, late_min, early_min FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to);

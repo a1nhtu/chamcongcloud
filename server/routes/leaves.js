@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db.js';
-import { authRequired, permRequired } from '../auth.js';
+import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
 import { LEAVE_TYPES, leaveBalance, overQuotaMsg, leaveSettings } from '../leave-quota.js';
 import { PRIV_KINDS } from '../privilege.js';
@@ -8,6 +8,7 @@ const normHalf = (h, f, t) => (f === t && (h === 'sang' || h === 'chieu') ? h : 
 
 const r = Router();
 r.use(authRequired);
+r.use(inspectorGuard([/^\/$/, /^\/types$/, /^\/balances$/, /^\/privileges$/]));   // tài khoản kiểm tra: chỉ xem
 
 // Nhân viên gửi đơn
 r.post('/', (req, res) => {

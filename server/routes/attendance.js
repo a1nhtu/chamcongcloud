@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { db, getSetting, allowedOffices, empAttMode, empHourly, isWeekendNormalEmp } from '../db.js';
 import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
+import { inspectorGuard } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv } from '../attendance-calc.js';
@@ -11,6 +12,7 @@ import { privilegeFor, halfLeaveFor } from '../privilege.js';
 
 const r = Router();
 r.use(authRequired);
+r.use(inspectorGuard([]));   // tài khoản kiểm tra không dùng app chấm công / chọn ca
 
 // Giờ VN HH:mm từ ISO
 function vnHm(iso) { const t = new Date(new Date(iso).getTime() + 7 * 3600000); return String(t.getUTCHours()).padStart(2, '0') + ':' + String(t.getUTCMinutes()).padStart(2, '0'); }

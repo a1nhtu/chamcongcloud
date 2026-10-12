@@ -34,7 +34,9 @@ const mixedMode = () => !!(SETTINGS.any_shift && SETTINGS.any_hourly);
 const ATT_MODE_LABEL = { '': 'Theo cài đặt chung của công ty', shift: '🕐 Theo ca làm việc', hourly: '⏱️ Theo giờ (làm bao nhiêu tính bấy nhiêu)' };
 const deviceEnabled = () => SETTINGS.device_enabled === '1';
 // CÔNG ẢO / LƯƠNG ẢO (audit): tài khoản tổng bật tính năng + người dùng có quyền "audit" mới thấy
-const auditOn = () => SETTINGS.audit_enabled === '1' && hasPerm('audit');
+// TÀI KHOẢN KIỂM TRA (audit_only): luôn công ảo, không có nút bật/tắt, không thấy chữ "ảo", chỉ xem
+const isInspector = () => !!(ME && ME.audit_only);
+const auditOn = () => SETTINGS.audit_enabled === '1' && hasPerm('audit') && !isInspector();
 let _virt = false;   // đang xem công ảo (dùng chung cho Tính công / Báo cáo / Lương)
 function virtToggle(onChange) {
   if (!auditOn()) return null;
@@ -91,10 +93,13 @@ async function afterLogin() {
   $('#app-view').classList.remove('hidden');
   $('#me-name').textContent = ME.full_name;
   $('#me-role').textContent = ME.role === 'admin' ? 'Quản trị viên' : 'Quản lý';
+  if (isInspector()) _virt = true;   // tài khoản kiểm tra: máy chủ cũng ép công ảo cho mọi dữ liệu
   try { SETTINGS = await api('/admin/settings'); } catch { SETTINGS = {}; }
   try { PERM_CATALOG = (await api('/admin/perm-catalog')).permissions; } catch { PERM_CATALOG = []; }
   const nav = $('#nav'); nav.innerHTML = '';
-  const visible = NAV.filter(([key, , , perm]) => hasPerm(perm)
+  // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
+  const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
+  const visible = NAV.filter(([key, , , perm]) => hasPerm(perm) && (!isInspector() || INSPECTOR_NAV.includes(key))
     && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq'))
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())
@@ -508,7 +513,7 @@ async function pageEmployees() {
             (e.device_admin_on || []).length ? el('span', { class: 'pill', style: 'margin-left:6px;background:#fdf0df;color:#a25a08', title: 'Quản trị MÁY chấm công (vào được menu máy) tại: ' + e.device_admin_on.join(', ') }, '👑 QT máy') : ''),
           el('td', {}, e.position || '—'),
           el('td', {}, e.username),
-          el('td', {}, roleLabel(e.role)),
+          el('td', {}, e.audit_only && !isInspector() ? el('span', { class: 'pill', style: 'background:#fef3c7;color:#92400e' }, '🔍 Kiểm tra') : roleLabel(e.role)),
           el('td', {}, e.active ? el('span', { class: 'pill ok' }, 'Hoạt động') : el('span', { class: 'pill bad' }, 'Khoá')),
           el('td', {}, actions),
         ));
@@ -718,6 +723,10 @@ function empModal(e) {
         v === '' ? `Theo cài đặt chung (hiện là: ${SETTINGS.attendance_mode === 'hourly' ? 'theo giờ' : 'theo ca'})` : ATT_MODE_LABEL[v])))),
     el('div', { class: 'two-col' }, field('Tài khoản *', mk('username', 'nv002', e?.username)), field('Vai trò', roleSel)),
     permWrap,
+    ...(isAdmin() && (SETTINGS.audit_enabled === '1' || e?.audit_only) ? [el('label', { class: 'lv-chk', style: 'padding:10px;border:1px dashed #f59e0b;border-radius:10px;background:#fffbeb' },
+      el('input', { type: 'checkbox', id: 'e-auditonly', ...(e?.audit_only ? { checked: '' } : {}) }),
+      el('div', {}, el('b', {}, '🔍 Tài khoản kiểm tra — chỉ xem công ảo'),
+        el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Dùng khi có đoàn kiểm tra: đăng nhập tài khoản này chỉ thấy công / lương ẢO ở mọi màn (không có nút bật/tắt, không thấy lượt quẹt thật, sửa giờ, nhật ký, máy chấm công), chỉ được xem, không sửa gì. Tự đặt vai trò Quản lý. Tài khoản này không hiện trong bảng công / bảng lương.')))] : []),
     field(e ? 'Mật khẩu mới (để trống nếu giữ nguyên)' : 'Mật khẩu *', input('e-password', { type: 'text', placeholder: e ? '••••••' : '123456' })),
     ...(e && deviceLockEnabled() ? [(() => {
       const status = e.device_id ? 'Đã gắn 1 điện thoại' : (e.pending_device ? 'Đang chờ duyệt đổi máy' : 'Chưa gắn điện thoại nào');
@@ -742,7 +751,9 @@ function empModal(e) {
       att_mode: $('#e-attmode') ? $('#e-attmode').value : undefined,
       start_date: $('#e-start') ? $('#e-start').value : undefined,
       leave_days_year: $('#e-leaveyear') ? $('#e-leaveyear').value : undefined,
+      audit_only: $('#e-auditonly') ? $('#e-auditonly').checked : undefined,
     };
+    if (body.audit_only && body.role === 'admin') body.role = 'manager';   // tài khoản kiểm tra luôn là Quản lý
     // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
     if (!pinLocked) body.device_pin = f.device_pin.value.trim();
     // Không gửi shift_id/work_schedule_id/office_ids → giữ nguyên phân ca & định vị đã gán ở màn riêng
@@ -3432,7 +3443,7 @@ async function pageEditAtt() {
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Sửa giờ chấm công". Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Sửa giờ chấm công". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
@@ -3485,7 +3496,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
-    allChk, markChk, recalcBtn, virtToggle(() => load()));
+    allChk, isInspector() ? null : markChk, isInspector() ? null : recalcBtn, virtToggle(() => load()));
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }

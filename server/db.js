@@ -535,6 +535,7 @@ function migrateColumns() {
   add('shifts', 'break_start',    "TEXT DEFAULT ''");               // 'HH:MM' giờ BẮT ĐẦU nghỉ giữa ca ('' = không cố định giờ nghỉ)
   add('employees', 'start_date',      "TEXT DEFAULT ''");   // ngày vào làm (tính phép năm theo tháng + thâm niên)
   add('employees', 'leave_days_year', 'REAL');              // số ngày phép năm riêng (NULL = theo cài đặt chung)
+  add('employees', 'audit_only', 'INTEGER NOT NULL DEFAULT 0');   // 1 = TÀI KHOẢN KIỂM TRA: chỉ xem công ảo, không thấy công thật, không sửa gì
   add('leave_requests', 'half',       "TEXT DEFAULT ''");   // '' cả ngày | 'sang' | 'chieu' (nửa ngày, chỉ khi từ ngày = đến ngày)
   // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…): trong [from_date, to_date] NV được đến muộn / về sớm số phút này, không trừ công
   db.exec(`CREATE TABLE IF NOT EXISTS employee_privileges (
@@ -699,7 +700,8 @@ export function setSetting(key, value) {
 // Mặc định bỏ Admin; bật setting 'payroll_include_admin'='1' thì TÍNH CÔNG cho cả Admin (trả '').
 // col: tên cột role (vd 'role' hoặc 'e.role' khi join có alias).
 export function adminAttWhere(col = 'role') {
-  return getSetting('payroll_include_admin', '0') === '1' ? '' : ` AND ${col}!='admin'`;
+  const p = col.includes('.') ? col.slice(0, col.indexOf('.') + 1) : '';
+  return (getSetting('payroll_include_admin', '0') === '1' ? '' : ` AND ${col}!='admin'`) + ` AND IFNULL(${p}audit_only,0)=0`;
 }
 
 // Danh sách định vị (văn phòng) mà NV được phép chấm. Chưa cấu hình → TẤT CẢ định vị đang bật.

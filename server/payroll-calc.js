@@ -133,7 +133,7 @@ export function computePayrollTable(year, month, filter) {
   else if (f.dept) { sql += ' AND department = ?'; args.push(f.dept); }
   sql += ' ORDER BY department, full_name';
   const emps = db.prepare(sql).all(...args);
-  const vmap = f.virt ? virtualOt(emps.map((e) => e.id), from, to) : null;   // lương ảo: nạp công ảo 1 lần cho cả bảng
+  const vmap = f.virt ? virtualOt(emps.map((e) => e.id), from, to, !!f.force) : null;   // lương ảo: nạp công ảo 1 lần cho cả bảng
   const rows = emps.map((e) => ({ emp: e, pay: computePayrollForEmployee(e.id, from, to, { virt: !!f.virt, vmap }) }));
   return { from, to, rows };
 }

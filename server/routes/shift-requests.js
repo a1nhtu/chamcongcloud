@@ -3,10 +3,12 @@
 import { Router } from 'express';
 import { db, getSetting, empHourly } from '../db.js';
 import { authRequired, permRequired } from '../auth.js';
+import { inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
 
 const r = Router();
 r.use(authRequired);
+r.use(inspectorGuard([]));   // tài khoản kiểm tra không dùng app chấm công / chọn ca
 
 const enabled = () => getSetting('self_shift_enabled', '0') === '1';
 const needApprove = () => getSetting('self_shift_approve', '1') === '1';

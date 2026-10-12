@@ -43,9 +43,9 @@ export function registerPayrollRoutes(r, { need }) {
     const dept = req.query.dept || null;
     const m = /^(\d{4})-(\d{2})$/.exec(month);
     if (!m) return res.status(400).json({ error: 'Thiếu tháng (YYYY-MM)' });
-    const virt = req.query.virt === '1';
-    if (virt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
-    const data = computePayrollTable(+m[1], +m[2], { dept, virt });
+    const virt = req.query.virt === '1' || !!req.forceVirt;   // tài khoản kiểm tra: luôn lương ảo
+    if (virt && !req.forceVirt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
+    const data = computePayrollTable(+m[1], +m[2], { dept, virt, force: !!req.forceVirt });
     res.json({ ...data, month, mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
   });
 

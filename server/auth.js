@@ -134,8 +134,13 @@ export const ALL_PERMS = PERMISSIONS.map(([k]) => k);
 const MANAGER_DEFAULT = ['reports', 'employees', 'shifts', 'assignments', 'shift_requests', 'offices', 'departments', 'leaves', 'attendance_edit', 'devices', 'holidays', 'recompute'];
 
 // Quyền hiệu lực của một nhân viên. admin = toàn quyền.
+// TÀI KHOẢN KIỂM TRA (audit_only): chỉ được các quyền XEM này, mọi dữ liệu công trả về là công ảo
+export const INSPECTOR_PERMS = ['reports', 'employees', 'shifts', 'assignments', 'offices', 'departments', 'leaves', 'attendance_edit', 'salary', 'holidays'];
+export const isInspector = (u) => !!(u && !u.master && u.audit_only);
+
 export function effectivePermissions(emp) {
   if (!emp) return [];
+  if (isInspector(emp)) return INSPECTOR_PERMS.slice();
   if (emp.master || emp.role === 'admin') return ALL_PERMS.slice();
   if (emp.permissions != null && emp.permissions !== '') {
     try { const p = JSON.parse(emp.permissions); if (Array.isArray(p)) return p.filter((k) => ALL_PERMS.includes(k)); } catch {}
@@ -144,7 +149,19 @@ export function effectivePermissions(emp) {
 }
 
 export function hasPerm(emp, key) {
+  if (isInspector(emp)) return INSPECTOR_PERMS.includes(key);
   return emp?.master || emp?.role === 'admin' || effectivePermissions(emp).includes(key);
+}
+
+// Chặn tài khoản kiểm tra: chỉ cho GET các đường dẫn trong danh sách `allow` (công ảo được ép ở từng route qua req.forceVirt);
+// mọi thao tác ghi / đường dẫn khác (lượt quẹt, sửa giờ, nhật ký, máy chấm công, sao lưu…) đều 403
+export function inspectorGuard(allow) {
+  return (req, res, next) => {
+    if (!isInspector(req.user)) return next();
+    req.forceVirt = true;
+    if (req.method === 'GET' && allow.some((re) => re.test(req.path))) return next();
+    return res.status(403).json({ error: 'Tài khoản này chỉ được xem' });
+  };
 }
 
 // Middleware: yêu cầu 1 quyền cụ thể (admin luôn qua).

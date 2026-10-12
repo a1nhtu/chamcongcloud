@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import { db, getSetting, adminAttWhere, globalAttMode } from '../db.js';
-import { authRequired, permRequired } from '../auth.js';
+import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
@@ -10,6 +10,7 @@ import { virtualOt, applyVirtual, auditAllowed } from '../virtual-att.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
+r.use(inspectorGuard([/^\/(dashboard|attendance|departments|data|export\.xlsx)$/]));   // tài khoản kiểm tra: chỉ xem, ép công ảo
 
 /* ================= Helpers ================= */
 function isoToVnHM(iso) {
@@ -149,7 +150,7 @@ function loadRange(from, to, filter) {
   ).all(from, to);
   // CÔNG ẢO: tăng ca cắt theo hạn mức, giờ ra / vào lùi tương ứng, ngày chỉ toàn tăng ca bị cắt hết thì bỏ
   const virt = !!(filter && typeof filter === 'object' && filter.virt);
-  const results = virt ? applyVirtual(results0, virtualOt(employees.map((e) => e.id), from, to)) : results0;
+  const results = virt ? applyVirtual(results0, virtualOt(employees.map((e) => e.id), from, to, !!filter.force)) : results0;
   // shift join fallback: nếu không có phân ca ngày, lấy ca mặc định
   const shiftsById = new Map(db.prepare('SELECT * FROM shifts').all().map((s) => [s.id, s]));
   const empById = new Map(employees.map((e) => [e.id, e]));
@@ -1167,7 +1168,7 @@ r.get('/dashboard', (req, res) => {
   const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_outside = 1').get(today).c;
   const pendingLeaves = db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'").get().c;
   // includeAdmin: popup "Chưa chấm" phải dùng CÙNG bộ lọc vai trò với totalEmp (bật "Tính công cho cả Admin" thì kể cả admin)
-  res.json({ today, totalEmp, checkedIn, notYet: Math.max(0, totalEmp - checkedIn), late, outside, pendingLeaves, includeAdmin: adminAttWhere() === '' });
+  res.json({ today, totalEmp, checkedIn, notYet: Math.max(0, totalEmp - checkedIn), late, outside, pendingLeaves, includeAdmin: getSetting('payroll_include_admin', '0') === '1' });
 });
 
 // Dùng cho trang Tổng quan (danh sách hôm nay có ảnh)
@@ -1181,7 +1182,12 @@ r.get('/attendance', (req, res) => {
   if (dept) { sql += ' AND e.department = ?'; args.push(dept); }
   sql += ' ORDER BY a.work_date DESC, e.full_name';
   const marks = new Set(db.prepare('SELECT employee_id, work_date FROM att_edit_marks WHERE work_date LIKE ?').all(month + '%').map((m) => m.employee_id + '|' + m.work_date));
-  const rows = db.prepare(sql).all(...args).map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
+  let raw = db.prepare(sql).all(...args);
+  if (req.forceVirt) {   // tài khoản kiểm tra: danh sách Tổng quan cũng là công ảo, không dấu sửa tay
+    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], month + '-01', month + '-31', true)).map((a) => ({ ...a, manual: 0 }));
+    marks.clear();
+  }
+  const rows = raw.map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
     check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at) }));
   res.json({ month, rows });
 });
@@ -1196,25 +1202,26 @@ r.get('/departments', (req, res) => {
 
 // Báo cáo JSON (generic) — hỗ trợ ?month=YYYY-MM hoặc ?from=YYYY-MM-DD&to=YYYY-MM-DD
 // Bộ lọc NV từ query: ?ids=1,2,3 (NV cụ thể) hoặc ?depts=A,B (nhiều phòng ban) hoặc ?dept=A (cũ)
-function filterFromQuery(q) {
+function filterFromQuery(q, req) {
   const ids = String(q.ids || '').split(',').map(Number).filter(Boolean);
   const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
   const m = (v) => (v === 'shift' || v === 'hourly' ? v : null);
-  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: q.virt === '1' };
+  const force = !!(req && req.forceVirt);   // tài khoản kiểm tra: luôn công ảo
+  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: q.virt === '1' || force, force };
 }
 // công ảo chỉ cho người được phép (tính năng bật + quyền "audit")
-const virtGuard = (req, res, next) => (req.query.virt === '1' && !auditAllowed(req.user) ? res.status(403).json({ error: 'Không có quyền dùng chức năng này' }) : next());
+const virtGuard = (req, res, next) => (req.query.virt === '1' && !req.forceVirt && !auditAllowed(req.user) ? res.status(403).json({ error: 'Không có quyền dùng chức năng này' }) : next());
 
 r.get('/data', virtGuard, (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const type = req.query.type || 'horizontal';
-  res.json(buildReport(type, from, to, filterFromQuery(req.query)));
+  res.json(buildReport(type, from, to, filterFromQuery(req.query, req)));
 });
 
 // Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to
 r.get('/export.xlsx', virtGuard, async (req, res) => {
   const { from, to } = resolvePeriod(req.query);
-  const filter = filterFromQuery(req.query);
+  const filter = filterFromQuery(req.query, req);
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');

@@ -1,7 +1,7 @@
 // Router QUẢN TRỊ — chỉ lắp ráp: middleware chung + đăng ký các nhóm route con trong ./admin/*.js.
 // Mỗi nhóm là registerXxxRoutes(r, {need[, adminOnly]}) — dùng chung router r (đã gắn auth + audit).
 import { Router } from 'express';
-import { authRequired, roleRequired, permRequired } from '../auth.js';
+import { authRequired, roleRequired, permRequired, inspectorGuard } from '../auth.js';
 import { auditMiddleware } from '../audit.js';
 import { registerEmployeeRoutes } from './admin/employees.js';
 import { registerOrgRoutes } from './admin/org.js';
@@ -16,6 +16,10 @@ import { registerLogRoutes } from './admin/logs.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
+// tài khoản kiểm tra: chỉ xem danh mục + lưới Tính công / bảng lương (đều ép công ảo)
+r.use(inspectorGuard([/^\/settings$/, /^\/departments$/, /^\/positions$/, /^\/offices$/, /^\/shifts$/, /^\/schedules$/, /^\/inout-schedules$/,
+  /^\/employees$/, /^\/shift-assignments$/, /^\/dept-shift-assignments$/, /^\/assignments$/, /^\/attendance\/grid$/, /^\/payroll$/,
+  /^\/salary$/, /^\/holidays$/, /^\/perm-catalog$/]));
 r.use(auditMiddleware);   // ghi nhật ký mọi thao tác thay đổi (POST/PUT/DELETE) của admin/quản lý
 
 const adminOnly = roleRequired('admin');

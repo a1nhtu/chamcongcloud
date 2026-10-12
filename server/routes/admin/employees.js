@@ -1,7 +1,7 @@
 // Nhóm route NHÂN VIÊN + phân quyền chi tiết + khoá thiết bị chấm công điện thoại.
 import ExcelJS from 'exceljs';
 import { db, getSetting } from '../../db.js';
-import { hashPassword, passwordHasher, PERMISSIONS } from '../../auth.js';
+import { hashPassword, passwordHasher, PERMISSIONS, isInspector } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
@@ -55,6 +55,15 @@ function saveLeaveFields(id, b) {
   if (b.leave_days_year !== undefined) { const v = parseFloat(b.leave_days_year); db.prepare('UPDATE employees SET leave_days_year=? WHERE id=?').run(Number.isFinite(v) && v >= 0 ? v : null, id); }
 }
 
+// Đánh dấu / bỏ TÀI KHOẢN KIỂM TRA (chỉ xem công ảo). Chỉ admin / tài khoản tổng làm được.
+// Đánh dấu thì vai trò thành "Quản lý" (để vào được trang quản lý), quyền thực tế bị giới hạn ở INSPECTOR_PERMS.
+function saveAuditOnly(caller, id, b) {
+  if (b.audit_only === undefined || !(caller.master || caller.role === 'admin') || isInspector(caller)) return;
+  const on = b.audit_only ? 1 : 0;
+  db.prepare('UPDATE employees SET audit_only = ? WHERE id = ?').run(on, id);
+  if (on) db.prepare("UPDATE employees SET role = 'manager' WHERE id = ? AND role <> 'manager'").run(id);
+}
+
 export function registerEmployeeRoutes(r, { need }) {
   // Danh mục quyền (cho giao diện dựng ô tích phân quyền)
   // quyền "công ảo" chỉ hiện khi tài khoản tổng đã bật tính năng (tắt thì không ai thấy tính năng này tồn tại)
@@ -75,7 +84,7 @@ export function registerEmployeeRoutes(r, { need }) {
   r.get('/employees', (req, res) => {
     const rows = db.prepare(`
       SELECT e.id,e.code,e.full_name,e.department,e.position,e.phone,e.role,e.username,
-             e.active,e.office_id,e.shift_id,e.work_schedule_id,e.permissions,e.device_pin,e.from_device,
+             e.active,e.office_id,e.shift_id,e.work_schedule_id,e.permissions,e.device_pin,e.from_device,e.audit_only,
              e.device_id,e.pending_device,e.device_label,e.att_mode,
              o.name AS office_name, s.name AS shift_name, ws.name AS schedule_name
       FROM employees e
@@ -133,6 +142,7 @@ export function registerEmployeeRoutes(r, { need }) {
       setEmpOffices(info.lastInsertRowid, b.office_ids);
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), info.lastInsertRowid);
       saveLeaveFields(info.lastInsertRowid, b);
+      saveAuditOnly(req.user, info.lastInsertRowid, b);
       const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
       res.json({ ok: true, id: info.lastInsertRowid, relinked });
     } catch (e) {
@@ -318,6 +328,7 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
       saveLeaveFields(emp.id, b);
+      saveAuditOnly(req.user, emp.id, b);
       res.json({ ok: true, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
