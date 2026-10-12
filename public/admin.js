@@ -3512,20 +3512,10 @@ async function pageEditAtt() {
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
-  // Đổi Từ / Đến ngày KHÔNG tự tải (tránh tải 2 lần / tải khoảng quá dài khi đang chọn dở) → bấm "✓ Áp dụng" hoặc Enter
-  const applyB = el('button', { class: 'btn sm green apply-dt', title: 'Xem theo khoảng ngày vừa chọn (hoặc nhấn Enter trong ô ngày)', disabled: '' }, '✓ Áp dụng');
-  let applied = [fromI.value, toI.value];
-  const dirty = () => { const d = fromI.value !== applied[0] || toI.value !== applied[1]; applyB.disabled = !d; applyB.classList.toggle('pending', d); };
-  const load = () => { applied = [fromI.value, toI.value]; dirty(); view === 'summary' ? loadSummary() : loadDetail(); };
-  const applyDates = () => {
-    if (!fromI.value || !toI.value) return toast('Chọn đủ Từ ngày và Đến ngày', 'err');
-    if (toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
-    const n = Math.round((Date.parse(toI.value) - Date.parse(fromI.value)) / 86400000) + 1;
-    if (n > 93 && !confirm(`Khoảng ${n} ngày khá dài, tải có thể chậm. Vẫn xem?`)) return;
-    load();
-  };
-  for (const i of [fromI, toI]) { i.oninput = dirty; i.onchange = dirty; i.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); applyDates(); } }; }
-  applyB.onclick = applyDates;
+  // Đổi Từ / Đến ngày KHÔNG tự tải → bấm "✓ Áp dụng" hoặc Enter
+  const dApply = dateApply(fromI, toI, () => load());
+  const applyB = dApply.btn;
+  const load = () => { dApply.synced(); view === 'summary' ? loadSummary() : loadDetail(); };
   recalcBtn.onclick = async () => {
     let scopeTxt;
     if (empPick.size) scopeTxt = empPick.size + ' nhân viên đã chọn';
@@ -3805,6 +3795,16 @@ function auditPanelEl(s) {
   const auWeek = num(s.audit_ot_week_h ?? 0), auMonth = num(s.audit_ot_month_h ?? 0), auYear = num(s.audit_ot_year_h ?? 0);
   const auWk = el('input', { type: 'checkbox', ...(s.audit_incl_weekend !== '0' ? { checked: '' } : {}) });
   const auHol = el('input', { type: 'checkbox', ...(s.audit_incl_holiday !== '0' ? { checked: '' } : {}) });
+  // Chú thích đổi THEO Ô TÍCH (chỉ nói trạng thái đang chọn) + ghi chú hạn mức tuần
+  const wkName = (s.weekend_days || '7').split(',').map((x) => ({ 1: 'thứ 2', 2: 'thứ 3', 3: 'thứ 4', 4: 'thứ 5', 5: 'thứ 6', 6: 'thứ 7', 7: 'chủ nhật' }[x.trim()])).filter(Boolean).join(', ') || 'chủ nhật';
+  const wkHint = el('div', { class: 'map-hint', style: 'margin-top:2px' }), holHint = el('div', { class: 'map-hint', style: 'margin-top:2px' });
+  const wkNote = el('span', { style: 'font-size:12.5px;color:var(--muted)' });
+  const syncHints = () => {
+    wkHint.textContent = auWk.checked ? `✔ Đang bật: tăng ca ngày ${wkName} được cộng vào hạn mức và cũng bị cắt.` : `✘ Đang tắt: tăng ca ngày ${wkName} giữ nguyên như thật, không cộng vào hạn mức.`;
+    holHint.textContent = auHol.checked ? '✔ Đang bật: tăng ca ngày lễ được cộng vào hạn mức và cũng bị cắt.' : '✘ Đang tắt: tăng ca ngày lễ giữ nguyên như thật, không cộng vào hạn mức.';
+    wkNote.textContent = auWk.checked ? `(thứ 2 → chủ nhật, gồm cả tăng ca ngày ${wkName})` : `(thứ 2 → chủ nhật, KHÔNG tính tăng ca ngày ${wkName})`;
+  };
+  auWk.onchange = syncHints; auHol.onchange = syncHints; syncHints();
   const auMethod = el('select', { style: 'width:auto;max-width:100%' }, el('option', { value: 'ratio' }, 'Chia đều theo tỷ lệ'), el('option', { value: 'days' }, 'Gỡ bớt nguyên ngày'));
   auMethod.value = s.audit_method === 'days' ? 'days' : 'ratio';
   const auBlock = el('select', {}, ...[[0, 'Không làm tròn (từng phút)'], [15, 'Khối 15 phút'], [30, 'Khối 30 phút'], [60, 'Khối 1 giờ']].map(([v, t]) => el('option', { value: v }, t)));
@@ -3822,13 +3822,13 @@ function auditPanelEl(s) {
     el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Công ảo dùng để in bảng công / bảng lương nộp kiểm tra: tăng ca vượt hạn mức bị cắt bớt, giờ ra (hoặc giờ vào khi tăng ca trước ca) lùi lại cho khớp, ngày chỉ toàn tăng ca bị cắt hết thì coi như không đi làm. Công THẬT không đổi. Xem bằng thanh "Thật · Ảo 1 · Ảo 2 · Ảo 3" ở Tính công / Báo cáo / Lương. Các hạn mức tuần / tháng / năm dưới đây áp chung cho cả 3 mức. Luật hiện hành: tối đa 4 giờ/ngày (50% giờ làm), 40 giờ/tháng, 200 giờ/năm (300 giờ với một số ngành). Để 0 = không giới hạn.'),
     el('div', { class: 'lv-form' },
       lvRow('Tăng ca tối đa mỗi ngày', (() => { const b = el('button', { class: 'btn ghost sm', type: 'button' }, '⏱️ Khai theo 3 mức →'); b.onclick = () => go('auditlimits'); return b; })(), 'Mỗi mức Ảo 1 / 2 / 3 một số phút riêng, đặt được theo từng NV, từng ngày.'),
-      lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', '(thứ 2 → chủ nhật)'),
+      lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', wkNote),
       lvRow('Tăng ca tối đa mỗi tháng', auMonth, 'giờ', '(theo kỳ lương ở Cài đặt › Lương)'),
       lvRow('Tăng ca tối đa mỗi năm', auYear, 'giờ', '(cộng dồn từ kỳ lương tháng 1)'),
       lvRow('Cách cắt khi vượt', auMethod, 'Chia đều: mọi ngày có tăng ca đều giảm theo cùng tỷ lệ. Gỡ nguyên ngày: bỏ hẳn tăng ca của một số ngày (chọn ngẫu nhiên nhưng cố định, ngày thường trước, ngày nghỉ / lễ sau) như HR-ERP.'),
       lvRow('Làm tròn tăng ca ảo', auBlock),
-      el('label', { class: 'lv-chk' }, auWk, el('div', {}, el('b', {}, 'Cộng cả tăng ca ngày nghỉ hằng tuần (chủ nhật…)'), el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Bật: tăng ca ngày nghỉ tuần tính vào hạn mức và cũng bị cắt. Tắt: giữ nguyên, không tính vào hạn mức.'))),
-      el('label', { class: 'lv-chk' }, auHol, el('div', {}, el('b', {}, 'Cộng cả tăng ca ngày lễ'), el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Bật: tăng ca ngày lễ tính vào hạn mức và cũng bị cắt. Tắt: giữ nguyên.')))),
+      el('label', { class: 'lv-chk' }, auWk, el('div', {}, el('b', {}, `Cộng cả tăng ca ngày nghỉ hằng tuần (${wkName})`), wkHint)),
+      el('label', { class: 'lv-chk' }, auHol, el('div', {}, el('b', {}, 'Cộng cả tăng ca ngày lễ'), holHint))),
     el('div', { style: 'margin-top:14px' }, save));
 }
 
@@ -4896,6 +4896,29 @@ const REPORT_GROUPS = [
   ]],
 ];
 
+// KHOẢNG NGÀY Từ → Đến: đổi ngày KHÔNG tự tải (tránh tải 2 lần / tải khoảng quá dài khi đang chọn dở).
+// Nút "✓ Áp dụng" sáng xanh khi đã đổi mà chưa xem; bấm nút hoặc Enter trong ô ngày → run() 1 lần.
+// Trả { btn, synced }: gọi synced() sau mỗi lần đã tải theo ngày đang chọn (nút mờ lại).
+function dateApply(fromI, toI, run) {
+  const btn = el('button', { class: 'btn sm green apply-dt', title: 'Xem theo khoảng ngày vừa chọn (hoặc nhấn Enter trong ô ngày)', disabled: '' }, '✓ Áp dụng');
+  let applied = [fromI.value, toI.value];
+  const dirty = () => { const d = fromI.value !== applied[0] || toI.value !== applied[1]; btn.disabled = !d; btn.classList.toggle('pending', d); };
+  const synced = () => { applied = [fromI.value, toI.value]; dirty(); };
+  const apply = () => {
+    if (!fromI.value || !toI.value) return toast('Chọn đủ Từ ngày và Đến ngày', 'err');
+    if (toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
+    const n = Math.round((Date.parse(toI.value) - Date.parse(fromI.value)) / 86400000) + 1;
+    if (n > 93 && !confirm(`Khoảng ${n} ngày khá dài, tải có thể chậm. Vẫn xem?`)) return;
+    run();
+  };
+  for (const i of [fromI, toI]) {
+    i.addEventListener('input', dirty); i.addEventListener('change', dirty);
+    i.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); apply(); } });
+  }
+  btn.onclick = apply;
+  return { btn, synced };
+}
+
 // Nút "chọn nhiều" dùng chung (phòng ban / NV): bỏ hết tick = tất cả. Trả {btn, sync}.
 function makeChecklist(icon, allLabel, getItems, picked, afterChange) {
   const btn = el('button', { class: 'btn ghost sm mc-btn', style: 'text-align:left;min-width:150px' });
@@ -5001,6 +5024,8 @@ async function pageReport() {
   const filterQS = () => (empPick.size ? '&ids=' + [...empPick].join(',')
     : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : ''))
     + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=' + _virt : '');
+  let rpRun = null;   // báo cáo đang mở: hàm tải lại (màn danh sách thẻ = null, không tải)
+  const dApply = dateApply(fromI, toI, () => rpRun && rpRun());
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
   const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; dimMonth(); };
   // Ô THÁNG chỉ "sáng" khi Từ / Đến ngày đúng trọn tháng đó; chọn khoảng ngày khác → ô tháng mờ đi (đang lọc theo Từ → Đến)
@@ -5014,7 +5039,7 @@ async function pageReport() {
 
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
   const hub = () => {
-    monthI.onchange = snapMonth; fromI.onchange = null; toI.onchange = null; onFilterChange = () => {};
+    monthI.onchange = () => { snapMonth(); dApply.synced(); }; fromI.onchange = null; toI.onchange = null; onFilterChange = () => {}; rpRun = null;
     formSel.onchange = () => { _rpForm = formSel.value; hub(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; };
     const wrap = el('div', {});
     wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
@@ -5043,11 +5068,12 @@ async function pageReport() {
     const backBtn = el('button', { class: 'btn ghost sm' }, '← Danh sách báo cáo');
     backBtn.onclick = hub;
     const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
-    exportBtn.onclick = () => downloadExcel(type, fromI.value, toI.value, filterQS());
+    exportBtn.onclick = () => { if (!dApply.btn.disabled) return toast('Bấm "✓ Áp dụng" để xem khoảng ngày mới trước khi xuất Excel', 'err'); downloadExcel(type, fromI.value, toI.value, filterQS()); };
     const wrap = el('div', {}, loading());
-    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, deptCl.btn, empCl.btn, formSel, onlyLbl, virtToggle(() => showReport(type)), exportBtn), wrap);
+    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, dApply.btn, deptCl.btn, empCl.btn, formSel, onlyLbl, virtToggle(() => showReport(type)), exportBtn), wrap);
     const load = async () => {
       if (fromI.value && toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
+      dApply.synced();
       wrap.innerHTML = ''; wrap.append(loading());
       let data;
       try { data = await api(`/reports/data?type=${type}&${periodQS()}${filterQS()}`); }
@@ -5092,7 +5118,7 @@ async function pageReport() {
       });
     };
     const snapAndLoad = () => { snapMonth(); load(); };
-    monthI.onchange = snapAndLoad; fromI.onchange = load; toI.onchange = load; onFilterChange = load;
+    monthI.onchange = snapAndLoad; fromI.onchange = null; toI.onchange = null; onFilterChange = load; rpRun = load;   // Từ / Đến: chờ "✓ Áp dụng"
     formSel.onchange = () => { _rpForm = formSel.value; load(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; load(); };
     load();
   };
