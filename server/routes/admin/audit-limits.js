@@ -39,7 +39,6 @@ export function registerAuditLimitRoutes(r, { need }) {
       if (m === undefined) return res.status(400).json({ error: `Mức ${lv}: số phút phải từ 0 đến 1440` });
       setSetting(`audit_l${lv}_day`, m == null ? '' : String(m));
     }
-    if ([1, 2, 3].includes(+b.inspector)) setSetting('audit_inspector_level', String(+b.inspector));   // tài khoản kiểm tra xem mức nào
     res.json({ ok: true, defaults: levelDefaults() });
   });
 

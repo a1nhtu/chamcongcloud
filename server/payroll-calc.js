@@ -1,5 +1,5 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
-import { db, getSetting, adminAttWhere, empHourly } from './db.js';
+import { db, getSetting, adminAttWhere, empHourly, deptWithChildren } from './db.js';
 import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
 import { splitOtTiers } from './attendance-calc.js';
 import { virtualOt } from './virtual-att.js';
@@ -125,7 +125,7 @@ export function computePayrollTable(year, month, filter) {
   const { from, to } = payPeriod(year, month, startDay);
   const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
   const ids = (f.ids || []).map(Number).filter(Boolean);
-  const depts = (f.depts || []).filter(Boolean);
+  const depts = deptWithChildren((f.depts || []).length ? f.depts : f.dept ? [f.dept] : []);   // gồm cả bộ phận con
   let sql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
   const args = [];
   if (ids.length) { sql += ` AND id IN (${ids.map(() => '?').join(',')})`; args.push(...ids); }

@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
-import { db, getSetting, adminAttWhere, globalAttMode } from '../db.js';
+import { db, getSetting, adminAttWhere, globalAttMode, deptWithChildren } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
-import { virtualOt, applyVirtual, auditAllowed, virtLevel, levelDefaults } from '../virtual-att.js';
+import { virtualOt, applyVirtual, auditAllowed, virtLevel } from '../virtual-att.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -61,7 +61,7 @@ function periodLabel(from, to) {
 export function empFilterSql(filter) {
   const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
   const ids = (f.ids || []).map(Number).filter(Boolean);
-  const depts = (f.depts || []).filter(Boolean);
+  const depts = deptWithChildren((f.depts || []).length ? f.depts : f.dept ? [f.dept] : []);   // gồm cả bộ phận con
   if (ids.length) return { where: ` AND id IN (${ids.map(() => '?').join(',')})`, args: ids };
   if (depts.length) return { where: ` AND department IN (${depts.map(() => '?').join(',')})`, args: depts };
   if (f.dept) return { where: ' AND department = ?', args: [f.dept] };
@@ -1223,7 +1223,7 @@ r.get('/attendance', (req, res) => {
   const marks = new Set(db.prepare('SELECT employee_id, work_date FROM att_edit_marks WHERE work_date LIKE ?').all(month + '%').map((m) => m.employee_id + '|' + m.work_date));
   let raw = db.prepare(sql).all(...args);
   if (req.forceVirt) {   // tài khoản kiểm tra: danh sách Tổng quan cũng là công ảo, không dấu sửa tay
-    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], month + '-01', month + '-31', true, levelDefaults().inspector)).map((a) => ({ ...a, manual: 0 }));
+    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], month + '-01', month + '-31', true, virtLevel(req.query, req))).map((a) => ({ ...a, manual: 0 }));
     marks.clear();
   }
   const rows = raw.map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm

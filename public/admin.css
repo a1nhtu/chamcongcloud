@@ -363,3 +363,44 @@ td.al-c.sun { background: #fff1f2; }
 td.al-c:focus { outline: 2px solid #f59e0b; outline-offset: -2px; }
 td.al-c .al-inp { width: 64px; margin: 0; padding: 3px 4px; text-align: center; }
 table.al-grid td.al-dept { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+/* Báo cáo: ô tháng mờ khi đang lọc theo Từ → Đến ngày khác trọn tháng */
+input.rp-dim { opacity: .45; filter: grayscale(1); }
+input.rp-dim:hover, input.rp-dim:focus { opacity: .8; }
+
+/* Ô chọn nhiều: nút hiện tên đang chọn + thẻ "Đang chọn" trong khung */
+.mc-btn { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mc-btn.on { border-color: var(--brand); color: var(--brand); background: #fff7f2; }
+.mc-chips { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; padding: 4px 4px 8px; margin-bottom: 4px; border-bottom: 1px dashed var(--line, #eee); font-size: 12.5px; max-height: 110px; overflow: auto; }
+.mc-chip { display: inline-flex; align-items: center; gap: 3px; background: #fff1e8; color: #c2410c; border-radius: 999px; padding: 2px 4px 2px 9px; font-weight: 600; }
+.mc-chip button { border: 0; background: none; color: #c2410c; font-size: 15px; line-height: 1; padding: 0 4px; cursor: pointer; }
+
+/* Menu trái thu gọn: chỉ còn biểu tượng */
+#nav-toggle { margin: 8px 10px 0; background: #2a3040; color: #cfd3db; border: 0; border-radius: 8px; padding: 6px; font-size: 15px; font-weight: 800; cursor: pointer; }
+#nav-toggle:hover { background: #343b4d; color: #fff; }
+#nav-toggle .nt-o, body.nav-mini #nav-toggle .nt-c { display: none; }
+body.nav-mini #nav-toggle .nt-o { display: inline; }
+@media (min-width: 781px) {
+body.nav-mini .layout { grid-template-columns: 64px 1fr; }
+body.nav-mini .sidebar .brand { font-size: 0; padding: 14px 6px; }
+body.nav-mini .sidebar .brand::before { content: 'D'; font-size: 20px; display: block; text-align: center; }
+body.nav-mini .sidebar .brand small { display: none; }
+body.nav-mini .sidebar nav { padding: 8px 6px; }
+body.nav-mini .sidebar nav button { justify-content: center; padding: 11px 0; }
+body.nav-mini .sidebar nav .nav-lb, body.nav-mini .sidebar nav .nav-arrow, body.nav-mini .sidebar nav .nav-sub { display: none !important; }
+body.nav-mini .sidebar nav button > span:first-child { font-size: 18px; }
+body.nav-mini .sidebar .foot { padding: 8px 6px; }
+body.nav-mini .sidebar .foot .me, body.nav-mini #me-role { display: none; }
+body.nav-mini #btn-logout { font-size: 0; padding: 8px 0; }
+body.nav-mini #btn-logout::before { content: '🚪'; font-size: 16px; }
+}
+@media (max-width: 780px) { #nav-toggle { display: none; } }
+
+/* Cây phòng ban thu gọn: nút ▸ / ▾ */
+.dt-tg { display: inline-block; width: 16px; flex: none; text-align: center; color: #9ca3af; font-size: 10px; user-select: none; }
+.dt-tg.has { cursor: pointer; }
+.dt-tg.has:hover { color: var(--brand); }
+/* Tính công: nút "✓ Áp dụng" khoảng ngày — chỉ sáng khi đã đổi ngày mà chưa xem */
+.apply-dt:disabled { opacity: .4; cursor: default; }
+.apply-dt.pending { box-shadow: 0 0 0 3px rgba(22, 163, 74, .3); animation: aplPulse 1.6s ease-in-out infinite; }
+@keyframes aplPulse { 50% { box-shadow: 0 0 0 6px rgba(22, 163, 74, .12); } }
+@media (prefers-reduced-motion: reduce) { .apply-dt.pending { animation: none; } }

@@ -101,6 +101,14 @@ async function afterLogin() {
   try { SETTINGS = await api('/admin/settings'); } catch { SETTINGS = {}; }
   try { PERM_CATALOG = (await api('/admin/perm-catalog')).permissions; } catch { PERM_CATALOG = []; }
   const nav = $('#nav'); nav.innerHTML = '';
+  // nút thu gọn / mở rộng menu trái (thu gọn = chỉ còn biểu tượng, nội dung rộng hơn); nhớ lựa chọn trên máy này
+  const setMini = (on) => { document.body.classList.toggle('nav-mini', on); try { localStorage.setItem('navMini', on ? '1' : '0'); } catch {} };
+  try { if (localStorage.getItem('navMini') === '1') document.body.classList.add('nav-mini'); } catch {}
+  if (!$('#nav-toggle')) {
+    const tg = el('button', { id: 'nav-toggle', type: 'button', title: 'Thu gọn / mở rộng menu' }, el('span', { class: 'nt-c' }, '«'), el('span', { class: 'nt-o' }, '»'));
+    tg.onclick = () => setMini(!document.body.classList.contains('nav-mini'));
+    $('#side-brand').after(tg);
+  }
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
   const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
   const visible = NAV.filter(([key, , , perm]) => hasPerm(perm) && (!isInspector() || INSPECTOR_NAV.includes(key))
@@ -110,7 +118,7 @@ async function afterLogin() {
     && !(key === 'shiftreq' && !selfShiftEnabled())
     && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1'));   // công ảo: chỉ hiện khi tài khoản tổng đã bật
   visible.forEach(([key, ic, label]) => {
-    const b = el('button', { 'data-k': key }, el('span', {}, ic), label);
+    const b = el('button', { 'data-k': key, title: label }, el('span', {}, ic), el('span', { class: 'nav-lb' }, label));
     // Mục có MENU CON (kiểu ZKBio): bấm mũi tên hoặc bấm mục để xổ ra / thu lại
     const SUB = key === 'assignments' ? { id: 'nav-sub-as', tabs: AS_TABS, isOpen: () => _asNavOpen, setOpen: (o) => { _asNavOpen = o; }, pick: (tab) => { if (!asLeaveOk()) return false; _asTab = tab; _asAdd = null; return true; } }
       : key === 'shifts' ? { id: 'nav-sub-sh', tabs: SH_TABS, isOpen: () => _shNavOpen, setOpen: (o) => { _shNavOpen = o; }, pick: (tab) => { _shView = tab; _schEdit = null; return true; } }
@@ -409,6 +417,50 @@ async function loadRefs() {
     api('/admin/positions').then(r => r.rows).catch(() => []),
   ]);
 }
+// CÂY PHÒNG BAN THU GỌN (mặc định chỉ hiện cấp cao nhất, bấm ▸ để xổ cấp con). Phòng nào đã mở thì nhớ chung mọi màn.
+// items: [{ key, depth, el }] theo đúng thứ tự cây (con nằm ngay sau cha). keep: các key cần thấy (đang chọn) → tự mở các cấp cha.
+// Trả hàm apply() để vẽ lại phần ẩn / hiện (VD sau khi xoá ô tìm).
+const _deptOpen = new Set();
+function collapseTree(items, keep = []) {
+  items.forEach((it, i) => { it.kids = i + 1 < items.length && items[i + 1].depth > it.depth; it.d0 = it.el.style.display === 'none' ? '' : it.el.style.display; });
+  for (const k of keep) {
+    const i = items.findIndex((x) => x.key === k); if (i < 0) continue;
+    let d = items[i].depth;
+    for (let j = i - 1; j >= 0 && d > 0; j--) if (items[j].depth < d) { _deptOpen.add(items[j].key); d = items[j].depth; }
+  }
+  const apply = () => {
+    let cut = Infinity;   // đang trong nhánh bị gọn: ẩn mọi mục sâu hơn `cut`
+    for (const it of items) {
+      if (it.depth <= cut) cut = Infinity;
+      const hide = it.depth > cut;
+      it.el.style.display = hide ? 'none' : it.d0;   // giữ kiểu hiển thị gốc (VD flex) khi hiện lại
+      if (it.tg) it.tg.textContent = it.kids ? (_deptOpen.has(it.key) ? '▼' : '▶') : '';
+      if (!hide && it.kids && !_deptOpen.has(it.key)) cut = it.depth;
+    }
+  };
+  for (const it of items) {
+    it.tg = el('span', { class: 'dt-tg' + (it.kids ? ' has' : ''), title: it.kids ? 'Xổ / thu bộ phận con' : '' });
+    if (it.kids) it.tg.addEventListener('click', (ev) => { ev.preventDefault(); ev.stopPropagation(); _deptOpen.has(it.key) ? _deptOpen.delete(it.key) : _deptOpen.add(it.key); apply(); });
+    (it.at || it.el).prepend(it.tg);   // at: chỗ gắn nút (mặc định đầu dòng)
+  }
+  apply();
+  return apply;
+}
+// Ô chọn nhiều phòng ban: theo cây cha → con (thụt lề); tên đang gán ở NV mà chưa có trong danh mục để cuối
+function deptTreeItems(names) {
+  const seen = new Set();
+  const out = deptOrdered().map((d) => { seen.add(d.name); return { value: d.name, depth: d.depth, text: '\u2003'.repeat(d.depth) + (d.depth ? '└ ' : '') + d.name }; });
+  for (const n of names) if (!seen.has(n)) out.push({ value: n, text: n });
+  return out;
+}
+// Các phòng ban đã chọn + MỌI bộ phận con của chúng (chọn phòng cha là gồm cả con)
+function deptExpand(picked) {
+  const out = new Set(picked);
+  const kids = new Map(); for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+  const walk = (id, depth) => { if (depth > 20) return; for (const c of kids.get(id) || []) { out.add(c.name); walk(c.id, depth + 1); } };
+  for (const d of DEPARTMENTS) if (picked.has(d.name)) walk(d.id, 0);
+  return out;
+}
 // Xếp bộ phận theo cây cha→con, trả [{id,name,parent_id,depth}] để đổ vào dropdown/quản lý
 function deptOrdered(list = DEPARTMENTS) {
   const byParent = new Map();
@@ -421,7 +473,7 @@ function deptOrdered(list = DEPARTMENTS) {
 }
 // Trang Nhân viên: bộ phận đang chọn trên cây ('*' = tất cả), các nhánh đang gọn, ô tìm — giữ khi làm mới/sửa
 let empDeptSel = '*', empSearch = '';
-const empDeptClosed = new Set();
+const empDeptClosed = new Set(); let _empTreeInit = false;   // mặc định THU GỌN mọi bộ phận có cấp con
 async function pageEmployees() {
   const addBtn = hasPerm('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
   const canEdit = hasPerm('employees');
@@ -460,6 +512,7 @@ async function pageEmployees() {
       nodes.push({ key: k, label: k + ' (cũ)', depth: 0, id: 0, parent: 0, names: [k], hasKids: false, count: cnt.get(k) });
     if (cnt.has(NONE)) nodes.push({ key: NONE, label: 'Chưa có bộ phận', depth: 0, id: 0, parent: 0, names: [NONE], hasKids: false, count: cnt.get(NONE) });
     if (empDeptSel !== '*' && !nodes.some((n) => n.key === empDeptSel)) empDeptSel = '*';
+    if (!_empTreeInit) { for (const n of nodes) if (n.hasKids) empDeptClosed.add(n.key); _empTreeInit = true; }
     const orderOf = new Map(nodes.map((n, i) => [n.key, i]));
 
     const tree = el('div', { class: 'emp-tree' });
@@ -517,7 +570,7 @@ async function pageEmployees() {
             (e.device_admin_on || []).length ? el('span', { class: 'pill', style: 'margin-left:6px;background:#fdf0df;color:#a25a08', title: 'Quản trị MÁY chấm công (vào được menu máy) tại: ' + e.device_admin_on.join(', ') }, '👑 QT máy') : ''),
           el('td', {}, e.position || '—'),
           el('td', {}, e.username),
-          el('td', {}, e.audit_only && !isInspector() ? el('span', { class: 'pill', style: 'background:#fef3c7;color:#92400e' }, '🔍 Kiểm tra') : roleLabel(e.role)),
+          el('td', {}, e.audit_only && !isInspector() ? el('span', { class: 'pill', style: 'background:#fef3c7;color:#92400e' }, '🔍 Kiểm tra · Ảo ' + (+e.audit_only || 1)) : roleLabel(e.role)),
           el('td', {}, e.active ? el('span', { class: 'pill ok' }, 'Hoạt động') : el('span', { class: 'pill bad' }, 'Khoá')),
           el('td', {}, actions),
         ));
@@ -728,8 +781,8 @@ function empModal(e) {
     el('div', { class: 'two-col' }, field('Tài khoản *', mk('username', 'nv002', e?.username)), field('Vai trò', roleSel)),
     permWrap,
     ...(isAdmin() && (SETTINGS.audit_enabled === '1' || e?.audit_only) ? [el('label', { class: 'lv-chk', style: 'padding:10px;border:1px dashed #f59e0b;border-radius:10px;background:#fffbeb' },
-      el('input', { type: 'checkbox', id: 'e-auditonly', ...(e?.audit_only ? { checked: '' } : {}) }),
-      el('div', {}, el('b', {}, '🔍 Tài khoản kiểm tra — chỉ xem công ảo'),
+      (() => { const sel = el('select', { id: 'e-auditonly', style: 'width:auto;margin:0' }, ...[['0', 'Không'], ['1', 'Chỉ xem Công ảo 1'], ['2', 'Chỉ xem Công ảo 2'], ['3', 'Chỉ xem Công ảo 3']].map(([v, t]) => el('option', { value: v }, t))); sel.value = String(e?.audit_only || 0); return sel; })(),
+      el('div', {}, el('b', {}, '🔍 Tài khoản kiểm tra — chỉ xem công ảo của 1 mức'),
         el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Dùng khi có đoàn kiểm tra: đăng nhập tài khoản này chỉ thấy công / lương ẢO ở mọi màn (không có nút bật/tắt, không thấy lượt quẹt thật, sửa giờ, nhật ký, máy chấm công), chỉ được xem, không sửa gì. Tự đặt vai trò Quản lý. Tài khoản này không hiện trong bảng công / bảng lương.')))] : []),
     field(e ? 'Mật khẩu mới (để trống nếu giữ nguyên)' : 'Mật khẩu *', input('e-password', { type: 'text', placeholder: e ? '••••••' : '123456' })),
     ...(e && deviceLockEnabled() ? [(() => {
@@ -755,7 +808,7 @@ function empModal(e) {
       att_mode: $('#e-attmode') ? $('#e-attmode').value : undefined,
       start_date: $('#e-start') ? $('#e-start').value : undefined,
       leave_days_year: $('#e-leaveyear') ? $('#e-leaveyear').value : undefined,
-      audit_only: $('#e-auditonly') ? $('#e-auditonly').checked : undefined,
+      audit_only: $('#e-auditonly') ? +$('#e-auditonly').value : undefined,
     };
     if (body.audit_only && body.role === 'admin') body.role = 'manager';   // tài khoản kiểm tra luôn là Quản lý
     // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
@@ -894,15 +947,18 @@ async function pageOrg() {
     const tree = deptOrdered();
     if (!tree.length) { deptPanel.append(el('div', { class: 'map-hint' }, 'Chưa có bộ phận nào.')); return; }
     const list = el('div', { style: 'margin-top:8px' });
+    const tItems = [];
     for (const d of tree) {
       const acts = ro ? '' : el('div', { style: 'display:flex;gap:6px' },
         btnSm('Sửa', () => deptEditModal(d, renderDept), 'ghost'),
         btnSm('Xoá', async () => { if (!confirm(`Xoá bộ phận "${d.name}"?`)) return; try { await api('/admin/departments/' + d.id, { method: 'DELETE' }); DEPARTMENTS = (await api('/admin/departments')).rows; renderDept(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'ghost'));
-      list.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid #f1efec' },
+      const rowEl = el('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid #f1efec' },
         el('div', { style: 'flex:1;padding-left:' + (d.depth * 18) + 'px' },
           d.depth ? el('span', { style: 'color:var(--muted)' }, '↳ ') : '', el('b', {}, d.name)),
-        acts));
+        acts);
+      list.append(rowEl); tItems.push({ key: d.name, depth: d.depth, el: rowEl, at: rowEl.firstChild });
     }
+    collapseTree(tItems);
     deptPanel.append(list);
   };
 
@@ -1811,7 +1867,8 @@ async function pageAssignments() {
   const node = (key, label, depth) => el('div', { class: 'tn' + (_asDept === key ? ' on' : ''), style: 'padding-left:' + (6 + depth * 14) + 'px', onclick: () => { if (!asLeaveOk()) return; _asDept = key; pageAssignments(); } },
     el('span', { class: 'nm', title: label }, label), el('span', { class: 'ct' }, String(countOf(key))));
   tree.append(node('*', 'Tất cả phòng ban', 0));
-  for (const n of nodes) tree.append(node(n.name, n.name, 1 + n.depth));
+  const tItems = nodes.map((n) => { const r = node(n.name, n.name, 1 + n.depth); tree.append(r); return { key: n.name, depth: n.depth, el: r }; });
+  collapseTree(tItems, [_asDept]);
   if (countOf('') > 0) tree.append(node('', '(Chưa có phòng ban)', 1));
   const setTreeHidden = (h) => { _asTreeHidden = h; try { localStorage.setItem('as_tree_hidden', h ? '1' : '0'); } catch {} pageAssignments(); };
   const hideBtn = el('span', { title: 'Ẩn cây phòng ban cho rộng màn hình', style: 'float:right;cursor:pointer;font-weight:700;color:#6b7280' }, '◀ Ẩn');
@@ -3296,40 +3353,13 @@ async function pageEditAtt() {
   catch (e) { setMain(head('Tính công'), el('div', { class: 'empty' }, e.message)); return; }
   let depts = [];
   try { depts = (await api('/reports/departments')).rows || []; } catch {}
+  if (!DEPARTMENTS.length) { try { DEPARTMENTS = (await api('/admin/departments')).rows || []; } catch {} }   // cây cha–con cho ô chọn phòng ban
 
-  // Helper: nút "chọn NHIỀU" (checklist tick). picked rỗng = tất cả.
-  const makeChecklist = (icon, allLabel, getItems, picked, afterChange) => {
-    const btn = el('button', { class: 'btn ghost sm', style: 'text-align:left;min-width:150px' });
-    const sync = () => { btn.textContent = (picked.size ? `${icon} Đã chọn ${picked.size}` : `${icon} ${allLabel}`) + ' ▾'; };
-    sync();
-    let dd = null;
-    const close = (reload) => { if (dd) { dd.remove(); dd = null; sync(); if (reload) afterChange(); } };
-    btn.onclick = (ev) => {
-      ev.stopPropagation();
-      if (dd) { close(true); return; }
-      dd = el('div', { style: 'position:fixed;z-index:1200;background:var(--surface,#fff);border:1px solid var(--line,#e5e5e5);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px;max-height:360px;overflow:auto;min-width:250px' });
-      const selAll = el('input', { type: 'checkbox', style: 'width:auto' }); selAll.checked = picked.size === 0;
-      selAll.onchange = () => { picked.clear(); dd.querySelectorAll('.mc-cb').forEach(c => c.checked = false); };
-      dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:5px 6px;border-bottom:1px solid var(--line,#eee);margin-bottom:4px;cursor:pointer' }, selAll, `${allLabel} (bỏ hết tick = tất cả)`));
-      for (const it of getItems()) {
-        const cb = el('input', { type: 'checkbox', class: 'mc-cb', style: 'width:auto', ...(picked.has(it.value) ? { checked: '' } : {}) });
-        cb.onchange = () => { cb.checked ? picked.add(it.value) : picked.delete(it.value); selAll.checked = picked.size === 0; };
-        dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 6px;cursor:pointer' }, cb, it.text));
-      }
-      const done = el('button', { class: 'btn sm', style: 'width:100%;margin-top:6px' }, 'Xong');
-      done.onclick = () => close(true); dd.append(done);
-      document.body.append(dd);
-      const r = btn.getBoundingClientRect();
-      dd.style.left = Math.max(8, Math.min(r.left, innerWidth - 270)) + 'px';
-      dd.style.top = (r.bottom + 4) + 'px';
-      setTimeout(() => document.addEventListener('click', function h(ev2) { if (dd && !dd.contains(ev2.target) && ev2.target !== btn) { close(true); document.removeEventListener('click', h, true); } }, true), 0);
-    };
-    return { btn, sync };
-  };
+  // nút "chọn NHIỀU" dùng hàm chung makeChecklist (có ô tìm, gõ không dấu)
   // Phòng ban (chọn nhiều) + Nhân viên (chọn nhiều, lọc theo phòng ban đã chọn)
   const deptPick = new Set(), empPick = new Set();
-  const deptCl = makeChecklist('🏢', 'Cả công ty', () => depts.map(d => ({ value: d, text: d })), deptPick, () => { empPick.clear(); empCl.sync(); load(); });
-  const empCl = makeChecklist('👥', 'Tất cả NV', () => emps.filter(e => !deptPick.size || deptPick.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })), empPick, () => load());
+  const deptCl = makeChecklist('🏢', 'Cả công ty', () => deptTreeItems(depts), deptPick, () => { empPick.clear(); empCl.sync(); load(); });
+  const empCl = makeChecklist('👥', 'Tất cả NV', () => { const ex = deptExpand(deptPick); return emps.filter(e => !deptPick.size || ex.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })); }, empPick, () => load());
   const fmt = (d) => d.toISOString().slice(0, 10);
   const now = new Date();
   const fromI = el('input', { type: 'date', value: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), style: 'width:auto' });
@@ -3482,8 +3512,20 @@ async function pageEditAtt() {
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
 
-  const load = () => { view === 'summary' ? loadSummary() : loadDetail(); };
-  fromI.onchange = load; toI.onchange = load;
+  // Đổi Từ / Đến ngày KHÔNG tự tải (tránh tải 2 lần / tải khoảng quá dài khi đang chọn dở) → bấm "✓ Áp dụng" hoặc Enter
+  const applyB = el('button', { class: 'btn sm green apply-dt', title: 'Xem theo khoảng ngày vừa chọn (hoặc nhấn Enter trong ô ngày)', disabled: '' }, '✓ Áp dụng');
+  let applied = [fromI.value, toI.value];
+  const dirty = () => { const d = fromI.value !== applied[0] || toI.value !== applied[1]; applyB.disabled = !d; applyB.classList.toggle('pending', d); };
+  const load = () => { applied = [fromI.value, toI.value]; dirty(); view === 'summary' ? loadSummary() : loadDetail(); };
+  const applyDates = () => {
+    if (!fromI.value || !toI.value) return toast('Chọn đủ Từ ngày và Đến ngày', 'err');
+    if (toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
+    const n = Math.round((Date.parse(toI.value) - Date.parse(fromI.value)) / 86400000) + 1;
+    if (n > 93 && !confirm(`Khoảng ${n} ngày khá dài, tải có thể chậm. Vẫn xem?`)) return;
+    load();
+  };
+  for (const i of [fromI, toI]) { i.oninput = dirty; i.onchange = dirty; i.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); applyDates(); } }; }
+  applyB.onclick = applyDates;
   recalcBtn.onclick = async () => {
     let scopeTxt;
     if (empPick.size) scopeTxt = empPick.size + ' nhân viên đã chọn';
@@ -3499,7 +3541,7 @@ async function pageEditAtt() {
   const bar = el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' },
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
-    el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI,
+    el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI, applyB,
     allChk, isInspector() ? null : markChk, isInspector() ? null : recalcBtn, virtToggle(() => load()));
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
@@ -3615,10 +3657,12 @@ async function pageFixTime() {
   const treeItem = (key, label, depth, n) => {
     const b = el('button', { class: 'ft-node' + (_ft.dept === key ? ' on' : ''), style: `padding-left:${10 + depth * 14}px` }, el('span', {}, label), el('small', {}, String(n)));
     b.onclick = () => { _ft.dept = key; tree.querySelectorAll('.ft-node').forEach((x) => x.classList.toggle('on', x === b)); drawEmps(); };
-    tree.append(b);
+    tree.append(b); return b;
   };
   treeItem('', '🏢 Tất cả nhân viên', 0, emps.length);
-  for (const d of deptOrdered()) { const names = namesUnder(d); groups.set('d' + d.id, new Set(names)); treeItem('d' + d.id, d.name, d.depth + 1, names.reduce((a, x) => a + (cntBy.get(x) || 0), 0)); }
+  const tItems = [];
+  for (const d of deptOrdered()) { const names = namesUnder(d); groups.set('d' + d.id, new Set(names)); tItems.push({ key: d.name, depth: d.depth, el: treeItem('d' + d.id, d.name, d.depth + 1, names.reduce((a, x) => a + (cntBy.get(x) || 0), 0)) }); }
+  collapseTree(tItems, [(DEPARTMENTS.find((x) => 'd' + x.id === _ft.dept) || {}).name]);
   const known = new Set(DEPARTMENTS.map((d) => d.name));
   for (const k of [...cntBy.keys()].filter((k) => k !== NONE && !known.has(k))) { groups.set('o' + k, new Set([k])); treeItem('o' + k, k, 1, cntBy.get(k)); }
   if (cntBy.has(NONE)) { groups.set('none', new Set([NONE])); treeItem('none', 'Chưa có phòng ban', 1, cntBy.get(NONE)); }
@@ -3850,31 +3894,30 @@ async function pageAuditLimits() {
   const treeItem = (key, label, depth, n) => {
     const b = el('button', { class: 'ft-node' + (_al.dept === key ? ' on' : ''), style: `padding-left:${10 + depth * 14}px` }, el('span', {}, label), el('small', {}, String(n)));
     b.onclick = () => { _al.dept = key; tree.querySelectorAll('.ft-node').forEach((x) => x.classList.toggle('on', x === b)); draw(); };
-    tree.append(b);
+    tree.append(b); return b;
   };
   treeItem('', '🏢 Tất cả nhân viên', 0, emps.length);
-  for (const d of deptOrdered()) { const names = namesUnder(d); const n = names.reduce((a, x) => a + (cntBy.get(x) || 0), 0); if (!n) continue; groups.set('d' + d.id, new Set(names)); treeItem('d' + d.id, d.name, d.depth + 1, n); }
+  const tItems = [];
+  for (const d of deptOrdered()) { const names = namesUnder(d); const n = names.reduce((a, x) => a + (cntBy.get(x) || 0), 0); if (!n) continue; groups.set('d' + d.id, new Set(names)); tItems.push({ key: d.name, depth: d.depth, el: treeItem('d' + d.id, d.name, d.depth + 1, n) }); }
+  collapseTree(tItems, [(DEPARTMENTS.find((x) => 'd' + x.id === _al.dept) || {}).name]);
   const known = new Set(DEPARTMENTS.map((d) => d.name));
   for (const k of [...cntBy.keys()].filter((k) => k !== NONE && !known.has(k))) { groups.set('o' + k, new Set([k])); treeItem('o' + k, k, 1, cntBy.get(k)); }
   if (cntBy.has(NONE)) { groups.set('none', new Set([NONE])); treeItem('none', 'Chưa có phòng ban', 1, cntBy.get(NONE)); }
 
   // ----- mặc định công ty -----
   const defI = [0, 1, 2, 3].map((lv) => (lv ? el('input', { type: 'number', min: 0, max: 1440, step: 5, placeholder: 'không giới hạn', value: data.defaults[lv] ?? '', style: 'width:120px;margin:0' }) : null));
-  const inspSel = el('select', { style: 'width:auto;margin:0' }, ...[1, 2, 3].map((lv) => el('option', { value: lv }, LV[lv])));
-  inspSel.value = String(data.defaults.inspector || 1);
   const saveDef = el('button', { class: 'btn sm' }, 'Lưu mặc định');
   saveDef.onclick = async () => {
     try {
-      const r = await api('/admin/audit-limits/defaults', { method: 'PUT', body: { 1: defI[1].value, 2: defI[2].value, 3: defI[3].value, inspector: inspSel.value } });
+      const r = await api('/admin/audit-limits/defaults', { method: 'PUT', body: { 1: defI[1].value, 2: defI[2].value, 3: defI[3].value } });
       data.defaults = r.defaults; toast('Đã lưu mặc định', 'ok'); draw();
     } catch (e) { toast(e.message, 'err'); }
   };
   const defPanel = el('div', { class: 'panel al-def' },
     el('b', {}, 'Mặc định công ty (phút / ngày)'),
     ...[1, 2, 3].map((lv) => el('label', {}, LV[lv], defI[lv])),
-    el('label', { title: 'Tài khoản kiểm tra (chỉ xem công ảo) thấy số liệu theo mức này' }, '🔍 Tài khoản kiểm tra xem', inspSel),
     saveDef,
-    el('div', { class: 'map-hint', style: 'flex-basis:100%;margin:0' }, 'NV / ngày nào chưa khai thì lấy mức riêng của NV, chưa có nữa thì lấy mặc định này. Để trống = không giới hạn; 0 = không cho tăng ca. Công ảo tính ngay lúc xem, không cần bấm Tính lại.'));
+    el('div', { class: 'map-hint', style: 'flex-basis:100%;margin:0' }, 'NV / ngày nào chưa khai thì lấy mức riêng của NV, chưa có nữa thì lấy mặc định này. Để trống = không giới hạn; 0 = không cho tăng ca. Công ảo tính ngay lúc xem, không cần bấm Tính lại. Tài khoản kiểm tra xem mức nào: chọn ở Nhân viên › sửa tài khoản › "Tài khoản kiểm tra".'));
 
   // ----- khoảng ngày + mức đang xem -----
   const fromI = el('input', { type: 'date', value: _al.from, style: 'width:auto;margin:0' });
@@ -3954,14 +3997,21 @@ async function pageAuditLimits() {
     const frag = document.createDocumentFragment();
     for (const e of list) {
       const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(_al.picked.has(e.id) ? { checked: '' } : {}) });
-      cb.onchange = () => { cb.checked ? _al.picked.add(e.id) : _al.picked.delete(e.id); };
+      cb.onchange = () => { cb.checked ? _al.picked.add(e.id) : _al.picked.delete(e.id); updTotal(); };
       frag.append(el('tr', {}, el('td', {}, cb), el('td', {}, e.code || ''), el('td', {}, el('b', {}, e.full_name)), el('td', { class: 'muted al-dept', title: e.department || '' }, e.department || '—'), ...cols.map((c) => tdFor(e, c))));
     }
     if (!list.length) frag.append(el('tr', {}, el('td', { colspan: 4 + cols.length }, el('div', { class: 'empty' }, 'Không có nhân viên.'))));
     tbody.append(frag);
-    allChk.checked = list.length > 0 && list.every((e) => _al.picked.has(e.id));
-    total.textContent = `${list.length} nhân viên · ${_al.picked.size} đã tích`;
+    updTotal();
   };
+  // số NV đã tích (tính trên danh sách đang lọc) — cập nhật ngay mỗi lần tích / bỏ tích
+  function updTotal() {
+    const n = list.filter((e) => _al.picked.has(e.id)).length;
+    allChk.checked = list.length > 0 && n === list.length;
+    allChk.indeterminate = n > 0 && n < list.length;
+    total.textContent = `${list.length} nhân viên · ${n} đã tích` + (_al.picked.size > n ? ` (thêm ${_al.picked.size - n} ở bộ phận khác)` : '');
+    bScope.value = _al.picked.size ? 'picked' : 'list';   // đã tích ai → "Áp nhanh" tự chỉ áp cho người đã tích
+  }
   allChk.onchange = () => { for (const e of list) allChk.checked ? _al.picked.add(e.id) : _al.picked.delete(e.id); draw(); };
   // lưu nhiều ô 1 lần rồi vẽ lại
   const saveCells = async (changes) => {
@@ -4848,23 +4898,67 @@ const REPORT_GROUPS = [
 
 // Nút "chọn nhiều" dùng chung (phòng ban / NV): bỏ hết tick = tất cả. Trả {btn, sync}.
 function makeChecklist(icon, allLabel, getItems, picked, afterChange) {
-  const btn = el('button', { class: 'btn ghost sm', style: 'text-align:left;min-width:150px' });
-  const sync = () => { btn.textContent = (picked.size ? `${icon} Đã chọn ${picked.size}` : `${icon} ${allLabel}`) + ' ▾'; };
+  const btn = el('button', { class: 'btn ghost sm mc-btn', style: 'text-align:left;min-width:150px' });
+  const clean = (t) => String(t).replace(/^[\s\u2003└]+/, '');   // bỏ thụt lề cây phòng ban
+  const nameOf = () => { const m = new Map(getItems().map((it) => [it.value, clean(it.text)])); return [...picked].map((v) => m.get(v) ?? String(v)); };
+  const sync = () => {
+    if (!picked.size) { btn.textContent = `${icon} ${allLabel} ▾`; btn.title = ''; btn.classList.remove('on'); return; }
+    const names = nameOf();
+    btn.textContent = `${icon} ${names.slice(0, 2).join(', ')}${names.length > 2 ? ` +${names.length - 2}` : ''} ▾`;
+    btn.title = `Đang chọn ${names.length}:\n` + names.join('\n'); btn.classList.add('on');
+  };
   sync();
   let dd = null;
   const close = (reload) => { if (dd) { dd.remove(); dd = null; sync(); if (reload) afterChange(); } };
   btn.onclick = (ev) => {
     ev.stopPropagation();
     if (dd) { close(true); return; }
-    dd = el('div', { style: 'position:fixed;z-index:1200;background:var(--surface,#fff);border:1px solid var(--line,#e5e5e5);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px;max-height:360px;overflow:auto;min-width:250px' });
+    dd = el('div', { class: 'mc-dd', style: 'position:fixed;z-index:1200;background:var(--surface,#fff);border:1px solid var(--line,#e5e5e5);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,.18);padding:8px;max-height:360px;overflow:auto;min-width:250px' });
     const selAll = el('input', { type: 'checkbox', style: 'width:auto' }); selAll.checked = picked.size === 0;
     selAll.onchange = () => { picked.clear(); dd.querySelectorAll('.mc-cb').forEach(c => c.checked = false); };
-    dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:5px 6px;border-bottom:1px solid var(--line,#eee);margin-bottom:4px;cursor:pointer' }, selAll, `${allLabel} (bỏ hết tick = tất cả)`));
-    for (const it of getItems()) {
-      const cb = el('input', { type: 'checkbox', class: 'mc-cb', style: 'width:auto', ...(picked.has(it.value) ? { checked: '' } : {}) });
-      cb.onchange = () => { cb.checked ? picked.add(it.value) : picked.delete(it.value); selAll.checked = picked.size === 0; };
-      dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 6px;cursor:pointer' }, cb, it.text));
+    const items = getItems();
+    // ô TÌM (tên / mã, gõ không dấu cũng được) khi danh sách dài + nút tích hết các dòng đang hiện
+    const fold = (t) => String(t).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
+    const rows = []; let treeApply = null;
+    const search = items.length > 8 ? el('input', { placeholder: '🔍 Tìm tên / mã…', style: 'margin:0 0 6px;width:100%' }) : null;
+    const pickShown = search ? el('button', { type: 'button', class: 'btn ghost sm', style: 'width:100%;margin-bottom:4px;display:none' }) : null;
+    if (search) {
+      dd.append(el('div', { style: 'position:sticky;top:-8px;z-index:1;background:var(--surface,#fff);padding-top:8px;margin-top:-8px' }, search, pickShown));
+      const filt = () => {
+        const s = fold(search.value.trim()); let n = 0;
+        if (!s && treeApply) { treeApply(); pickShown.style.display = 'none'; return; }   // hết tìm → về cây thu gọn
+        for (const r of rows) { const show = !s || r.key.includes(s); r.lb.style.display = show ? 'flex' : 'none'; if (show) n++; }
+        pickShown.style.display = s ? 'block' : 'none'; pickShown.textContent = `✓ Tích hết ${n} kết quả`;
+      };
+      search.oninput = filt;
+      search.onkeydown = (ev) => { if (ev.key === 'Enter') { ev.preventDefault(); const vis = rows.filter((r) => r.lb.style.display !== 'none'); if (vis.length === 1) vis[0].cb.click(); } };
+      pickShown.onclick = () => { for (const r of rows) if (r.lb.style.display !== 'none' && !r.cb.checked) { r.cb.checked = true; picked.add(r.value); } selAll.checked = picked.size === 0; drawChips(); };
+      setTimeout(() => search.focus(), 0);
     }
+    const chips = el('div', { class: 'mc-chips' });
+    const drawChips = () => {
+      chips.replaceChildren();
+      if (!picked.size) { chips.style.display = 'none'; return; }
+      chips.style.display = '';
+      chips.append(el('span', { class: 'muted' }, `Đang chọn (${picked.size}):`));
+      for (const r of rows.filter((r) => picked.has(r.value))) {
+        const x = el('button', { type: 'button', title: 'Bỏ chọn' }, '×');
+        x.onclick = (ev) => { ev.stopPropagation(); r.cb.checked = false; picked.delete(r.value); selAll.checked = picked.size === 0; drawChips(); };
+        chips.append(el('span', { class: 'mc-chip' }, clean(r.lb.textContent), x));
+      }
+    };
+    dd.append(chips);
+    const oldSelAll = selAll.onchange; selAll.onchange = () => { oldSelAll(); drawChips(); };
+    dd.append(el('label', { style: 'display:flex;gap:8px;align-items:center;font-weight:700;padding:5px 6px;border-bottom:1px solid var(--line,#eee);margin-bottom:4px;cursor:pointer' }, selAll, `${allLabel} (bỏ hết tick = tất cả)`));
+    for (const it of items) {
+      const cb = el('input', { type: 'checkbox', class: 'mc-cb', style: 'width:auto', ...(picked.has(it.value) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(it.value) : picked.delete(it.value); selAll.checked = picked.size === 0; drawChips(); };
+      const lb = el('label', { style: 'display:flex;gap:8px;align-items:center;padding:4px 6px;cursor:pointer' }, cb, it.text);
+      rows.push({ lb, cb, value: it.value, key: fold(it.text), depth: it.depth });
+      dd.append(lb);
+    }
+    if (rows.some((r) => r.depth > 0)) treeApply = collapseTree(rows.map((r) => ({ key: r.value, depth: r.depth || 0, el: r.lb })), [...picked]);
+    drawChips();
     const done = el('button', { class: 'btn sm', style: 'width:100%;margin-top:6px' }, 'Xong');
     done.onclick = () => close(true); dd.append(done);
     document.body.append(dd);
@@ -4894,12 +4988,13 @@ async function pageReport() {
   // Phòng ban + Nhân viên chọn NHIỀU (bỏ hết tick = tất cả). Chọn NV cụ thể sẽ ưu tiên hơn phòng ban.
   let depts = [], emps = [];
   try { depts = (await api('/reports/departments')).rows || []; } catch {}
+  if (!DEPARTMENTS.length) { try { DEPARTMENTS = (await api('/admin/departments')).rows || []; } catch {} }   // cây cha–con cho ô chọn phòng ban
   try { emps = (await api('/admin/employees')).rows || []; } catch {}
   emps = emps.filter(e => e.role !== 'admin' && e.active !== 0);
   const deptPick = new Set(), empPick = new Set();
   let onFilterChange = () => {};
-  const deptCl = makeChecklist('🏢', 'Tất cả phòng ban', () => depts.map(d => ({ value: d, text: d })), deptPick, () => { empPick.clear(); empCl.sync(); onFilterChange(); });
-  const empCl = makeChecklist('👥', 'Tất cả NV', () => emps.filter(e => !deptPick.size || deptPick.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })), empPick, () => onFilterChange());
+  const deptCl = makeChecklist('🏢', 'Tất cả phòng ban', () => deptTreeItems(depts), deptPick, () => { empPick.clear(); empCl.sync(); onFilterChange(); });
+  const empCl = makeChecklist('👥', 'Tất cả NV', () => { const ex = deptExpand(deptPick); return emps.filter(e => !deptPick.size || ex.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })); }, empPick, () => onFilterChange());
 
   const periodQS = () => `from=${fromI.value}&to=${toI.value}`;
   // Phần lọc NV cho query: ưu tiên NV cụ thể (ids), rồi tới nhiều phòng ban (depts)
@@ -4907,7 +5002,15 @@ async function pageReport() {
     : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : ''))
     + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=' + _virt : '');
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
-  const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; };
+  const snapMonth = () => { const ds = monthDaysArr(monthI.value || todayMonth()); fromI.value = ds[0]; toI.value = ds[ds.length - 1]; dimMonth(); };
+  // Ô THÁNG chỉ "sáng" khi Từ / Đến ngày đúng trọn tháng đó; chọn khoảng ngày khác → ô tháng mờ đi (đang lọc theo Từ → Đến)
+  const dimMonth = () => {
+    const ds = monthDaysArr(monthI.value || todayMonth());
+    const on = fromI.value === ds[0] && toI.value === ds[ds.length - 1];
+    monthI.classList.toggle('rp-dim', !on);
+    monthI.title = on ? 'Chọn nhanh trọn 1 tháng' : 'Đang xem theo Từ ngày → Đến ngày (không theo tháng). Chọn tháng để xem trọn tháng.';
+  };
+  fromI.addEventListener('change', dimMonth); toI.addEventListener('change', dimMonth); monthI.addEventListener('change', dimMonth);
 
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
   const hub = () => {

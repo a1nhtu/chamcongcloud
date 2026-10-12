@@ -25,17 +25,18 @@ export function auditSettings() {
   };
 }
 // 3 MỨC công ảo (như "TGLT tối đa / tối đa 2 / tối đa 3" của HR-ERP): mỗi mức có tăng ca tối đa / ngày riêng.
-// Mặc định công ty (phút; null = không giới hạn) + mức tài khoản kiểm tra được xem. Mức 1 kế thừa audit_ot_day_min cũ (> 0).
+// Mặc định công ty (phút; null = không giới hạn). Mức 1 kế thừa audit_ot_day_min cũ (> 0).
 export function levelDefaults() {
   const rd = (k) => { const v = getSetting(k, ''); if (v === '' || v == null) return null; const n = parseInt(v, 10); return Number.isFinite(n) && n >= 0 ? n : null; };
   let l1 = rd('audit_l1_day');
   if (l1 == null && getSetting('audit_l1_day', null) == null) { const old = parseInt(getSetting('audit_ot_day_min', '0'), 10); if (old > 0) l1 = old; }
-  const insp = parseInt(getSetting('audit_inspector_level', '1'), 10);
-  return { 1: l1, 2: rd('audit_l2_day'), 3: rd('audit_l3_day'), inspector: [1, 2, 3].includes(insp) ? insp : 1 };
+  return { 1: l1, 2: rd('audit_l2_day'), 3: rd('audit_l3_day') };
 }
-// Mức công ảo đang xem từ query ?virt=1|2|3 (0 = công thật). Tài khoản kiểm tra: luôn đúng mức chủ đã chọn cho họ.
+// Mức công ảo đang xem từ query ?virt=1|2|3 (0 = công thật).
+// Tài khoản kiểm tra: luôn đúng mức gắn với tài khoản (employees.audit_only = 1 / 2 / 3), bỏ qua query.
+export const inspectorLevel = (u) => ([1, 2, 3].includes(+(u && u.audit_only)) ? +u.audit_only : 1);
 export function virtLevel(q, req) {
-  if (req && req.forceVirt) return levelDefaults().inspector;
+  if (req && req.forceVirt) return inspectorLevel(req.user);
   const v = parseInt(q && q.virt, 10);
   return [1, 2, 3].includes(v) ? v : 0;
 }

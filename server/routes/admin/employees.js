@@ -59,7 +59,7 @@ function saveLeaveFields(id, b) {
 // Đánh dấu thì vai trò thành "Quản lý" (để vào được trang quản lý), quyền thực tế bị giới hạn ở INSPECTOR_PERMS.
 function saveAuditOnly(caller, id, b) {
   if (b.audit_only === undefined || !(caller.master || caller.role === 'admin') || isInspector(caller)) return;
-  const on = b.audit_only ? 1 : 0;
+  const on = [1, 2, 3].includes(+b.audit_only) ? +b.audit_only : b.audit_only ? 1 : 0;   // 1/2/3 = chỉ xem công ảo mức đó
   db.prepare('UPDATE employees SET audit_only = ? WHERE id = ?').run(on, id);
   if (on) db.prepare("UPDATE employees SET role = 'manager' WHERE id = ? AND role <> 'manager'").run(id);
 }

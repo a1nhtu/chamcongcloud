@@ -535,7 +535,7 @@ function migrateColumns() {
   add('shifts', 'break_start',    "TEXT DEFAULT ''");               // 'HH:MM' giờ BẮT ĐẦU nghỉ giữa ca ('' = không cố định giờ nghỉ)
   add('employees', 'start_date',      "TEXT DEFAULT ''");   // ngày vào làm (tính phép năm theo tháng + thâm niên)
   add('employees', 'leave_days_year', 'REAL');              // số ngày phép năm riêng (NULL = theo cài đặt chung)
-  add('employees', 'audit_only', 'INTEGER NOT NULL DEFAULT 0');   // 1 = TÀI KHOẢN KIỂM TRA: chỉ xem công ảo, không thấy công thật, không sửa gì
+  add('employees', 'audit_only', 'INTEGER NOT NULL DEFAULT 0');   // 1/2/3 = TÀI KHOẢN KIỂM TRA: chỉ xem công ảo MỨC đó, không thấy công thật, không sửa gì
   add('leave_requests', 'half',       "TEXT DEFAULT ''");   // '' cả ngày | 'sang' | 'chieu' (nửa ngày, chỉ khi từ ngày = đến ngày)
   // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…): trong [from_date, to_date] NV được đến muộn / về sớm số phút này, không trừ công
   db.exec(`CREATE TABLE IF NOT EXISTS employee_privileges (
@@ -707,6 +707,21 @@ export function setSetting(key, value) {
 // Mệnh đề SQL loại tài khoản Admin khỏi tính công/báo cáo/lương/phân ca.
 // Mặc định bỏ Admin; bật setting 'payroll_include_admin'='1' thì TÍNH CÔNG cho cả Admin (trả '').
 // col: tên cột role (vd 'role' hoặc 'e.role' khi join có alias).
+// Tên các bộ phận + MỌI bộ phận con của chúng (cây departments.parent_id): lọc theo phòng ban cha là gồm cả con
+export function deptWithChildren(names) {
+  const list = [...new Set((names || []).filter(Boolean))];
+  if (!list.length) return list;
+  const all = db.prepare('SELECT id, name, parent_id FROM departments').all();
+  const kids = new Map();
+  for (const d of all) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+  const out = new Set(list);
+  const walk = (id, depth) => { if (depth > 20) return; for (const c of kids.get(id) || []) { out.add(c.name); walk(c.id, depth + 1); } };
+  const want = new Set(list.map((n) => n.normalize('NFC')));
+  for (const d of all) if (want.has(d.name.normalize('NFC'))) walk(d.id, 0);
+  for (const n of [...out]) { out.add(n.normalize('NFC')); out.add(n.normalize('NFD')); }   // tên nhập từ Excel có thể ở dạng dấu tách rời (NFD)
+  return [...out];
+}
+
 export function adminAttWhere(col = 'role') {
   const p = col.includes('.') ? col.slice(0, col.indexOf('.') + 1) : '';
   return (getSetting('payroll_include_admin', '0') === '1' ? '' : ` AND ${col}!='admin'`) + ` AND IFNULL(${p}audit_only,0)=0`;

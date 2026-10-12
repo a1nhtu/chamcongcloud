@@ -1,5 +1,5 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
-import { db, getSetting, adminAttWhere } from '../../db.js';
+import { db, getSetting, adminAttWhere, deptWithChildren } from '../../db.js';
 import { LEAVE_TYPES, HALF_LABEL } from '../../leave-quota.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
@@ -44,7 +44,7 @@ export function registerAttendanceRoutes(r, { need }) {
 
     // Phạm vi: ids (vài NV) > depts (nhiều phòng ban) > dept (1 phòng ban) > cả công ty
     const dept = (req.query.dept || '').trim();
-    const deptList = String(req.query.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const deptList = deptWithChildren(String(req.query.depts || dept).split(',').map((s) => s.trim()).filter(Boolean));   // gồm cả bộ phận con
     const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
     const rcFrom = String(req.query.from || '').slice(0, 10);
     const rcTo = String(req.query.to || '').slice(0, 10);
@@ -123,7 +123,7 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu khoảng ngày hợp lệ' });
     if (to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
     const dept = (req.query.dept || '').trim();
-    const deptList = String(req.query.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
+    const deptList = deptWithChildren(String(req.query.depts || dept).split(',').map((s) => s.trim()).filter(Boolean));   // gồm cả bộ phận con
     const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
     const mode = req.query.mode === 'summary' ? 'summary' : 'detail';
 
