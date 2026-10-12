@@ -421,3 +421,6 @@ body.nav-mini #btn-logout::before { content: '🚪'; font-size: 16px; }
 .panel.folded { padding-top: 8px !important; padding-bottom: 8px !important; }
 .panel.folded > :not(.fold-head) { display: none !important; }
 .ft-node > span:not(.dt-tg) { flex: 1; text-align: left; min-width: 0; }   /* tên bộ phận sát nút ▶, thẳng cột theo cấp */
+.st-head h3 { margin: 0 !important; }
+.st-head { padding: 2px 0; }
+#main > .panel.folded:has(> .st-head) { width: 100%; max-width: 680px !important; }   /* Cài đặt: khung gọn cùng 1 độ rộng */

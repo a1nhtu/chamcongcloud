@@ -4916,6 +4916,30 @@ function foldPanel(panel, key, title, summary) {
   return { refresh: apply };
 }
 
+// CÀI ĐẶT: mỗi khung (có tiêu đề h3) thu gọn được bằng nút ▶/▼ — mặc định GỌN hết, khung nào đã mở thì nhớ trên máy
+function foldSettings(root) {
+  const panels = [...root.querySelectorAll('.panel')].filter((p) => !p.parentElement.closest('.panel') && p.querySelector(':scope > h3'));
+  for (const p of panels) {
+    const h = p.querySelector(':scope > h3');
+    const key = 'fold_st_' + h.textContent.trim();
+    const tg = el('button', { type: 'button', class: 'fold-tg', title: 'Mở / thu gọn' });
+    const head = el('div', { class: 'fold-head st-head' }, tg, h);
+    p.prepend(head);
+    let open = false; try { open = localStorage.getItem(key) === 'open'; } catch {}
+    const apply = () => { p.classList.toggle('folded', !open); tg.textContent = open ? '▼' : '▶'; };
+    p._setOpen = (o) => { open = o; try { localStorage.setItem(key, open ? 'open' : 'closed'); } catch {} apply(); };
+    head.onclick = (ev) => { if (ev.target.closest('input,select,a,button:not(.fold-tg)')) return; p._setOpen(!open); };
+    apply();
+  }
+  // nút "Mở tất cả / Thu gọn tất cả" ở đầu trang
+  const all = el('button', { type: 'button', class: 'btn ghost sm st-all' });
+  const sync = () => { all.textContent = panels.some((p) => p.classList.contains('folded')) ? '▼ Mở tất cả' : '▶ Thu gọn tất cả'; };
+  all.onclick = () => { const openAll = panels.some((p) => p.classList.contains('folded')); panels.forEach((p) => p._setOpen(openAll)); sync(); };
+  panels.forEach((p) => p.querySelector('.fold-head').addEventListener('click', () => setTimeout(sync, 0)));
+  sync();
+  const tb = root.querySelector('.page-head .toolbar'); if (tb) tb.append(all); else root.prepend(all);
+}
+
 // VẼ DẦN bảng dài (VD 650 NV × 30 ngày = hàng chục nghìn dòng — vẽ 1 lần làm trình duyệt đơ):
 // vẽ 200 dòng đầu, cuộn gần cuối bảng thì vẽ tiếp 200 (dữ liệu đã tải đủ, chỉ chưa vẽ) + nút "Hiện tất cả".
 // Trả start(scrollRoot) — gọi SAU khi bảng đã gắn vào trang; scrollRoot = khung cuộn chứa bảng (null = cả trang).
@@ -5795,6 +5819,7 @@ async function pageSettings() {
   // ----- Công ảo / lương ảo (audit) — hạn mức tăng ca -----
   const panelAudit = auditOn() && hasPerm('settings') ? auditPanelEl(s) : null;
   setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelAudit, panelHol, panelBackup, panelUpdate, panel2);
+  foldSettings($('#main'));   // mặc định thu gọn mọi khung, bấm tiêu đề / ▶ để mở
   if (hasPerm('holidays') && !hourlyMode()) loadHols();
   if (hasPerm('backup')) loadBackups();
   loadLic();
