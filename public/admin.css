@@ -328,5 +328,10 @@ table.ft-emps tbody tr.sel td, table.ft-punch tbody tr.sel td { background: #ffe
 @media (max-width: 800px) { .ft-wrap { grid-template-columns: 1fr; } .ft-left { position: static; max-height: 200px; } }
 
 /* Nút xem CÔNG ẢO (audit) */
-.virt-tg { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 6px 12px; border: 1px dashed #d1d5db; border-radius: 999px; font-weight: 700; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.virt-tg { display: inline-flex; align-items: center; gap: 6px; margin: 0; padding: 6px 12px; border: 1.5px solid #f59e0b; background: #fffbeb; border-radius: 999px; font-weight: 700; font-size: 13px; color: #b45309; cursor: pointer; white-space: nowrap; }
 .virt-tg.on { border: 1px solid #f59e0b; background: #fef3c7; color: #92400e; }
+.virt-tg.on { background: #f59e0b; color: #fff; }
+.au-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; margin-bottom: 18px; max-width: 900px; }
+.au-card { display: flex; gap: 12px; align-items: flex-start; text-align: left; padding: 16px; border: 1.5px solid #fcd34d; background: #fffbeb; border-radius: 14px; cursor: pointer; font: inherit; color: var(--ink); }
+.au-card:hover { box-shadow: 0 6px 18px rgba(245, 158, 11, .2); transform: translateY(-1px); }
+.au-ic { font-size: 28px; line-height: 1; }
