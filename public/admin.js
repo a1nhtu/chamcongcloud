@@ -3889,6 +3889,7 @@ async function pageAudit() {
     b.onclick = () => { if (key !== 'auditlimits' && !_virt) _virt = 1; if (key === 'salary') _salTab = 'payroll'; go(key); };
     return b;
   };
+  const auPanel = hasPerm('settings') ? auditPanelEl(SETTINGS) : null;
   setMain(head('🎭 Công ảo / lương ảo'),
     el('div', { class: 'map-hint', style: 'margin:-6px 0 12px;max-width:820px' }, 'Có 3 mức công ảo (Ảo 1 / Ảo 2 / Ảo 3), mỗi mức có tăng ca tối đa / ngày riêng — khai ở "⏱️ Tăng ca tối đa". Trên Tính công / Báo cáo / Lương có thanh vàng "Thật · Ảo 1 · Ảo 2 · Ảo 3" để chuyển. Công thật không bao giờ bị thay đổi.'),
     el('div', { class: 'au-cards' },
@@ -3897,7 +3898,8 @@ async function pageAudit() {
       card('📅', 'Báo cáo công ảo', 'Mọi báo cáo theo Ảo 1 / 2 / 3 + 2 mẫu so sánh 3 mức (nhóm "Công ảo 3 mức")', 'report'),
       hasPerm('salary') ? card('💰', 'Bảng lương ảo', 'Bảng lương / phiếu lương với tiền tăng ca theo công ảo', 'salary') : null),
     lockPanelEl(),
-    hasPerm('settings') ? auditPanelEl(SETTINGS) : el('div', { class: 'map-hint' }, 'Hạn mức tăng ca do người có quyền Cài đặt chỉnh.'));
+    auPanel || el('div', { class: 'map-hint' }, 'Hạn mức tăng ca do người có quyền Cài đặt chỉnh.'));
+  if (auPanel) foldSettings($('#main'), { only: [auPanel] });   // khung hạn mức: mặc định gọn, bấm ▶ để mở
 }
 
 /* ---------- TĂNG CA TỐI ĐA / NGÀY — 3 MỨC CÔNG ẢO (như "TGLT tối đa / tối đa 2 / tối đa 3" của HR-ERP) ----------
@@ -4983,8 +4985,9 @@ function foldPanel(panel, key, title, summary) {
 }
 
 // CÀI ĐẶT: mỗi khung (có tiêu đề h3) thu gọn được bằng nút ▶/▼ — mặc định GỌN hết, khung nào đã mở thì nhớ trên máy
-function foldSettings(root) {
-  const panels = [...root.querySelectorAll('.panel')].filter((p) => !p.parentElement.closest('.panel') && p.querySelector(':scope > h3'));
+// opts.only: chỉ thu gọn đúng các khung này (không thêm nút "Mở tất cả")
+function foldSettings(root, opts = {}) {
+  const panels = (opts.only || [...root.querySelectorAll('.panel')]).filter((p) => p && !p.parentElement.closest('.panel') && p.querySelector(':scope > h3'));
   for (const p of panels) {
     const h = p.querySelector(':scope > h3');
     const key = 'fold_st_' + h.textContent.trim();
@@ -4997,6 +5000,7 @@ function foldSettings(root) {
     head.onclick = (ev) => { if (ev.target.closest('input,select,a,button:not(.fold-tg)')) return; p._setOpen(!open); };
     apply();
   }
+  if (opts.only) return;
   // nút "Mở tất cả / Thu gọn tất cả" ở đầu trang
   const all = el('button', { type: 'button', class: 'btn ghost sm st-all' });
   const sync = () => { all.textContent = panels.some((p) => p.classList.contains('folded')) ? '▼ Mở tất cả' : '▶ Thu gọn tất cả'; };
