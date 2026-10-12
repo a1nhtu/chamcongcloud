@@ -78,13 +78,19 @@ export function registerAuditLimitRoutes(r, { need }) {
   // ---------- CHỐT KỲ công ảo: 12 tháng lương gần nhất + các tháng đã chốt ----------
   r.get('/audit-locks', need('audit'), guard, (req, res) => {
     const locks = new Map(db.prepare('SELECT month, from_date, to_date, locked_at, locked_by, rows FROM audit_locks').all().map((l) => [l.month, l]));
-    const today = vnDateStr(), cur = payMonthOf(today);
-    const months = [];
-    let y = +cur.slice(0, 4), m = +cur.slice(5, 7);
-    for (let i = 0; i < 13; i++) { months.push(`${y}-${String(m).padStart(2, '0')}`); m--; if (!m) { m = 12; y--; } }
-    for (const k of locks.keys()) if (!months.includes(k)) months.push(k);
-    months.sort().reverse();
-    res.json({ today, rows: months.map((k) => { const p = payPeriod(k); return { month: k, from: p.from, to: p.to, ended: p.to < today, lock: locks.get(k) || null }; }) });
+    const today = vnDateStr(), cur = payMonthOf(today), curY = +cur.slice(0, 4);
+    // các năm chọn được: từ năm có dòng công đầu tiên → năm hiện tại (+ năm có tháng đã chốt)
+    const span = db.prepare('SELECT MIN(work_date) a, MAX(work_date) b FROM attendance').get();
+    const ys = new Set([curY, curY - 1, ...[...locks.keys()].map((k) => +k.slice(0, 4))]);   // luôn có năm nay + năm trước
+    if (span && span.a) for (let y = +payMonthOf(span.a).slice(0, 4); y <= Math.max(curY, +payMonthOf(span.b).slice(0, 4)); y++) ys.add(y);
+    const years = [...ys].sort((p, q) => q - p);
+    const year = /^\d{4}$/.test(String(req.query.year || '')) ? +req.query.year : curY;
+    const rows = [];
+    for (let m = 1; m <= 12; m++) {
+      const k = `${year}-${String(m).padStart(2, '0')}`, p = payPeriod(k);
+      rows.push({ month: k, from: p.from, to: p.to, ended: p.to < today, future: p.from > today, lock: locks.get(k) || null });
+    }
+    res.json({ today, year, years, rows, locked: [...locks.keys()].sort() });
   });
   r.post('/audit-locks', need('audit'), guard, (req, res) => {
     try { res.json({ ok: true, ...lockMonth(String(req.body?.month || ''), req.user.full_name || req.user.username || '') }); }

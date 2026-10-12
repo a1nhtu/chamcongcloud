@@ -424,3 +424,6 @@ body.nav-mini #btn-logout::before { content: '🚪'; font-size: 16px; }
 .st-head h3 { margin: 0 !important; }
 .st-head { padding: 2px 0; }
 #main > .panel.folded:has(> .st-head) { width: 100%; max-width: 680px !important; }   /* Cài đặt: khung gọn cùng 1 độ rộng */
+
+/* Chốt kỳ: hàng nút chọn năm dưới bảng */
+.lock-years { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
