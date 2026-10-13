@@ -6,7 +6,7 @@ import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { initSchema, getSetting } from './db.js';
+import { initSchema, getSetting, optimizeDb } from './db.js';
 import { UPLOAD_DIR } from './storage.js';
 import { ensureSeed } from './seed.js';
 import { maybeAutoBackup } from './backup.js';
@@ -22,12 +22,14 @@ import shiftRequestRoutes from './routes/shift-requests.js';
 import iclockRoutes from './routes/iclock.js';
 import { isActivated } from './license.js';
 import { currentVersion } from './update.js';
+import { offload } from './heavy.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 
 initSchema();
 fixOverlappingAssignmentsOnce();   // dọn 1 lần các lịch gán ca chồng ngày của bản cũ (chạy SAU khi CSDL đã khởi tạo)
+optimizeDb();
 ensureSeed();
 
 // Tự động sao lưu dữ liệu: kiểm tra mỗi 5 phút, chạy khi tới giờ đã đặt (1 lần/ngày)
@@ -63,6 +65,9 @@ app.use('/api', (req, res, next) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/leaves', leaveRoutes);
+// Các yêu cầu ĐỌC nặng (lưới tính công, bảng lương, phân ca, báo cáo, xuất Excel) chạy ở luồng phụ → máy chủ không "đứng" khi có người chạy báo cáo
+app.use('/api/admin', offload([/^\/attendance\/grid$/, /^\/payroll$/, /^\/assignments$/]));
+app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$/]));
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/shift-requests', shiftRequestRoutes);

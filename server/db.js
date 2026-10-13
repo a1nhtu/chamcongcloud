@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, existsSync, copyFileSync, renameSync, rmSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isMainThread } from 'node:worker_threads';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -13,7 +14,7 @@ export const DB_PATH = process.env.DB_PATH || join(DATA_DIR, 'digiplus.db');
 
 // PHỤC HỒI: nếu có file chờ (.restore) → thay CSDL trước khi mở (an toàn, làm 1 lần lúc khởi động)
 const RESTORE_FILE = DB_PATH + '.restore';
-if (existsSync(RESTORE_FILE)) {
+if (isMainThread && existsSync(RESTORE_FILE)) {   // chỉ luồng chính lúc khởi động (luồng phụ xuất báo cáo cũng nạp file này)
   try {
     if (existsSync(DB_PATH)) copyFileSync(DB_PATH, DB_PATH + '.prerestore'); // giữ bản trước khi phục hồi
     for (const ext of ['-wal', '-shm']) { const f = DB_PATH + ext; if (existsSync(f)) rmSync(f); } // bỏ WAL cũ
@@ -25,6 +26,26 @@ if (existsSync(RESTORE_FILE)) {
 export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL;');
 db.exec('PRAGMA foreign_keys = ON;');
+// WAL + synchronous NORMAL: không ép đĩa ghi xong sau TỪNG lần ghi (CSDL vẫn không hỏng khi mất điện, cùng lắm mất vài thao tác cuối)
+// → tính lại công / nhận lượt quẹt nhanh hơn nhiều lần. busy_timeout: luồng phụ (xuất báo cáo, tính lại) và luồng chính chờ nhau thay vì báo lỗi.
+db.exec('PRAGMA synchronous = NORMAL;');
+db.exec('PRAGMA busy_timeout = 15000;');
+// NHỚ CÂU LỆNH ĐÃ SOẠN: mã gọi db.prepare(...) lại ở mỗi lần chạy (hàng triệu lần khi tính lại công / dựng báo cáo công ty đông người);
+// soạn 1 lần rồi dùng lại. Chỉ nhớ câu ngắn (câu có danh sách IN dài thay đổi liên tục thì soạn như cũ).
+{
+  const prep = db.prepare.bind(db), cache = new Map();
+  db.prepare = (sql) => {
+    if (typeof sql !== 'string' || sql.length > 700) return prep(sql);
+    let st = cache.get(sql);
+    if (!st) { if (cache.size >= 2000) cache.clear(); st = prep(sql); cache.set(sql, st); }
+    return st;
+  };
+}
+
+// Cập nhật số liệu thống kê để SQLite chọn đúng chỉ mục (nhẹ: chỉ lấy mẫu, chỉ làm khi cần) — gọi lúc khởi động
+export function optimizeDb() {
+  try { db.exec('PRAGMA analysis_limit = 400; PRAGMA optimize;'); } catch (e) { console.error('[db] optimize:', e.message); }
+}
 
 export function initSchema() {
   db.exec(`
@@ -345,6 +366,10 @@ export function initSchema() {
     CREATE INDEX IF NOT EXISTS idx_leave_emp ON leave_requests(employee_id);
     CREATE INDEX IF NOT EXISTS idx_leave_status ON leave_requests(status);
     CREATE INDEX IF NOT EXISTS idx_punch_emp_date ON device_punches(employee_id, work_date);
+    -- công ty đông người / dữ liệu nhiều năm: tìm lượt quẹt theo khoảng GIỜ của 1 NV, và lọc công / lượt quẹt theo NGÀY cả công ty
+    CREATE INDEX IF NOT EXISTS idx_punch_emp_at ON device_punches(employee_id, punch_at);
+    CREATE INDEX IF NOT EXISTS idx_punch_date ON device_punches(work_date);
+    CREATE INDEX IF NOT EXISTS idx_att_date ON attendance(work_date);
     CREATE INDEX IF NOT EXISTS idx_shiftreq_emp ON shift_requests(employee_id);
     CREATE INDEX IF NOT EXISTS idx_shiftreq_status ON shift_requests(status);
   `);

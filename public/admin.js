@@ -316,7 +316,7 @@ async function renderDashboard(showLoading) {
   if (showLoading) setMain(head('Tổng quan', dateI, autotag, refreshBtn), loading());
   try {
     const d = await api('/reports/dashboard?date=' + (dashDate || ''));
-    const rep = await api('/reports/attendance?month=' + d.today.slice(0, 7));
+    const rep = await api('/reports/attendance?month=' + d.today.slice(0, 7) + '&date=' + d.today);   // chỉ tải đúng ngày đang xem
     const today = rep.rows.filter(r => r.work_date === d.today);
     const hourly = hourlyMode();
     const person = (r, info) => ({ name: r.full_name, code: r.code, dept: r.department, info });

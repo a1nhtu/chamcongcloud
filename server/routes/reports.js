@@ -1236,14 +1236,17 @@ r.get('/attendance', (req, res) => {
   const dept = req.query.dept || null;
   let sql = `SELECT a.*, e.code, e.full_name, e.department, oi.name AS in_office
              FROM attendance a JOIN employees e ON e.id=a.employee_id
-             LEFT JOIN offices oi ON oi.id=a.check_in_office_id WHERE a.work_date LIKE ?`;
-  const args = [month + '%'];
+             LEFT JOIN offices oi ON oi.id=a.check_in_office_id WHERE `;
+  // ?date=YYYY-MM-DD: chỉ lấy ĐÚNG 1 NGÀY (trang Tổng quan — trước đây tải cả tháng rồi lọc: công ty 3.000 NV = 53 MB mỗi 20 giây)
+  const day = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || '')) ? req.query.date : null;
+  sql += day ? 'a.work_date = ?' : 'a.work_date LIKE ?';
+  const args = [day || month + '%'];
   if (dept) { sql += ' AND e.department = ?'; args.push(dept); }
   sql += ' ORDER BY a.work_date DESC, e.full_name';
-  const marks = new Set(db.prepare('SELECT employee_id, work_date FROM att_edit_marks WHERE work_date LIKE ?').all(month + '%').map((m) => m.employee_id + '|' + m.work_date));
+  const marks = new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE work_date ${day ? '=' : 'LIKE'} ?`).all(day || month + '%').map((m) => m.employee_id + '|' + m.work_date));
   let raw = db.prepare(sql).all(...args);
   if (req.forceVirt) {   // tài khoản kiểm tra: danh sách Tổng quan cũng là công ảo, không dấu sửa tay
-    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], month + '-01', month + '-31', true, virtLevel(req.query, req))).map((a) => ({ ...a, manual: 0 }));
+    raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], day || month + '-01', day || month + '-31', true, virtLevel(req.query, req))).map((a) => ({ ...a, manual: 0 }));
     marks.clear();
   }
   const rows = raw.map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm

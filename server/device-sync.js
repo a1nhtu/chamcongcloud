@@ -507,8 +507,12 @@ export function relearnDevice(serial) {
 
 // Tính chỉ số công cho 1 ngày (giống computeManual ở admin.js).
 // presetShift: nếu truyền (kể cả null) thì dùng luôn, không tự dò lại ca (dùng khi tách nhiều ca/ngày).
+// Cấu hình tính công (ngày lễ, làm tròn, chế độ ưu đãi, nghỉ nửa ngày, kiểu chấm công từng NV…) nạp từ CSDL khá nặng.
+// Dựng lại NHIỀU ngày 1 lượt (rebuildDays: tính lại công, máy đẩy cả loạt log) → nạp 1 LẦN cho cả lượt thay vì mỗi ngày-công 1 lần
+// (3.000 NV: 1 ngày 6,7 giây → ~1 giây). Dựng lẻ 1 ngày (rebuildDay) vẫn nạp mới như cũ.
+let _batchCtx = null;
 function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null) {
-  const ctx = payrollCtx(getSetting, db);
+  const ctx = _batchCtx || payrollCtx(getSetting, db);
   const hourly = ctx.isHourly(employeeId);
   const shift = hourly ? null : (presetShift !== undefined ? presetShift
     : resolveEffectiveShift(employeeId, workDate, inIso || `${workDate}T00:00:00Z`, outIso || null).shift);
@@ -596,12 +600,15 @@ export function rebuildDays(keys) {
     all.add(eid + '|' + nx.toISOString().slice(0, 10));
   }
   const list = [...all].map((k) => k.split('|')).sort((a, b) => (+a[0] - +b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
-  for (const [eid, date] of list) rebuildDay(+eid, date);
+  const outer = _batchCtx;
+  if (!outer) _batchCtx = payrollCtx(getSetting, db);
+  try { for (const [eid, date] of list) rebuildDay(+eid, date); } finally { _batchCtx = outer; }
   return list.length;
 }
 
 export function rebuildDay(employeeId, workDate) {
-  let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
+  // "+punch_at": ép dùng chỉ mục (NV, ngày) rồi mới sắp xếp — không thì SQLite có thể duyệt hết lượt quẹt của NV theo chỉ mục (NV, giờ)
+  let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
   if (!prov.length) return;
   const usedTo = consumedByPrevDay(employeeId, workDate);
   if (usedTo) prov = prov.filter((p) => p.punch_at > usedTo);
@@ -675,7 +682,7 @@ export function rebuildDay(employeeId, workDate) {
 // có ca → lượt quẹt trong cửa sổ ca; không ca (chế độ theo giờ) → mọi lượt quẹt của ngày.
 export function dayPairsFor(employeeId, workDate, shift) {
   if (!shift) {
-    const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY punch_at').all(employeeId, workDate);
+    const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
     return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), ioParamsFor(employeeId, workDate) || pairDup()) : null;
   }
   const { winStart, winEnd } = ruleWindow(workDate, shift, { toDayEnd: !isNightShift(shift) });
