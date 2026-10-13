@@ -3604,9 +3604,10 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
         if (!ids.length) return toast('Chọn ít nhất 1 nhân viên', 'err');
         if (!b.check_in && !b.check_out) return toast('Nhập giờ vào và/hoặc giờ ra', 'err');
         save.disabled = true;
-        await api('/admin/attendance/punches', { method: 'POST', body: { employee_ids: ids, date: dateI.value, in: b.check_in, out: b.check_out } });
+        const r = await api('/admin/attendance/punches', { method: 'POST', body: { employee_ids: ids, date: dateI.value, in: b.check_in, out: b.check_out } });
+        toast(`Đã thêm giờ cho ${r.count} người` + (r.skippedPhone ? ` · bỏ qua ${r.skippedPhone} người chấm bằng điện thoại (trùng phiên đã có / đang có phiên chưa ra)` : ''), r.count ? 'ok' : 'err'); closeModal(); reload(); return;
       }
-      toast(row ? 'Đã lưu' : `Đã thêm giờ cho ${pick ? pick.picked.size : 1} người`, 'ok'); closeModal(); reload();
+      toast('Đã lưu', 'ok'); closeModal(); reload();
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   const footer = [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ')];
@@ -4554,11 +4555,10 @@ async function punchModal(emp, date, reload) {
         el('td', {}, p.manual ? el('span', { style: 'color:#e67e22;font-weight:600' }, '✎ Thêm tay') : p.source),
         el('td', {}, el('div', { style: 'display:flex;gap:6px' }, edit, del))));
     });
-    addBtn.disabled = !!d.phoneLocked;
     listBox.replaceChildren(
       (d.phone && d.phone.length) ? el('div', { class: 'map-hint', style: 'margin-bottom:8px;color:#b45309' },
         '📱 Chấm bằng điện thoại: ' + d.phone.map((p) => (p.in || '--:--') + ' → ' + (p.out || 'chưa ra')).join(' · ') + '. '
-        + (d.phoneLocked ? 'Muốn sửa giờ thì bấm thẳng ô Vào / Ra của từng dòng ở bảng Tính công (không thêm lượt chấm ở đây, tránh ghi đè giờ chấm điện thoại).' : '')) : '',
+        + (d.phoneLocked ? 'Thêm ở dưới = thêm 1 phiên vào–ra MỚI (thêm "Vào" trước, rồi "Ra"), các phiên đã có giữ nguyên. Muốn đổi giờ phiên đã có thì bấm thẳng ô Vào / Ra ở bảng Tính công.' : '')) : '',
       el('div', { class: 'tbl-scroll' }, tbl),
       d.manualRow ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, 'Ngày này đang có giờ sửa tay ở bảng công — thêm / sửa / xoá lượt chấm sẽ tính lại theo các lượt chấm ở đây.') : '');
   };

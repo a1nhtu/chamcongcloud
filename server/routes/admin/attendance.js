@@ -193,7 +193,7 @@ export function registerAttendanceRoutes(r, { need }) {
         ...capInfo(a),
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
-        punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || []),   // công ảo: chỉ giờ vào · ra ảo
+        punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || ((a.check_in_photo || a.check_out_photo) ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean).map((t) => t + '📱') : [])),   // công ảo: chỉ giờ vào · ra ảo; 📱 = chấm bằng điện thoại
         late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
         cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: lv ? lv.sym : '',
         status: a.check_out_at ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
@@ -329,6 +329,40 @@ export function registerAttendanceRoutes(r, { need }) {
     for (const k of keys) { const [e, d] = k.split('|'); (left.get(+e, d).c ? delMan : delAll).run(+e, d); mark.run(+e, d); }   // dấu (*): ngày có lượt chấm sửa tay
     rebuildDays([...keys]);
   };
+  // Ngày NV chấm bằng ĐIỆN THOẠI (dòng công có ảnh chấm) và chưa có lượt quẹt nào từ máy: giờ chấm chỉ nằm ở bảng công,
+  // không có lượt chấm gốc → dựng lại ngày từ lượt chấm thêm tay sẽ GHI ĐÈ / làm mất các lần chấm điện thoại. Chặn thêm lượt ở các ngày này.
+  const phoneDay = (eid, date) => !!db.prepare("SELECT 1 FROM attendance WHERE employee_id = ? AND work_date = ? AND (COALESCE(check_in_photo,'') <> '' OR COALESCE(check_out_photo,'') <> '') LIMIT 1").get(eid, date)
+    && !db.prepare("SELECT 1 FROM device_punches WHERE employee_id = ? AND work_date = ? AND serial NOT IN ('TAY_VAO','TAY_RA') LIMIT 1").get(eid, date);
+  const dm = (d) => d.slice(8) + '/' + d.slice(5, 7);
+  // Ngày chấm điện thoại: thêm giờ tay = thêm 1 PHIÊN vào–ra MỚI ở bảng công (không dựng lại từ lượt chấm, không đụng các phiên đã có).
+  // Chỉ có giờ ra → điền giờ ra cho phiên đang mở (đã vào, chưa ra). Trả { error } nếu không thêm được.
+  const addPhoneSession = (eid, date, tIn, tOut, by) => {
+    const rows = db.prepare('SELECT id, check_in_at, check_out_at FROM attendance WHERE employee_id = ? AND work_date = ? AND check_in_at IS NOT NULL ORDER BY check_in_at').all(eid, date);
+    const open = rows.filter((a) => !a.check_out_at).pop();
+    if (!tIn) {
+      if (!open) return { error: `Ngày ${dm(date)} không có phiên nào đang mở (đã vào, chưa ra) — nhập cả giờ vào và giờ ra để thêm phiên mới.` };
+      let outIso = vnToIso(date, tOut);
+      if (new Date(outIso) <= new Date(open.check_in_at)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();   // ra sáng hôm sau
+      const m = computeManual(eid, date, open.check_in_at, outIso);
+      db.prepare(`UPDATE attendance SET check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?, work_minutes=?, work_unit=?, day_status=?, ot_type=?,
+        manual=1, manual_at=?, manual_by=? WHERE id=?`).run(outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, nowIso(), by, open.id);
+      notifyTimeEdited(eid, date, open.check_in_at, outIso);
+      return { ok: true };
+    }
+    const inIso = vnToIso(date, tIn);
+    let outIso = tOut ? vnToIso(date, tOut) : null;
+    if (outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();
+    if (open) return { error: `Ngày ${dm(date)} đang có phiên chưa chấm ra (vào ${vnHM(open.check_in_at)}) — nhập giờ ra cho phiên đó trước.` };
+    const hit = rows.find((a) => inIso < a.check_out_at && (outIso || inIso) >= a.check_in_at);
+    if (hit) return { error: `Giờ vừa nhập trùng với phiên ${vnHM(hit.check_in_at)} → ${vnHM(hit.check_out_at)} đã có ngày ${dm(date)} — muốn đổi giờ phiên đó thì sửa ở ô Vào / Ra.` };
+    const m = computeManual(eid, date, inIso, outIso);
+    db.prepare(`INSERT INTO attendance
+      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note, manual_at, manual_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'manual', 1, '', ?, ?)`)
+      .run(eid, date, inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, nowIso(), by);
+    notifyTimeEdited(eid, date, inIso, outIso);
+    return { ok: true };
+  };
   const tx = (fn) => { db.exec('BEGIN'); try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } };
   const devName = () => new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
 
@@ -345,8 +379,10 @@ export function registerAttendanceRoutes(r, { need }) {
           kind: manual ? (p.serial === TAY.out ? 'Ra' : 'Vào') : '',
           source: manual ? 'Thêm tay' : (dv ? (dv.name || p.serial) + (dv.machine_number ? ` (máy ${dv.machine_number})` : '') : p.serial) };
       });
-    const att = db.prepare('SELECT id, check_in_at, check_out_at, manual FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ?').all(eid, from, to);
-    res.json({ rows, manualRow: att.some((a) => a.manual) });
+    const att = db.prepare('SELECT id, work_date, check_in_at, check_out_at, manual, check_in_photo, check_out_photo FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ? ORDER BY work_date, check_in_at').all(eid, from, to);
+    // các lần chấm bằng điện thoại (chỉ xem — sửa ở ô Vào / Ra của bảng Tính công)
+    const phone = att.filter((a) => a.check_in_photo || a.check_out_photo).map((a) => ({ date: a.work_date, in: a.check_in_at ? vnHM(a.check_in_at) : '', out: a.check_out_at ? vnHM(a.check_out_at) : '' }));
+    res.json({ rows, manualRow: att.some((a) => a.manual), phone, phoneLocked: from === to && phoneDay(eid, from) });
   });
 
   // Thêm lượt chấm cho 1 hoặc nhiều NV trong 1 ngày: giờ vào và/hoặc giờ ra
@@ -358,11 +394,19 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Chọn ngày' });
     if (!tIn && !tOut) return res.status(400).json({ error: 'Nhập giờ vào hoặc giờ ra (dạng 08:00)' });
+    const by = req.user.full_name || 'Quản lý';
+    let phoneErr = '';
     const keys = new Set();
+    let skippedPhone = 0;
     const n = tx(() => {
       let c = 0;
       for (const id of ids) {
         const emp = pinOf.get(id); if (!emp) continue;
+        if (phoneDay(id, date)) {   // ngày chấm điện thoại: thêm phiên mới ở bảng công, không dựng lại từ lượt chấm
+          const r = addPhoneSession(id, date, tIn, tOut, by);
+          if (r.error) { skippedPhone++; phoneErr = r.error; } else c++;
+          continue;
+        }
         const a = tIn ? addPunch(emp, date, tIn, 'in') : null;
         const o = tOut ? addPunch(emp, outDate || date, tOut, 'out', 0, outDate ? null : a) : null;
         for (const iso of [a, o]) if (iso) keys.add(id + '|' + vnDate(new Date(iso)));
@@ -371,7 +415,8 @@ export function registerAttendanceRoutes(r, { need }) {
       redoDays(keys);
       return c;
     });
-    res.json({ ok: true, count: n });
+    if (!n && ids.length === 1 && phoneErr) return res.status(400).json({ error: phoneErr });
+    res.json({ ok: true, count: n, skippedPhone });
   });
 
   // Sửa giờ 1 lượt chấm (lượt máy hay lượt thêm tay đều sửa được)
@@ -395,8 +440,10 @@ export function registerAttendanceRoutes(r, { need }) {
     const p = db.prepare('SELECT * FROM device_punches WHERE id = ?').get(req.params.id);
     if (!p) return res.status(404).json({ error: 'Không tìm thấy lượt chấm' });
     tx(() => {
+      const phone = p.employee_id && p.serial.startsWith('TAY_') && phoneDay(p.employee_id, p.work_date);
       db.prepare('DELETE FROM device_punches WHERE id = ?').run(p.id);
-      if (p.employee_id) redoDays(new Set([p.employee_id + '|' + p.work_date]));
+      // ngày chấm điện thoại: chỉ gỡ lượt thêm tay, GIỮ nguyên các dòng công (dựng lại sẽ xoá mất dòng chấm điện thoại)
+      if (p.employee_id && !phone) redoDays(new Set([p.employee_id + '|' + p.work_date]));
     });
     res.json({ ok: true });
   });
@@ -416,12 +463,13 @@ export function registerAttendanceRoutes(r, { need }) {
     const rnd = (j) => Math.floor(Math.random() * (j * 60 + 1));   // giây lệch
     const shift = (t, s) => { const [h, m] = t.split(':').map(Number); const tot = h * 3600 + m * 60 + s; return [String(Math.floor(tot / 3600) % 24).padStart(2, '0') + ':' + String(Math.floor(tot / 60) % 60).padStart(2, '0'), tot % 60]; };
     const keys = new Set();
-    let added = 0, skipped = 0;
+    let added = 0, skipped = 0, skippedPhone = 0;
     tx(() => {
       for (const id of ids) {
         const emp = pinOf.get(id); if (!emp) continue;
         for (const date of dates) {
           if (b.skip_existing && has.get(id, date)) { skipped++; continue; }
+          if (phoneDay(id, date)) { skippedPhone++; continue; }   // ngày chấm bằng điện thoại: không ghi đè
           let a = null;
           if (tIn) { const [t, s] = shift(tIn, rnd(jIn)); a = addPunch(emp, date, t, 'in', s); }
           if (tOut) { const [t, s] = shift(tOut, rnd(jOut)); const o = addPunch(emp, date, t, 'out', s, a); keys.add(id + '|' + vnDate(new Date(o))); }
@@ -430,7 +478,7 @@ export function registerAttendanceRoutes(r, { need }) {
       }
       redoDays(keys);
     });
-    res.json({ ok: true, added, skipped });
+    res.json({ ok: true, added, skipped, skippedPhone });
   });
 
   // XOÁ DỮ LIỆU CHẤM CÔNG của các NV đã chọn trong khoảng ngày. raw = xoá cả lượt chấm gốc (Tính lại sẽ không còn giờ)
