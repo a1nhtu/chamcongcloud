@@ -647,6 +647,13 @@ function migrateColumns() {
   add('push_devices', 'clock_text', "TEXT DEFAULT ''");
   add('push_devices', 'clock_at',   "TEXT DEFAULT ''");
   add('push_devices', 'clock_raw',  "TEXT DEFAULT ''");
+  // Máy kết nối TRỰC TIẾP TCP/IP (SDK zkemkeeper, cổng 4370): conn_type 'push' (máy tự đẩy, mặc định) | 'tcp' (phần mềm chủ động kết nối)
+  add('push_devices', 'conn_type',   "TEXT NOT NULL DEFAULT 'push'");
+  add('push_devices', 'tcp_ip',      "TEXT DEFAULT ''");
+  add('push_devices', 'tcp_port',    'INTEGER NOT NULL DEFAULT 4370');
+  add('push_devices', 'tcp_key',     'INTEGER NOT NULL DEFAULT 0');   // mật mã kết nối (Comm Key) đặt trên máy, 0 = không đặt
+  add('push_devices', 'tcp_info',    "TEXT DEFAULT ''");              // JSON thông tin + dung lượng đọc lần gần nhất
+  add('push_devices', 'tcp_sync_at', "TEXT DEFAULT ''");              // lần tải lượt chấm gần nhất
   // Lệnh đồng bộ mang theo "đối tượng" để CHỈ cộng số đếm khi máy XÁC NHẬN đã nhận (chống đếm khống)
   add('push_device_commands', 'pin',      "TEXT DEFAULT ''");
   add('push_device_commands', 'bio_type', 'INTEGER');

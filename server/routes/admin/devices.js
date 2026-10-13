@@ -4,6 +4,7 @@ import { db, getSetting } from '../../db.js';
 import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
+import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob } from '../../zk-tcp.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -44,8 +45,10 @@ export function registerDeviceRoutes(r, { need }) {
       d.card_count = db.prepare("SELECT COUNT(*) c FROM device_users_serial WHERE serial=? AND card<>''").get(d.serial).c;
       d.key_ok = deviceKeyOk(d);          // đã có key hợp lệ chưa
       delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
+      d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
+      try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
     }
-    res.json({ rows, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+    res.json({ rows, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
   r.get('/server-ips', need('devices'), (req, res) => {
@@ -86,8 +89,8 @@ export function registerDeviceRoutes(r, { need }) {
     // bắt tay đầy đủ (bật đẩy dữ liệu real-time + nhận lại giờ/múi giờ đúng).
     // KHÔNG tự tải toàn bộ NV từ máy (máy có thể cả nghìn người → nặng). NV đăng ký trước khi nối phần mềm
     // sẽ được hỏi RIÊNG từng người khi họ quẹt mà chưa khớp (askUserFromDevice); cần tải hết thì bấm tay.
-    if (becameActive) { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
-    res.json({ ok: true, synced, rebooting: becameActive });
+    if (becameActive && d.conn_type !== 'tcp') { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
+    res.json({ ok: true, synced, rebooting: becameActive && d.conn_type !== 'tcp' });
   });
   // Đồng bộ giờ: ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt mới nhận lệnh)
   r.post('/devices/:id/sync-time', need('devices'), (req, res) => {
@@ -191,6 +194,89 @@ export function registerDeviceRoutes(r, { need }) {
       db.exec('COMMIT');
       res.json({ ok: true, kind: b.kind || 'attlog', ...r2 });
     } catch (e) { db.exec('ROLLBACK'); sendCaughtError(res, 'POST /admin/devices/import-usb', e); }
+  });
+
+  /* -------- MÁY KẾT NỐI TRỰC TIẾP TCP/IP (SDK zkemkeeper, cổng 4370) — xem server/zk-tcp.js -------- */
+  const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  const tcpOn = (req, res, next) => (tcpEnabled() ? next() : res.status(400).json({ error: 'Chưa bật "Dùng máy chấm công kết nối TCP/IP" (trang Máy chấm công / Cài đặt).' }));
+  const connOf = (b, old = {}) => {
+    const ip = String(b.ip ?? old.tcp_ip ?? '').trim();
+    const port = b.port != null && b.port !== '' ? parseInt(b.port, 10) : (old.tcp_port || 4370);
+    const key = b.key != null && b.key !== '' ? parseInt(b.key, 10) : (b.key === '' ? 0 : (old.tcp_key || 0));
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip) || ip.split('.').some((x) => +x > 255)) return { error: 'Địa chỉ IP máy chấm công không hợp lệ (VD 192.168.1.201)' };
+    if (!(port > 0 && port < 65536)) return { error: 'Cổng không hợp lệ (mặc định 4370)' };
+    if (!(key >= 0 && key <= 999999)) return { error: 'Mật mã kết nối (Comm Key) phải là số 0–999999' };
+    return { tcp_ip: ip, tcp_port: port, tcp_key: key };
+  };
+  // Thêm máy: kết nối thử → đọc Serial + thông tin → ghi vào danh sách (Chờ duyệt, cần key như máy Push)
+  r.post('/devices/tcp', need('devices'), tcpOn, async (req, res) => {
+    const b = req.body || {}, c = connOf(b);
+    if (c.error) return res.status(400).json({ error: c.error });
+    try {
+      if (!(await tcpProbe(c.tcp_ip, c.tcp_port))) return res.status(400).json({ error: `Không thấy máy ở ${c.tcp_ip}:${c.tcp_port}. Kiểm tra: máy đã bật, cắm dây mạng, IP đúng và máy tính này CÙNG lớp mạng với máy chấm công.` });
+      const info = await tcpInfo(c);
+      if (!info.serial) return res.status(400).json({ error: 'Kết nối được nhưng không đọc được Serial của máy.' });
+      const name = String(b.name || '').trim();
+      const old = db.prepare('SELECT * FROM push_devices WHERE serial=?').get(info.serial);
+      if (old) db.prepare("UPDATE push_devices SET conn_type='tcp', tcp_ip=?, tcp_port=?, tcp_key=?, name=CASE WHEN ?<>'' THEN ? ELSE name END WHERE id=?").run(c.tcp_ip, c.tcp_port, c.tcp_key, name, name, old.id);
+      else db.prepare("INSERT INTO push_devices(serial, name, active, conn_type, tcp_ip, tcp_port, tcp_key) VALUES(?,?,0,'tcp',?,?,?)").run(info.serial, name, c.tcp_ip, c.tcp_port, c.tcp_key);
+      const d = db.prepare('SELECT id, serial, active FROM push_devices WHERE serial=?').get(info.serial);
+      saveInfo(d.id, info);
+      res.json({ ok: true, id: d.id, serial: d.serial, active: !!d.active, existed: !!old, info });
+    } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
+  });
+  // Sửa IP / cổng / mật mã kết nối
+  r.put('/devices/:id/tcp', need('devices'), tcpOn, (req, res) => {
+    const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d || d.conn_type !== 'tcp') return res.status(404).json({ error: 'Không tìm thấy máy TCP/IP' });
+    const c = connOf(req.body || {}, d);
+    if (c.error) return res.status(400).json({ error: c.error });
+    db.prepare('UPDATE push_devices SET tcp_ip=?, tcp_port=?, tcp_key=? WHERE id=?').run(c.tcp_ip, c.tcp_port, c.tcp_key, d.id);
+    res.json({ ok: true });
+  });
+  r.get('/devices/tcp-jobs/:job', need('devices'), (req, res) => {
+    const j = getJob(req.params.job);
+    if (!j) return res.status(404).json({ error: 'Không còn thông tin việc này (máy chủ vừa khởi động lại?)' });
+    res.json(j);
+  });
+  // Chạy 1 thao tác trên máy (chạy nền, giao diện hỏi tiến độ ở /devices/tcp-jobs/:job)
+  const TCP_ACTIONS = {
+    info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy',
+    'clear-admins': 'Xóa quyền quản trị', 'clear-logs': 'Xóa toàn bộ dữ liệu chấm công trên máy', 'delete-logs': 'Xóa dữ liệu chấm công theo khoảng ngày',
+    'clear-users': 'Xóa toàn bộ nhân viên + vân tay trên máy', 'clear-all': 'Xóa sạch máy',
+  };
+  r.post('/devices/:id/tcp/:action', need('devices'), tcpOn, async (req, res) => {
+    const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d || d.conn_type !== 'tcp') return res.status(404).json({ error: 'Không tìm thấy máy TCP/IP' });
+    const action = req.params.action, b = req.body || {};
+    if (!TCP_ACTIONS[action]) return res.status(400).json({ error: 'Thao tác không hỗ trợ' });
+    // Máy chưa duyệt (chưa có key bản quyền): chỉ được đọc thông tin
+    if (action !== 'info' && !d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước (dán key bản quyền nếu được yêu cầu).' });
+    const from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10);
+    if (action === 'delete-logs' || (action === 'logs' && (from || to))) {
+      if (!ISO.test(from) || !ISO.test(to) || to < from) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
+    }
+    if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) return res.status(400).json({ error: `Không thấy máy ở ${d.tcp_ip}:${d.tcp_port} — kiểm tra máy đã bật và cùng mạng LAN.` });
+    const j = startJob(action, d.name || d.serial, async (prog) => {
+      // luôn đọc Serial trước: chặn trường hợp IP này giờ là MÁY KHÁC (đổi máy / trùng IP) → không ghi nhầm dữ liệu, không xoá nhầm máy
+      prog('Đang kết nối máy…');
+      const info = await tcpInfo(d);
+      if (info.serial && info.serial !== d.serial) throw new Error(`Máy ở ${d.tcp_ip} có Serial ${info.serial}, KHÁC máy đã khai (${d.serial}). Dừng lại để tránh nhầm máy — sửa lại IP hoặc thêm máy mới.`);
+      saveInfo(d.id, info);
+      if (action === 'info') return { info };
+      if (action === 'users') { prog('Đang đọc nhân viên từ máy…'); return await tcpUsers(d, prog); }
+      if (action === 'logs') {
+        prog('Đang đọc nhân viên từ máy…');
+        const u = await tcpUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
+        prog('Đang đọc dữ liệu chấm công từ máy…');
+        return { ...(await tcpLogs(d, from, to, prog)), users: u.read, from, to };
+      }
+      prog(TCP_ACTIONS[action] + '…');
+      const r2 = await zkRun(d, action, { from, to, timeoutMs: 5 * 60000 });
+      if (action !== 'restart') { try { const i2 = await tcpInfo(d); saveInfo(d.id, i2); return { info: i2, note: r2.note }; } catch { /* máy đang bận sau khi xoá */ } }
+      return { note: r2.note };
+    });
+    res.json({ ok: true, job: j.id, title: TCP_ACTIONS[action] });
   });
 
   /* -------- Xóa dữ liệu / nhân viên TRÊN MÁY (gửi lệnh ADMS xuống máy) -------- */
