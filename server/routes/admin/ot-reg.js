@@ -163,6 +163,93 @@ export function registerOtRegRoutes(r, { need }) {
     catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/ot-reg/apply', e); }
   });
 
+  // ---------- XUẤT MẪU / NHẬP EXCEL ----------
+  // Xuất file mẫu: mỗi dòng 1 NV, mỗi cột 1 ngày trong [from, to] (tối đa 62 ngày), ô = số phút đã đăng ký (trống = chưa đăng ký).
+  // Body: { from, to, ids? } — ids rỗng = mọi NV. Điền / sửa số phút rồi nhập lại bằng /ot-reg/import.
+  r.post('/ot-reg/export.xlsx', need('attendance_edit'), async (req, res) => {
+    const b = req.body || {}, from = String(b.from || ''), to = String(b.to || '');
+    if (!ISO.test(from) || !ISO.test(to) || to < from) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
+    if (spanDays(from, to) > 62) return res.status(400).json({ error: 'Xuất mẫu tối đa 62 ngày một lần' });
+    const idSet = new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Boolean));
+    const emps = db.prepare(`SELECT id, code, full_name, department FROM employees WHERE active=1${adminAttWhere('role')} ORDER BY department, code`).all()
+      .filter((e) => !idSet.size || idSet.has(e.id));
+    const days = []; for (let d = from; d <= to; d = addDays(d, 1)) days.push(d);
+    const reg = new Map(db.prepare('SELECT employee_id, work_date, minutes FROM ot_registrations WHERE work_date>=? AND work_date<=?').all(from, to).map((c) => [c.employee_id + '|' + c.work_date, c.minutes]));
+    const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+    const vn = (s) => s.slice(8) + '/' + s.slice(5, 7) + '/' + s.slice(0, 4);
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('DangKyLamThem', { views: [{ state: 'frozen', xSplit: 3, ySplit: 4 }] });
+    ws.addRow(['ĐĂNG KÝ LÀM THÊM (số PHÚT mỗi ngày)']).font = { bold: true, size: 14 };
+    ws.addRow([`Từ ${vn(from)} đến ${vn(to)} · Điền số phút vào ô ngày (0 = không cho làm thêm, để trống = không đăng ký). KHÔNG sửa cột Mã NV và dòng ngày. Xong vào Đăng ký làm thêm › ⬆ Nhập Excel.`]).font = { italic: true, color: { argb: 'FF64748B' } };
+    const wdRow = ws.addRow(['', '', '', ...days.map((d) => WD[new Date(d + 'T12:00:00Z').getUTCDay()])]);
+    const head = ws.addRow(['Mã NV', 'Họ tên', 'Bộ phận', ...days.map(vn)]);
+    const thin = { style: 'thin', color: { argb: 'FFCBD5E1' } }, border = { top: thin, bottom: thin, left: thin, right: thin };
+    for (const row of [wdRow, head]) row.eachCell((c, i) => {
+      c.font = { bold: true, color: i > 3 && wdRow.getCell(i).value === 'CN' ? { argb: 'FFDC2626' } : undefined }; c.alignment = { horizontal: 'center', vertical: 'middle' };
+      c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5EDF7' } }; c.border = border;
+    });
+    for (const e of emps) {
+      const row = ws.addRow([e.code || '', e.full_name, e.department || '', ...days.map((d) => reg.get(e.id + '|' + d) ?? null)]);
+      row.eachCell({ includeEmpty: true }, (c, i) => { c.border = border; if (i > 3) c.alignment = { horizontal: 'center' }; });
+    }
+    ws.getColumn(1).width = 12; ws.getColumn(2).width = 26; ws.getColumn(3).width = 24;
+    for (let i = 0; i < days.length; i++) ws.getColumn(4 + i).width = 12;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="dang_ky_lam_them_${from}_${to}.xlsx"`);
+    await wb.xlsx.write(res);
+    res.end();
+  });
+
+  // Nhập Excel theo mẫu trên: { fileBase64, clear_blank? } — clear_blank: ô để trống = XOÁ đăng ký ngày đó (mặc định: bỏ qua ô trống).
+  // Tìm dòng tiêu đề có "Mã NV" ở cột A; cột ngày đọc từ tiêu đề (dd/mm/yyyy hoặc ô kiểu ngày). NV tìm theo Mã NV.
+  r.post('/ot-reg/import', need('attendance_edit'), async (req, res) => {
+    const b64 = req.body?.fileBase64 || '';
+    if (!b64) return res.status(400).json({ error: 'Thiếu file' });
+    const wb = new ExcelJS.Workbook();
+    try { await wb.xlsx.load(Buffer.from(b64.replace(/^data:.*;base64,/, ''), 'base64')); } catch { return res.status(400).json({ error: 'File Excel không đọc được (phải là file .xlsx)' }); }
+    const ws = wb.worksheets[0];
+    if (!ws) return res.status(400).json({ error: 'File rỗng' });
+    const txt = (v) => (v == null ? '' : typeof v === 'object' && !(v instanceof Date) ? String(v.text ?? v.result ?? (v.richText ? v.richText.map((x) => x.text).join('') : '')) : v instanceof Date ? v : String(v)).toString().trim();
+    const toIso = (v) => {
+      if (v instanceof Date && !isNaN(v)) return new Date(v.getTime() + 12 * 3600e3).toISOString().slice(0, 10);   // ô kiểu ngày (Excel lưu 00:00 UTC)
+      if (typeof v === 'number' && v > 36526 && v < 73051) return new Date(Math.round((v - 25569) * 86400e3) + 12 * 3600e3).toISOString().slice(0, 10);   // số thứ tự ngày của Excel (ô ngày mất định dạng)
+      const s = String(v == null ? '' : (v.text ?? v.result ?? v)).trim();
+      let m = s.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/); if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+      m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/); return m ? s : '';
+    };
+    let headRow = 0;
+    for (let i = 1; i <= Math.min(ws.rowCount, 15); i++) if (/^mã\s*nv$/i.test(txt(ws.getRow(i).getCell(1).value).normalize('NFC'))) { headRow = i; break; }
+    if (!headRow) return res.status(400).json({ error: 'Không thấy dòng tiêu đề có "Mã NV" ở cột A — hãy dùng file mẫu xuất từ phần mềm.' });
+    const cols = [];   // [{ col, date }]
+    ws.getRow(headRow).eachCell((c, i) => { if (i <= 1) return; const d = toIso(c.value); if (d && ISO.test(d)) cols.push({ col: i, date: d }); });
+    if (!cols.length) return res.status(400).json({ error: 'Không thấy cột ngày nào ở dòng tiêu đề (dạng 24/08/2026).' });
+    if (cols.length > 92) return res.status(400).json({ error: 'File có quá nhiều cột ngày (tối đa 92).' });
+    const empByCode = new Map(db.prepare('SELECT id, code FROM employees WHERE active=1').all().map((e) => [String(e.code).trim().toUpperCase(), e.id]));
+    const clearBlank = !!req.body?.clear_blank;
+    const list = [], unknown = [], badCells = []; let people = 0;
+    for (let i = headRow + 1; i <= ws.rowCount; i++) {
+      const row = ws.getRow(i), code = txt(row.getCell(1).value);
+      if (!code) continue;
+      const id = empByCode.get(code.toUpperCase());
+      if (!id) { if (unknown.length < 30) unknown.push(code); continue; }
+      let touched = false;
+      for (const { col, date } of cols) {
+        const raw = row.getCell(col).value, s = txt(raw);
+        if (s === '') { if (clearBlank) { list.push([id, date, null]); touched = true; } continue; }
+        const m = minutesOf(s.replace(',', '.'));
+        if (m === undefined || m === null || !/^\d+([.,]0+)?$/.test(s)) { if (badCells.length < 30) badCells.push(`${code} ngày ${date.slice(8)}/${date.slice(5, 7)}: "${s.slice(0, 20)}"`); continue; }
+        list.push([id, date, m]); touched = true;
+      }
+      if (touched) people++;
+    }
+    db.exec('BEGIN');
+    try {
+      const changed = save(list, req.user.full_name || req.user.username || '');
+      db.exec('COMMIT');
+      res.json({ ok: true, saved: list.filter((x) => x[2] != null).length, cleared: list.filter((x) => x[2] == null).length, people, days: cols.length, from: cols.map((c) => c.date).sort()[0], to: cols.map((c) => c.date).sort().pop(), unknown, badCells, changed });
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/ot-reg/import', e); }
+  });
+
   // ---------- CHẤM CÔNG BẤT THƯỜNG ----------
   r.get('/abnormal', need('reports'), (req, res) => {
     try { res.json(buildAbnormal(req.query)); }
@@ -185,8 +272,10 @@ export function registerOtRegRoutes(r, { need }) {
     const head = ws.addRow(['STT', 'Ngày', 'Mã NV', 'Họ tên', 'Bộ phận', 'Ca', 'Giờ vào', 'Giờ ra', 'Đi muộn (phút)', 'Về sớm (phút)', 'Đăng ký làm thêm (phút)', 'Làm thêm thực tế (phút)', 'Làm thêm được tính (phút)', 'Vượt đăng ký (phút)', 'Bất thường']);
     head.font = { bold: true }; head.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; head.height = 32;
     head.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE5EDF7' } }; c.border = { top: { style: 'thin' }, bottom: { style: 'thin' }, left: { style: 'thin' }, right: { style: 'thin' } }; });
-    rows.forEach((x, i) => ws.addRow([i + 1, vn(x.date), x.code, x.name, x.dept, x.shift, x.in, x.out, x.late || null, x.early || null,
-      x.reg, x.raw, x.ot, x.reg != null && x.raw > x.reg ? x.raw - x.reg : null, x.kinds.map((k) => label[k]).join('; ') + (x.absent ? ' (không đi làm)' : '')]));
+    // chỉ ghi số + nhãn của các loại ĐANG CHỌN (không chọn "Đi muộn" thì dòng xuất vì lý do khác không kèm số đi muộn)
+    const on = (x, k) => (!want.size || want.has(k)) && x.kinds.includes(k);
+    rows.forEach((x, i) => ws.addRow([i + 1, vn(x.date), x.code, x.name, x.dept, x.shift, x.in, x.out, on(x, 'late') ? x.late : null, on(x, 'early') ? x.early : null,
+      x.reg, x.raw, x.ot, on(x, 'ot_over') ? x.raw - x.reg : null, x.kinds.filter((k) => !want.size || want.has(k)).map((k) => label[k]).join('; ') + (x.absent ? ' (không đi làm)' : '')]));
     [6, 12, 11, 26, 24, 24, 9, 9, 10, 10, 12, 12, 12, 11, 44].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="cham_cong_bat_thuong_${d.from}_${d.to}.xlsx"`);

@@ -4375,7 +4375,54 @@ async function pageOtReg() {
     saveCells(changes);
   });
 
-  setMain(head(T, fromI, toI, dApply.btn, prev, next, weekB, monthB),
+  // ----- Excel: xuất mẫu (NV đang lọc × khoảng ngày đang xem) / nhập lại -----
+  const xlOut = el('button', { class: 'btn ghost sm', title: 'Xuất file Excel: mỗi dòng 1 nhân viên đang lọc, mỗi cột 1 ngày trong khoảng đang xem — điền số phút rồi nhập lại' }, '⬇ Xuất mẫu Excel');
+  xlOut.onclick = async () => {
+    const vis = visible(); if (!vis.length) return toast('Không có nhân viên nào để xuất', 'err');
+    xlOut.disabled = true;
+    try {
+      const res = await api('/admin/ot-reg/export.xlsx', { method: 'POST', raw: true, body: { from: _or.from, to: _or.to, ids: vis.length === emps.length ? [] : vis.map((e) => e.id) } });
+      if (!res.ok) { let m = 'Máy chủ trả lỗi ' + res.status; try { m = (await res.json()).error || m; } catch {} toast(m, 'err'); return; }
+      const url = URL.createObjectURL(await res.blob());
+      const a = el('a', { href: url, download: `dang_ky_lam_them_${_or.from}_${_or.to}.xlsx` });
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast(`Đã xuất mẫu ${vis.length.toLocaleString('vi')} nhân viên × ${days.length} ngày`, 'ok');
+    } catch (e) { toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
+    finally { xlOut.disabled = false; }
+  };
+  const xlIn = el('button', { class: 'btn ghost sm', title: 'Nhập file Excel đã điền số phút đăng ký (theo mẫu xuất từ nút bên cạnh)' }, '⬆ Nhập Excel');
+  xlIn.onclick = () => {
+    const file = el('input', { type: 'file', accept: '.xlsx' });
+    const clr = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+    const out = el('div', { style: 'margin-top:12px' });
+    const go = el('button', { class: 'btn' }, '⬆ Nhập');
+    go.onclick = () => {
+      const f = file.files[0]; if (!f) return toast('Chọn file Excel trước', 'err');
+      if (clr.checked && !confirm('Ô để TRỐNG trong file sẽ XOÁ đăng ký của ngày đó. Tiếp tục?')) return;
+      go.disabled = true; go.textContent = 'Đang nhập…';
+      const reader = new FileReader();
+      reader.onload = async () => {
+        try {
+          const r = await api('/admin/ot-reg/import', { method: 'POST', body: { fileBase64: reader.result, clear_blank: clr.checked } });
+          const dm = (d) => d.slice(8) + '/' + d.slice(5, 7);
+          out.replaceChildren(
+            el('div', { style: 'font-weight:700;color:#15803d' }, `✅ Đã nhập ${r.saved.toLocaleString('vi')} ô đăng ký của ${r.people.toLocaleString('vi')} nhân viên (${r.days} ngày, ${dm(r.from)} → ${dm(r.to)})` + (r.cleared ? ` · xoá ${r.cleared.toLocaleString('vi')} ô` : '')),
+            r.unknown.length ? el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `Mã NV không có trong phần mềm (bỏ qua): ${r.unknown.join(', ')}${r.unknown.length >= 30 ? '…' : ''}`) : '',
+            r.badCells.length ? el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `Ô không phải số phút 0–1440 (bỏ qua): ${r.badCells.join(' · ')}${r.badCells.length >= 30 ? '…' : ''}`) : '');
+          go.style.display = 'none'; closeB.textContent = 'Đóng'; closeB.onclick = () => { closeModal(); _or.from = r.from; _or.to = nDays(r.from, r.to) > 31 ? addDays(r.from, 30) : r.to; pageOtReg(); };
+        } catch (e) { toast(e.message, 'err'); go.disabled = false; go.textContent = '⬆ Nhập'; }
+      };
+      reader.readAsDataURL(f);
+    };
+    const closeB = el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ');
+    openModal('Nhập đăng ký làm thêm từ Excel', [
+      el('div', { class: 'map-hint' }, 'Dùng file xuất từ nút "⬇ Xuất mẫu Excel": cột A = Mã NV, dòng tiêu đề = các ngày, ô = số PHÚT đăng ký (0 = không cho làm thêm). Nhập xong áp ngay vào công, không cần bấm Tính lại.'),
+      el('div', { style: 'margin-top:12px' }, file),
+      el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer' }, clr, 'Ô để trống = XOÁ đăng ký ngày đó (không tích: ô trống giữ nguyên như đang có)'),
+      out,
+    ], [closeB, go]);
+  };
+  setMain(head(T, fromI, toI, dApply.btn, prev, next, weekB, monthB, xlOut, xlIn),
     rulePanel, applyPanel,
     el('div', { class: 'ft-wrap' }, el('div', { class: 'panel ft-left' }, tree),
       el('div', { class: 'panel', style: 'padding:10px;min-width:0' },
@@ -4459,9 +4506,10 @@ async function pageAbnormal() {
       tbl.innerHTML = '<thead><tr><th>Ngày</th><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Ca</th><th>Vào</th><th>Ra</th><th>Đi muộn</th><th>Về sớm</th><th title="Số phút đăng ký làm thêm">ĐK làm thêm</th><th title="Số phút làm thêm thực tế">Thực tế</th><th title="Số phút làm thêm được tính công">Được tính</th><th>Vượt ĐK</th><th>Bất thường</th></tr></thead>';
       start = lazyRows(tb, rows, (r) => el('tr', {}, el('td', { style: 'white-space:nowrap' }, dmy(r.date)), el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', { class: 'muted ab-dept', title: r.dept || '' }, r.dept || '—'),
         el('td', { class: 'muted ab-dept', title: r.shift || '' }, (r.shift || '—').replace(/\s*\(.*\)$/, '')), el('td', {}, r.in || (r.absent ? '' : '—')), el('td', {}, r.out || (r.absent ? '' : '—')),
-        num(r.late, 'late'), num(r.early, 'early'),
+        // chỉ hiện số của loại ĐANG BẬT (tắt "Đi muộn" thì dòng hiện vì lý do khác không còn số đi muộn gây rối)
+        num(_ab.kinds.has('late') && r.ks.includes('late') ? r.late : 0, 'late'), num(_ab.kinds.has('early') && r.ks.includes('early') ? r.early : 0, 'early'),
         el('td', { class: 'ab-n' }, r.reg == null ? '' : String(r.reg)), el('td', { class: 'ab-n' }, r.raw ? String(r.raw) : ''), el('td', { class: 'ab-n' }, r.ot ? String(r.ot) : ''),
-        num(r.reg != null && r.raw > r.reg ? r.raw - r.reg : 0, 'ot_over'),
+        num(_ab.kinds.has('ot_over') && r.ks.includes('ot_over') ? r.raw - r.reg : 0, 'ot_over'),
         el('td', {}, ...r.ks.filter((k) => _ab.kinds.has(k)).map(badge), r.absent ? el('span', { class: 'muted', style: 'font-size:12px' }, ' không đi làm') : '')), 14);
     }
     tbl.append(tb);
