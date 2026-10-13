@@ -87,23 +87,51 @@ StatusRunProgram=Đang hoàn tất cài đặt...
 Source: "{#Src}\config.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "{#Src}\*"; DestDir: "{app}"; Excludes: "config.txt"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "digiplus.ico"; DestDir: "{app}"; Flags: ignoreversion
+; SDK ZKTeco (zkemkeeper 6.3.1.37, 32-bit) cho máy chấm công kết nối trực tiếp TCP/IP — để riêng trong thư mục cài,
+; KHÔNG chép vào thư mục Windows (không đụng SDK của phần mềm chấm công khác đang có trên máy)
+Source: "zksdk\*.dll"; DestDir: "{app}\zksdk"; Flags: ignoreversion
 
 [InstallDelete]
 Type: files; Name: "{autodesktop}\Digiplus Cham Cong.url"
 Type: files; Name: "{autodesktop}\Digiplus Cham Cong {code:InstNum}.url"
 
 [Run]
+; Đăng ký SDK zkemkeeper (COM 32-bit) — CHỈ khi máy chưa có SDK nào (máy đã cài Wise Eye / Ronald Jack… thì giữ nguyên SDK đang có)
+Filename: "{syswow64}\regsvr32.exe"; Parameters: "/s ""{app}\zksdk\zkemkeeper.dll"""; Check: NeedZkSdk; Flags: runhidden waituntilterminated; StatusMsg: "Đang đăng ký SDK máy chấm công (TCP/IP)..."
 ; Đăng ký tự bật khi mở máy + khởi động phần mềm + chờ phần mềm sẵn sàng (CaiDat.bat chế độ im lặng)
 Filename: "{app}\CaiDat.bat"; Parameters: "silent{code:AutoParam}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Đang khởi động phần mềm (lần đầu có thể mất khoảng 1 phút)..."
 Filename: "{code:AdminUrl}"; Description: "Mở trang quản lý Digiplus Chấm Công"; Flags: postinstall shellexec nowait skipifsilent
 
 [UninstallRun]
+; Gỡ đăng ký SDK chỉ khi chính bản này đã đăng ký (đường dẫn đăng ký nằm trong thư mục cài)
+Filename: "{syswow64}\regsvr32.exe"; Parameters: "/u /s ""{app}\zksdk\zkemkeeper.dll"""; Check: ZkSdkIsOurs; Flags: runhidden waituntilterminated; RunOnceId: "DigiplusZkSdk"
 Filename: "{app}\GoCaiDat.bat"; Parameters: "silent"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; RunOnceId: "DigiplusStop"
 
 [UninstallDelete]
 Type: files; Name: "{autodesktop}\{code:ShortcutName}"
 
 [Code]
+// ----- SDK zkemkeeper (máy chấm công TCP/IP) -----
+// Đường dẫn DLL đang đăng ký cho zkemkeeper.ZKEM ở nhánh 32-bit ('' = máy chưa có SDK)
+function ZkSdkPath(): String;
+var Clsid: String;
+begin
+  Result := '';
+  if RegQueryStringValue(HKCR32, 'zkemkeeper.ZKEM\CLSID', '', Clsid) and (Clsid <> '') then
+    RegQueryStringValue(HKCR32, 'CLSID\' + Clsid + '\InprocServer32', '', Result);
+end;
+// Cần đăng ký khi: chưa có SDK, SDK cũ trỏ tới file đã mất, hoặc chính bản này đăng ký trước đó (đăng ký lại cho đúng file mới)
+function NeedZkSdk(): Boolean;
+var P: String;
+begin
+  P := RemoveQuotes(ZkSdkPath());
+  Result := (P = '') or (not FileExists(P)) or (Pos(Lowercase(ExpandConstant('{app}\zksdk\')), Lowercase(P)) = 1);
+end;
+function ZkSdkIsOurs(): Boolean;
+begin
+  Result := Pos(Lowercase(ExpandConstant('{app}\zksdk\')), Lowercase(RemoveQuotes(ZkSdkPath()))) = 1;
+end;
+
 const
   MODE_KEEP = 0;
   MODE_DOMAIN = 1;

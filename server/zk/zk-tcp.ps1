@@ -13,8 +13,14 @@ function Out($s) { [Console]::Out.WriteLine($s) }
 function Clean($s) { if ($null -eq $s) { return '' }; return (([string]$s) -replace "[`t`r`n`0]", ' ').Trim() }
 function Fail($code, $msg) { Out ("ERR`t$code`t" + (Clean $msg)); exit 1 }
 
+# Thư mục chứa SDK đang đăng ký → thêm vào PATH để zkemkeeper nạp được các DLL đi kèm (commpro, tcpcomm…) khi SDK không nằm trong thư mục Windows
+try {
+  $clsid = (Get-ItemProperty 'Registry::HKEY_CLASSES_ROOT\zkemkeeper.ZKEM\CLSID' -ErrorAction Stop).'(default)'
+  $dll = (Get-ItemProperty "Registry::HKEY_CLASSES_ROOT\CLSID\$clsid\InprocServer32" -ErrorAction Stop).'(default)'
+  if ($dll) { $dir = Split-Path ($dll.Trim('"')); if ($dir -and (Test-Path $dir)) { $env:PATH = "$dir;$env:PATH"; Set-Location $dir } }
+} catch {}
 try { $z = New-Object -ComObject zkemkeeper.ZKEM }
-catch { Fail 'NOSDK' 'Máy tính chưa cài SDK zkemkeeper (chạy Register_SDK.bat bằng quyền Administrator).' }
+catch { Fail 'NOSDK' 'Máy tính này chưa có SDK máy chấm công (zkemkeeper). Chạy lại bộ cài DigiplusChamCong-Setup.exe (bản 1.19.1 trở lên) bằng quyền Administrator để tự đăng ký.' }
 
 if ($Key -gt 0) { [void]$z.SetCommPassword($Key) }
 if (-not $z.Connect_Net($Ip, $Port)) {
