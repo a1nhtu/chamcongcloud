@@ -114,7 +114,7 @@ async function afterLogin() {
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
   const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
   const visible = NAV.filter(([key, , , perm]) => hasPerm(perm) && (!isInspector() || INSPECTOR_NAV.includes(key))
-    && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg'))
+    && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg' || key === 'abnormal'))
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())
     && !(key === 'shiftreq' && !selfShiftEnabled())
@@ -4554,7 +4554,12 @@ async function punchModal(emp, date, reload) {
         el('td', {}, p.manual ? el('span', { style: 'color:#e67e22;font-weight:600' }, '✎ Thêm tay') : p.source),
         el('td', {}, el('div', { style: 'display:flex;gap:6px' }, edit, del))));
     });
-    listBox.replaceChildren(el('div', { class: 'tbl-scroll' }, tbl),
+    addBtn.disabled = !!d.phoneLocked;
+    listBox.replaceChildren(
+      (d.phone && d.phone.length) ? el('div', { class: 'map-hint', style: 'margin-bottom:8px;color:#b45309' },
+        '📱 Chấm bằng điện thoại: ' + d.phone.map((p) => (p.in || '--:--') + ' → ' + (p.out || 'chưa ra')).join(' · ') + '. '
+        + (d.phoneLocked ? 'Muốn sửa giờ thì bấm thẳng ô Vào / Ra của từng dòng ở bảng Tính công (không thêm lượt chấm ở đây, tránh ghi đè giờ chấm điện thoại).' : '')) : '',
+      el('div', { class: 'tbl-scroll' }, tbl),
       d.manualRow ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, 'Ngày này đang có giờ sửa tay ở bảng công — thêm / sửa / xoá lượt chấm sẽ tính lại theo các lượt chấm ở đây.') : '');
   };
   prev.onclick = () => { cur = addDays(cur, -1); draw(); };
@@ -4617,7 +4622,7 @@ async function bulkPunchModal(emps, month0, reload) {
     run.disabled = true; run.textContent = 'Đang thực hiện…';
     try {
       const r = await api('/admin/attendance/punches/bulk', { method: 'POST', body });
-      toast(`Đã thêm giờ ${r.added} lượt người × ngày` + (r.skipped ? `, bỏ qua ${r.skipped} ngày đã có giờ` : ''), 'ok'); closeModal(); reload && reload();
+      toast(`Đã thêm giờ ${r.added} lượt người × ngày` + (r.skipped ? `, bỏ qua ${r.skipped} ngày đã có giờ` : '') + (r.skippedPhone ? `, bỏ qua ${r.skippedPhone} ngày chấm bằng điện thoại (sửa ở ô Vào / Ra)` : ''), 'ok'); closeModal(); reload && reload();
     } catch (e) { toast(e.message, 'err'); run.disabled = false; run.textContent = 'Thực hiện'; }
   };
   openModal('Thêm giờ hàng loạt', [
