@@ -5824,17 +5824,42 @@ async function pageReport() {
 
   hub();
 }
+// Thanh TIẾN TRÌNH xuất Excel (góc dưới phải): máy chủ báo % + đang làm gì; không chặn thao tác khác.
+// Trả { pt, done(ok) }: pt = mã gửi kèm yêu cầu xuất để máy chủ báo tiến độ theo.
+function exportProgress(title) {
+  const pt = Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+  const bar = el('div', { class: 'xp-bar' }, el('i', {}));
+  const pctEl = el('b', {}, '0%'), msgEl = el('div', { class: 'xp-msg' }, 'Đang gửi yêu cầu…');
+  const box = el('div', { class: 'xp-box' }, el('div', { class: 'xp-top' }, el('span', {}, '📊 ' + title), pctEl), bar, msgEl);
+  document.body.append(box);
+  const t0 = Date.now(); let stop = false, shown = 0;
+  const set = (pct, msg) => { shown = Math.max(shown, pct); bar.firstChild.style.width = shown + '%'; pctEl.textContent = shown + '%'; if (msg) msgEl.textContent = msg + ` · ${Math.round((Date.now() - t0) / 1000)} giây`; };
+  (async () => {
+    while (!stop) {
+      await new Promise((ok) => setTimeout(ok, 450));
+      if (stop) break;
+      try { const r = await api('/reports/progress?pt=' + pt); if (!stop && r) set(Math.min(99, r.pct || 0), r.pct >= 100 ? 'Đang tải file về máy…' : (r.msg || 'Đang xử lý…')); } catch { /* hỏi lại lần sau */ }
+    }
+  })();
+  return { pt, done(ok) { stop = true; if (ok) { set(100, 'Xong'); box.classList.add('ok'); } setTimeout(() => box.remove(), ok ? 1200 : 0); } };
+}
+let _xlBusy = false;
 async function downloadExcel(type, from, to, extraQS) {
+  if (_xlBusy) return toast('Đang xuất 1 file Excel — chờ xong rồi xuất tiếp', 'err');
+  _xlBusy = true;
+  const xp = exportProgress('Xuất Excel');
   try {
-    const res = await api(`/reports/export.xlsx?type=${type}&from=${from}&to=${to}${extraQS || ''}`, { raw: true });
-    if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
+    const res = await api(`/reports/export.xlsx?type=${type}&from=${from}&to=${to}${extraQS || ''}&pt=${xp.pt}`, { raw: true });
+    if (!res.ok) { xp.done(false); toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = el('a', { href: url, download: `baocao_${type}_${from}_${to}.xlsx` });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
+    xp.done(true);
     toast('Đã xuất Excel', 'ok');
-  } catch (e) { toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
+  } catch (e) { xp.done(false); toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
+  finally { _xlBusy = false; }
 }
 
 /* ---------- 7) CÀI ĐẶT ---------- */

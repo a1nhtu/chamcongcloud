@@ -7,10 +7,11 @@ import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } 
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
+import { progressOf, getProgress, loopProg } from '../progress.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
-r.use(inspectorGuard([/^\/(dashboard|attendance|departments|data|export\.xlsx)$/]));   // tài khoản kiểm tra: chỉ xem, ép công ảo
+r.use(inspectorGuard([/^\/(dashboard|attendance|departments|data|progress|export\.xlsx)$/]));   // tài khoản kiểm tra: chỉ xem, ép công ảo
 
 /* ================= Helpers ================= */
 function isoToVnHM(iso) {
@@ -384,6 +385,7 @@ function buildReportRaw(type, from, to, filter) {
   if (AUDIT3.includes(type)) return buildAudit3(type, from, to, filter);
   if (type === 'manualtime') return filter && filter.virt ? { title: `Giờ sửa/thêm bằng tay ${periodLabel(from, to)}`, columns: [], rows: [] } : buildManualTime(from, to);
   const ctx = loadRange(from, to, filter);
+  if (filter && filter._prog) filter._prog(28, 'Đã đọc xong dữ liệu, đang tính công từng nhân viên…');   // thanh tiến trình khi xuất Excel
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
   const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1], ctx.virt);   // giờ vào/ra theo quy tắc ghép log
@@ -853,7 +855,9 @@ function buildReportRaw(type, from, to, filter) {
  * Giờ vào/ra theo quy tắc ghép log (theo cặp → nhiều cặp; FILO → cặp 1 = đầu/cuối).
  * Chế độ theo giờ: bỏ Công + Tăng ca. */
 async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly) {
+  const PROG = filter._prog; let pi = 0;
   const ctx = loadRange(from, to, filter);
+  PROG && PROG(30, 'Đã đọc xong dữ liệu, đang ghi từng nhân viên…');
   const days = daysBetween(from, to);
   const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
   const HOURLY = formHourly(filter);
@@ -893,6 +897,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
 
   let r = 1, printed = 0;
   for (const e of ctx.employees) {
+    loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
     // Dữ liệu từng ngày
     const lines = [];
     let mins = 0, cong = 0, otMin = 0, lateN = 0, lateM = 0, earlyN = 0, earlyM = 0, vangKP = 0, vangCP = 0;
@@ -990,14 +995,18 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${onlyLateEarly ? 'dimuon_vesom_theonv' : 'chitiet_tung_nv'}_${from}_${to}.xlsx"`);
+  PROG && PROG(90, 'Đang đóng gói file Excel…');
   await wb.xlsx.write(res);
   res.end();
+  PROG && PROG(100, 'Xong');
 }
 
 /* ===== Xuất Excel "BẢNG THỐNG KÊ CHẤM CÔNG (GIỜ)" — tiêu đề 2 dòng như mẫu:
  * cột ngày: dòng trên = số ngày, dòng dưới = thứ; nhóm "Tăng ca" gộp trên TC1–TC3; cột khác gộp 2 dòng. */
 async function exportHourStatXlsx(res, from, to, filter, company, address) {
+  const PROG = filter._prog; let pi = 0;
   const { title, columns, rows } = buildReport('hourstat', from, to, filter);
+  PROG && PROG(55, 'Đã tính xong, đang ghi vào Excel…');
   const N = columns.length;
   const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
   const ws = wb.addWorksheet('ThongKeGio', { pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
@@ -1031,6 +1040,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
   }
   let r = H + 2;
   for (const row of rows) {
+    loopProg(PROG, ++pi, rows.length, 55, 88, 'Đang ghi dòng');
     for (let i = 0; i < N; i++) {
       const c = columns[i], cell = ws.getCell(r, i + 1);
       cell.value = row[c.key] ?? '';
@@ -1046,13 +1056,17 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="thongke_chamcong_gio_${from}_${to}.xlsx"`);
+  PROG && PROG(90, 'Đang đóng gói file Excel…');
   await wb.xlsx.write(res);
   res.end();
+  PROG && PROG(100, 'Xong');
 }
 
 /* ===== Xuất Excel "Giờ công & tăng ca" — mẫu chi tiết 3 dòng/NV (giống file mẫu) ===== */
 async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
+  const PROG = filter._prog; let pi = 0;
   const ctx = loadRange(from, to, filter);
+  PROG && PROG(30, 'Đã đọc xong dữ liệu, đang ghi từng nhân viên…');
   const days = daysBetween(from, to);
   const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);   // giờ vào/ra theo quy tắc ghép log
   const PERIOD = periodLabel(from, to).toUpperCase();
@@ -1093,6 +1107,7 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   let r = H + 2, stt = 0;
   const hireDate = (e) => (e.start_date ? fmtDMY(e.start_date) : '');   // ngày vào làm (hồ sơ NV)
   for (const e of ctx.employees) {
+    loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
     stt++;
     const rIn = r, rCong = r + 1, rOt = r + 2;
     const fixedVals = [stt, e.department || '', e.code, e.full_name, hireDate(e)];
@@ -1135,13 +1150,17 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="giocong_tangca_${from}_${to}.xlsx"`);
+  PROG && PROG(90, 'Đang đóng gói file Excel…');
   await wb.xlsx.write(res);
   res.end();
+  PROG && PROG(100, 'Xong');
 }
 
 /* ===== Xuất Excel "Chi tiết giờ vào/ra" — ma trận 2 cột/ngày (Vào|Ra), 1 dòng/NV (mẫu ChiTietThoiGianLamViec) ===== */
 async function exportDaytimeXlsx(res, from, to, filter, company, address) {
+  const PROG = filter._prog; let pi = 0;
   const ctx = loadRange(from, to, filter);
+  PROG && PROG(30, 'Đã đọc xong dữ liệu, đang ghi từng nhân viên…');
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to).toUpperCase();
   const FIXED = 5;
@@ -1178,6 +1197,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
   let r = H + 2, stt = 0;
   for (const e of ctx.employees) {
+    loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
     stt++;
     let lines = 1;
     [stt, e.department || '', e.code, e.full_name, e.start_date ? fmtDMY(e.start_date) : ''].forEach((v, i) => {
@@ -1209,8 +1229,10 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="chitiet_giovaora_${from}_${to}.xlsx"`);
+  PROG && PROG(90, 'Đang đóng gói file Excel…');
   await wb.xlsx.write(res);
   res.end();
+  PROG && PROG(100, 'Xong');
 }
 
 /* ================= Routes ================= */
@@ -1288,12 +1310,18 @@ r.get('/data', virtGuard, (req, res) => {
 });
 
 // Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to
+// Tiến độ 1 lần xuất Excel đang chạy (giao diện hỏi ~2 lần / giây để vẽ thanh %)
+r.get('/progress', (req, res) => res.json(getProgress(String(req.query.pt || '')) || { pct: 0, msg: '' }));
+
 r.get('/export.xlsx', virtGuard, async (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const filter = filterFromQuery(req.query, req);
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');
+  const PROG = progressOf(req); let pi = 0;   // thanh tiến trình (giao diện gửi kèm ?pt=…)
+  filter._prog = PROG;
+  PROG(4, 'Đang đọc dữ liệu chấm công…');
 
   // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
   if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, filter, company, address);
@@ -1303,6 +1331,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   if (type === 'empsheetlate') return exportEmpSheetXlsx(res, from, to, filter, company, true);
 
   const { title, columns, rows } = buildReport(type, from, to, filter);
+  PROG(50, 'Đã tính xong, đang ghi vào Excel…');
 
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Digiplus';
@@ -1330,6 +1359,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   });
 
   for (const row of rows) {
+    loopProg(PROG, ++pi, rows.length, 50, 88, 'Đang ghi dòng');
     const r2 = ws.addRow(columns.map((c) => row[c.key] ?? ''));
     let lines = 1;
     r2.eachCell((cell, col) => {
@@ -1347,8 +1377,10 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${from}_${to}.xlsx"`);
+  PROG && PROG(90, 'Đang đóng gói file Excel…');
   await wb.xlsx.write(res);
   res.end();
+  PROG && PROG(100, 'Xong');
 });
 
 export default r;
