@@ -42,6 +42,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
         audit_ot_month_h: getSetting('audit_ot_month_h', '0'), audit_ot_year_h: getSetting('audit_ot_year_h', '0'),
         audit_incl_weekend: getSetting('audit_incl_weekend', '1'), audit_incl_holiday: getSetting('audit_incl_holiday', '1'),
         audit_method: getSetting('audit_method', 'ratio'), audit_block: getSetting('audit_block', '15'),
+        audit_week_lv: getSetting('audit_week_lv', '1,2,3'), audit_month_lv: getSetting('audit_month_lv', '1,2,3'), audit_year_lv: getSetting('audit_year_lv', '1,2,3'),
+        audit_clamp_lv: getSetting('audit_clamp_lv', ''), audit_clamp_in_min: getSetting('audit_clamp_in_min', '14'), audit_clamp_out_min: getSetting('audit_clamp_out_min', '14'),
       } : {}),
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
       payroll_include_admin: getSetting('payroll_include_admin', '0'), // tính công cho cả tài khoản Admin
@@ -117,6 +119,11 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.audit_incl_weekend != null) setSetting('audit_incl_weekend', b.audit_incl_weekend ? '1' : '0');
       if (b.audit_incl_holiday != null) setSetting('audit_incl_holiday', b.audit_incl_holiday ? '1' : '0');
       if (b.audit_method != null) setSetting('audit_method', b.audit_method === 'days' ? 'days' : 'ratio');
+      // hạn mức tuần / tháng / năm + khống chế giờ chấm: áp cho những mức ảo nào ('1,2,3'; '' = không mức nào)
+      for (const k of ['audit_week_lv', 'audit_month_lv', 'audit_year_lv', 'audit_clamp_lv'])
+        if (b[k] != null) setSetting(k, [...new Set(String(b[k]).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)))].sort().join(','));
+      for (const k of ['audit_clamp_in_min', 'audit_clamp_out_min'])
+        if (b[k] != null) { const v = n(b[k], 120); if (v == null) return res.status(400).json({ error: 'Số phút khống chế giờ chấm phải là số ≥ 0' }); setSetting(k, String(Math.round(+v))); }
     }
     if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
     if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));

@@ -13,7 +13,14 @@ const monday = (d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return
 
 export function auditSettings() {
   const num = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v >= 0 ? v : d; };
+  const lvs = (k, d) => new Set(String(getSetting(k, d)).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)));
   return {
+    weekLv: lvs('audit_week_lv', '1,2,3'),          // hạn mức tuần / tháng / năm áp cho những mức ảo nào (mặc định cả 3)
+    monthLv: lvs('audit_month_lv', '1,2,3'),
+    yearLv: lvs('audit_year_lv', '1,2,3'),
+    clampLv: lvs('audit_clamp_lv', ''),             // KHỐNG CHẾ GIỜ CHẤM áp cho những mức ảo nào (mặc định không mức nào)
+    clampIn: Math.round(num('audit_clamp_in_min', 14)) * 60000,    // giờ vào không sớm hơn giờ vào ca quá N phút
+    clampOut: Math.round(num('audit_clamp_out_min', 14)) * 60000,  // giờ ra không trễ hơn (giờ tan ca + tăng ca ảo) quá N phút
     enabled: getSetting('audit_enabled', '0') === '1',
     weekMin: num('audit_ot_week_h', 0) * 60,         // tối đa / tuần (giờ)
     monthMin: num('audit_ot_month_h', 0) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
@@ -159,14 +166,15 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
     byEmp.get(r.employee_id).push({ r, date: r.work_date, type: r.ot_type || 'thuong', v: r.ot_min || 0 });
   }
   const group = (items, keyFn) => { const m = new Map(); for (const x of items) { const k = keyFn(x.date); if (!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; };
-  if (S.yearMin > 0) for (const k of lockedUse.keys()) { const eid = +k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); }   // NV chỉ có tháng đã chốt
+  const weekOn = S.weekMin > 0 && S.weekLv.has(lv), monthOn = S.monthMin > 0 && S.monthLv.has(lv), yearOn = S.yearMin > 0 && S.yearLv.has(lv);
+  if (yearOn) for (const k of lockedUse.keys()) { const eid = +k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); }   // NV chỉ có tháng đã chốt
   for (const [eid, items] of byEmp) {
     items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     for (const [d, xs] of group(items, (d) => d)) { const cap = dayCap(eid, d); if (cap != null) reduce(xs, cap, S, eid * 7919 + Date.parse(d) / DAY + lv); }
-    if (S.weekMin > 0) for (const [w, xs] of group(items, monday)) reduce(xs, S.weekMin, S, eid * 104729 + Date.parse(w) / DAY);
+    if (weekOn) for (const [w, xs] of group(items, monday)) reduce(xs, S.weekMin, S, eid * 104729 + Date.parse(w) / DAY);
     const months = group(items, P.key);
-    if (S.monthMin > 0) for (const [k, xs] of months) reduce(xs, S.monthMin, S, eid * 1299709 + +k.replace('-', ''));
-    if (S.yearMin > 0) {
+    if (monthOn) for (const [k, xs] of months) reduce(xs, S.monthMin, S, eid * 1299709 + +k.replace('-', ''));
+    if (yearOn) {
       let year = null, used = 0;
       const lockedKs = locks.map((k) => k.month).filter((m) => lockedUse.has(eid + '|' + m));
       for (const k of [...new Set([...months.keys(), ...lockedKs])].sort()) {
@@ -183,7 +191,47 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
       out.set(r.id, { ...shiftTimes(r, cut, x.v), ot_min: x.v, cut });
     }
   }
+  if (S.clampLv.has(lv)) clampRange(out, ids, from, to, S, lv, lockedDay);
   return out;
+}
+
+// KHỐNG CHẾ GIỜ CHẤM ẢO: giờ vào không sớm hơn giờ vào ca quá `clampIn`, giờ ra không trễ hơn (giờ tan ca + tăng ca ảo còn lại) quá `clampOut`.
+// Ngày chia 2 ca (sáng / chiều) → giờ ra giữa ca và giờ vào chiều cũng theo đúng luật này (mỗi ca 1 dòng công).
+// Giờ nằm ngoài khoảng được thay bằng 1 giờ ngẫu nhiên TRONG khoảng (cố định theo NV + ngày + mức → xem lại vẫn ra đúng giờ đó);
+// đi trễ / về sớm thật giữ nguyên. Chỉ đổi giờ hiển thị, không đổi công / tăng ca.
+function clampRange(out, ids, from, to, S, lv, lockedDay) {
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    for (const r of db.prepare(`SELECT a.id, a.employee_id, a.work_date, a.ot_min, a.work_unit, a.check_in_at, a.check_out_at,
+        s.start_time, s.end_time, s.break_minutes, s.ot_before FROM attendance a JOIN shifts s ON s.id = a.shift_id
+      WHERE a.employee_id IN (${chunk.map(() => '?').join(',')}) AND a.work_date >= ? AND a.work_date <= ?`).all(...chunk, from, to)) {
+      if (!r.start_time || !r.end_time || lockedDay(r.work_date)) continue;
+      const cur = out.get(r.id);
+      if (cur && cur.hidden) continue;
+      const v = cur ? cur.ot_min : r.ot_min || 0;
+      const t = clampTimes(r, cur ? cur.check_in_at : r.check_in_at, cur ? cur.check_out_at : r.check_out_at, v, S, lv);
+      if (t) out.set(r.id, { hidden: false, ot_min: v, cut: cur ? cur.cut : 0, ...t });
+    }
+  }
+}
+function clampTimes(r, cin, cout, v, S, lv) {
+  const st = Date.parse(`${r.work_date}T${r.start_time}:00+07:00`);
+  let en = Date.parse(`${r.work_date}T${r.end_time}:00+07:00`); if (en <= st) en += DAY;
+  let inT = cin ? Date.parse(cin) : null, outT = cout ? Date.parse(cout) : null;
+  const in0 = inT, out0 = outT, vMs = v * 60000;
+  // phần tăng ca ảo nằm SAU giờ tan ca (post) / TRƯỚC giờ vào ca (pre) — giờ ảo phải chừa đủ chỗ cho phần này
+  let pre = 0, post;
+  if (r.work_unit > 0) {
+    post = Math.min(vMs, outT != null ? Math.max(0, outT - en) : 0);
+    if (r.ot_before && inT != null) pre = Math.min(vMs - post, Math.max(0, st - inT));
+  } else post = Math.max(0, vMs - Math.max(0, en - st - (r.break_minutes || 0) * 60000));   // ngày cả ca là tăng ca: chỉ phần vượt độ dài ca mới nằm sau giờ tan
+  let h = (r.employee_id * 2654435761 + Date.parse(r.work_date) / DAY * 40503 + lv * 97) >>> 0;
+  const rnd = (n) => { h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0; return Math.floor(h / 4294967296 * n); };   // 0 … n-1
+  if (inT != null && inT < st - pre - S.clampIn) inT = st - pre - (S.clampIn ? S.clampIn - rnd(S.clampIn / 1000) * 1000 : 0);
+  if (outT != null && outT > en + post + S.clampOut) outT = en + post + (S.clampOut ? rnd(S.clampOut / 1000) * 1000 : 0);
+  if (inT != null && outT != null && inT > outT) inT = in0;   // lượt chấm nằm hẳn ngoài ca: không ép giờ vào vượt giờ ra
+  if (inT === in0 && outT === out0) return null;
+  return { check_in_at: inT != null ? new Date(inT).toISOString() : null, check_out_at: outT != null ? new Date(outT).toISOString() : null };
 }
 
 // Giờ vào / ra ẢO khớp với số tăng ca còn lại: lùi giờ ra phần tăng ca sau ca, còn thừa thì lùi giờ vào (tăng ca trước ca).
