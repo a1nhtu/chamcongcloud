@@ -3467,7 +3467,9 @@ async function pageEditAtt() {
         ] : [
           el('td', {}, r.late > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.late)) : '—'),
           el('td', {}, r.early > 0 ? el('span', { style: 'color:#c0392b;font-weight:600' }, String(r.early)) : '—'),
-          el('td', {}, r.ot > 0 ? el('span', { style: 'color:#0a7;font-weight:600' }, String(r.ot)) : '—'),
+          // tăng ca bị chặn theo ĐĂNG KÝ LÀM THÊM: gạch chân chấm + mũi tên nhỏ, rê chuột xem thực tế / đăng ký
+          el('td', {}, r.otRaw ? el('span', { class: 'ot-cap', title: `Làm thêm thực tế ${r.otRaw}' · ${r.otReg == null ? 'chưa đăng ký làm thêm' : `đăng ký ${r.otReg}'`} → chỉ tính ${r.ot}'` }, String(r.ot), el('small', {}, `/${r.otRaw}`))
+            : r.ot > 0 ? el('span', { style: 'color:#0a7;font-weight:600' }, String(r.ot)) : '—'),
           el('td', { style: 'text-align:center;font-weight:600' }, String(r.cong ?? 0)),
         ]),
         el('td', { style: 'text-align:center' }, r.leave ? el('span', { class: 'pill warn' }, r.leave) : '—'),
@@ -3724,7 +3726,7 @@ async function pageFixTime() {
       ...res.map((r) => el('div', { class: 'ft-res-row' }, el('b', {}, `${r.date.slice(8)}/${r.date.slice(5, 7)} ${r.wd}`), r.shift ? el('span', { class: 'pill' }, r.shift) : '',
         r.in ? `Vào ${r.in} · Ra ${r.out || '—'}` : '', r.leave ? el('span', { class: 'pill warn' }, r.leave) : '',
         r.late ? el('span', { style: 'color:#c0392b' }, `trễ ${r.late}'`) : '', r.early ? el('span', { style: 'color:#c0392b' }, `sớm ${r.early}'`) : '',
-        r.ot ? el('span', { style: 'color:#0a7' }, `TC ${r.ot}'`) : '', el('b', {}, `${r.cong ?? 0} công`), el('span', { class: 'muted' }, r.status || ''))));
+        r.otRaw ? el('span', { style: 'color:#0a7', title: `Làm thêm thực tế ${r.otRaw}' · ${r.otReg == null ? 'chưa đăng ký' : `đăng ký ${r.otReg}'`}` }, `TC ${r.ot}'`, el('span', { class: 'muted' }, ` (thực tế ${r.otRaw}')`)) : r.ot ? el('span', { style: 'color:#0a7' }, `TC ${r.ot}'`) : '', el('b', {}, `${r.cong ?? 0} công`), el('span', { class: 'muted' }, r.status || ''))));
   };
 
   // Thêm (như Wise Eye: tích Ngày giờ vào / Ngày giờ ra)

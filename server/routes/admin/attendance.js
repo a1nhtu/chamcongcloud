@@ -178,11 +178,19 @@ export function registerAttendanceRoutes(r, { need }) {
 
     const marks = vmap ? new Set() : new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
     const rows = []; const seen = new Set();
+    // ĐĂNG KÝ LÀM THÊM: dòng nào tăng ca bị chặn theo đăng ký thì kèm số thực tế + số đăng ký (chỉ ở công thật) để giao diện chú thích
+    const regOf = db.prepare('SELECT minutes FROM ot_registrations WHERE employee_id=? AND work_date=?');
+    const capInfo = (a) => {
+      if (vmap || !(a.ot_raw_min > (a.ot_min || 0))) return null;
+      const g = regOf.get(a.employee_id, a.work_date);
+      return { otRaw: a.ot_raw_min, otReg: g ? g.minutes : null };
+    };
     for (const a of att) {
       const e = empById.get(a.employee_id); if (!e) continue;
       const key = a.employee_id + '|' + a.work_date; seen.add(key);
       const lv = leaveMap.get(key);
       rows.push({
+        ...capInfo(a),
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
         punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || []),   // công ảo: chỉ giờ vào · ra ảo
