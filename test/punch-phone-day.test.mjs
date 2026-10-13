@@ -11,6 +11,7 @@ const dir = mkdtempSync(join(tmpdir(), 'dgp-phone-'));
 process.env.DB_PATH = join(dir, 'test.db');
 const { db, initSchema, setSetting } = await import('../server/db.js');
 const { registerAttendanceRoutes } = await import('../server/routes/admin/attendance.js');
+const { rebuildDay } = await import('../server/device-sync.js');
 const express = (await import('express')).default;
 
 const D = '2026-10-08';
@@ -28,6 +29,8 @@ before(() => {
   setSetting('attendance_mode', 'hourly');
   const addEmp = (code) => db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active) VALUES (?,?,'x',?,'employee',1)").run(code, code.toLowerCase(), 'NV ' + code).lastInsertRowid;
   phoneEmp = addEmp('PH1'); devEmp = addEmp('DV1');
+  // DV1 là người có quẹt máy (đã có lượt quẹt thật ở ngày khác)
+  db.prepare("INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES ('MAY1','DV1',?,?,0,1,?)").run(iso('08:00', '2026-10-01'), '2026-10-01', devEmp);
   // NV chấm điện thoại 2 phiên trong ngày (có ảnh chấm)
   const ins = db.prepare("INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo, work_minutes, work_unit, day_status, shift_source) VALUES (?,?,?,?,'/uploads/a.jpg','/uploads/b.jpg',?,?, 'lam_viec', 'hourly')");
   ins.run(phoneEmp, D, iso('08:24'), iso('12:33'), 249, 0.51);
@@ -84,5 +87,42 @@ test('lưới Tính công + cửa sổ Lượt chấm hiện các lần chấm �
 test('ngày chấm điện thoại đã lỡ có lượt thêm tay (bản cũ): xoá lượt đó KHÔNG làm mất dòng công', async () => {
   const id = db.prepare("INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES ('TAY_VAO','PH1',?,?,0,0,?)").run(iso('08:00'), D, phoneEmp).lastInsertRowid;
   assert.equal((await call('DELETE', '/attendance/punches/' + id)).status, 200);
+  assert.deepEqual(dayRows(phoneEmp), [['08:00', '12:33'], ['14:31', '19:32']]);
+});
+
+test('NV theo giờ chỉ chấm điện thoại, ngày chưa có giờ: nhập tay 2 phiên → 2 dòng, cộng giờ từng phiên (không gộp đầu–cuối)', async () => {
+  const eid = db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active) VALUES ('HR1','hr1','x','NV HR1','employee',1)").run().lastInsertRowid;
+  const D2 = '2026-10-09';
+  assert.equal((await call('POST', '/attendance/punches', { employee_ids: [eid], date: D2, in: '08:00', out: '12:00' })).status, 200);
+  assert.equal((await call('POST', '/attendance/punches', { employee_ids: [eid], date: D2, in: '14:00', out: '18:00' })).status, 200);
+  const rows = db.prepare('SELECT work_minutes wm FROM attendance WHERE employee_id=? AND work_date=? ORDER BY check_in_at').all(eid, D2);
+  assert.deepEqual(rows.map((x) => x.wm), [240, 240]);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM device_punches WHERE employee_id=?').get(eid).c, 0);
+});
+
+test('NV theo giờ có quẹt máy: thêm giờ tay vẫn là lượt chấm, ghép theo quy tắc của máy như cũ', async () => {
+  // devEmp đã có lượt thêm tay 08:00 / 17:00 ngày D (test trên) → thêm lượt nữa vẫn đi đường lượt chấm
+  assert.equal((await call('POST', '/attendance/punches', { employee_ids: [devEmp], date: D, out: '18:00' })).status, 200);
+  assert.deepEqual(dayRows(devEmp), [['08:00', '18:00']]);
+});
+
+test('ngày hỗn hợp: sáng chấm điện thoại, chiều quẹt máy → gộp chung, không mất giờ điện thoại, không trùng dòng', async () => {
+  const eid = db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active) VALUES ('MX1','mx1','x','NV MX1','employee',1)").run().lastInsertRowid;
+  const D3 = '2026-10-12';
+  db.prepare("INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo, work_minutes, work_unit, day_status, shift_source) VALUES (?,?,?,?,'/u/a.jpg','/u/b.jpg',240,0.5,'lam_viec','hourly')").run(eid, D3, iso('08:00', D3), iso('12:00', D3));
+  const ins = db.prepare("INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES ('MAY1','MX1',?,?,0,1,?)");
+  ins.run(iso('13:00', D3), D3, eid); ins.run(iso('17:00', D3), D3, eid);
+  rebuildDay(eid, D3); rebuildDay(eid, D3);   // dựng 2 lần vẫn ra như nhau
+  const rows = db.prepare('SELECT check_in_at i, check_out_at o, check_in_photo ph FROM attendance WHERE employee_id=? AND work_date=?').all(eid, D3);
+  assert.equal(rows.length, 1);
+  assert.deepEqual([hm(rows[0].i), hm(rows[0].o)], ['08:00', '17:00']);
+  assert.equal(rows[0].ph, '/u/a.jpg');
+  const g = await call('GET', `/attendance/grid?mode=detail&from=${D3}&to=${D3}&ids=${eid}`);
+  assert.deepEqual(g.body.rows[0].punches, ['08:00📱', '12:00📱', '13:00', '17:00']);
+});
+
+test('ngày chấm điện thoại còn sót lượt thêm tay: dựng lại (Tính lại) không đè các phiên điện thoại', () => {
+  db.prepare("INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES ('TAY_VAO','PH1',?,?,0,0,?)").run(iso('07:00'), D, phoneEmp);
+  rebuildDay(phoneEmp, D);
   assert.deepEqual(dayRows(phoneEmp), [['08:00', '12:33'], ['14:31', '19:32']]);
 });

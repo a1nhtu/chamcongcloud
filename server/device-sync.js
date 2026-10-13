@@ -530,6 +530,7 @@ const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
 function deviceMachineMap() {
   const map = {};
   for (const d of db.prepare('SELECT serial, machine_number FROM push_devices').all()) map[d.serial] = d.machine_number || 0;
+  map.DT_VAO = 1; map.DT_RA = 2;     // giờ chấm ĐIỆN THOẠI của ngày có cả lượt quẹt máy (xem seedPhonePunches)
   map.TAY_VAO = 1; map.TAY_RA = 2;   // lượt chấm THÊM TAY (Tính công › Lượt chấm): máy ảo lẻ = Vào, chẵn = Ra
   return map;
 }
@@ -607,6 +608,26 @@ export function rebuildDays(keys) {
   return list.length;
 }
 
+// NGÀY HỖN HỢP (vừa quẹt máy vừa chấm điện thoại): giờ chấm điện thoại chỉ nằm ở bảng công, dựng lại ngày từ lượt quẹt máy
+// sẽ đè mất. Trước khi dựng, chép giờ vào / ra điện thoại thành lượt chấm của máy ảo DT_VAO / DT_RA → ghép chung với lượt
+// quẹt máy theo đúng quy tắc của ca. Chỉ chép dòng chấm điện thoại CHƯA gộp (dòng đã dựng từ lượt chấm có shift_source='device').
+const VIRT_SERIALS = "('TAY_VAO','TAY_RA','DT_VAO','DT_RA')";
+const PHONE_ROW = "(COALESCE(check_in_photo,'')<>'' OR COALESCE(check_out_photo,'')<>'')";
+function seedPhonePunches(employeeId, workDate) {
+  if (!db.prepare(`SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ${VIRT_SERIALS} LIMIT 1`).get(employeeId, workDate)) return;
+  const rows = db.prepare(`SELECT check_in_at, check_out_at, check_in_photo, check_out_photo FROM attendance
+    WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND COALESCE(shift_source,'')<>'device' AND ${PHONE_ROW}`).all(employeeId, workDate);
+  if (!rows.length) return;
+  const emp = db.prepare('SELECT code, device_pin FROM employees WHERE id=?').get(employeeId); if (!emp) return;
+  const pin = String(emp.device_pin || emp.code);
+  const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES (?,?,?,?,?,0,?)');
+  const vnDate = (iso) => new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(0, 10);
+  for (const a of rows) {
+    if (a.check_in_at && a.check_in_photo) ins.run('DT_VAO', pin, a.check_in_at, vnDate(a.check_in_at), 0, employeeId);
+    if (a.check_out_at && a.check_out_photo) ins.run('DT_RA', pin, a.check_out_at, vnDate(a.check_out_at), 1, employeeId);
+  }
+}
+
 export function rebuildDay(employeeId, workDate) {
   const out = rebuildDayCore(employeeId, workDate);
   // Ngày có NHIỀU dòng công cùng có tăng ca: số phút đăng ký làm thêm là của CẢ NGÀY → chia lại theo thứ tự ca
@@ -615,8 +636,12 @@ export function rebuildDay(employeeId, workDate) {
 }
 function rebuildDayCore(employeeId, workDate) {
   // "+punch_at": ép dùng chỉ mục (NV, ngày) rồi mới sắp xếp — không thì SQLite có thể duyệt hết lượt quẹt của NV theo chỉ mục (NV, giờ)
+  seedPhonePunches(employeeId, workDate);
   let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
   if (!prov.length) return;
+  // Ngày chấm điện thoại mà chỉ có lượt THÊM TAY (bản cũ để lại): không dựng lại — dựng từ riêng lượt thêm tay sẽ đè mất các phiên chấm điện thoại
+  if (prov.every((p) => p.serial.startsWith('TAY_')) && db.prepare(`SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND ${PHONE_ROW} LIMIT 1`).get(employeeId, workDate)) return;
+  const mixed = prov.some((p) => p.serial.startsWith('DT_'));   // ngày có giờ chấm điện thoại đã gộp vào lượt chấm
   const usedTo = consumedByPrevDay(employeeId, workDate);
   if (usedTo) prov = prov.filter((p) => p.punch_at > usedTo);
   if (!prov.length) {   // mọi lượt quẹt của ngày đã là giờ ra ca đêm hôm trước → bỏ dòng công rác của ngày này
@@ -680,9 +705,16 @@ function rebuildDayCore(employeeId, workDate) {
     // giờ làm = tổng các cặp lượt quẹt trong ngày (1-2, 3-4…) thay vì lấy đầu–cuối
     if (hourly ? getSetting('hourly_merge_rule', 'filo') === 'pairs' : true) pairs = punchPairs(prov.map((p) => p.punch_at), dup);
   }
-  const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
+  const existing = db.prepare('SELECT id, manual FROM attendance WHERE employee_id=? AND work_date=? ORDER BY COALESCE(manual,0) DESC, check_in_at').get(employeeId, workDate);
   if (existing && existing.manual) return; // tôn trọng sửa tay của admin
   upsertRow(employeeId, workDate, shift?.id ?? null, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs), existing?.id);
+  if (mixed && existing) {
+    // các phiên chấm điện thoại khác trong ngày đã gộp vào dòng này → bỏ (không thì tính trùng công); giữ lại ảnh / vị trí chấm RA sau cùng
+    const last = db.prepare(`SELECT check_out_photo, check_out_lat, check_out_lng, check_out_distance_m FROM attendance
+      WHERE employee_id=? AND work_date=? AND id<>? AND (manual IS NULL OR manual=0) AND COALESCE(check_out_photo,'')<>'' ORDER BY check_out_at DESC LIMIT 1`).get(employeeId, workDate, existing.id);
+    if (last) db.prepare('UPDATE attendance SET check_out_photo=?, check_out_lat=?, check_out_lng=?, check_out_distance_m=? WHERE id=?').run(last.check_out_photo, last.check_out_lat, last.check_out_lng, last.check_out_distance_m, existing.id);
+    db.prepare('DELETE FROM attendance WHERE employee_id=? AND work_date=? AND id<>? AND (manual IS NULL OR manual=0)').run(employeeId, workDate, existing.id);
+  }
 }
 
 // Các cặp vào–ra của 1 NV (cho "↻ Tính lại" khi dùng quy tắc "Nhiều lần vào/ra"):

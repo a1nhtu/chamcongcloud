@@ -4557,7 +4557,7 @@ async function punchModal(emp, date, reload) {
     });
     listBox.replaceChildren(
       (d.phone && d.phone.length) ? el('div', { class: 'map-hint', style: 'margin-bottom:8px;color:#b45309' },
-        '📱 Chấm bằng điện thoại: ' + d.phone.map((p) => (p.in || '--:--') + ' → ' + (p.out || 'chưa ra')).join(' · ') + '. '
+        '📱 Các phiên vào–ra (chấm điện thoại / nhập tay): ' + d.phone.map((p) => (p.in || '--:--') + ' → ' + (p.out || 'chưa ra')).join(' · ') + '. '
         + (d.phoneLocked ? 'Thêm ở dưới = thêm 1 phiên vào–ra MỚI (thêm "Vào" trước, rồi "Ra"), các phiên đã có giữ nguyên. Muốn đổi giờ phiên đã có thì bấm thẳng ô Vào / Ra ở bảng Tính công.' : '')) : '',
       el('div', { class: 'tbl-scroll' }, tbl),
       d.manualRow ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, 'Ngày này đang có giờ sửa tay ở bảng công — thêm / sửa / xoá lượt chấm sẽ tính lại theo các lượt chấm ở đây.') : '');
