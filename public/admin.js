@@ -5034,6 +5034,7 @@ async function pageDevices() {
       m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải dữ liệu chấm công (từ ngày – đến ngày)', fn: () => tcpLogsModal(m) } : null,
       { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
       { group: 'Cài đặt máy', label: '🔌 Sửa kết nối (IP / cổng / mật mã)', fn: () => tcpAddModal(m) },
+      m.active ? { group: 'Cài đặt máy', label: m.tcp_auto ? '⏱ Tắt tự động tải máy này' : '⏱ Bật tự động tải máy này', fn: async () => { try { await api(`/admin/tcp-devices/${m.id}/auto`, { method: 'PUT', body: { on: !m.tcp_auto } }); toast(m.tcp_auto ? 'Đã tắt tự động tải cho máy này' : 'Đã bật tự động tải cho máy này', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy tính', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ của máy tính cài phần mềm?\nKiểm tra đồng hồ máy tính đúng trước.`)) tcpJob(m, 'set-time', {}); } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}); } } : null,
       hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
@@ -5075,6 +5076,7 @@ async function pageDevices() {
     const online = !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
     const chips = [
       isTcp ? el('span', { class: 'chip', title: 'Máy kết nối trực tiếp TCP/IP — phần mềm chủ động kết nối khi bấm tải' }, '🔌 TCP/IP') : '',
+      isTcp && m.active && d.tcp_auto_min > 0 ? el('span', { class: 'chip' + (m.tcp_auto ? ' g' : ''), title: m.tcp_auto ? `Tự động tải ${d.tcp_auto_min} phút / lần` : 'Máy này đang TẮT tự động tải (bật ở ⋯ Thêm)' }, m.tcp_auto ? `⏱ tự tải ${d.tcp_auto_min}'` : '⏱ tắt tự tải') : '',
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
     ].filter(Boolean);
@@ -5086,14 +5088,17 @@ async function pageDevices() {
           el('button', { class: 'cp', title: 'Copy serial', onclick: () => copySerial(m.serial) }, '📋')),
         chips.length ? el('div', { class: 'dv-chips' }, ...chips) : ''),
       el('td', {}, el('div', { class: 'dv-st' },
-        isTcp ? el('span', { class: 'st', title: 'Máy TCP/IP không tự gọi về — phần mềm kết nối khi Anh/Chị bấm tải dữ liệu' }, 'Kết nối khi tải')
+        isTcp ? (m.tcp_auto_at && m.tcp_auto && d.tcp_auto_min > 0
+            ? el('span', { class: 'st ' + (m.tcp_auto_ok ? 'on' : 'offl'), title: `Lần tự tải gần nhất ${isoToHMS(m.tcp_auto_at)}: ${m.tcp_auto_msg || ''}` }, el('i', {}), m.tcp_auto_ok ? 'Kết nối tốt' : 'Không kết nối được')
+            : el('span', { class: 'st', title: 'Máy TCP/IP không tự gọi về — phần mềm kết nối khi bấm tải hoặc theo lịch tự tải' }, 'Kết nối khi tải'))
           : el('span', { class: 'st ' + (online ? 'on' : 'offl'), title: online ? 'Máy đang kết nối' : 'Máy không gọi về trong 2,5 phút gần đây' }, el('i', {}), online ? 'Online' : 'Offline'),
         m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'),
         // Máy đã có key thì ẩn nhãn cho đỡ rối; chỉ cảnh báo khi CHƯA có key
         (d.key_required && !m.key_ok) ? el('span', { class: 'pill warn' }, '🔑 Chưa có key') : '')),
       idCell(m),
       cNV, cFP, cFace, cCard,
-      el('td', {}, el('div', { class: 'dv-ip' }, isTcp ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—')), seen ? el('div', { class: 'dv-sub' }, seen) : ''),
+      el('td', {}, el('div', { class: 'dv-ip' }, isTcp ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—')), seen ? el('div', { class: 'dv-sub' }, seen) : '',
+        isTcp && m.tcp_auto_at && m.tcp_auto && d.tcp_auto_min > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
         m.unmatched ? el('div', { class: 'dv-warn', title: 'Số ID trên máy chưa khớp với nhân viên nào trong phần mềm' }, m.unmatched + ' mã chưa khớp') : ''),
       el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : [doorBtn, timeBtn]), logBtn, moreBtn)),
@@ -5136,7 +5141,42 @@ async function pageDevices() {
   usbBtn.onclick = usbImportModal;
   const tcpBtn = d.tcp_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy TCP/IP') : null;
   if (tcpBtn) tcpBtn.onclick = () => tcpAddModal(null);
-  setMain(head('Máy chấm công', tcpBtn, usbBtn, resyncBtn), togglePanel, guide, el('div', { class: 'panel tbl-scroll' }, tbl));
+  // Thanh TỰ ĐỘNG TẢI máy TCP/IP: chọn chu kỳ (lưu ngay) + nút tải ngay tất cả
+  let autoBar = null;
+  if (d.tcp_enabled && d.rows.some((m) => m.conn_type === 'tcp')) {
+    const sel = el('select', { style: 'width:auto;margin:0' }, ...(d.tcp_auto_choices || [0]).map((n) => el('option', { value: n, ...(n === d.tcp_auto_min ? { selected: '' } : {}) }, !n ? 'Tắt (chỉ tải khi bấm)' : n < 60 ? `${n} phút / lần` : `${n / 60} giờ / lần`)));
+    sel.onchange = async () => {
+      try { await api('/admin/tcp-devices/auto', { method: 'PUT', body: { minutes: +sel.value } }); toast(+sel.value ? `Đã bật tự động tải ${sel.options[sel.selectedIndex].text}` : 'Đã tắt tự động tải', 'ok'); pageDevices(); }
+      catch (e) { toast(e.message, 'err'); sel.value = d.tcp_auto_min; }
+    };
+    const runAll = btnSm('⬇ Tải ngay tất cả máy', () => tcpAutoRun(), 'ghost');
+    autoBar = el('div', { class: 'panel', style: 'padding:10px 14px;margin-bottom:10px;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap' },
+      el('b', {}, '⏱ Tự động tải máy TCP/IP'), sel, runAll,
+      el('span', { class: 'map-hint', style: 'margin:0;flex:1;min-width:260px' }, d.tcp_auto_min
+        ? 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về (lúc tải máy tạm khoá vài giây). Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
+        : 'Đang tắt: dữ liệu chỉ về khi bấm "⬇ Tải chấm công". Chọn chu kỳ để phần mềm tự tải.'));
+  }
+  setMain(head('Máy chấm công', tcpBtn, usbBtn, resyncBtn), togglePanel, guide, autoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+// Tải ngay tất cả máy TCP/IP đang bật tự tải (1 lượt, tuần tự từng máy)
+async function tcpAutoRun() {
+  const msg = el('div', { style: 'font-size:15px;font-weight:600' }, '⏳ Đang bắt đầu…');
+  const out = el('div', { style: 'margin-top:12px' });
+  const closeB = el('button', { class: 'btn', disabled: '' }, 'Đóng');
+  closeB.onclick = () => { closeModal(); pageDevices(); };
+  openModal('Tải ngay tất cả máy TCP/IP', [msg, out], [closeB]);
+  const fail = (t) => { msg.textContent = '❌ ' + t; msg.style.color = '#c0392b'; closeB.disabled = false; };
+  let job; try { job = (await api('/admin/tcp-devices/auto/run', { method: 'POST' })).job; } catch (e) { return fail(e.message); }
+  for (;;) {
+    await new Promise((ok) => setTimeout(ok, 1000));
+    let j; try { j = await api('/admin/devices/tcp-jobs/' + job); } catch (e) { return fail(e.message); }
+    if (j.state === 'run') { msg.textContent = '⏳ ' + j.msg; continue; }
+    if (j.state === 'err') return fail(j.msg);
+    const list = (j.result && j.result.devices) || [];
+    msg.textContent = list.length ? '✅ Đã chạy xong' : 'Không có máy nào đang bật tự động tải'; msg.style.color = list.length ? '#15803d' : '';
+    for (const x of list) out.append(el('div', { style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px dashed var(--line,#eee)' }, el('b', {}, x.device), el('span', {}, x.msg)));
+    closeB.disabled = false; return;
+  }
 }
 
 /* ---------- MÁY KẾT NỐI TRỰC TIẾP TCP/IP (cổng 4370) ---------- */

@@ -8,6 +8,7 @@ import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
 import { ingestAttlog, ingestUserData } from './device-sync.js';
+import { vnDateStr } from './util.js';
 
 const SCRIPT = process.env.ZK_TCP_SCRIPT || fileURLToPath(new URL('./zk/zk-tcp.ps1', import.meta.url));   // ZK_TCP_SCRIPT: script giả lập máy (chỉ dùng khi kiểm thử)
 export const tcpEnabled = () => getSetting('device_enabled', '0') === '1' && getSetting('tcp_device_enabled', '0') === '1';
@@ -125,3 +126,65 @@ export function startJob(kind, devName, fn) {
   return j;
 }
 export const getJob = (id) => jobs.get(id) || null;
+
+/* ---------- TỰ ĐỘNG TẢI THEO LỊCH ----------
+ * Cài đặt tcp_auto_min = cứ N phút tải 1 lần (0 = tắt). Mỗi lượt, với từng máy TCP/IP đã duyệt + đang bật tự tải (tuần tự từng máy):
+ *   1) hỏi thông tin máy (nhẹ, không khoá máy)  2) số lượt chấm trên máy KHÔNG đổi so với lần trước → bỏ qua
+ *   3) có lượt mới → tải nhân viên (khi số NV đổi) + tải lượt chấm từ hôm trước lần tải gần nhất đến hôm nay.
+ * Máy tắt / mất mạng: ghi lại lỗi, lượt sau thử lại; không làm phiền người dùng. */
+export const AUTO_CHOICES = [0, 5, 10, 15, 30, 60, 120, 240];
+export const autoMinutes = () => { const n = parseInt(getSetting('tcp_auto_min', '0'), 10) || 0; return n > 0 ? Math.max(1, n) : 0; };
+const dayBefore = (d) => new Date(Date.parse(d + 'T12:00:00Z') - 86400000).toISOString().slice(0, 10);
+let autoBusy = false;
+// Tự tải 1 máy. Trả chuỗi kết quả ngắn (ghi vào tcp_auto_msg).
+async function autoOne(d, prog = () => {}) {
+  const mark = (ok, msg, extra = {}) => {
+    db.prepare('UPDATE push_devices SET tcp_auto_at=?, tcp_auto_ok=?, tcp_auto_msg=?, tcp_auto_logs=COALESCE(?, tcp_auto_logs), tcp_auto_users=COALESCE(?, tcp_auto_users) WHERE id=?')
+      .run(new Date().toISOString(), ok ? 1 : 0, msg, extra.logs ?? null, extra.users ?? null, d.id);
+    return msg;
+  };
+  try {
+    prog(`${d.name || d.serial}: đang kết nối…`);
+    if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) return mark(false, `Không thấy máy ở ${d.tcp_ip}:${d.tcp_port}`);
+    const info = await tcpInfo(d);
+    if (info.serial && info.serial !== d.serial) return mark(false, `IP này đang là máy khác (Serial ${info.serial})`);
+    saveInfo(d.id, info);
+    const logsNow = Number.isFinite(info.logs) ? info.logs : null, usersNow = Number.isFinite(info.users) ? info.users : null;
+    if (logsNow != null && logsNow === d.tcp_auto_logs && (usersNow == null || usersNow === d.tcp_auto_users)) return mark(true, 'Không có lượt chấm mới');
+    if (usersNow == null || usersNow !== d.tcp_auto_users) { prog(`${d.name || d.serial}: tải nhân viên…`); await tcpUsers(d); }
+    let added = 0;
+    if (logsNow == null || logsNow !== d.tcp_auto_logs) {
+      const today = vnDateStr();
+      const last = d.tcp_sync_at ? vnDateStr(new Date(d.tcp_sync_at)) : '';
+      prog(`${d.name || d.serial}: tải lượt chấm…`);
+      const r = last ? await tcpLogs(d, dayBefore(last), today) : await tcpLogs(d, '', '');   // chưa tải lần nào → tải toàn bộ
+      added = r.added;
+    }
+    return mark(true, added ? `Thêm ${added} lượt chấm mới` : 'Không có lượt chấm mới', { logs: logsNow, users: usersNow });
+  } catch (e) { return mark(false, e.message || String(e)); }
+}
+// Chạy 1 lượt cho các máy đến hạn (force = mọi máy đang bật, bỏ qua giờ hẹn). Trả [{ device, msg }].
+export async function autoCycle(force = false, prog = () => {}) {
+  if (autoBusy) return null;
+  autoBusy = true;
+  try {
+    const every = autoMinutes() * 60000, out = [];
+    const list = db.prepare("SELECT * FROM push_devices WHERE conn_type='tcp' AND active=1 AND tcp_auto=1 ORDER BY id").all();
+    for (const d of list) {   // TUẦN TỰ từng máy (quy tắc SDK)
+      if (!force && d.tcp_auto_at && Date.now() - Date.parse(d.tcp_auto_at) < every - 5000) continue;
+      if (!tcpEnabled()) break;
+      out.push({ device: d.name || d.serial, msg: await autoOne(d, prog) });
+    }
+    return out;
+  } finally { autoBusy = false; }
+}
+let autoTimer = null;
+export function startTcpScheduler() {
+  if (autoTimer || process.platform !== 'win32') return;
+  const tick = Math.max(2000, parseInt(process.env.ZK_TCP_TICK_MS || '30000', 10) || 30000);
+  autoTimer = setInterval(() => {
+    if (!tcpEnabled() || !autoMinutes()) return;
+    autoCycle(false).catch((e) => console.error('[zk-tcp] tự tải lỗi:', e.message));
+  }, tick);
+  autoTimer.unref();
+}

@@ -23,6 +23,7 @@ import iclockRoutes from './routes/iclock.js';
 import { isActivated } from './license.js';
 import { currentVersion } from './update.js';
 import { offload } from './heavy.js';
+import { startTcpScheduler } from './zk-tcp.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -30,6 +31,7 @@ const PUBLIC_DIR = join(__dirname, '..', 'public');
 initSchema();
 fixOverlappingAssignmentsOnce();   // dọn 1 lần các lịch gán ca chồng ngày của bản cũ (chạy SAU khi CSDL đã khởi tạo)
 optimizeDb();
+startTcpScheduler();   // tự tải máy chấm công TCP/IP theo lịch (chỉ chạy khi đã bật + đặt số phút)
 ensureSeed();
 
 // Tự động sao lưu dữ liệu: kiểm tra mỗi 5 phút, chạy khi tới giờ đã đặt (1 lần/ngày)

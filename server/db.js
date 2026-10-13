@@ -654,6 +654,13 @@ function migrateColumns() {
   add('push_devices', 'tcp_key',     'INTEGER NOT NULL DEFAULT 0');   // mật mã kết nối (Comm Key) đặt trên máy, 0 = không đặt
   add('push_devices', 'tcp_info',    "TEXT DEFAULT ''");              // JSON thông tin + dung lượng đọc lần gần nhất
   add('push_devices', 'tcp_sync_at', "TEXT DEFAULT ''");              // lần tải lượt chấm gần nhất
+  // TỰ ĐỘNG TẢI theo lịch (Cài đặt tcp_auto_min = số phút / lần, 0 = tắt): bật riêng từng máy + kết quả lần chạy gần nhất
+  add('push_devices', 'tcp_auto',       'INTEGER NOT NULL DEFAULT 1');
+  add('push_devices', 'tcp_auto_at',    "TEXT DEFAULT ''");
+  add('push_devices', 'tcp_auto_msg',   "TEXT DEFAULT ''");
+  add('push_devices', 'tcp_auto_ok',    'INTEGER NOT NULL DEFAULT 1');
+  add('push_devices', 'tcp_auto_logs',  'INTEGER NOT NULL DEFAULT -1');   // số lượt chấm trên máy ở lần tự tải gần nhất (không đổi → khỏi tải)
+  add('push_devices', 'tcp_auto_users', 'INTEGER NOT NULL DEFAULT -1');
   // Lệnh đồng bộ mang theo "đối tượng" để CHỈ cộng số đếm khi máy XÁC NHẬN đã nhận (chống đếm khống)
   add('push_device_commands', 'pin',      "TEXT DEFAULT ''");
   add('push_device_commands', 'bio_type', 'INTEGER');

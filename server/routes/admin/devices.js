@@ -4,7 +4,8 @@ import { db, getSetting } from '../../db.js';
 import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
-import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob } from '../../zk-tcp.js';
+import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES } from '../../zk-tcp.js';
+import { setSetting } from '../../db.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -48,7 +49,7 @@ export function registerDeviceRoutes(r, { need }) {
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
       try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
     }
-    res.json({ rows, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
   r.get('/server-ips', need('devices'), (req, res) => {
@@ -233,6 +234,29 @@ export function registerDeviceRoutes(r, { need }) {
     if (c.error) return res.status(400).json({ error: c.error });
     db.prepare('UPDATE push_devices SET tcp_ip=?, tcp_port=?, tcp_key=? WHERE id=?').run(c.tcp_ip, c.tcp_port, c.tcp_key, d.id);
     res.json({ ok: true });
+  });
+  // TỰ ĐỘNG TẢI: đặt chu kỳ chung (phút, 0 = tắt)
+  r.put('/tcp-devices/auto', need('devices'), tcpOn, (req, res) => {
+    const n = parseInt(req.body?.minutes, 10) || 0;
+    if (!AUTO_CHOICES.includes(n)) return res.status(400).json({ error: 'Chu kỳ không hợp lệ' });
+    setSetting('tcp_auto_min', String(n));
+    res.json({ ok: true, minutes: n });
+  });
+  // bật / tắt tự tải cho riêng 1 máy
+  r.put('/tcp-devices/:id/auto', need('devices'), tcpOn, (req, res) => {
+    const d = db.prepare("SELECT id FROM push_devices WHERE id=? AND conn_type='tcp'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy TCP/IP' });
+    db.prepare('UPDATE push_devices SET tcp_auto=? WHERE id=?').run(req.body?.on ? 1 : 0, d.id);
+    res.json({ ok: true });
+  });
+  // "Tải ngay tất cả máy": chạy 1 lượt tự tải cho mọi máy đang bật (không chờ tới giờ hẹn)
+  r.post('/tcp-devices/auto/run', need('devices'), tcpOn, (req, res) => {
+    const j = startJob('auto', 'tất cả máy TCP/IP', async (prog) => {
+      const out = await autoCycle(true, prog);
+      if (out == null) throw new Error('Đang có một lượt tự tải chạy dở — chờ xong rồi thử lại.');
+      return { devices: out };
+    });
+    res.json({ ok: true, job: j.id, title: 'Tải dữ liệu chấm công tất cả máy TCP/IP' });
   });
   r.get('/devices/tcp-jobs/:job', need('devices'), (req, res) => {
     const j = getJob(req.params.job);
