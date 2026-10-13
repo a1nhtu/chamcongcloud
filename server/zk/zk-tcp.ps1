@@ -101,8 +101,10 @@ try {
     'clear-users' {     # xoá toàn bộ NV + vân tay / khuôn mặt (giữ lượt chấm)
       Lock; [void]$z.ClearData($m, 2); [void]$z.ClearData($m, 5); [void]$z.RefreshData($m); Done 'clear-users'
     }
-    'clear-all' {       # xoá sạch: lượt chấm + NV + vân tay
-      Lock; [void]$z.ClearGLog($m); [void]$z.ClearData($m, 2); [void]$z.ClearData($m, 5); [void]$z.RefreshData($m); Done 'clear-all'
+    'clear-all' {       # xoá sạch: lượt chấm + NV + vân tay + khuôn mặt. ClearKeeperData = xoá toàn bộ dữ liệu trên máy (theo tài liệu SDK);
+                        # vài firmware trả false dù đã xoá nên gọi thêm từng loại cho chắc, không xét kết quả
+      Lock; try { [void]$z.ClearKeeperData($m) } catch {}
+      [void]$z.ClearGLog($m); [void]$z.ClearData($m, 2); [void]$z.ClearData($m, 5); [void]$z.RefreshData($m); Done 'clear-all'
     }
     'delete-user' {     # xoá 1 NV trên máy (vân tay + thẻ + mật mã); $From = Số ID
       $ok = [bool]$z.SSR_DeleteEnrollData($m, $From, 12); [void]$z.RefreshData($m)
