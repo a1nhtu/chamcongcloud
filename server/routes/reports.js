@@ -23,6 +23,15 @@ const WD_LABEL = { 0: 'CN', 1: 'T.2', 2: 'T.3', 3: 'T.4', 4: 'T.5', 5: 'T.6', 6:
 const WD = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 const fmtDMY = (d) => `${d.slice(8)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 const round2 = (n) => Math.round((n || 0) * 100) / 100;
+// GỘP Ô NHANH: ws.mergeCells của ExcelJS mỗi lần gộp lại dò TẤT CẢ ô đã gộp (chống gộp chồng) → hàng chục nghìn lần gộp
+// (VD 650 NV, mỗi người vài chục ô) mất hàng chục giây và treo máy chủ. Mã ở đây không bao giờ gộp chồng nên bỏ bước dò:
+// tạm cho danh sách đã-gộp rỗng lúc gộp rồi ghép lại. Thư viện đổi cấu trúc bên trong thì tự về cách gộp thường.
+function mergeFast(ws, r1, c1, r2, c2) {
+  const all = ws._merges;
+  if (!all || typeof all !== 'object' || Array.isArray(all)) return ws.mergeCells(r1, c1, r2, c2);
+  ws._merges = {};
+  try { ws.mergeCells(r1, c1, r2, c2); Object.assign(all, ws._merges); } finally { ws._merges = all; }
+}
 
 function monthDays(month) {
   const [y, m] = month.split('-').map(Number);
@@ -871,7 +880,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
   const box = (r1, c1, r2, c2, value, style = {}) => {
-    if (r1 !== r2 || c1 !== c2) ws.mergeCells(r1, c1, r2, c2);
+    if (r1 !== r2 || c1 !== c2) mergeFast(ws, r1, c1, r2, c2);
     const cell = ws.getCell(r1, c1);
     cell.value = value;
     Object.assign(cell, style);
@@ -971,9 +980,9 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
     // Ký tên
     r++;
     const sc1 = NC - 5;
-    ws.mergeCells(r, sc1, r, NC); Object.assign(ws.getCell(r, sc1), { value: 'Kí tên', font: { bold: true }, alignment: C });
+    mergeFast(ws, r, sc1, r, NC); Object.assign(ws.getCell(r, sc1), { value: 'Kí tên', font: { bold: true }, alignment: C });
     r += 4;
-    ws.mergeCells(r, sc1, r, NC); Object.assign(ws.getCell(r, sc1), { value: e.full_name, font: { bold: true }, alignment: C });
+    mergeFast(ws, r, sc1, r, NC); Object.assign(ws.getCell(r, sc1), { value: e.full_name, font: { bold: true }, alignment: C });
     r += 2;
     void top;
   }
@@ -1087,7 +1096,7 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
     stt++;
     const rIn = r, rCong = r + 1, rOt = r + 2;
     const fixedVals = [stt, e.department || '', e.code, e.full_name, hireDate(e)];
-    fixedVals.forEach((v, i) => { ws.mergeCells(rIn, i + 1, rOt, i + 1); Object.assign(ws.getCell(rIn, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' } }); });
+    fixedVals.forEach((v, i) => { mergeFast(ws, rIn, i + 1, rOt, i + 1); Object.assign(ws.getCell(rIn, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' } }); });
     for (let di = 0; di < days.length; di++) {
       const d = days[di], c1 = FIXED + di * 2 + 1;
       const c = ctx.cell.get(e.id + '|' + d);
@@ -1098,13 +1107,21 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
       ws.getCell(rIn, c1 + 1).value = lv ? '' : io.cout;
       if (io.pairs) { ws.getCell(rIn, c1).alignment = ws.getCell(rIn, c1 + 1).alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
         ws.getRow(rIn).height = Math.max(ws.getRow(rIn).height || 15, 15 * io.pairs.length); }
-      ws.mergeCells(rCong, c1, rCong, c1 + 1); ws.getCell(rCong, c1).value = c && c.work_minutes ? round2(c.work_minutes / 60) : 0;
-      ws.mergeCells(rOt, c1, rOt, c1 + 1); ws.getCell(rOt, c1).value = c && c.ot_min ? round2(c.ot_min / 60) : 0;
-      for (const [rr, cc] of [[rIn, c1], [rIn, c1 + 1], [rCong, c1], [rOt, c1]]) {
+      // KHÔNG gộp ô từng ngày (mergeCells của ExcelJS dò lại mọi ô đã gộp → 650 NV × 60 ô = treo máy chủ hàng phút):
+      // dùng "căn giữa qua 2 cột" (centerContinuous) — nhìn y như gộp
+      ws.getCell(rCong, c1).value = c && c.work_minutes ? round2(c.work_minutes / 60) : 0;
+      ws.getCell(rOt, c1).value = c && c.ot_min ? round2(c.ot_min / 60) : 0;
+      for (const [rr, cc] of [[rIn, c1], [rIn, c1 + 1]]) {
         const cell = ws.getCell(rr, cc);
         cell.alignment = { horizontal: 'center' };
         cell.border = border;
         if (weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+      }
+      for (const rr of [rCong, rOt]) {
+        const L = ws.getCell(rr, c1), R = ws.getCell(rr, c1 + 1);
+        L.alignment = R.alignment = { horizontal: 'centerContinuous' };
+        L.border = { top: thin, bottom: thin, left: thin }; R.border = { top: thin, bottom: thin, right: thin };
+        if (weekend) L.fill = R.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
       }
     }
     for (let i = 1; i <= FIXED; i++) ws.getCell(rIn, i).border = border;
