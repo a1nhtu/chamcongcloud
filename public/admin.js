@@ -13,21 +13,32 @@ const NAV = [
   ['shifts', '🕐', 'Ca làm', 'shifts'],
   ['assignments', '🗓️', 'Phân ca', 'assignments'],
   ['shiftreq', '🙋', 'Duyệt chọn ca', 'shift_requests'],
-  ['devreq', '📱', 'Duyệt đổi thiết bị', 'employees'],
   ['editatt', '🧮', 'Tính công', 'attendance_edit'],
-  ['fixtime', '✏️', 'Sửa giờ chấm công', 'attendance_edit'],
+  ['fixtime', '✏️', 'Thêm/sửa/xóa giờ chấm', 'attendance_edit'],
   ['otreg', '⏰', 'Đăng ký làm thêm', 'attendance_edit'],
   ['abnormal', '🚨', 'Chấm công bất thường', 'reports'],
-  ['devices', '🔌', 'Máy chấm công', 'devices'],
   ['offices', '📍', 'Chi nhánh', 'offices'],
   ['leaves', '📝', 'Đơn từ', 'leaves'],
   ['salary', '💰', 'Lương', 'salary'],
   ['report', '📅', 'Báo cáo', 'reports'],
   ['audit', '🎭', 'Công ảo / lương ảo', 'audit'],
   ['auditlimits', '⏱️', 'Tăng ca tối đa (ảo)', 'audit'],
+  ['devices', '🔌', 'Máy chấm công', 'devices'],
+  ['devreq', '📱', 'Duyệt đổi thiết bị', 'employees'],
   ['logs', '🧾', 'Nhật ký', 'logs'],
   ['settings', '⚙️', 'Cài đặt', 'settings'],
 ];
+// NHÓM MENU TRÁI (menu dài → gom các mục cùng loại, mỗi nhóm 1 mũi tên xổ / thu). Mục không thuộc nhóm nào đứng riêng.
+// Nhóm chỉ còn 1 mục nhìn thấy (do phân quyền / tắt tính năng) thì hiện thẳng mục đó, không cần tiêu đề nhóm.
+const NAV_GROUPS = [
+  ['org', 'Tổ chức', ['employees', 'org', 'offices']],
+  ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
+  ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'abnormal', 'leaves']],
+  ['pay', 'Lương & báo cáo', ['salary', 'report']],
+  ['audit', 'Công ảo', ['audit', 'auditlimits']],
+  ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
+];
+const _navGrp = new Map();   // id nhóm → { open(o, save), has(key) }
 const isMaster = () => ME?.role === 'master';                 // tài khoản tổng (Anh)
 const isAdmin = () => ME?.role === 'admin' || isMaster();     // master có mọi quyền admin
 const hasPerm = (key) => isAdmin() || (ME?.permissions || []).includes(key);
@@ -119,7 +130,29 @@ async function afterLogin() {
     && !(key === 'devreq' && !deviceLockEnabled())
     && !(key === 'shiftreq' && !selfShiftEnabled())
     && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1'));   // công ảo: chỉ hiện khi tài khoản tổng đã bật
+  // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
+  _navGrp.clear();
+  const visKeys = new Set(visible.map((v) => v[0]));
+  const boxOf = new Map();   // key mục → nơi gắn nút (thân nhóm hoặc nav)
+  const made = new Set();
+  const groupFor = (key) => NAV_GROUPS.find((g) => g[2].includes(key) && g[2].filter((k) => visKeys.has(k)).length > 1);
+  const ensureGroup = (g) => {
+    if (made.has(g[0])) return; made.add(g[0]);
+    const [gid, glabel, keys] = g;
+    let open = false; try { open = localStorage.getItem('navGrp_' + gid) === '1'; } catch {}
+    const arrow = el('span', { class: 'nav-arrow' }, '▸');
+    const h = el('button', { type: 'button', class: 'nav-grp-h', title: 'Xổ / thu nhóm ' + glabel }, el('span', { class: 'nav-lb' }, glabel), el('span', { style: 'flex:1' }), arrow);
+    const body = el('div', { class: 'nav-grp-body' });
+    const set = (o, save) => { open = o; body.classList.toggle('shut', !o); arrow.textContent = o ? '▾' : '▸'; h.classList.toggle('open', o); if (save) { try { localStorage.setItem('navGrp_' + gid, o ? '1' : '0'); } catch {} } };
+    h.addEventListener('click', () => set(!open, true));
+    set(open, false);
+    nav.append(h, body);
+    _navGrp.set(gid, { open: set, has: (k) => keys.includes(k), head: h });
+    for (const k of keys) boxOf.set(k, body);
+  };
   visible.forEach(([key, ic, label]) => {
+    const grp = groupFor(key); if (grp) ensureGroup(grp);
+    const nav = boxOf.get(key) || $('#nav');   // mục trong nhóm gắn vào thân nhóm
     const b = el('button', { 'data-k': key, title: label }, el('span', {}, ic), el('span', { class: 'nav-lb' }, label));
     // Mục có MENU CON (kiểu ZKBio): bấm mũi tên hoặc bấm mục để xổ ra / thu lại
     const SUB = key === 'assignments' ? { id: 'nav-sub-as', tabs: AS_TABS, isOpen: () => _asNavOpen, setOpen: (o) => { _asNavOpen = o; }, pick: (tab) => { if (!asLeaveOk()) return false; _asTab = tab; _asAdd = null; return true; } }
@@ -191,6 +224,8 @@ async function checkUpdateBanner() {
 }
 function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
+  // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
+  for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
   ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings }[key])();
 }
 
@@ -3483,7 +3518,7 @@ async function pageEditAtt() {
     wrap.innerHTML = '';
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Sửa giờ chấm công". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
     startLazy(null);
   };
@@ -3633,11 +3668,11 @@ async function attEditModal(row, employeeId, reload, opts = {}) {
  * Trên cùng: Thêm giờ hàng loạt · Xoá dữ liệu chấm công. Mọi thay đổi tự tính lại công ngày đó theo ca. */
 const _ft = { dept: '', empId: null, q: '', from: null, to: null, sel: null };
 async function pageFixTime() {
-  setMain(head('Sửa giờ chấm công'), loading());
+  setMain(head('Thêm / sửa / xóa giờ chấm'), loading());
   if (!DEPARTMENTS.length) { try { DEPARTMENTS = (await api('/admin/departments')).rows || []; } catch {} }
   let emps;
   try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); }
-  catch (e) { return setMain(head('Sửa giờ chấm công'), el('div', { class: 'empty' }, e.message)); }
+  catch (e) { return setMain(head('Thêm / sửa / xóa giờ chấm'), el('div', { class: 'empty' }, e.message)); }
   const today = todayVN();
   if (!_ft.from) _ft.from = _ft.to = today;
   const fmtD = (d) => d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
@@ -3787,7 +3822,7 @@ async function pageFixTime() {
     el('div', { class: 'ft-bar ft-tools' }, addB, editB, delB, el('span', { class: 'ft-sep' }),
       el('span', { class: 'muted' }, 'Chọn ngày'), prev, fromI, el('span', { class: 'muted' }, 'đến'), toI, next),
     el('div', { class: 'tbl-scroll' }, pTbl), resBox);
-  setMain(head('Sửa giờ chấm công', bulkBtn, clearBtn),
+  setMain(head('Thêm / sửa / xóa giờ chấm', bulkBtn, clearBtn),
     el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Chọn phòng ban → bấm 1 nhân viên → các lượt chấm hiện ở bảng dưới. "+ Thêm" giờ vào / ra, bấm chọn 1 dòng rồi "✎ Sửa" (hoặc bấm đúp) / "✕ Xoá". Công ngày đó tự tính lại theo ca và quy tắc ghép vào–ra.'),
     el('div', { class: 'ft-wrap' }, el('div', { class: 'panel ft-left' }, tree), el('div', { class: 'ft-right' }, empPanel, punchPanel)));
   drawEmps(); loadPunches();
