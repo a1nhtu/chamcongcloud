@@ -3,6 +3,7 @@
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
 import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
 import { privilegeLookup, halfLeaveLookup } from './privilege.js';
+import { otRegCapper } from './ot-cap.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -50,13 +51,15 @@ export function payrollCtx(getSetting, db) {
       };
     })(),
     isHoliday: (d) => hol.has(d),
+    otReg: otRegCapper(db, getSetting),   // ĐĂNG KÝ LÀM THÊM: (NV, ngày, phút thực tế) → phút được tính
   };
 }
 
 /**
  * Tính đầy đủ chỉ số công cho 1 bản ghi. `shift` do caller GIẢI SẴN (mỗi nơi dò ca theo cách riêng).
  * Trả về đúng shape mà các UPDATE/INSERT hiện tại cần: { shiftId, late, early_min, ot_min,
- * work_minutes, work_unit, ot_type, day_status }.
+ * work_minutes, work_unit, ot_type, day_status, ot_raw }.
+ * ot_raw = tăng ca THỰC TẾ; ot_min = tăng ca ĐƯỢC TÍNH sau khi chặn theo đăng ký làm thêm (không đăng ký → bằng nhau).
  * Công thức giữ NGUYÊN so với code cũ — chỉ gom một chỗ.
  */
 // opts.hourly: nhân viên chấm công THEO GIỜ → không đổi ngày cuối tuần thành tăng ca (mẫu theo giờ không có tăng ca)
@@ -97,5 +100,7 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   // làm tròn tăng ca (quy tắc chung) — từng đoạn trước ca / sau ca làm tròn riêng
   if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtParts(c.ot_min, c.ot_parts, r.decimals ?? 2, r.mode || 0, r.block || 0) }; }
   delete c.ot_parts;
-  return { shiftId: shift?.id ?? null, late, ...c };
+  const ot_raw = c.ot_min || 0;
+  if (ot_raw && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw) };
+  return { shiftId: shift?.id ?? null, late, ...c, ot_raw };
 }

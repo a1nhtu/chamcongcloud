@@ -66,7 +66,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/leaves', leaveRoutes);
 // Các yêu cầu ĐỌC nặng (lưới tính công, bảng lương, phân ca, báo cáo, xuất Excel) chạy ở luồng phụ → máy chủ không "đứng" khi có người chạy báo cáo
-app.use('/api/admin', offload([/^\/attendance\/grid$/, /^\/payroll$/, /^\/assignments$/]));
+app.use('/api/admin', offload([/^\/attendance\/grid$/, /^\/payroll$/, /^\/assignments$/, /^\/abnormal(\.xlsx)?$/, /^\/ot-reg$/]));
 app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$/]));
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);

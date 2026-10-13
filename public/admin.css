@@ -427,3 +427,32 @@ body.nav-mini #btn-logout::before { content: '🚪'; font-size: 16px; }
 
 /* Chốt kỳ: hàng nút chọn năm dưới bảng */
 .lock-years { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+
+/* ĐĂNG KÝ LÀM THÊM: ô = số đăng ký (đậm) + số thực tế (nhỏ) */
+.or-rule { border: 1px dashed #2563eb; }
+table.or-grid th.today { background: #dbeafe; }
+td.or-c { min-width: 62px; }
+td.or-c b { font-weight: 800; color: #1d4ed8; }
+td.or-c small { margin-left: 4px; font-size: 11px; color: #94a3b8; }
+td.or-c.has { background: #eff6ff; }
+td.or-c.over { background: #fee2e2; } td.or-c.over small { color: #dc2626; font-weight: 700; }
+td.or-c.under { background: #fef9c3; } td.or-c.under small { color: #a16207; }
+td.or-c.noreg small { color: #64748b; font-style: italic; }
+td.or-c:focus { outline: 2px solid #2563eb; outline-offset: -2px; }
+td.or-sum { text-align: right; font-weight: 700; color: #1d4ed8; font-variant-numeric: tabular-nums; }
+.or-lg { padding: 1px 7px; border-radius: 999px; font-weight: 600; white-space: nowrap; }
+.or-lg.over { background: #fee2e2; color: #b91c1c; } .or-lg.under { background: #fef9c3; color: #854d0e; } .or-lg.noreg { background: #f1f5f9; color: #475569; }
+/* CHẤM CÔNG BẤT THƯỜNG */
+.ab-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ab-chip { display: inline-flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 10px; border: 1px solid var(--line, #e5e7eb); background: var(--surface, #fff); color: #64748b; font-weight: 600; font-size: 13px; cursor: pointer; opacity: .6; }
+.ab-chip b { font-size: 15px; font-variant-numeric: tabular-nums; }
+.ab-chip.on { opacity: 1; color: #0f172a; border-color: currentColor; box-shadow: inset 0 -3px 0 currentColor; }
+.ab-chip.on.late, .ab-b.late, td.ab-n.late { color: #b45309; } .ab-chip.on.early, .ab-b.early, td.ab-n.early { color: #7c3aed; }
+.ab-chip.on.ot_over, .ab-b.ot_over, td.ab-n.ot_over { color: #dc2626; } .ab-chip.on.ot_noreg, .ab-b.ot_noreg, td.ab-n.ot_noreg { color: #475569; }
+.ab-chip.on.ot_under, .ab-b.ot_under, td.ab-n.ot_under { color: #0e7490; } .ab-chip.on.no_out, .ab-b.no_out, td.ab-n.no_out { color: #be123c; }
+.ab-filt { display: flex; gap: 10px 16px; align-items: center; flex-wrap: wrap; padding: 10px 14px; margin-bottom: 10px; }
+.ab-filt label { display: inline-flex; align-items: center; gap: 6px; margin: 0; font-size: 13px; font-weight: 600; }
+.ab-scroll { max-height: calc(100vh - 300px); overflow: auto; }
+table.ab-tbl { font-size: 13px; } table.ab-tbl td { white-space: nowrap; padding-top: 7px; padding-bottom: 7px; } table.ab-tbl td.ab-dept { max-width: 190px; overflow: hidden; text-overflow: ellipsis; } table.ab-tbl th { position: sticky; top: 0; z-index: 1; white-space: nowrap; }
+td.ab-n { text-align: right; font-variant-numeric: tabular-nums; font-weight: 700; }
+.ab-b { display: inline-block; padding: 1px 8px; margin: 1px 4px 1px 0; border-radius: 999px; background: #f1f5f9; font-size: 12px; font-weight: 700; white-space: nowrap; }

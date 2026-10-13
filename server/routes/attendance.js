@@ -8,6 +8,7 @@ import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom } from '../day-metrics.js';
+import { otRegCapper } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
 
 const r = Router();
@@ -273,15 +274,18 @@ r.post('/check-out', (req, res) => {
   if (!hourly) calc = weekendToOt(calc, dayFlags(wdate, req.user.id));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
   if (calc.ot_min) { const r = otRoundingFrom(getSetting); calc = { ...calc, ot_min: roundOtParts(calc.ot_min, calc.ot_parts, r.decimals, r.mode, r.block) }; }
   delete calc.ot_parts;
+  // ĐĂNG KÝ LÀM THÊM: làm quá số phút đăng ký thì chỉ tính theo đăng ký (giữ số thực tế ở ot_raw_min)
+  const otRaw = calc.ot_min || 0;
+  if (otRaw) calc = { ...calc, ot_min: otRegCapper(db, getSetting)(req.user.id, wdate, otRaw) };
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');
   const finalLate = shift ? (() => { const f = dayFlags(wdate, req.user.id); return computeLate(shift, row.check_in_at, wdate, f.lateBlock, halfLeavePriv(shift, wdate, f.half, f.priv)); })() : row.late_min;
 
   db.prepare(`UPDATE attendance SET check_out_at=?, check_out_lat=?, check_out_lng=?,
-    check_out_photo=?, check_out_distance_m=?, work_minutes=?, early_min=?, ot_min=?,
+    check_out_photo=?, check_out_distance_m=?, work_minutes=?, early_min=?, ot_min=?, ot_raw_min=?,
     work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=?, late_min=? WHERE id=?`)
-    .run(at, lat, lng, photoPath, distance, calc.work_minutes, calc.early_min, calc.ot_min,
+    .run(at, lat, lng, photoPath, distance, calc.work_minutes, calc.early_min, calc.ot_min, otRaw,
          calc.work_unit, calc.day_status, calc.ot_type, finalShiftId, finalSource, finalLate, row.id);
 
   const updated = db.prepare('SELECT * FROM attendance WHERE id = ?').get(row.id);

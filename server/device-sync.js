@@ -4,6 +4,7 @@ import { db, getSetting, empHourly } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
+import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
 
@@ -536,14 +537,14 @@ function deviceMachineMap() {
 // Ghi 1 dòng công (insert mới hoặc update dòng có sẵn theo existingId)
 function upsertRow(employeeId, workDate, shiftId, inIso, outIso, m, existingId) {
   if (existingId) {
-    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
+    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?,
       work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='device' WHERE id=?`)
-      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId, existingId);
+      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw ?? m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId, existingId);
   } else {
     db.prepare(`INSERT INTO attendance
-      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'device')`)
-      .run(employeeId, workDate, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId);
+      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'device')`)
+      .run(employeeId, workDate, inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw ?? m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, shiftId);
   }
 }
 
@@ -607,6 +608,12 @@ export function rebuildDays(keys) {
 }
 
 export function rebuildDay(employeeId, workDate) {
+  const out = rebuildDayCore(employeeId, workDate);
+  // Ngày có NHIỀU dòng công cùng có tăng ca: số phút đăng ký làm thêm là của CẢ NGÀY → chia lại theo thứ tự ca
+  if (db.prepare('SELECT COUNT(*) c FROM attendance WHERE employee_id=? AND work_date=? AND ot_raw_min>0').get(employeeId, workDate).c > 1) syncOtRegDay(employeeId, workDate);
+  return out;
+}
+function rebuildDayCore(employeeId, workDate) {
   // "+punch_at": ép dùng chỉ mục (NV, ngày) rồi mới sắp xếp — không thì SQLite có thể duyệt hết lượt quẹt của NV theo chỉ mục (NV, giờ)
   let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
   if (!prov.length) return;

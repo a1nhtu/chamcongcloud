@@ -79,7 +79,7 @@ export function registerAttendanceRoutes(r, { need }) {
 
     // Prepare MỘT LẦN ngoài vòng (không re-prepare mỗi dòng)
     const updNoOut = db.prepare('UPDATE attendance SET late_min=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?');
-    const updFull = db.prepare(`UPDATE attendance SET late_min=?, early_min=?, ot_min=?, work_minutes=?,
+    const updFull = db.prepare(`UPDATE attendance SET late_min=?, early_min=?, ot_min=?, ot_raw_min=?, work_minutes=?,
       work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=? WHERE id=?`);
 
     let n = 0;
@@ -103,7 +103,7 @@ export function registerAttendanceRoutes(r, { need }) {
           // Chưa chấm ra: chỉ cập nhật muộn/trạng thái/ca — GIỮ NGUYÊN giờ công cũ (như trước)
           updNoOut.run(m.late, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);
         } else {
-          updFull.run(m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);
+          updFull.run(m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, eff.source, row.id);
         }
         n++;
       }
@@ -242,16 +242,16 @@ export function registerAttendanceRoutes(r, { need }) {
     // Khoá theo (NV, ngày, CA) → cho phép thêm nhiều ca/ngày (VD ca gãy sáng + chiều)
     const existing = db.prepare('SELECT id FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_id,0)=COALESCE(?,0)').get(eid, date, m.shiftId ?? null);
     if (existing) {
-      db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
+      db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?,
         work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=?, manual_at=?, manual_by=? WHERE id=?`)
-        .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý', existing.id);
+        .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý', existing.id);
       notifyTimeEdited(eid, date, inIso, outIso);
       return res.json({ ok: true, id: existing.id, updated: true });
     }
     const info = db.prepare(`INSERT INTO attendance
-      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note, manual_at, manual_by)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?, 'manual', 1, ?, ?, ?)`)
-      .run(eid, date, inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý');
+      (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note, manual_at, manual_by)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'manual', 1, ?, ?, ?)`)
+      .run(eid, date, inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý');
     notifyTimeEdited(eid, date, inIso, outIso);
     res.json({ ok: true, id: info.lastInsertRowid });
   });
@@ -265,9 +265,9 @@ export function registerAttendanceRoutes(r, { need }) {
     let outIso = b.check_out !== undefined ? vnToIso(row.work_date, b.check_out) : row.check_out_at;
     if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();
     const m = computeManual(row.employee_id, row.work_date, inIso, outIso);
-    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?,
+    db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?,
       work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=?, manual_at=?, manual_by=? WHERE id=?`)
-      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note ?? row.note ?? '', nowIso(), req.user.full_name || 'Quản lý', row.id);
+      .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note ?? row.note ?? '', nowIso(), req.user.full_name || 'Quản lý', row.id);
     notifyTimeEdited(row.employee_id, row.work_date, inIso, outIso);
     res.json({ ok: true });
   });

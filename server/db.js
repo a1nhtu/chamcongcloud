@@ -604,6 +604,16 @@ function migrateColumns() {
       minutes     INTEGER NOT NULL,
       PRIMARY KEY (employee_id, work_date, level)
     );`);
+  // ĐĂNG KÝ LÀM THÊM: số phút đăng ký mỗi NV × ngày (xem server/ot-reg.js)
+  db.exec(`CREATE TABLE IF NOT EXISTS ot_registrations (
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      work_date   TEXT NOT NULL,
+      minutes     INTEGER NOT NULL,
+      updated_by  TEXT NOT NULL DEFAULT '',
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (employee_id, work_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_otreg_date ON ot_registrations(work_date);`);
   // Ngày có LƯỢT CHẤM được thêm / sửa / xoá bằng tay (menu Sửa giờ chấm công) → hiện dấu (*) như giờ sửa tay
   db.exec(`CREATE TABLE IF NOT EXISTS att_edit_marks (
       employee_id INTEGER NOT NULL, work_date TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -619,6 +629,8 @@ function migrateColumns() {
   add('attendance', 'work_unit',  'REAL DEFAULT 0');
   add('attendance', 'day_status', "TEXT DEFAULT NULL");   // lam_viec | thieu_ra | nghi_le ...
   add('attendance', 'ot_type',    "TEXT DEFAULT 'thuong'"); // thuong | cuoi_tuan | le
+  // Tăng ca THỰC TẾ (trước khi chặn theo đăng ký làm thêm); ot_min = tăng ca được tính. Dòng cũ: thực tế = được tính.
+  if (!cols('attendance').has('ot_raw_min')) { add('attendance', 'ot_raw_min', 'INTEGER'); db.exec('UPDATE attendance SET ot_raw_min = ot_min WHERE ot_min > 0'); }
 
   // Máy chấm công: mốc OperLog đã nhận (để máy chỉ đẩy thao tác/vân tay mới hơn)
   add('push_devices', 'oper_stamp', "TEXT DEFAULT '0'");
