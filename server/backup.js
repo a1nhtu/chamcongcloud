@@ -7,7 +7,8 @@ import { UPLOAD_DIR } from './storage.js';
 import { userError } from './util.js';
 
 const ROOT = join(DATA_DIR, '..');                 // thư mục app (chứa uploads/)
-const winTar = () => { const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
+// Linux: GNU tar không đọc/ghi được .zip → dùng bsdtar (gói libarchive-tools, bộ cài Linux tự cài)
+const winTar = () => { if (process.platform !== 'win32') return 'bsdtar'; const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
 
 export const BACKUP_DIR = join(DATA_DIR, 'backups');
 mkdirSync(BACKUP_DIR, { recursive: true });
