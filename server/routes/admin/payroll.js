@@ -57,7 +57,8 @@ export function registerPayrollRoutes(r, { need }) {
     const b = req.body || {};
     if (!b.holiday_date) return res.status(400).json({ error: 'Thiếu ngày' });
     try {
-      db.prepare('INSERT INTO public_holidays(holiday_date, name) VALUES (?,?)').run(b.holiday_date, b.name || '');
+      // kind: le = ngày lễ | bu = ngày nghỉ bù lễ (lễ trùng ngày nghỉ hằng tuần; đi làm ngày này tính tăng ca ngày nghỉ, không phải ngày lễ)
+      db.prepare('INSERT INTO public_holidays(holiday_date, name, kind) VALUES (?,?,?)').run(b.holiday_date, b.name || '', b.kind === 'bu' ? 'bu' : 'le');
       res.json({ ok: true });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Ngày lễ đã tồn tại' });

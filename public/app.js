@@ -495,6 +495,11 @@ async function renderDontu() {
   const today = new Date().toISOString().slice(0, 10);
   form.querySelector('#lv-from').value = today; form.querySelector('#lv-to').value = today;
   form.querySelector('#lv-submit').addEventListener('click', submitLeave);
+  // lý do nghỉ công ty tự khai báo → thêm vào danh sách loại đơn (trước mục "Khác")
+  api('/leaves/types').then((d) => {
+    const s = $('#lv-type'); if (!s) return;
+    for (const t of (d.rows || [])) if (t.custom && ![...s.options].some((o) => o.value === t.type)) s.insertBefore(new Option(t.label || t.type, t.type), s.querySelector('option[value="Khác"]'));
+  }).catch(() => {});
   // nửa ngày chỉ khi nghỉ 1 ngày
   const syncHalf = () => { const one = $('#lv-from').value === $('#lv-to').value; $('#lv-half').disabled = !one; if (!one) $('#lv-half').value = ''; };
   form.querySelector('#lv-from').addEventListener('change', () => { if ($('#lv-to').value < $('#lv-from').value) $('#lv-to').value = $('#lv-from').value; syncHalf(); });

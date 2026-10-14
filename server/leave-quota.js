@@ -11,9 +11,20 @@ export const LEAVE_TYPES = [
   { type: 'Công tác', sym: 'CT', paid: true, quota: false, label: 'Công tác' },
   { type: 'Thai sản', sym: 'TS', paid: false, quota: false, label: 'Nghỉ thai sản (BHXH chi trả, công ty không tính lương)' },
   { type: 'Khác', sym: 'K', paid: true, quota: false, label: 'Khác' },
+  // tự sinh từ Đăng ký làm bù (không chọn được ở đơn từ): công đã tính ở ngày làm bù nên ngày nghỉ bù không cộng thêm
+  { type: 'Nghỉ bù', sym: 'NB', paid: false, quota: false, label: 'Nghỉ bù (đã đi làm bù ngày khác)', system: true },
 ];
+// LÝ DO NGHỈ TỰ KHAI BÁO (bảng leave_types): { id, type, sym, paid, quota, active, custom: true }
+export function customLeaveTypes(all = false) {
+  let rows = [];
+  try { rows = db.prepare(`SELECT * FROM leave_types${all ? '' : ' WHERE active=1'} ORDER BY id`).all(); } catch {}
+  return rows.map((r) => ({ id: r.id, type: r.name, sym: r.sym, paid: !!r.paid, quota: !!r.quota, active: !!r.active, custom: true,
+    label: `${r.name} (${r.paid ? 'có lương' : 'không lương'}${r.quota ? ', trừ phép' : ''})` }));
+}
+// Các loại CHỌN ĐƯỢC khi lập đơn: loại có sẵn (trừ loại hệ thống) + lý do tự khai đang dùng
+export const leaveTypes = () => [...LEAVE_TYPES.filter((x) => !x.system), ...customLeaveTypes()];
 const typeNamed = (n) => LEAVE_TYPES.find((x) => x.type === n);
-export const leaveTypeOf = (t) => typeNamed(t)
+export const leaveTypeOf = (t) => typeNamed(t) || customLeaveTypes(true).find((x) => x.type === t)
   || (String(t || '').toLowerCase().includes('không lương') ? typeNamed('Nghỉ không lương') : typeNamed('Khác'));
 export const HALF_LABEL = { '': 'Cả ngày', sang: 'Nửa ngày sáng', chieu: 'Nửa ngày chiều' };
 

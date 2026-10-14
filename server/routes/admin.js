@@ -15,6 +15,7 @@ import { registerPushRoutes } from './admin/push.js';
 import { registerLogRoutes } from './admin/logs.js';
 import { registerAuditLimitRoutes } from './admin/audit-limits.js';
 import { registerOtRegRoutes } from './admin/ot-reg.js';
+import { registerSwapRoutes } from './admin/swap.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
@@ -39,5 +40,6 @@ registerPushRoutes(r);                   // thông báo đẩy
 registerLogRoutes(r, { need, adminOnly });          // nhật ký thao tác
 registerAuditLimitRoutes(r, { need });   // công ảo: tăng ca tối đa / ngày 3 mức
 registerOtRegRoutes(r, { need });        // đăng ký làm thêm + chấm công bất thường
+registerSwapRoutes(r, { need });         // đăng ký làm bù (hoán đổi ngày làm việc)
 
 export default r;

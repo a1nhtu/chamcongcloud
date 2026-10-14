@@ -4,6 +4,7 @@
 import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
 import { privilegeLookup, halfLeaveLookup } from './privilege.js';
 import { otRegCapper } from './ot-cap.js';
+import { dayRules } from './swap.js';
 
 /**
  * Gói cấu hình tính công cho CẢ MỘT MẺ (đọc settings + ngày lễ MỘT LẦN).
@@ -18,7 +19,7 @@ export function otRoundingFrom(getSetting) {
   return { decimals: Number.isFinite(dec) ? dec : 2, mode: parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0, block };
 }
 export function payrollCtx(getSetting, db) {
-  const hol = new Set(db.prepare('SELECT holiday_date FROM public_holidays').all().map((r) => r.holiday_date));
+  const rules = dayRules(db);   // ngày lễ / nghỉ bù lễ / ngày làm bù
   return {
     weekend: getSetting('weekend_days', '7'),
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
@@ -50,7 +51,7 @@ export function payrollCtx(getSetting, db) {
         return map.has(empId) ? map.get(empId) : g;
       };
     })(),
-    isHoliday: (d) => hol.has(d),
+    isHoliday: rules.isHoliday, isCompOff: rules.isCompOff, isSwapWork: rules.isSwapWork,
     otReg: otRegCapper(db, getSetting),   // ĐĂNG KÝ LÀM THÊM: (NV, ngày, phút thực tế) → phút được tính
   };
 }
@@ -64,9 +65,12 @@ export function payrollCtx(getSetting, db) {
  */
 // opts.hourly: nhân viên chấm công THEO GIỜ → không đổi ngày cuối tuần thành tăng ca (mẫu theo giờ không có tăng ca)
 export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = null, opts = {}) {
+  // LÀM BÙ: ngày làm bù tính như ngày thường. NGHỈ BÙ LỄ mà đi làm: bản chất là ngày nghỉ hằng tuần → cả ngày là tăng ca hệ số ngày nghỉ.
+  const swapWork = !!(opts.empId && ctx.isSwapWork && ctx.isSwapWork(opts.empId, workDate));
+  const compOff = !swapWork && !!(ctx.isCompOff && ctx.isCompOff(workDate));
   const flags = {
     isHoliday: ctx.isHoliday(workDate),
-    isWeekend: isWeekendDay(workDate, ctx.weekend) && !(opts.empId && ctx.weekendNormal && ctx.weekendNormal(opts.empId)),
+    isWeekend: compOff || (!swapWork && isWeekendDay(workDate, ctx.weekend) && !(opts.empId && ctx.weekendNormal && ctx.weekendNormal(opts.empId))),
     roundingDecimals: ctx.roundingDecimals,
     roundingMode: ctx.roundingMode,
     lateBlock: ctx.lateBlock || 0,
@@ -96,7 +100,7 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   } else {
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: 'vang' };
   }
-  if (ctx.weekendOt && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
+  if ((ctx.weekendOt || compOff) && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
   // làm tròn tăng ca (quy tắc chung) — từng đoạn trước ca / sau ca làm tròn riêng
   if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtParts(c.ot_min, c.ot_parts, r.decimals ?? 2, r.mode || 0, r.block || 0) }; }
   delete c.ot_parts;

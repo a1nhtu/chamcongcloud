@@ -605,6 +605,31 @@ function migrateColumns() {
       PRIMARY KEY (employee_id, work_date, level)
     );`);
   // ĐĂNG KÝ LÀM THÊM: số phút đăng ký mỗi NV × ngày (xem server/ot-reg.js)
+  // LÀM BÙ (hoán đổi ngày): NV đi làm ngày `work_date` (ngày nghỉ) để nghỉ ngày `off_date`. Ngày nghỉ bù = đơn nghỉ "Nghỉ bù" tự sinh (leave_requests.swap_id).
+  db.exec(`CREATE TABLE IF NOT EXISTS swap_days (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES employees(id),
+      work_date   TEXT NOT NULL,      -- ngày ĐI LÀM bù (tính như ngày thường)
+      off_date    TEXT NOT NULL,      -- ngày được NGHỈ bù
+      note        TEXT DEFAULT '',
+      created_by  TEXT DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(employee_id, work_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_swap_work ON swap_days(work_date);
+    CREATE INDEX IF NOT EXISTS idx_swap_off ON swap_days(off_date);`);
+  add('leave_requests', 'swap_id', 'INTEGER');                       // đơn "Nghỉ bù" tự sinh từ đăng ký làm bù
+  add('public_holidays', 'kind', "TEXT NOT NULL DEFAULT 'le'");      // le = ngày lễ | bu = ngày nghỉ bù lễ (đi làm tính như ngày nghỉ hằng tuần)
+  // LÝ DO NGHỈ tự khai báo (ngoài các loại có sẵn trong leave-quota.js)
+  db.exec(`CREATE TABLE IF NOT EXISTS leave_types (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL UNIQUE,
+      sym        TEXT NOT NULL,             -- ký hiệu trên bảng công
+      paid       INTEGER NOT NULL DEFAULT 0, -- 1 = có lương
+      quota      INTEGER NOT NULL DEFAULT 0, -- 1 = trừ vào quỹ phép năm
+      active     INTEGER NOT NULL DEFAULT 1, -- 0 = ẩn (không cho chọn nữa, đơn cũ vẫn giữ)
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );`);
   db.exec(`CREATE TABLE IF NOT EXISTS ot_registrations (
       employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
       work_date   TEXT NOT NULL,

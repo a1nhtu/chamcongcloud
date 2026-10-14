@@ -8,6 +8,7 @@ import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
+import { customLeaveTypes } from '../leave-quota.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -195,7 +196,12 @@ function loadRange(from, to, filter) {
   for (const a of db.prepare('SELECT employee_id, work_date, shift_id, is_off FROM dsa_effective WHERE work_date >= ? AND work_date <= ?').all(from, to))
     assigns.set(a.employee_id + '|' + a.work_date, a);
 
-  const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date >= ? AND holiday_date <= ?').all(from, to).map((h) => h.holiday_date));
+  const holRows = db.prepare('SELECT holiday_date, kind FROM public_holidays WHERE holiday_date >= ? AND holiday_date <= ?').all(from, to);
+  const holidays = new Set(holRows.map((h) => h.holiday_date));
+  const compOff = new Set(holRows.filter((h) => h.kind === 'bu').map((h) => h.holiday_date));   // ngày nghỉ bù lễ: đi làm = tăng ca ngày nghỉ (NN)
+  // ngày LÀM BÙ (đăng ký làm bù): là ngày phải đi làm dù rơi vào cuối tuần
+  const swapWork = new Set(db.prepare('SELECT employee_id, work_date FROM swap_days WHERE work_date >= ? AND work_date <= ?').all(from, to).map((w) => w.employee_id + '|' + w.work_date));
+  const KINDS = allLeaveKinds();
 
   // Nghỉ đã duyệt phủ lên từng ngày: empId|date → loại nghỉ (1 mục trong LEAVE_KINDS)
   const leaveDays = new Map();
@@ -207,12 +213,12 @@ function loadRange(from, to, filter) {
   const usedKinds = new Set();
   for (const l of leaveRows) {
     if (l.status !== 'approved') continue;
-    const kind = leaveKind(l.type);
+    const kind = leaveKind(l.type, KINDS);
     const k2 = l.half && l.from_date === l.to_date ? { ...kind, half: true } : kind;   // nửa ngày: đếm 0,5
     for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) { leaveDays.set(l.employee_id + '|' + d, k2); usedKinds.add(kind.key); }
   }
   // Các loại nghỉ có phát sinh trong kỳ (giữ đúng thứ tự LEAVE_KINDS) → báo cáo thêm cột cho từng loại
-  const leaveKinds = LEAVE_KINDS.filter((k) => usedKinds.has(k.key));
+  const leaveKinds = KINDS.filter((k) => usedKinds.has(k.key));
 
   // ca theo lịch của 1 NV trong 1 ngày (để xác định ngày công theo lịch)
   const scheduledShift = (empId, date) => {
@@ -225,12 +231,12 @@ function loadRange(from, to, filter) {
     if (holidays.has(date)) return false;
     const s = scheduledShift(empId, date);
     if (!s) return false;
-    return !isWeekendDay(date, weekend);   // ngày phải đi làm = không phải ngày cuối tuần (Cài đặt > Quy tắc tính công)
+    return swapWork.has(empId + '|' + date) || !isWeekendDay(date, weekend);   // ngày phải đi làm = không phải ngày cuối tuần (Cài đặt > Quy tắc tính công), hoặc ngày làm bù
   };
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
-  return { from, to, weekend, employees, cell, holidays, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt };
+  return { from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt };
 }
 
 // Loại nghỉ theo đơn từ (cột "type" của leave_requests). Loại lạ → "Nghỉ khác".
@@ -241,11 +247,14 @@ const LEAVE_KINDS = [
   { key: 'lvCT', type: 'Công tác', label: 'Công tác', sym: 'CT' },
   { key: 'lvTS', type: 'Thai sản', label: 'Thai sản', sym: 'TS' },
   { key: 'lvK', type: 'Khác', label: 'Nghỉ khác', sym: 'K' },
+  { key: 'lvNB', type: 'Nghỉ bù', label: 'Nghỉ bù', sym: 'NB' },   // ngày nghỉ bù của đăng ký làm bù
 ];
-function leaveKind(type) {
+// Loại có sẵn + LÝ DO NGHỈ TỰ KHAI BÁO (kể cả lý do đã ẩn — đơn cũ vẫn hiện đúng ký hiệu)
+const allLeaveKinds = () => [...LEAVE_KINDS, ...customLeaveTypes(true).map((t) => ({ key: 'lvC' + t.id, type: t.type, label: t.type, sym: t.sym }))];
+function leaveKind(type, kinds = LEAVE_KINDS) {
   const t = String(type || '').trim().toLowerCase();
   const k = (key) => LEAVE_KINDS.find((x) => x.key === key);
-  return LEAVE_KINDS.find((x) => x.type.toLowerCase() === t)
+  return kinds.find((x) => x.type.toLowerCase() === t)
     || (t.includes('không lương') ? k('lvKL') : t.includes('có lương') ? k('lvR') : t.includes('công tác') ? k('lvCT') : t.includes('thai sản') ? k('lvTS') : t.includes('phép') ? k('lvP') : k('lvK'));
 }
 // Cột số ngày nghỉ từng loại (chỉ những loại có phát sinh trong kỳ; `always` = luôn có cột Nghỉ phép)
@@ -255,7 +264,7 @@ function leaveCols(ctx, always = false) {
 }
 // Đếm số ngày nghỉ từng loại của 1 NV trong danh sách ngày → { lvP: n, lvKL: n, ... }
 function leaveCounts(ctx, empId, days) {
-  const out = Object.fromEntries(LEAVE_KINDS.map((k) => [k.key, 0]));
+  const out = Object.fromEntries([...LEAVE_KINDS, ...ctx.leaveKinds].map((k) => [k.key, 0]));
   for (const d of days) { const k = ctx.leaveDays.get(empId + '|' + d); if (k) out[k.key] += k.half ? 0.5 : 1; }
   return out;
 }
@@ -276,7 +285,7 @@ function otCellMin(c) {
 function symbolOf(ctx, empId, date) {
   const c = ctx.cell.get(empId + '|' + date);
   if (ctx.leaveDays.has(empId + '|' + date)) return 'P';
-  if (ctx.holidays.has(date)) return 'L';
+  if (ctx.holidays.has(date)) return ctx.compOff.has(date) && c && ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) ? 'NN' : 'L';   // NN = đi làm ngày nghỉ bù lễ
   if (!c) return ctx.isScheduled(empId, date) ? 'V' : '';
   if (c.day_status === 'thieu_ra' || !c.check_out_at) return 'O';
   if ((c.late_min || 0) > 0 || (c.early_min || 0) > 0) return 'T';
@@ -472,12 +481,12 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
         { key: 'X', label: 'X', w: 5 }, { key: 'T', label: 'T', w: 5 },
         ...(ctx.leaveKinds.length ? ctx.leaveKinds.map((k) => ({ key: k.key, label: k.sym, w: 5 })) : [{ key: 'P', label: 'P', w: 5 }]),
-        { key: 'L', label: 'L', w: 5 }, { key: 'V', label: 'V', w: 5 }, { key: 'O', label: 'O', w: 5 },
+        { key: 'L', label: 'L', w: 5 }, ...(ctx.compOff.size ? [{ key: 'NN', label: 'NN', w: 5 }] : []), { key: 'V', label: 'V', w: 5 }, { key: 'O', label: 'O', w: 5 },
         ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 9 }] : []),
       ];
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '', ...leaveCounts(ctx, e.id, days) };
-        const cnt = { X: 0, T: 0, P: 0, L: 0, V: 0, O: 0 };
+        const cnt = { X: 0, T: 0, P: 0, L: 0, V: 0, O: 0, NN: 0 };
         let mins = 0;
         for (const d of days) {
           const s = symbolOf(ctx, e.id, d);

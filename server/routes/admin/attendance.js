@@ -1,6 +1,6 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
 import { db, getSetting, adminAttWhere, deptWithChildren } from '../../db.js';
-import { LEAVE_TYPES, HALF_LABEL } from '../../leave-quota.js';
+import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays } from '../../device-sync.js';
@@ -144,7 +144,7 @@ export function registerAttendanceRoutes(r, { need }) {
 
     // Nghỉ đã duyệt phủ theo từng ngày
     const leaves = db.prepare(`SELECT * FROM leave_requests WHERE status='approved' AND employee_id IN (${ph}) AND from_date<=? AND to_date>=?`).all(...empIds, to, from);
-    const leaveSym = Object.fromEntries(LEAVE_TYPES.map((t) => [t.type, t.sym]));
+    const leaveSym = Object.fromEntries([...LEAVE_TYPES, ...customLeaveTypes(true)].map((t) => [t.type, t.sym]));
     const leaveMap = new Map();
     for (const l of leaves) {
       let d = l.from_date < from ? from : l.from_date; const end = l.to_date > to ? to : l.to_date;

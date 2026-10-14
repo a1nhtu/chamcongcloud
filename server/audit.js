@@ -35,6 +35,8 @@ const LABELS = {
   'PUT /salary/:empId': 'Sửa cấu hình lương',
   'POST /holidays': 'Thêm ngày lễ',
   'DELETE /holidays/:id': 'Xóa ngày lễ',
+  'POST /swap-days': 'Đăng ký làm bù',
+  'POST /swap-days/delete': 'Xóa đăng ký làm bù',
   'POST /assignments': 'Phân ca (theo ngày)',
   'POST /assignments/bulk': 'Lịch trình tạm thời',
   'POST /assignments/cells': 'Sửa bảng phân ca (Excel)',

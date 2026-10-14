@@ -16,6 +16,7 @@ const NAV = [
   ['editatt', '🧮', 'Tính công', 'attendance_edit'],
   ['fixtime', '✏️', 'Thêm/sửa/xóa giờ chấm', 'attendance_edit'],
   ['otreg', '⏰', 'Đăng ký làm thêm', 'attendance_edit'],
+  ['swap', '🔁', 'Đăng ký làm bù', 'attendance_edit'],
   ['abnormal', '🚨', 'Chấm công bất thường', 'reports'],
   ['offices', '📍', 'Chi nhánh', 'offices'],
   ['leaves', '📝', 'Đơn từ', 'leaves'],
@@ -33,7 +34,7 @@ const NAV = [
 const NAV_GROUPS = [
   ['org', 'Tổ chức', ['employees', 'org', 'offices']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
-  ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'abnormal', 'leaves']],
+  ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
   ['audit', 'Công ảo', ['audit', 'auditlimits']],
   ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
@@ -125,7 +126,7 @@ async function afterLogin() {
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
   const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
   const visible = NAV.filter(([key, , , perm]) => hasPerm(perm) && (!isInspector() || INSPECTOR_NAV.includes(key))
-    && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg' || key === 'abnormal'))
+    && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg' || key === 'swap' || key === 'abnormal'))
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())
     && !(key === 'shiftreq' && !selfShiftEnabled())
@@ -226,7 +227,7 @@ function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
   // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
-  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings }[key])();
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings }[key])();
 }
 
 /* ---------- Lựa chọn phụ khi chấm "Theo giờ": đầu–cuối (FILO) / theo cặp vào–ra ----------
@@ -2871,7 +2872,9 @@ async function pageLeaves() {
   quotaBtn.onclick = () => { _lvTab = 'quota'; pageLeaves(); };
   const privBtn = el('button', { class: 'btn ghost' }, '🤰 Chế độ ưu đãi');
   privBtn.onclick = () => { _lvTab = 'priv'; pageLeaves(); };
-  setMain(head('Đơn từ', sel, privBtn, quotaBtn, addBtn), loading());
+  const typeBtn = el('button', { class: 'btn ghost' }, '🏷️ Lý do nghỉ');
+  typeBtn.onclick = () => leaveTypesModal();
+  setMain(head('Đơn từ', sel, typeBtn, privBtn, quotaBtn, addBtn), loading());
   const load = async () => {
     const status = $('#lv-filter').value;
     const { rows } = await api('/leaves' + (status ? '?status=' + status : ''));
@@ -2881,7 +2884,7 @@ async function pageLeaves() {
     if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Không có đơn.'))));
     for (const r of rows) {
       const st = { pending: ['warn', 'Chờ duyệt'], approved: ['ok', 'Đã duyệt'], rejected: ['bad', 'Từ chối'] }[r.status];
-      const delBtn = btnSm('Xoá', async () => {
+      const delBtn = r.swap_id ? el('span', { style: 'color:#9ca3af;font-size:12px' }, 'xoá ở Đăng ký làm bù') : btnSm('Xoá', async () => {
         if (!confirm(`Xoá đơn "${r.type}" ${fmtD(r.from_date)}–${fmtD(r.to_date)} của ${r.full_name}?`)) return;
         try { await api('/leaves/admin/' + r.id, { method: 'DELETE' }); if (r.half && r.status === 'approved') await privRecompute([r.employee_id], r.from_date, r.to_date); toast('Đã xoá đơn', 'ok'); pageLeaves(); } catch (e) { toast(e.message, 'err'); }
       }, 'ghost');
@@ -2898,7 +2901,7 @@ async function pageLeaves() {
       ));
     }
     tbl.append(tb);
-    setMain(head('Đơn từ', sel, privBtn, quotaBtn, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / R / KL / CT / TS / K) và báo cáo. Ưu đãi thai sản / nuôi con nhỏ (được đến muộn, về sớm) khai ở "🤰 Chế độ ưu đãi".'), el('div', { class: 'panel tbl-scroll' }, tbl));
+    setMain(head('Đơn từ', sel, typeBtn, privBtn, quotaBtn, addBtn), el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Nhân viên gửi đơn trên app điện thoại (mục Đơn từ) → quản lý Duyệt / Từ chối ở đây. Hoặc quản lý bấm "+ Thêm đơn" để khai nghỉ trực tiếp cho nhân viên — đơn tự duyệt. Đơn đã duyệt hiện ở Tính công (P / R / KL / CT / TS / K) và báo cáo. Ưu đãi thai sản / nuôi con nhỏ (được đến muộn, về sớm) khai ở "🤰 Chế độ ưu đãi".'), el('div', { class: 'panel tbl-scroll' }, tbl));
     $('#lv-filter').value = status;
     $('#lv-filter').onchange = load;
   };
@@ -3104,6 +3107,156 @@ async function privModal(row) {
     total,
     field('Ghi chú', noteI),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+}
+
+/* ---------- ĐĂNG KÝ LÀM BÙ (hoán đổi ngày): đi làm ngày nghỉ (VD chủ nhật) để nghỉ 1 ngày khác (VD thứ 2) ---------- */
+let _swMonth = null;
+const swDay = (d) => (d ? `${WD_VN[new Date(d + 'T12:00:00Z').getUTCDay()]} ${d.slice(8)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : '');
+async function swapRecompute(pairs) {   // [[employee_id, ngày]] → tính lại công từng ngày (gom NV theo ngày)
+  const byDay = new Map();
+  for (const [id, d] of pairs) { if (!byDay.has(d)) byDay.set(d, []); byDay.get(d).push(id); }
+  for (const [d, ids] of byDay) for (let i = 0; i < ids.length; i += 200) await privRecompute(ids.slice(i, i + 200), d, d);
+}
+async function pageSwap() {
+  const mI = el('input', { type: 'month', value: _swMonth || todayVN().slice(0, 7), style: 'width:auto' });
+  const addBtn = el('button', { class: 'btn' }, '+ Đăng ký làm bù');
+  const delBtn = el('button', { class: 'btn ghost', disabled: '' }, '✕ Xoá đã chọn');
+  const box = el('div', { class: 'panel tbl-scroll' }, loading());
+  setMain(head('Đăng ký làm bù', mI, delBtn, addBtn),
+    el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Hoán đổi ngày làm việc: nhân viên đi làm vào ngày nghỉ (VD chủ nhật) để nghỉ một ngày khác (VD thứ 2). Ngày LÀM bù tính như ngày thường — 1 công, lương 100%, chỉ phần làm quá giờ ca mới là tăng ca. Ngày NGHỈ bù hiện ký hiệu NB trên bảng công, không bị tính vắng và không cộng thêm công (công đã tính ở ngày làm bù).'),
+    box);
+  const sel = new Set();
+  const syncDel = () => { delBtn.disabled = !sel.size; delBtn.textContent = sel.size ? `✕ Xoá đã chọn (${sel.size})` : '✕ Xoá đã chọn'; };
+  let rows = [];
+  const load = async () => {
+    _swMonth = mI.value || todayVN().slice(0, 7);
+    const y = +_swMonth.slice(0, 4), m = +_swMonth.slice(5, 7);
+    const to = `${_swMonth}-${String(new Date(Date.UTC(y, m, 0)).getUTCDate()).padStart(2, '0')}`;
+    sel.clear(); syncDel();
+    try { rows = (await api(`/admin/swap-days?from=${_swMonth}-01&to=${to}`)).rows || []; } catch (e) { box.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
+    const today = todayVN();
+    const all = el('input', { type: 'checkbox' });
+    const tbl = el('table', { class: 'data' });
+    const tb = el('tbody');
+    tbl.append(el('thead', {}, el('tr', {}, el('th', { style: 'width:34px' }, all), ...['Nhân viên', 'Ngày làm bù', 'Ngày nghỉ bù', 'Tình trạng', 'Ghi chú', ''].map((t) => el('th', {}, t)))), tb);
+    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Tháng này chưa có đăng ký làm bù. Bấm "+ Đăng ký làm bù".'))));
+    const cbs = [];
+    for (const r of rows) {
+      const cb = el('input', { type: 'checkbox' }); cbs.push(cb);
+      cb.onchange = () => { cb.checked ? sel.add(r.id) : sel.delete(r.id); all.checked = sel.size === rows.length; syncDel(); };
+      const st = [];
+      if (r.work_date <= today) st.push(r.worked ? el('span', { class: 'pill ok' }, `Đã đi làm · ${r.cong || 0} công`) : el('span', { class: 'pill warn' }, 'Chưa có giờ chấm ngày làm bù'));
+      else st.push(el('span', { class: 'pill' }, 'Sắp tới'));
+      if (r.off_worked) st.push(el('span', { class: 'pill bad', style: 'margin-left:4px' }, 'Có giờ chấm ngày nghỉ bù'));
+      const del = btnSm('Xoá', () => remove([r]), 'ghost');
+      tb.append(el('tr', {}, el('td', {}, cb),
+        el('td', {}, el('b', {}, r.name), el('div', { style: 'color:#999;font-size:12px' }, (r.code || '') + (r.dept ? ' · ' + r.dept : ''))),
+        el('td', {}, swDay(r.work_date)), el('td', {}, swDay(r.off_date)), el('td', {}, ...st), el('td', {}, r.note || '—'), el('td', {}, del)));
+    }
+    all.onchange = () => { sel.clear(); cbs.forEach((c, i) => { c.checked = all.checked; if (all.checked) sel.add(rows[i].id); }); syncDel(); };
+    box.replaceChildren(tbl);
+  };
+  const remove = async (list) => {
+    if (!list.length) return;
+    if (!confirm(list.length === 1 ? `Xoá đăng ký làm bù ${swDay(list[0].work_date)} của ${list[0].name}?\nNgày đó sẽ tính lại như ngày nghỉ (tăng ca ngày nghỉ), ngày nghỉ bù ${swDay(list[0].off_date)} không còn ký hiệu NB.` : `Xoá ${list.length} đăng ký làm bù đã chọn? Công các ngày làm bù sẽ được tính lại.`)) return;
+    try {
+      const r = await api('/admin/swap-days/delete', { method: 'POST', body: { ids: list.map((x) => x.id) } });
+      await swapRecompute(r.rows.map((x) => [x.employee_id, x.work_date]));
+      toast(`Đã xoá ${r.count} đăng ký`, 'ok'); load();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  delBtn.onclick = () => remove(rows.filter((r) => sel.has(r.id)));
+  addBtn.onclick = () => swapAddModal(load);
+  mI.onchange = load;
+  load();
+}
+async function swapAddModal(done) {
+  let emps = [];
+  try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); }
+  const pick = await empMultiPicker(emps), picked = pick.picked;
+  const workI = el('input', { type: 'date' }), offI = el('input', { type: 'date' });
+  const noteI = el('input', { placeholder: 'Ghi chú (tuỳ chọn), VD: làm bù để nghỉ thứ 2 sau lễ' });
+  const info = el('div', { class: 'map-hint' });
+  const wkSet = new Set(String(SETTINGS.weekend_days || '7').split(',').map((x) => +x.trim()));
+  const isWk = (d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return wkSet.has(w === 0 ? 7 : w); };
+  const sync = () => {
+    const a = workI.value, b = offI.value, parts = [];
+    if (a) parts.push(`Làm bù: ${swDay(a)}` + (isWk(a) ? '' : ' — ngày này vốn là ngày làm việc bình thường, đăng ký không làm đổi cách tính công'));
+    if (b) parts.push(`Nghỉ bù: ${swDay(b)}` + (isWk(b) ? ' — ngày này vốn đã là ngày nghỉ hằng tuần' : ''));
+    info.textContent = parts.join('  ·  ');
+  };
+  workI.onchange = sync; offI.onchange = sync;
+  const save = el('button', { class: 'btn' }, 'Lưu đăng ký');
+  save.onclick = async () => {
+    if (!picked.size) return toast('Chọn ít nhất 1 nhân viên', 'err');
+    if (!workI.value || !offI.value) return toast('Chọn ngày làm bù và ngày nghỉ bù', 'err');
+    if (workI.value === offI.value) return toast('Ngày làm bù và ngày nghỉ bù phải khác nhau', 'err');
+    save.disabled = true;
+    try {
+      const r = await api('/admin/swap-days', { method: 'POST', body: { employee_ids: [...picked], work_date: workI.value, off_date: offI.value, note: noteI.value } });
+      await swapRecompute(r.employee_ids.map((id) => [id, workI.value]));
+      if (r.skipped.length) alert(`Đã đăng ký ${r.count} người. Bỏ qua ${r.skipped.length} người:\n` + r.skipped.slice(0, 20).join('\n') + (r.skipped.length > 20 ? `\n… và ${r.skipped.length - 20} người khác` : ''));
+      else toast(`Đã đăng ký làm bù cho ${r.count} người`, 'ok');
+      closeModal(); _swMonth = workI.value.slice(0, 7); pageSwap();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  };
+  openModal('Đăng ký làm bù', [
+    pick.node,
+    el('div', { class: 'two-col' }, field('Ngày đi LÀM bù (tính như ngày thường)', workI), field('Ngày được NGHỈ bù (ký hiệu NB)', offI)),
+    info,
+    field('Ghi chú', noteI),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+}
+
+/* ---------- LÝ DO NGHỈ tự khai báo (ngoài các loại có sẵn) ---------- */
+async function leaveTypesModal() {
+  const box = el('div', {}, loading());
+  const nameI = el('input', { placeholder: 'VD: Nghỉ ốm, Nghỉ việc riêng, Nghỉ chờ việc…', maxlength: 60 });
+  const symI = el('input', { placeholder: 'VD: NO', maxlength: 4, style: 'text-transform:uppercase' });
+  const paidC = el('input', { type: 'checkbox' }), quotaC = el('input', { type: 'checkbox' });
+  const addB = el('button', { class: 'btn' }, '+ Thêm lý do nghỉ');
+  const cancelB = el('button', { class: 'btn ghost', style: 'display:none' }, 'Thôi sửa');
+  let editing = null;
+  const reset = () => { editing = null; nameI.value = ''; symI.value = ''; paidC.checked = false; quotaC.checked = false; addB.textContent = '+ Thêm lý do nghỉ'; cancelB.style.display = 'none'; };
+  cancelB.onclick = reset;
+  const yn = (v) => (v ? '✔' : '—');
+  const draw = async () => {
+    let d;
+    try { d = await api('/leaves/types/all'); } catch (e) { box.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
+    const tbl = el('table', { class: 'data', style: 'width:100%' }), tb = el('tbody');
+    tbl.append(el('thead', {}, el('tr', {}, ...['Lý do nghỉ', 'Ký hiệu', 'Lương', 'Trừ phép', ''].map((t) => el('th', {}, t)))), tb);
+    for (const t of d.builtin) tb.append(el('tr', {}, el('td', { style: 'white-space:nowrap' }, t.type, el('span', { style: 'color:#9ca3af;font-size:12px' }, t.system ? ' · tự sinh khi đăng ký làm bù' : ' · có sẵn')), el('td', {}, el('b', {}, t.sym)), el('td', {}, yn(t.paid)), el('td', {}, yn(t.quota)), el('td', {}, '')));
+    for (const t of d.custom) {
+      const edit = btnSm('Sửa', () => { editing = t; nameI.value = t.type; symI.value = t.sym; paidC.checked = t.paid; quotaC.checked = t.quota; addB.textContent = 'Lưu thay đổi'; cancelB.style.display = ''; nameI.focus(); });
+      const tog = t.active ? null : btnSm('Dùng lại', async () => { try { await api('/leaves/types/' + t.id, { method: 'PUT', body: { name: t.type, sym: t.sym, paid: t.paid, quota: t.quota, active: true } }); draw(); } catch (e) { toast(e.message, 'err'); } }, 'ghost');
+      const del = btnSm(t.used ? 'Ẩn' : 'Xoá', async () => {
+        if (!confirm(t.used ? `"${t.type}" đã có ${t.used} đơn dùng nên chỉ ẨN (không chọn được nữa, đơn cũ giữ nguyên). Ẩn?` : `Xoá lý do nghỉ "${t.type}"?`)) return;
+        try { await api('/leaves/types/' + t.id, { method: 'DELETE' }); if (editing && editing.id === t.id) reset(); draw(); } catch (e) { toast(e.message, 'err'); }
+      }, 'ghost');
+      tb.append(el('tr', { style: t.active ? '' : 'opacity:.55' }, el('td', { style: 'white-space:nowrap' }, el('b', {}, t.type), t.active ? '' : el('span', { class: 'pill', style: 'margin-left:6px' }, 'Đã ẩn'), t.used ? el('span', { style: 'color:#9ca3af;font-size:12px' }, ` · ${t.used} đơn`) : ''),
+        el('td', {}, el('b', {}, t.sym)), el('td', {}, yn(t.paid)), el('td', {}, yn(t.quota)),
+        el('td', {}, el('div', { style: 'display:flex;gap:6px;justify-content:flex-end' }, edit, tog, t.active ? del : null))));
+    }
+    box.replaceChildren(el('div', { class: 'tbl-scroll', style: 'max-height:300px;overflow:auto' }, tbl));
+  };
+  addB.onclick = async () => {
+    const body = { name: nameI.value, sym: symI.value, paid: paidC.checked, quota: quotaC.checked };
+    if (!body.name.trim()) return toast('Nhập tên lý do nghỉ', 'err');
+    if (!body.sym.trim()) return toast('Nhập ký hiệu hiện trên bảng công', 'err');
+    try {
+      if (editing) await api('/leaves/types/' + editing.id, { method: 'PUT', body });
+      else await api('/leaves/types', { method: 'POST', body });
+      toast(editing ? 'Đã lưu' : 'Đã thêm lý do nghỉ', 'ok'); reset(); draw();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  openModal('Lý do nghỉ', [
+    el('div', { class: 'map-hint' }, 'Tự khai thêm lý do nghỉ của công ty. Lý do mới chọn được khi lập đơn (web + điện thoại), hiện đúng ký hiệu trên bảng công và có cột riêng trong báo cáo. "Có lương" = ngày nghỉ được trả lương như ngày công; "Trừ phép năm" = trừ vào quỹ phép năm của nhân viên.'),
+    box,
+    el('div', { style: 'display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:12px;margin-top:6px' }, field('Tên lý do nghỉ', nameI), field('Ký hiệu', symI)),
+    el('div', { style: 'display:flex;gap:22px;flex-wrap:wrap' }, el('label', { class: 'lv-chk' }, paidC, el('span', {}, 'Có lương')), el('label', { class: 'lv-chk' }, quotaC, el('span', {}, 'Trừ phép năm'))),
+    el('div', { style: 'display:flex;gap:8px' }, addB, cancelB),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+  draw();
 }
 
 // Quản lý khai nghỉ TRỰC TIẾP cho 1 hoặc nhiều nhân viên (đơn tự duyệt)
@@ -6271,6 +6424,7 @@ async function pageSettings() {
   const holBox = el('div', { id: 'hol-box' }, loading());
   const holDate = input('hol-date', { type: 'date' });
   const holName = input('hol-name', { placeholder: 'VD: Quốc khánh 2/9' });
+  const holKind = el('select', {}, el('option', { value: 'le' }, 'Ngày lễ, tết (đi làm: tăng ca ngày lễ)'), el('option', { value: 'bu' }, 'Nghỉ bù lễ (đi làm: tăng ca ngày nghỉ)'));
   const addHol = el('button', { class: 'btn' }, 'Thêm ngày lễ');
   const loadHols = async () => {
     const { rows } = await api('/admin/holidays');
@@ -6279,18 +6433,20 @@ async function pageSettings() {
     for (const h of rows) {
       const del = btnSm('Xoá', async () => { await api('/admin/holidays/' + h.id, { method: 'DELETE' }); loadHols(); }, 'ghost');
       holBox.append(el('div', { style: 'display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid #f1efec' },
-        el('b', {}, fmtD(h.holiday_date) + '/' + h.holiday_date.slice(0, 4)), el('span', { style: 'flex:1' }, h.name || ''), del));
+        el('b', {}, fmtD(h.holiday_date) + '/' + h.holiday_date.slice(0, 4)), el('span', { style: 'flex:1' }, h.name || '', h.kind === 'bu' ? el('span', { class: 'pill warn', style: 'margin-left:8px' }, 'Nghỉ bù lễ') : ''), del));
     }
   };
   addHol.onclick = async () => {
     if (!holDate.value) return toast('Chọn ngày', 'err');
-    try { await api('/admin/holidays', { method: 'POST', body: { holiday_date: holDate.value, name: holName.value } }); toast('Đã thêm', 'ok'); holName.value = ''; loadHols(); }
+    try { await api('/admin/holidays', { method: 'POST', body: { holiday_date: holDate.value, name: holName.value, kind: holKind.value } }); toast('Đã thêm', 'ok'); holName.value = ''; loadHols(); }
     catch (e) { toast(e.message, 'err'); }
   };
   const panelHol = (hasPerm('holidays') && !hourlyMode()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Ngày lễ'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', { class: 'two-col' }, field('Ngày', holDate), field('Tên', holName)),
+      field('Loại', holKind),
+      el('div', { class: 'map-hint' }, 'Nghỉ bù lễ: khi ngày lễ trùng ngày nghỉ hằng tuần, người lao động được nghỉ bù vào ngày làm việc kế tiếp. Nghỉ đúng ngày đó thì hiện như nghỉ lễ (L); nếu đi làm thì tính tăng ca ngày nghỉ hằng tuần (hệ số ngày nghỉ, ký hiệu NN), không tính hệ số ngày lễ. Thêm / xoá ngày lễ xong bấm "Tính lại công" cho các ngày đã có giờ chấm.'),
       addHol, holBox)) : null;
 
   // ----- Sao lưu & phục hồi dữ liệu -----

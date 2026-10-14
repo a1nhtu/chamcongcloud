@@ -10,6 +10,7 @@ import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom } from '../day-metrics.js';
 import { otRegCapper } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
+import { dayRules } from '../swap.js';
 
 const r = Router();
 r.use(authRequired);
@@ -23,16 +24,16 @@ function pushLoc(office, distance, lat, lng) {
   return `GPS ${Number(lat).toFixed(5)}, ${Number(lng).toFixed(5)}`;
 }
 
-function isHoliday(date) {
-  return !!db.prepare('SELECT 1 FROM public_holidays WHERE holiday_date = ?').get(date);
-}
 function dayFlags(date, empId = null) {
+  const rules = dayRules(db);
+  const swapWork = rules.isSwapWork(empId, date);          // ngày làm bù → như ngày thường
+  const compOff = !swapWork && rules.isCompOff(date);      // nghỉ bù lễ mà đi làm → như ngày nghỉ hằng tuần
   return {
-    isHoliday: isHoliday(date),
-    isWeekend: isWeekendDay(date, getSetting('weekend_days', '7')) && !isWeekendNormalEmp(empId),
+    isHoliday: rules.isHoliday(date),
+    isWeekend: compOff || (!swapWork && isWeekendDay(date, getSetting('weekend_days', '7')) && !isWeekendNormalEmp(empId)),
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
-    weekendOt: getSetting('weekend_work_as_ot', '1') === '1',
+    weekendOt: compOff || getSetting('weekend_work_as_ot', '1') === '1',
     lateBlock: Math.max(0, parseInt(getSetting('late_round_block', '0'), 10) || 0),
     priv: privilegeFor(db, empId, date),   // chế độ ưu đãi (thai sản…): được đến muộn / về sớm
     half: halfLeaveFor(db, empId, date),   // đơn nghỉ phép nửa ngày đã duyệt → nửa nghỉ không tính trễ / sớm

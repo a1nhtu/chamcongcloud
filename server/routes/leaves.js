@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { db } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
-import { LEAVE_TYPES, leaveBalance, overQuotaMsg, leaveSettings } from '../leave-quota.js';
+import { LEAVE_TYPES, leaveTypes, customLeaveTypes, leaveBalance, overQuotaMsg, leaveSettings } from '../leave-quota.js';
 import { PRIV_KINDS } from '../privilege.js';
 const normHalf = (h, f, t) => (f === t && (h === 'sang' || h === 'chieu') ? h : '');
 
@@ -28,7 +28,55 @@ r.post('/', (req, res) => {
 });
 
 // Danh mục loại đơn
-r.get('/types', (req, res) => res.json({ rows: LEAVE_TYPES }));
+r.get('/types', (req, res) => res.json({ rows: leaveTypes() }));
+
+/* ---------- LÝ DO NGHỈ TỰ KHAI BÁO: tên + ký hiệu bảng công + có lương / trừ phép năm ---------- */
+function typeBody(b, selfId = 0) {
+  const name = String(b.name || '').trim().replace(/\s+/g, ' ').slice(0, 60);
+  const sym = String(b.sym || '').trim().toUpperCase().slice(0, 4);
+  if (!name) return { error: 'Nhập tên lý do nghỉ' };
+  if (!/^[A-ZĐ0-9]{1,4}$/.test(sym)) return { error: 'Ký hiệu gồm 1–4 chữ / số, viết liền (VD: NO, VR, H1)' };
+  const low = name.toLowerCase();
+  if (LEAVE_TYPES.some((x) => x.type.toLowerCase() === low)) return { error: `"${name}" là loại có sẵn, đặt tên khác` };
+  const others = customLeaveTypes(true).filter((x) => x.id !== selfId);
+  if (others.some((x) => x.type.toLowerCase() === low)) return { error: `Đã có lý do nghỉ "${name}"` };
+  const usedSym = [...LEAVE_TYPES, ...others.filter((x) => x.active)].find((x) => x.sym === sym) || (['X', 'V', 'L', 'O', 'T', 'NN'].includes(sym) ? { type: 'ký hiệu chấm công' } : null);
+  if (usedSym) return { error: `Ký hiệu "${sym}" đang dùng cho "${usedSym.type}", chọn ký hiệu khác` };
+  return { name, sym, paid: b.paid ? 1 : 0, quota: b.quota ? 1 : 0 };
+}
+r.get('/types/all', permRequired('leaves'), (req, res) => {
+  const used = new Map(db.prepare('SELECT type, COUNT(*) c FROM leave_requests GROUP BY type').all().map((x) => [x.type, x.c]));
+  res.json({ builtin: LEAVE_TYPES, custom: customLeaveTypes(true).map((x) => ({ ...x, used: used.get(x.type) || 0 })) });
+});
+r.post('/types', permRequired('leaves'), (req, res) => {
+  const b = typeBody(req.body || {});
+  if (b.error) return res.status(400).json({ error: b.error });
+  const id = db.prepare('INSERT INTO leave_types(name, sym, paid, quota) VALUES (?,?,?,?)').run(b.name, b.sym, b.paid, b.quota).lastInsertRowid;
+  res.json({ ok: true, id });
+});
+r.put('/types/:id', permRequired('leaves'), (req, res) => {
+  const row = db.prepare('SELECT * FROM leave_types WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Không tìm thấy lý do nghỉ' });
+  const b = typeBody(req.body || {}, row.id);
+  if (b.error) return res.status(400).json({ error: b.error });
+  const active = req.body.active == null ? row.active : (req.body.active ? 1 : 0);
+  db.exec('BEGIN');
+  try {
+    db.prepare('UPDATE leave_types SET name=?, sym=?, paid=?, quota=?, active=? WHERE id=?').run(b.name, b.sym, b.paid, b.quota, active, row.id);
+    if (b.name !== row.name) db.prepare('UPDATE leave_requests SET type=? WHERE type=?').run(b.name, row.name);   // đổi tên → đơn cũ đổi theo
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  res.json({ ok: true });
+});
+// Xoá: lý do đã có đơn dùng thì chỉ ẨN (đơn cũ vẫn giữ ký hiệu / có lương như đã khai)
+r.delete('/types/:id', permRequired('leaves'), (req, res) => {
+  const row = db.prepare('SELECT * FROM leave_types WHERE id=?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Không tìm thấy lý do nghỉ' });
+  const used = db.prepare('SELECT COUNT(*) c FROM leave_requests WHERE type=?').get(row.name).c;
+  if (used) db.prepare('UPDATE leave_types SET active=0 WHERE id=?').run(row.id);
+  else db.prepare('DELETE FROM leave_types WHERE id=?').run(row.id);
+  res.json({ ok: true, hidden: used > 0, used });
+});
 // Quỹ phép năm của tôi
 r.get('/balance', (req, res) => {
   const y = parseInt(req.query.year, 10) || +new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 4);
@@ -73,7 +121,7 @@ r.post('/admin', permRequired('leaves'), (req, res) => {
   const { type, from_date, to_date, reason } = req.body || {};
   const ids = [...new Set((Array.isArray(req.body?.employee_ids) ? req.body.employee_ids : []).map(Number).filter(Boolean))];
   if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
-  if (!LEAVE_TYPES.some((x) => x.type === type)) return res.status(400).json({ error: 'Loại đơn không hợp lệ' });
+  if (!leaveTypes().some((x) => x.type === type)) return res.status(400).json({ error: 'Loại đơn không hợp lệ' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from_date || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to_date || '')) return res.status(400).json({ error: 'Chọn từ ngày / đến ngày' });
   if (to_date < from_date) return res.status(400).json({ error: 'Đến ngày phải sau từ ngày' });
   const half = normHalf(req.body?.half, from_date, to_date);
@@ -94,8 +142,10 @@ r.post('/admin', permRequired('leaves'), (req, res) => {
 
 // Quản lý xoá đơn bất kỳ (kể cả đã duyệt — VD nhập nhầm)
 r.delete('/admin/:id', permRequired('leaves'), (req, res) => {
-  const n = db.prepare('DELETE FROM leave_requests WHERE id = ?').run(req.params.id).changes;
-  if (!n) return res.status(404).json({ error: 'Không tìm thấy đơn' });
+  const row = db.prepare('SELECT swap_id FROM leave_requests WHERE id = ?').get(req.params.id);
+  if (!row) return res.status(404).json({ error: 'Không tìm thấy đơn' });
+  if (row.swap_id) return res.status(400).json({ error: 'Đơn "Nghỉ bù" này sinh từ Đăng ký làm bù — vào menu Đăng ký làm bù để xoá.' });
+  db.prepare('DELETE FROM leave_requests WHERE id = ?').run(req.params.id);
   res.json({ ok: true });
 });
 

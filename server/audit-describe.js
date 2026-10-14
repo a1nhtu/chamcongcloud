@@ -152,7 +152,9 @@ const RULES = [
   ['POST', /^\/(departments|positions|offices)$/, (r) => `"${r.body?.name || ''}"`],
   ['PUT', /^\/(departments|offices)\/(\d+)$/, (r, m) => { const o = one(`SELECT name FROM ${m[1]} WHERE id = ?`, +m[2]) || {}; return `"${o.name || ''}"${r.body?.name && r.body.name !== o.name ? ' → "' + r.body.name + '"' : ''}`; }],
   ['DELETE', /^\/(departments|positions|offices)\/(\d+)/, (r, m) => `"${(one(`SELECT name FROM ${m[1]} WHERE id = ?`, +m[2]) || {}).name || '#' + m[2]}"`],
-  ['POST', /^\/holidays$/, (r) => `${dmy(r.body?.holiday_date || r.body?.date)}${r.body?.name ? ' – ' + r.body.name : ''}`],
+  ['POST', /^\/holidays$/, (r) => `${dmy(r.body?.holiday_date || r.body?.date)}${r.body?.name ? ' – ' + r.body.name : ''}${r.body?.kind === 'bu' ? ' (nghỉ bù lễ)' : ''}`],
+  ['POST', /^\/swap-days$/, (r) => { const b = r.body || {}; return join([`Làm bù ngày ${dmy(b.work_date)}, nghỉ bù ngày ${dmy(b.off_date)}`, 'NV: ' + empNames(b.employee_ids || []), b.note ? 'Ghi chú: ' + b.note : '']); }],
+  ['POST', /^\/swap-days\/delete$/, (r) => { const a = (r.body?.ids || []).map(Number).filter(Boolean); const rows = a.length ? all(`SELECT w.work_date, w.off_date, e.full_name FROM swap_days w JOIN employees e ON e.id=w.employee_id WHERE w.id IN (${a.map(() => '?').join(',')})`, ...a) : []; return rows.slice(0, 8).map((x) => `${x.full_name}: làm bù ${dmy(x.work_date)}, nghỉ bù ${dmy(x.off_date)}`).join('; ') + (rows.length > 8 ? ` … (${rows.length} dòng)` : ''); }],
   ['DELETE', /^\/holidays\/(\d+)$/, (r, m) => { const h = one('SELECT holiday_date, name FROM public_holidays WHERE id = ?', +m[1]) || {}; return `${dmy(h.holiday_date)}${h.name ? ' – ' + h.name : ''}`; }],
 
   // ----- Máy chấm công -----
