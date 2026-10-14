@@ -56,3 +56,7 @@ tools/seed-device-demo.mjs
 *.docx
 *.pptx
 dist-setup/
+
+# Bo cai Linux (dong goi ra / binary tai ve)
+dist-linux/
+tools/cloudflared-linux-amd64

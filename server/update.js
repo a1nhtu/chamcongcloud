@@ -19,8 +19,12 @@ const INSTALL_ROOT = join(APP_DIR, '..');     // thư mục cài (bản cài: <i
 const DEFAULT_REPO = 'a1nhtu/chamcongcloud';
 const DEFAULT_BRANCH = 'main';
 
-// Bản cài cho khách có runtime\node.exe + ChayApp.bat (khác với môi trường dev)
+const IS_WIN = process.platform === 'win32';
+
+// Bản cài cho khách có runtime\node.exe + ChayApp.bat (khác với môi trường dev).
+// Bản cài Linux: runtime/node + chay-app.mjs (systemd chạy, tự bật lại khi app thoát).
 export function isPackaged() {
+  if (!IS_WIN) return existsSync(join(INSTALL_ROOT, 'runtime', 'node')) && existsSync(join(INSTALL_ROOT, 'chay-app.mjs'));
   return existsSync(join(INSTALL_ROOT, 'runtime', 'node.exe')) || existsSync(join(INSTALL_ROOT, 'ChayApp.bat'));
 }
 function nodeExe() {
@@ -127,6 +131,27 @@ rmdir /s /q "${workRoot}" >nul 2>&1
 `;
 }
 
+// Linux: lưu bản đang chạy vào _prev rồi chép bản mới đè lên app/. Lỗi giữa chừng → trả lại bản cũ.
+function swapInPlaceLinux({ staged, prev }) {
+  const parts = ['server', 'public', 'package.json'];
+  rmSync(prev, { recursive: true, force: true });
+  mkdirSync(prev, { recursive: true });
+  for (const p of parts) cpSync(join(APP_DIR, p), join(prev, p), { recursive: true });
+  try {
+    for (const p of parts) {
+      rmSync(join(APP_DIR, p), { recursive: true, force: true });
+      cpSync(join(staged, p), join(APP_DIR, p), { recursive: true });
+    }
+    if (existsSync(join(staged, 'node_modules')))
+      cpSync(join(staged, 'node_modules'), join(APP_DIR, 'node_modules'), { recursive: true });
+  } catch (e) {
+    for (const p of parts) {
+      try { rmSync(join(APP_DIR, p), { recursive: true, force: true }); cpSync(join(prev, p), join(APP_DIR, p), { recursive: true }); } catch {}
+    }
+    throw new Error('Chép bản mới bị lỗi, đã giữ nguyên bản cũ: ' + e.message);
+  }
+}
+
 // Thực hiện cập nhật: tải zip → giải nén → chuẩn bị → khởi động lại
 export async function applyUpdate() {
   const info = await checkUpdate();
@@ -156,9 +181,13 @@ export async function applyUpdate() {
   let extracted = false;
   // Dùng bsdtar của Windows (System32\tar.exe) — giải được .zip; tránh GNU tar trong PATH
   const winTar = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe');
-  const tarBin = existsSync(winTar) ? winTar : 'tar';
+  // Linux: GNU tar không giải được .zip → bsdtar (libarchive-tools), dự phòng unzip
+  const tarBin = !IS_WIN ? 'bsdtar' : existsSync(winTar) ? winTar : 'tar';
   try { execFileSync(tarBin, ['-xf', zipPath, '-C', exDir], { stdio: 'ignore' }); extracted = true; } catch {}
-  if (!extracted) {
+  if (!extracted && !IS_WIN) {
+    try { execFileSync('unzip', ['-q', '-o', zipPath, '-d', exDir], { stdio: 'ignore' }); extracted = true; } catch {}
+  }
+  if (!extracted && IS_WIN) {
     try {
       execFileSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
         `Expand-Archive -LiteralPath '${zipPath}' -DestinationPath '${exDir}' -Force`], { stdio: 'ignore' });
@@ -184,6 +213,14 @@ export async function applyUpdate() {
 
   // 5) Sao lưu CSDL trước khi cập nhật (an toàn)
   try { doBackup('preupdate'); } catch {}
+
+  // 6-Linux) Chép đè ngay trong tiến trình này (Linux cho thay file đang chạy) rồi thoát → systemd tự bật lại bằng code mới
+  if (!IS_WIN) {
+    swapInPlaceLinux({ staged, prev: join(INSTALL_ROOT, '_prev') });
+    rmSync(workRoot, { recursive: true, force: true });
+    setTimeout(() => process.exit(0), 1500);   // đợi trả kết quả về trình duyệt rồi mới thoát
+    return { ok: true, restarting: true, current: info.current, latest: info.latest };
+  }
 
   // 6) Ghi CapNhat.bat và chạy nền → app tự khởi động lại với code mới
   const vbsPath = writeHiddenLauncher();

@@ -1,0 +1,28 @@
+DIGIPLUS CHẤM CÔNG — BẢN LINUX (Ubuntu / Debian 64-bit)
+========================================================
+
+CÀI ĐẶT (trên VPS, cần quyền root)
+  1. Đăng nhập VPS bằng SSH (PuTTY / Terminal / cửa sổ dòng lệnh của nhà cung cấp VPS).
+  2. Dán 1 lệnh:
+        curl -fsSL https://huongdan.maychamcongcloud.com/cai-linux | sudo bash
+  3. Trả lời câu hỏi: tên khách (đã tạo trên trang Tạo khách) + mật khẩu cấp domain.
+     → Bộ cài tự lấy tên miền + token, cài, bật tự chạy khi khởi động máy.
+  4. Mở https://<tenkhach>.maychamcongcloud.com/admin → lấy MÃ MÁY → cấp license như bản Windows.
+
+  Cài bản LAN (không tên miền):  ... | sudo bash -s -- --lan --port 8686
+  Nhiều khách trên 1 VPS: chạy lại lệnh cho từng khách (mỗi khách 1 cổng, 1 thư mục /opt/digiplus/<tenkhach>).
+
+SAU KHI CÀI
+  - Thư mục cài:      /opt/digiplus/<tenkhach>
+  - Dữ liệu:          /opt/digiplus/<tenkhach>/app/data  và  app/uploads
+  - Cấu hình:         /opt/digiplus/<tenkhach>/config.txt (cổng, token tunnel)
+  - Xem tình trạng:   sudo /opt/digiplus/<tenkhach>/kiem-tra.sh
+  - Khởi động lại:    sudo systemctl restart digiplus-<tenkhach>
+  - Gỡ cài đặt:       sudo /opt/digiplus/<tenkhach>/go-cai-dat.sh   (giữ dữ liệu)
+  - Cập nhật phần mềm: bấm nút Cập nhật trong trang quản lý như bản Windows.
+  - Cài lại / sửa lỗi: chạy lại lệnh cài với đúng tên khách → dữ liệu cũ được giữ nguyên.
+
+KHÁC BẢN WINDOWS
+  - Không có tải dữ liệu máy chấm công qua TCP/IP (SDK zkemkeeper chỉ chạy trên Windows).
+    Máy chấm công đẩy dữ liệu về tên miền (ADMS/Cloud, cổng 443) vẫn chạy bình thường.
+  - Mã máy (để cấp license) khác với khi cài Windows trên cùng VPS → cấp license mới theo Mã máy hiện trên web.

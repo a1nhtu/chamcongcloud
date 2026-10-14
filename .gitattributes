@@ -1,0 +1,3 @@
+# Script chay tren Linux: luon xuong dong kieu LF (CRLF lam bash bao loi)
+*.sh text eol=lf
+tools/linux/* text eol=lf

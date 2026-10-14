@@ -26,6 +26,13 @@ export function machineId() {
     const m = out.match(/MachineGuid\s+REG_SZ\s+([\w-]+)/i);
     if (m) raw = 'g:' + m[1];
   } catch {}
+  // Linux (bản cài VPS Linux): mã định danh máy do hệ điều hành sinh lúc cài (/etc/machine-id). Windows không vào nhánh này.
+  if (!raw && process.platform === 'linux') {
+    try {
+      const id = readFileSync('/etc/machine-id', 'utf8').trim().toLowerCase();
+      if (/^[0-9a-f]{32}$/.test(id)) raw = 'l:' + id;
+    } catch {}
+  }
   if (!raw) {
     const macs = Object.values(os.networkInterfaces()).flat()
       .filter((n) => n && !n.internal && n.mac && n.mac !== '00:00:00:00:00:00')

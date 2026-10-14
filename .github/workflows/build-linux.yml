@@ -1,0 +1,53 @@
+name: Build Linux installer → Release
+
+# Tự đóng gói BỘ CÀI LINUX (trung tính) rồi up lên GitHub Release tag `base`
+# (cạnh Setup.exe / base.zip của bản Windows) mỗi khi bump version hoặc sửa bộ cài Linux.
+# Bộ cài tools/linux/cai-dat.sh tải file này về khi cài trên VPS Linux.
+# Quy trình bản Windows (build-base.yml) KHÔNG bị ảnh hưởng.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'package.json'
+      - 'tools/linux/**'
+      - '.github/workflows/build-linux.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # cần để up asset lên Release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24 (runtime se ship cho khach)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Cai dependencies (chi prod)
+        run: npm install --omit=dev --no-audit --no-fund
+
+      - name: Tai cloudflared (Linux amd64)
+        run: curl -fsSL -o tools/cloudflared-linux-amd64 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+
+      - name: Dong goi (build-linux.mjs)
+        run: node tools/linux/build-linux.mjs
+
+      - name: Kiem tra goi trung tinh (khong token / khong du lieu)
+        run: |
+          set -e
+          L=$(tar -tzf dist-linux/DigiplusChamCong-linux.tar.gz)
+          if echo "$L" | grep -E '^DigiplusChamCong/(app/)?(data|uploads|certs)/|\.db$|license\.key|\.pem$|\.env$|PASS_'; then echo "LOI: goi chua file cam"; exit 1; fi
+          tar -xzf dist-linux/DigiplusChamCong-linux.tar.gz -O DigiplusChamCong/config.txt | grep -q '^TUNNEL_TOKEN=$'
+          tar -xzf dist-linux/DigiplusChamCong-linux.tar.gz -O DigiplusChamCong/config.txt | grep -q '^CUSTOMER=$'
+          echo OK
+
+      - name: Up len Release tag base (ghi de asset cu)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload base dist-linux/DigiplusChamCong-linux.tar.gz --clobber

@@ -367,9 +367,18 @@ async function handleSetupExe(request, env) {
   return new Response(upstream.body, { status: 200, headers });
 }
 
+// Lệnh cài BẢN LINUX ngắn gọn: curl -fsSL https://huongdan.maychamcongcloud.com/cai-linux | sudo bash
+// → trả script tools/linux/cai-dat.sh mới nhất trên nhánh main (repo công khai).
+async function handleLinuxScript() {
+  const upstream = await fetch("https://raw.githubusercontent.com/a1nhtu/chamcongcloud/main/tools/linux/cai-dat.sh", { cf: { cacheTtl: 60 } });
+  if (!upstream.ok) return new Response("echo 'Chua tai duoc bo cai Linux (HTTP " + upstream.status + "). Thu lai sau it phut.'; exit 1\n", { status: 502, headers: { "content-type": "text/plain; charset=utf-8" } });
+  return new Response(upstream.body, { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-cache" } });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    if (url.pathname === "/cai-linux" || url.pathname === "/cai-linux.sh") return handleLinuxScript();
 
     // API cấp license / key máy (ký số phía server)
     if (url.pathname === "/api/gen-license") return handleSign(request, env, "license");
