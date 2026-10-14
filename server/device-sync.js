@@ -522,6 +522,8 @@ function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null)
 
 // Ngưỡng quẹt lặp khi ghép cặp vào/ra (phút) = ô "Bỏ qua lần chấm trùng trong N phút" ở Cài đặt;
 // quản trị đặt 0 (lưu đủ mọi lượt quẹt) thì lúc ghép cặp vẫn lọc lượt lặp dưới 5 phút để không lệch cặp.
+// Kiểu HR-ERP 4 lần quẹt: ca nghỉ trưa cố định + quy tắc nhiều lần vào/ra → mỗi cặp trừ giờ nghỉ, số lần quẹt lẻ lấy đầu → cuối (mặc định TẮT)
+export const pairsFixedBreakOn = () => getSetting('pairs_fixed_break', '0') === '1';
 export const pairDup = () => parseInt(getSetting('punch_dedup_min', '15'), 10) || 5;
 // Ca NGÀY chạy 1 ca/ngày: nhận lượt quẹt tới hết ngày (về rất muộn vẫn có giờ ra)
 const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
@@ -668,7 +670,7 @@ function rebuildDayCore(employeeId, workDate) {
       // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
       const rule = (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || effectiveMergeRule(shift, null) || 'filo');
       const one = picked.length === 1;
-      const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup };
+      const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn() };
       // chỉ 1 ca → nhận lượt quẹt như ca đơn (tới hết ngày với ca ngày); nhiều ca → đúng các lượt đã chia cho ca đó
       const w = ruleWindow(workDate, shift, wopts);
       const { inIso, outIso, pairs } = mergeDayPunches(one ? punchesInWin(w.winStart, w.winEnd) : punches, shift, rule, machineMap, workDate, wopts);
@@ -685,7 +687,7 @@ function rebuildDayCore(employeeId, workDate) {
   if (!shift && !hourly) { const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at); shift = eff.shift; mergeRule = eff.mergeRule; }
   let inIso, outIso, pairs = null;
   if (shift) {
-    const wopts = { toDayEnd: !isNightShift(shift), dupMin: dup };
+    const wopts = { toDayEnd: !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn() };
     const { winStart, winEnd, end } = ruleWindow(workDate, shift, wopts);
     let punches = punchesInWin(winStart, winEnd);
     const claim = nextDayClaim(employeeId, workDate, winEnd, hourly);
@@ -727,6 +729,7 @@ export function dayPairsFor(employeeId, workDate, shift) {
   const { winStart, winEnd } = ruleWindow(workDate, shift, { toDayEnd: !isNightShift(shift) });
   const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+  if (pairsFixedBreakOn() && shift.break_start && rows.length % 2 === 1) return null;   // số lần quẹt lẻ: lấy đầu → cuối (giống lúc dựng công từ máy)
   return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), ioParamsFor(employeeId, workDate) || pairDup()) : null;
 }
 

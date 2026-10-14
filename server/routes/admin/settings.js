@@ -12,6 +12,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       company_address: getSetting('company_address', ''),
       weekend_days: getSetting('weekend_days', '7'),
       weekend_work_as_ot: getSetting('weekend_work_as_ot', '1'),
+      weekend_work_exact: getSetting('weekend_work_exact', '0'),
+      weekend_need_pairs: getSetting('weekend_need_pairs', '0'),
+      pairs_fixed_break: getSetting('pairs_fixed_break', '0'),
+      weekend_ot_before: getSetting('weekend_ot_before', '0'),   // ngày nghỉ: tăng ca tính cả phần đến sớm trước giờ vào ca
       workunit_rounding: getSetting('workunit_rounding', '2'),
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
       ot_rounding: getSetting('ot_rounding', '2'), ot_rounding_mode: getSetting('ot_rounding_mode', '0'),   // làm tròn số giờ tăng ca
@@ -64,6 +68,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.company_address != null) setSetting('company_address', b.company_address);
     if (b.weekend_days != null) setSetting('weekend_days', b.weekend_days);
     if (b.weekend_work_as_ot != null) setSetting('weekend_work_as_ot', b.weekend_work_as_ot ? '1' : '0');
+    if (b.weekend_ot_before != null) setSetting('weekend_ot_before', b.weekend_ot_before ? '1' : '0');
+    if (b.weekend_work_exact != null) setSetting('weekend_work_exact', b.weekend_work_exact ? '1' : '0');
+    if (b.weekend_need_pairs != null) setSetting('weekend_need_pairs', b.weekend_need_pairs ? '1' : '0');
+    if (b.pairs_fixed_break != null) setSetting('pairs_fixed_break', b.pairs_fixed_break ? '1' : '0');
     if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
     if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));
     if (b.ot_rounding != null) setSetting('ot_rounding', String(Math.max(0, Math.min(3, parseInt(b.ot_rounding, 10) || 0))));

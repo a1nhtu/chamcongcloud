@@ -103,7 +103,10 @@ export function computeLate(shift, checkInIso, workDate, block = 0, priv = null)
 // Trả lại số PHÚT.
 // Làm tròn tổng tăng ca gồm nhiều ĐOẠN (trước ca / sau ca / cả ca ngày nghỉ): làm tròn từng đoạn rồi cộng.
 // parts thiếu hoặc không khớp tổng → làm tròn cả tổng như cũ.
-export function roundOtParts(total, parts, decimals = 2, mode = 0, block = 0) {
+// exact (tùy chọn): số phút được GIỮ NGUYÊN, không làm tròn (VD giờ làm trong ca ngày nghỉ khi bật weekend_work_exact) — chỉ làm tròn phần còn lại
+export function roundOtParts(total, parts, decimals = 2, mode = 0, block = 0, exact = 0) {
+  const ex = Math.max(0, Math.min(Number(exact) || 0, Number(total) || 0));
+  if (ex > 0) return roundOtParts((Number(total) || 0) - ex, parts, decimals, mode, block) + ex;
   const t = Number(total) || 0;
   const ps = (parts || []).map(Number).filter((x) => x > 0);
   const sum = ps.reduce((a, b) => a + b, 0);
@@ -138,7 +141,7 @@ export function noShiftUnit(work_minutes, opts = {}) {
 }
 
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
-  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null, lateBlock = 0, priv = null } = opts;
+  const { isHoliday = false, isWeekend = false, roundingDecimals = 2, roundingMode = 0, pairs = null, lateBlock = 0, priv = null, weekendOtBefore = false, pairsFixedBreak = false } = opts;
   const ci = toMinute(checkInIso);
   const co = toMinute(checkOutIso);
   const { start, end } = shiftBounds(workDate, shift);
@@ -179,7 +182,9 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
       let a = toMinute(pi), b = toMinute(po);
       if (k === 0) a = adjIn(a);                 // lượt vào đầu: áp số phút cho phép đi trễ
       if (k === full.length - 1) b = adjOut(b);  // lượt ra cuối: áp số phút cho phép về sớm
-      work_minutes += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
+      const a2 = a < start ? start : a, b2 = b > end ? end : b;
+      // (cài đặt pairs_fixed_break) ca có nghỉ trưa CỐ ĐỊNH giờ: phần của cặp rơi vào giờ nghỉ không phải giờ làm (HR-ERP: giao với khung sáng + khung chiều)
+      work_minutes += Math.max(0, mins(a2, b2) - (pairsFixedBreak ? breakOverlap(brk, a2, b2) : 0));
     }
     // Ưu đãi "về giữa giờ / đến muộn giữa giờ": phần ra ngoài giữa các cặp (trong khung ca, ngoài giờ nghỉ của ca)
     // được bù lại tối đa midOut + midIn phút
@@ -226,7 +231,8 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
     const after = shift.ot_start_after_min ?? 30;
     if (otAfterRaw >= after && otAfterRaw > 0) { ot_min += otAfterRaw; ot_parts.push(otAfterRaw); }
     // Tăng ca TRƯỚC giờ vào ca (tùy chọn): đến sớm >= ngưỡng
-    if (shift.ot_before) {
+    // (cài đặt chung weekend_ot_before: ngày nghỉ hằng tuần đến sớm cũng là tăng ca dù ca không bật — HR-ERP Hoa Hồng)
+    if (shift.ot_before || (isWeekend && weekendOtBefore)) {
       const beforeRaw = Math.max(0, mins(ci, co < start ? co : start));   // ra trước giờ vào ca → chỉ tính tới lúc ra
       if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) { ot_min += beforeRaw; ot_parts.push(beforeRaw); }
     }
@@ -454,7 +460,11 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
   let co = inWin.length > 1 ? inWin[inWin.length - 1] : null;
   if (co && at(co) - at(ci) < dupMs) co = null;   // cả ngày chỉ 1 cụm quẹt lặp → vẫn là thiếu giờ ra
   const res = { inIso: iso(ci), outIso: iso(co && co !== ci ? co : null) };
-  if (rule === 'pairs') res.pairs = punchPairs(inWin.map((p) => p.punch_at), opts.dupMin);
+  if (rule === 'pairs') {
+    res.pairs = punchPairs(inWin.map((p) => p.punch_at), opts.dupMin);
+    // (cài đặt pairs_fixed_break) Ca có nghỉ trưa CỐ ĐỊNH và số lần quẹt LẺ (3, 5…): HR-ERP không ghép cặp mà lấy đầu → cuối trừ giờ nghỉ
+    if (opts.pairsFixedBreak && shift.break_start && inWin.length >= 3 && inWin.length % 2 === 1) res.pairs = null;
+  }
   return res;
 }
 

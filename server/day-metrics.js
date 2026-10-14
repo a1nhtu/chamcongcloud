@@ -23,6 +23,10 @@ export function payrollCtx(getSetting, db) {
   return {
     weekend: getSetting('weekend_days', '7'),
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
+    weekendOtBefore: getSetting('weekend_ot_before', '0') === '1',   // ngày nghỉ: tăng ca tính cả phần đến sớm trước giờ vào ca
+    pairsFixedBreak: getSetting('pairs_fixed_break', '0') === '1',   // nhiều lần vào/ra + nghỉ trưa cố định (kiểu HR-ERP 4 lần quẹt)
+    weekendNeedPairs: getSetting('weekend_need_pairs', '0') === '1',   // ngày nghỉ: chỉ 2 lần quẹt thì không tính giờ làm trong ca
+    weekendWorkExact: getSetting('weekend_work_exact', '0') === '1',   // ngày nghỉ: giờ làm trong ca giữ đúng số phút, chỉ làm tròn phần ngoài ca
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
     otRound: otRoundingFrom(getSetting),
@@ -74,6 +78,8 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     roundingDecimals: ctx.roundingDecimals,
     roundingMode: ctx.roundingMode,
     lateBlock: ctx.lateBlock || 0,
+    pairsFixedBreak: !!ctx.pairsFixedBreak,   // nhiều lần vào/ra + nghỉ trưa cố định: mỗi cặp trừ giờ nghỉ
+    weekendOtBefore: !!ctx.weekendOtBefore,   // ngày nghỉ: đến sớm trước ca cũng là tăng ca
     pairs,   // quy tắc "Nhiều lần vào/ra": các cặp vào–ra trong ngày (null = tính như cũ)
     priv: opts.empId && ctx.privOf ? ctx.privOf(opts.empId, workDate) : null,   // ưu đãi đến muộn / về sớm (thai sản…)
   };
@@ -100,9 +106,13 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   } else {
     c = { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type: otType, day_status: 'vang' };
   }
+  // Ngày nghỉ + ca nghỉ trưa cố định + chỉ 1 cặp quẹt (2 lần): HR-ERP không tính giờ làm trong ca (chỉ tăng ca ngoài ca) — cài đặt weekend_need_pairs
+  if (flags.isWeekend && ctx.weekendNeedPairs && shift && shift.break_start && pairs && pairs.length === 1 && c.work_minutes) c = { ...c, work_minutes: 0, work_unit: 0 };
+  const beforeWk = c;
   if ((ctx.weekendOt || compOff) && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
+  const wkExact = c !== beforeWk ? (beforeWk.work_minutes || 0) : 0;   // giờ làm trong ca vừa chuyển thành tăng ca ngày nghỉ
   // làm tròn tăng ca (quy tắc chung) — từng đoạn trước ca / sau ca làm tròn riêng
-  if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtParts(c.ot_min, c.ot_parts, r.decimals ?? 2, r.mode || 0, r.block || 0) }; }
+  if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtParts(c.ot_min, c.ot_parts, r.decimals ?? 2, r.mode || 0, r.block || 0, ctx.weekendWorkExact ? wkExact : 0) }; }
   delete c.ot_parts;
   const ot_raw = c.ot_min || 0;
   if (ot_raw && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw) };
