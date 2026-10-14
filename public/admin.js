@@ -3998,6 +3998,9 @@ function auditPanelEl(s) {
   };
   const pkWeek = lvPick(s.audit_week_lv, '1,2,3'), pkMonth = lvPick(s.audit_month_lv, '1,2,3'), pkYear = lvPick(s.audit_year_lv, '1,2,3'), pkClamp = lvPick(s.audit_clamp_lv, '');
   const clIn = num(s.audit_clamp_in_min ?? 14, '1'), clOut = num(s.audit_clamp_out_min ?? 14, '1');
+  // chủ nhật (ngày nghỉ hằng tuần) đi làm tối đa / tháng — mỗi mức ảo 1 ô, để trống = không giới hạn
+  const sunI = [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max: 6, step: 1, placeholder: '—', value: s['audit_sun_l' + l] ?? '' }));
+  const sunBox = el('span', { class: 'lv-pick' }, ...sunI.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
   const auWk = el('input', { type: 'checkbox', ...(s.audit_incl_weekend !== '0' ? { checked: '' } : {}) });
   const auHol = el('input', { type: 'checkbox', ...(s.audit_incl_holiday !== '0' ? { checked: '' } : {}) });
   // Chú thích đổi THEO Ô TÍCH (chỉ nói trạng thái đang chọn) + ghi chú hạn mức tuần
@@ -4025,6 +4028,7 @@ function auditPanelEl(s) {
       await api('/admin/settings', { method: 'PUT', body: { audit_ot_week_h: auWeek.value, audit_ot_month_h: auMonth.value, audit_ot_year_h: auYear.value,
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value,
         audit_week_lv: pkWeek.val(), audit_month_lv: pkMonth.val(), audit_year_lv: pkYear.val(),
+        audit_sun_l1: sunI[0].value, audit_sun_l2: sunI[1].value, audit_sun_l3: sunI[2].value,
         audit_clamp_lv: pkClamp.val(), audit_clamp_in_min: clIn.value, audit_clamp_out_min: clOut.value } });
       SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
     } catch (e) { toast(e.message, 'err'); }
@@ -4037,6 +4041,8 @@ function auditPanelEl(s) {
       lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', pkWeek.node, wkNote),
       lvRow('Tăng ca tối đa mỗi tháng', auMonth, 'giờ', pkMonth.node, '(theo kỳ lương ở Cài đặt › Lương)'),
       lvRow('Tăng ca tối đa mỗi năm', auYear, 'giờ', pkYear.node, '(cộng dồn từ kỳ lương tháng 1)'),
+      lvRow(`Đi làm ${wkName} tối đa / tháng`, sunBox, 'ngày',
+        `Mỗi mức một số ngày (để trống = không giới hạn). Tháng lương có nhiều ngày ${wkName} đi làm hơn thì các ngày thừa bị gỡ hẳn khỏi công ảo (như không đi làm, kể cả tăng ca ngày đó). Ngày được giữ chọn ngẫu nhiên nhưng cố định theo từng nhân viên. Ngày làm bù và ngày lễ không tính vào số này.`),
       lvRow('Khống chế giờ chấm ảo', pkClamp.node,
         'Ở mức được tích, giờ vào / ra ảo luôn nằm sát giờ ca theo 2 số phút dưới đây. Ngày chia ca sáng / chiều thì giờ ra giữa ca và giờ vào chiều cũng theo luật này. Giờ nằm ngoài khoảng được đổi thành một giờ ngẫu nhiên trong khoảng (xem lại vẫn ra đúng giờ đó); đi trễ / về sớm thật giữ nguyên; công và tăng ca không đổi. Không tích mức nào = tắt.'),
       lvRow('· Vào sớm tối đa', clIn, 'phút trước giờ vào ca'),

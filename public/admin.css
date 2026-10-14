@@ -284,6 +284,7 @@ table.sh-list tbody tr.on { background: #fff1e8; box-shadow: inset 3px 0 0 var(-
 .lv-pick { display: inline-flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); }
 .lv-pick label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-weight: 400; cursor: pointer; color: var(--ink); }
 .lv-pick input { width: auto; margin: 0; }
+.lv-pick input[type=number] { width: 56px !important; padding: 5px 6px; }
 .lv-chk { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; margin: 0; font-weight: 400; }
 .lv-chk input { margin-top: 3px; width: auto; }
 @media (max-width: 640px) { .lv-row { grid-template-columns: 1fr; } .lv-lab { padding-top: 0; } }

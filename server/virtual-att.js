@@ -21,6 +21,8 @@ export function auditSettings() {
     clampLv: lvs('audit_clamp_lv', ''),             // KHỐNG CHẾ GIỜ CHẤM áp cho những mức ảo nào (mặc định không mức nào)
     clampIn: Math.round(num('audit_clamp_in_min', 14)) * 60000,    // giờ vào không sớm hơn giờ vào ca quá N phút
     clampOut: Math.round(num('audit_clamp_out_min', 14)) * 60000,  // giờ ra không trễ hơn (giờ tan ca + tăng ca ảo) quá N phút
+    // số ngày nghỉ hằng tuần (chủ nhật…) đi làm tối đa / tháng lương của từng mức ảo; null = không giới hạn
+    sunMax: Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting('audit_sun_l' + l, ''); const n = parseInt(v, 10); return [l, v === '' || v == null || !Number.isFinite(n) || n < 0 ? null : n]; })),
     enabled: getSetting('audit_enabled', '0') === '1',
     weekMin: num('audit_ot_week_h', 0) * 60,         // tối đa / tuần (giờ)
     monthMin: num('audit_ot_month_h', 0) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
@@ -158,10 +160,12 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
         s.start_time, s.end_time FROM attendance a LEFT JOIN shifts s ON s.id = a.shift_id
       WHERE a.employee_id IN (${chunk.map(() => '?').join(',')}) AND a.work_date >= ? AND a.work_date <= ? AND a.ot_min > 0`).all(...chunk, L, R));
   }
+  // CHỦ NHẬT ĐI LÀM TỐI ĐA / THÁNG: ngày nghỉ hằng tuần (dòng công loại tăng ca 'cuoi_tuan') vượt số cho phép bị gỡ hẳn khỏi công ảo
+  const sunHidden = S.sunMax[lv] != null ? sundayDrops(ids, L, R, S.sunMax[lv], lv, P, lockedDay) : new Map();
   const counted = (t) => t === 'le' ? S.inclHoliday : t === 'cuoi_tuan' ? S.inclWeekend : true;
   const byEmp = new Map();
   for (const r of rows) {
-    if (!counted(r.ot_type || 'thuong') || lockedDay(r.work_date)) continue;   // tháng đã chốt: không tính lại
+    if (!counted(r.ot_type || 'thuong') || lockedDay(r.work_date) || sunHidden.has(r.id)) continue;   // tháng đã chốt: không tính lại; chủ nhật bị gỡ: không tính vào hạn mức
     if (!byEmp.has(r.employee_id)) byEmp.set(r.employee_id, []);
     byEmp.get(r.employee_id).push({ r, date: r.work_date, type: r.ot_type || 'thuong', v: r.ot_min || 0 });
   }
@@ -191,7 +195,35 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
       out.set(r.id, { ...shiftTimes(r, cut, x.v), ot_min: x.v, cut });
     }
   }
+  for (const [id, x] of sunHidden) if (x.date >= from && x.date <= to) out.set(id, { hidden: true, check_in_at: null, check_out_at: null, ot_min: 0, cut: x.ot });
   if (S.clampLv.has(lv)) clampRange(out, ids, from, to, S, lv, lockedDay);
+  return out;
+}
+
+// Chủ nhật (ngày nghỉ hằng tuần) đi làm vượt `max` ngày / tháng lương → Map attendance.id → { date, ot } của các dòng bị gỡ.
+// Ngày có lượt chấm (kể cả chỉ có giờ vào) đều tính. Ngày được giữ chọn ngẫu nhiên nhưng CỐ ĐỊNH theo NV + tháng + mức (xem lại vẫn ra đúng ngày đó; mỗi NV giữ các ngày khác nhau).
+function sundayDrops(ids, L, R, max, lv, P, lockedDay) {
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const groups = new Map();   // empId|tháng → Map ngày → [dòng]
+    for (const r of db.prepare(`SELECT id, employee_id, work_date, ot_min, (ot_min > 0 OR work_unit > 0 OR work_minutes > 0) worked FROM attendance WHERE employee_id IN (${chunk.map(() => '?').join(',')})
+        AND work_date >= ? AND work_date <= ? AND ot_type='cuoi_tuan' AND (ot_min > 0 OR work_unit > 0 OR work_minutes > 0 OR check_in_at IS NOT NULL)`).all(...chunk, L, R)) {
+      if (lockedDay(r.work_date)) continue;
+      const k = r.employee_id + '|' + P.key(r.work_date);
+      if (!groups.has(k)) groups.set(k, new Map());
+      const g = groups.get(k); if (!g.has(r.work_date)) g.set(r.work_date, []); g.get(r.work_date).push(r);
+    }
+    for (const [k, days] of groups) {
+      if (days.size <= max) continue;
+      const [eid, m] = k.split('|');
+      let h = (+eid * 2246822519 + +m.replace('-', '') * 3266489917 + lv * 668265263) >>> 0;
+      const rnd = () => { h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0; return h; };
+      // giữ ưu tiên ngày có công / tăng ca; ngày chỉ có 1 lượt chấm (thiếu giờ ra) bị gỡ trước
+      const order = [...days.entries()].map(([d, rs]) => [d, rs.some((r) => r.worked) ? 0 : 1, rnd()]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).map((x) => x[0]);
+      for (const d of order.slice(max)) for (const r of days.get(d)) out.set(r.id, { date: d, ot: r.ot_min || 0 });
+    }
+  }
   return out;
 }
 
