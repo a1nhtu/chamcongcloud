@@ -12,6 +12,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       company_address: getSetting('company_address', ''),
       weekend_days: getSetting('weekend_days', '7'),
       weekend_work_as_ot: getSetting('weekend_work_as_ot', '1'),
+      weekend_work_exact: getSetting('weekend_work_exact', '0'),
+      weekend_need_pairs: getSetting('weekend_need_pairs', '0'),
+      pairs_fixed_break: getSetting('pairs_fixed_break', '0'),
+      weekend_ot_before: getSetting('weekend_ot_before', '0'),   // ngày nghỉ: tăng ca tính cả phần đến sớm trước giờ vào ca
       workunit_rounding: getSetting('workunit_rounding', '2'),
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
       ot_rounding: getSetting('ot_rounding', '2'), ot_rounding_mode: getSetting('ot_rounding_mode', '0'),   // làm tròn số giờ tăng ca
@@ -45,6 +49,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
         audit_week_lv: getSetting('audit_week_lv', '1,2,3'), audit_month_lv: getSetting('audit_month_lv', '1,2,3'), audit_year_lv: getSetting('audit_year_lv', '1,2,3'),
         audit_sun_l1: getSetting('audit_sun_l1', ''), audit_sun_l2: getSetting('audit_sun_l2', ''), audit_sun_l3: getSetting('audit_sun_l3', ''),
         audit_clamp_lv: getSetting('audit_clamp_lv', ''), audit_clamp_in_min: getSetting('audit_clamp_in_min', '14'), audit_clamp_out_min: getSetting('audit_clamp_out_min', '14'),
+        audit_k_lv: getSetting('audit_k_lv', ''), audit_k_early_min: getSetting('audit_k_early_min', '15'), audit_k_late_max: getSetting('audit_k_late_max', '60'),
+        audit_k_out_gap: getSetting('audit_k_out_gap', '15'), audit_k_in_gap: getSetting('audit_k_in_gap', '5'),
       } : {}),
       device_lock_enabled: getSetting('device_lock_enabled', '0'), // khoá thiết bị chấm công điện thoại
       payroll_include_admin: getSetting('payroll_include_admin', '0'), // tính công cho cả tài khoản Admin
@@ -64,6 +70,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.company_address != null) setSetting('company_address', b.company_address);
     if (b.weekend_days != null) setSetting('weekend_days', b.weekend_days);
     if (b.weekend_work_as_ot != null) setSetting('weekend_work_as_ot', b.weekend_work_as_ot ? '1' : '0');
+    if (b.weekend_ot_before != null) setSetting('weekend_ot_before', b.weekend_ot_before ? '1' : '0');
+    if (b.weekend_work_exact != null) setSetting('weekend_work_exact', b.weekend_work_exact ? '1' : '0');
+    if (b.weekend_need_pairs != null) setSetting('weekend_need_pairs', b.weekend_need_pairs ? '1' : '0');
+    if (b.pairs_fixed_break != null) setSetting('pairs_fixed_break', b.pairs_fixed_break ? '1' : '0');
     if (b.workunit_rounding != null) setSetting('workunit_rounding', b.workunit_rounding);
     if (b.workunit_rounding_mode != null) setSetting('workunit_rounding_mode', String(parseInt(b.workunit_rounding_mode, 10) || 0));
     if (b.ot_rounding != null) setSetting('ot_rounding', String(Math.max(0, Math.min(3, parseInt(b.ot_rounding, 10) || 0))));
@@ -121,7 +131,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.audit_incl_holiday != null) setSetting('audit_incl_holiday', b.audit_incl_holiday ? '1' : '0');
       if (b.audit_method != null) setSetting('audit_method', b.audit_method === 'days' ? 'days' : 'ratio');
       // hạn mức tuần / tháng / năm + khống chế giờ chấm: áp cho những mức ảo nào ('1,2,3'; '' = không mức nào)
-      for (const k of ['audit_week_lv', 'audit_month_lv', 'audit_year_lv', 'audit_clamp_lv'])
+      for (const k of ['audit_week_lv', 'audit_month_lv', 'audit_year_lv', 'audit_clamp_lv', 'audit_k_lv'])
         if (b[k] != null) setSetting(k, [...new Set(String(b[k]).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)))].sort().join(','));
       // chủ nhật đi làm tối đa / tháng của từng mức ảo ('' = không giới hạn)
       for (const k of ['audit_sun_l1', 'audit_sun_l2', 'audit_sun_l3']) if (b[k] != null) {
@@ -131,8 +141,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
         if (!Number.isFinite(x) || x < 0 || x > 6 || String(x) !== v) return res.status(400).json({ error: 'Số chủ nhật đi làm tối đa phải là số nguyên 0 – 6 (để trống = không giới hạn)' });
         setSetting(k, String(x));
       }
-      for (const k of ['audit_clamp_in_min', 'audit_clamp_out_min'])
-        if (b[k] != null) { const v = n(b[k], 120); if (v == null) return res.status(400).json({ error: 'Số phút khống chế giờ chấm phải là số ≥ 0' }); setSetting(k, String(Math.round(+v))); }
+      for (const k of ['audit_clamp_in_min', 'audit_clamp_out_min', 'audit_k_early_min', 'audit_k_late_max', 'audit_k_out_gap', 'audit_k_in_gap'])
+        if (b[k] != null) { const v = n(b[k], 240); if (v == null) return res.status(400).json({ error: 'Số phút (khống chế giờ chấm / giờ trưa kiểu K) phải là số ≥ 0' }); setSetting(k, String(Math.round(+v))); }
     }
     if (b.device_lock_enabled != null) setSetting('device_lock_enabled', b.device_lock_enabled ? '1' : '0');
     if (b.punch_dedup_min != null) setSetting('punch_dedup_min', String(Math.max(0, parseInt(b.punch_dedup_min, 10) || 0)));

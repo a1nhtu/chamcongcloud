@@ -34,6 +34,7 @@ function dayFlags(date, empId = null) {
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
     weekendOt: compOff || getSetting('weekend_work_as_ot', '1') === '1',
+    weekendOtBefore: getSetting('weekend_ot_before', '0') === '1',
     lateBlock: Math.max(0, parseInt(getSetting('late_round_block', '0'), 10) || 0),
     priv: privilegeFor(db, empId, date),   // chế độ ưu đãi (thai sản…): được đến muộn / về sớm
     half: halfLeaveFor(db, empId, date),   // đơn nghỉ phép nửa ngày đã duyệt → nửa nghỉ không tính trễ / sớm
@@ -272,8 +273,10 @@ r.post('/check-out', (req, res) => {
     const wm = Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
     calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate, req.user.id)), ot_type: otTypeOf(wdate, req.user.id), day_status: 'lam_viec' };
   }
+  const calcBeforeWk = calc;
   if (!hourly) calc = weekendToOt(calc, dayFlags(wdate, req.user.id));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
-  if (calc.ot_min) { const r = otRoundingFrom(getSetting); calc = { ...calc, ot_min: roundOtParts(calc.ot_min, calc.ot_parts, r.decimals, r.mode, r.block) }; }
+  const wkExact = calc !== calcBeforeWk ? (calcBeforeWk.work_minutes || 0) : 0;
+  if (calc.ot_min) { const r = otRoundingFrom(getSetting); calc = { ...calc, ot_min: roundOtParts(calc.ot_min, calc.ot_parts, r.decimals, r.mode, r.block, getSetting('weekend_work_exact', '0') === '1' ? wkExact : 0) }; }
   delete calc.ot_parts;
   // ĐĂNG KÝ LÀM THÊM: làm quá số phút đăng ký thì chỉ tính theo đăng ký (giữ số thực tế ở ot_raw_min)
   const otRaw = calc.ot_min || 0;

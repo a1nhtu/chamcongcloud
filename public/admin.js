@@ -3998,6 +3998,9 @@ function auditPanelEl(s) {
   };
   const pkWeek = lvPick(s.audit_week_lv, '1,2,3'), pkMonth = lvPick(s.audit_month_lv, '1,2,3'), pkYear = lvPick(s.audit_year_lv, '1,2,3'), pkClamp = lvPick(s.audit_clamp_lv, '');
   const clIn = num(s.audit_clamp_in_min ?? 14, '1'), clOut = num(s.audit_clamp_out_min ?? 14, '1');
+  // Giờ trưa & đi trễ kiểu "công khách K" của HR-ERP (khách chấm 4 lần / ngày) — mặc định không mức nào = TẮT
+  const pkK = lvPick(s.audit_k_lv, '');
+  const kEarly = num(s.audit_k_early_min ?? 15, '1'), kLate = num(s.audit_k_late_max ?? 60, '1'), kOut = num(s.audit_k_out_gap ?? 15, '1'), kIn = num(s.audit_k_in_gap ?? 5, '1');
   // chủ nhật (ngày nghỉ hằng tuần) đi làm tối đa / tháng — mỗi mức ảo 1 ô, để trống = không giới hạn
   const sunI = [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max: 6, step: 1, placeholder: '—', value: s['audit_sun_l' + l] ?? '' }));
   const sunBox = el('span', { class: 'lv-pick' }, ...sunI.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
@@ -4029,7 +4032,8 @@ function auditPanelEl(s) {
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value,
         audit_week_lv: pkWeek.val(), audit_month_lv: pkMonth.val(), audit_year_lv: pkYear.val(),
         audit_sun_l1: sunI[0].value, audit_sun_l2: sunI[1].value, audit_sun_l3: sunI[2].value,
-        audit_clamp_lv: pkClamp.val(), audit_clamp_in_min: clIn.value, audit_clamp_out_min: clOut.value } });
+        audit_clamp_lv: pkClamp.val(), audit_clamp_in_min: clIn.value, audit_clamp_out_min: clOut.value,
+        audit_k_lv: pkK.val(), audit_k_early_min: kEarly.value, audit_k_late_max: kLate.value, audit_k_out_gap: kOut.value, audit_k_in_gap: kIn.value } });
       SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -4047,6 +4051,12 @@ function auditPanelEl(s) {
         'Ở mức được tích, giờ vào / ra ảo luôn nằm sát giờ ca theo 2 số phút dưới đây. Ngày chia ca sáng / chiều thì giờ ra giữa ca và giờ vào chiều cũng theo luật này. Giờ nằm ngoài khoảng được đổi thành một giờ ngẫu nhiên trong khoảng (xem lại vẫn ra đúng giờ đó); đi trễ / về sớm thật giữ nguyên; công và tăng ca không đổi. Không tích mức nào = tắt.'),
       lvRow('· Vào sớm tối đa', clIn, 'phút trước giờ vào ca'),
       lvRow('· Ra trễ tối đa', clOut, 'phút sau giờ tan ca', '(đã cộng tăng ca ảo của ngày đó)'),
+      lvRow('Giờ trưa & đi trễ kiểu K', pkK.node,
+        'Dành cho công ty chấm 4 lần / ngày (Đến – Ra trưa – Vào lại – Về) như khách dùng HR-ERP "công khách K". Ở mức được tích: giờ ĐẾN sớm hoặc trễ trong khoảng cho phép hiện thành 1–14 phút trước giờ vào ca (đi trễ được che thì trả đủ giờ công, phút trễ = 0); giờ RA / VÀO trưa hiện sát giờ nghỉ của ca (cần ca có "Nghỉ giữa ca bắt đầu lúc"). Số phút ngẫu nhiên cố định theo từng nhân viên + ngày. Không tích mức nào = TẮT, công ty khác không bị ảnh hưởng.'),
+      lvRow('· Đến sớm từ', kEarly, 'phút → hiện 1–14 phút trước giờ vào ca', '(0 = không đổi giờ đến sớm)'),
+      lvRow('· Đi trễ tối đa được che', kLate, 'phút', '(trễ quá số này giữ giờ thật; 0 = không che)'),
+      lvRow('· Ra trưa muộn từ', kOut, 'phút sau giờ bắt đầu nghỉ → hiện 0–11 phút sau giờ nghỉ'),
+      lvRow('· Vào lại sớm hơn', kIn, 'phút trước giờ hết nghỉ → hiện trong chừng đó phút cuối của giờ nghỉ'),
       lvRow('Cách cắt khi vượt', auMethod, 'Chia đều: mọi ngày có tăng ca đều giảm theo cùng tỷ lệ. Gỡ nguyên ngày: bỏ hẳn tăng ca của một số ngày (chọn ngẫu nhiên nhưng cố định, ngày thường trước, ngày nghỉ / lễ sau) như HR-ERP.'),
       lvRow('Làm tròn tăng ca ảo', auBlock),
       el('label', { class: 'lv-chk' }, auWk, el('div', {}, el('b', {}, `Cộng cả tăng ca ngày nghỉ hằng tuần (${wkName})`), wkHint)),
@@ -5760,6 +5770,7 @@ const REPORT_GROUPS = [
     ['detailmulti', '🔁', 'Chi tiết chấm công (nhiều lần vào/ra)', 'Mỗi NV × mỗi ngày: Giờ vào 1 → Giờ ra 4 theo từng lần chấm, trễ, sớm, giờ, công, tăng ca'],
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
+    ['track6', '🗒️', 'Bảng theo dõi chấm công (4 lần quẹt)', 'Mỗi nhân viên 6 dòng × từng ngày: Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ HC · Giờ TC, kèm ngày công, giờ công, nghỉ từng loại, tăng ca. Dành cho công ty chấm 4 lần/ngày (Đến – Ra trưa – Vào lại – Về)'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: mỗi ô là SỐ CÔNG trong ngày + tổng công, tăng ca, trễ, sớm, vắng, nghỉ (xem số giờ ở Bảng thống kê chấm công (giờ))'],
     ['hourstat', '🕒', 'Bảng thống kê chấm công (giờ)', 'Ma trận ngày × NV theo SỐ GIỜ mỗi ngày + giờ công, tăng ca TC1–TC3, vắng, nghỉ từng loại, trễ, sớm'],
     ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · KL=không lương · CT=công tác · K=nghỉ khác · L=lễ · V=vắng · O=thiếu ra'],
@@ -6358,6 +6369,10 @@ async function pageSettings() {
     el('input', { type: 'checkbox', class: 'wk-day', value: d, style: 'width:auto', ...(wkDays.has(String(d)) ? { checked: '' } : {}) }),
     { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' }[d]));
   const wkOtChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_work_as_ot ?? '1') === '1' ? { checked: '' } : {}) });
+  const wkBeforeChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_ot_before ?? '0') === '1' ? { checked: '' } : {}) });
+  const wkExactChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_work_exact ?? '0') === '1' ? { checked: '' } : {}) });
+  const wkNeedChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_need_pairs ?? '0') === '1' ? { checked: '' } : {}) });
+  const pfbChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.pairs_fixed_break ?? '0') === '1' ? { checked: '' } : {}) });
   // Phòng ban đi làm cuối tuần vẫn tính như NGÀY THƯỜNG (VD bảo vệ trực CN) — ngoại lệ của quy tắc trên
   const wkNormal = new Set((s.weekend_normal_depts || []).map(String));
   const wkNormBox = el('div', { style: 'display:flex;gap:6px 14px;flex-wrap:wrap;max-height:140px;overflow:auto' }, el('span', { class: 'map-hint' }, 'Đang tải phòng ban…'));
@@ -6390,7 +6405,7 @@ async function pageSettings() {
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -6405,9 +6420,24 @@ async function pageSettings() {
     el('h3', { style: 'margin-top:0' }, 'Quy tắc tính công'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', {}, el('label', {}, 'Ngày cuối tuần'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...wkBoxes),
+        el('div', { style: 'margin-top:12px;padding:10px 12px;border:1px dashed var(--line, #d8dee6);border-radius:8px' },
+          el('div', { style: 'font-weight:700;color:var(--ink)' }, 'Kiểu HR-ERP: 4 lần quẹt / ngày (Đến – Ra – Vào – Về)'),
+          el('div', { style: 'font-size:12.5px;color:var(--muted);margin:2px 0 6px' }, 'Chỉ bật cho công ty đang dùng HR-ERP kiểu này. Cần thêm: ca có "Nghỉ giữa ca bắt đầu lúc" và chọn quy tắc "Nhiều lần vào/ra". Mặc định TẮT — công ty khác không bị ảnh hưởng.'),
+          el('label', { style: 'display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:600;color:var(--ink)' }, pfbChk,
+            el('div', {}, 'Ca nghỉ trưa cố định + nhiều lần vào/ra: mỗi cặp quẹt TRỪ giờ nghỉ trưa',
+              el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Giờ làm = phần của từng cặp nằm ngoài giờ nghỉ (vào lại sau giờ nghỉ thì mất phần chưa có mặt). Số lần quẹt lẻ (3, 5…): lấy lần đầu → cuối trừ giờ nghỉ.')))),
         el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkOtChk,
           el('div', {}, 'Đi làm vào ngày cuối tuần tính là TĂNG CA',
             el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Cả thời gian làm ngày đã tích ở trên thành tăng ca cuối tuần (không tính công thường). Báo cáo quy đổi 8 giờ = 1 công ở cột "Công TC cuối tuần". VD tích T7 → đi làm thứ 7 là tăng ca.'))),
+        el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkBeforeChk,
+          el('div', {}, 'Ngày nghỉ: tính cả giờ ĐẾN SỚM trước giờ vào ca là tăng ca',
+            el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Ngày thường đến sớm không tính tăng ca (nếu ca không bật), nhưng ngày nghỉ hằng tuần thì phần đến sớm (từ ngưỡng "Tăng ca trước ca" của ca) cũng là tăng ca — giống HR-ERP của Hoa Hồng.'))),
+        el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkExactChk,
+          el('div', {}, 'Ngày nghỉ: giờ làm TRONG ca giữ đúng số phút',
+            el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Chỉ làm tròn (theo khối phút ở dưới) phần tăng ca NGOÀI giờ ca (trước / sau ca); phần làm trong ca ngày nghỉ không bị làm tròn xuống. VD làm 7h10 (430 phút) → 430 phút, không phải 420.'))),
+        el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:8px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkNeedChk,
+          el('div', {}, 'Ngày nghỉ: chỉ có 2 lần quẹt thì KHÔNG tính giờ làm trong ca',
+            el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Áp cho ca có nghỉ trưa cố định và chọn quy tắc "nhiều lần vào/ra". Ngày nghỉ chỉ quẹt 1 cặp (vào + ra) thì giờ làm trong ca không thành tăng ca; phần tăng ca trước / sau ca vẫn tính. Giống HR-ERP của Hoa Hồng.'))),
         el('div', { style: 'margin-top:10px' }, el('div', { style: 'font-weight:600;color:var(--ink);margin-bottom:4px' }, 'Phòng ban đi làm cuối tuần vẫn tính như ngày thường'),
           el('div', { style: 'font-size:12.5px;color:var(--muted);margin-bottom:6px' }, 'VD bảo vệ trực Chủ nhật: tích phòng ban đó → ngày cuối tuần tính công + đi trễ/về sớm/tăng ca như ngày thường, không chuyển thành tăng ca.'),
           wkNormBox)),
