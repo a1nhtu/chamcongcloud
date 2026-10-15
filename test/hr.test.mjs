@@ -14,10 +14,10 @@ const DBP = join(tmpdir(), `dgp-hr-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
 process.env.DB_PATH = DBP;
 
-let db, initSchema, EMP_IN_PERIOD, applyDueDecisions, loadContracts;
+let db, initSchema, EMP_IN_PERIOD, applyDueDecisions, loadContracts, getSetting, setSetting, hrGate, hrEnabled;
 before(async () => {
-  ({ db, initSchema, EMP_IN_PERIOD } = await import('../server/db.js'));
-  ({ applyDueDecisions, loadContracts } = await import('../server/hr.js'));
+  ({ db, initSchema, EMP_IN_PERIOD, getSetting, setSetting } = await import('../server/db.js'));
+  ({ applyDueDecisions, loadContracts, hrGate, hrEnabled } = await import('../server/hr.js'));
   initSchema();
 });
 
@@ -183,4 +183,32 @@ test('Chưa ai nghỉ qua phân hệ Nhân sự → điều kiện mới cho K�
   // mọi NV cũ (cột leave_date mặc định rỗng) → không ai được thêm vào ngoài người active
   const extra = db.prepare(`SELECT COUNT(*) n FROM employees WHERE ${EMP_IN_PERIOD} AND active = 0 AND leave_date = ''`).get('2000-01-01').n;
   assert.equal(extra, 0);
+});
+
+// ===================== công tắc phân hệ (chỉ tài khoản tổng bật) =====================
+test('Phân hệ Nhân sự mặc định TẮT trên bản cài mới; tắt → API trả 403, bật → cho qua', () => {
+  assert.equal(getSetting('hr_enabled'), '0');
+  assert.equal(hrEnabled(), false);
+  const mock = () => { const r = { code: 200, body: null }; r.status = (c) => { r.code = c; return r; }; r.json = (b) => { r.body = b; return r; }; return r; };
+  let passed = false;
+  const res = mock();
+  hrGate({}, res, () => { passed = true; });
+  assert.equal(passed, false);
+  assert.equal(res.code, 403);
+  setSetting('hr_enabled', '1');
+  const res2 = mock();
+  hrGate({}, res2, () => { passed = true; });
+  assert.equal(passed, true);
+  setSetting('hr_enabled', '0');
+});
+
+test('Bản đã lỡ nhập dữ liệu nhân sự (1.20.1–1.20.2) → nâng cấp giữ phân hệ BẬT', () => {
+  db.prepare("DELETE FROM settings WHERE key = 'hr_enabled'").run();
+  const e = db.prepare("SELECT id FROM employees LIMIT 1").get().id;
+  db.prepare("INSERT INTO hr_contracts (employee_id, ctype, start_date) VALUES (?, 'khong_xac_dinh', '2026-01-01')").run(e);
+  initSchema();   // chạy lại bước nâng cấp CSDL
+  assert.equal(getSetting('hr_enabled'), '1');
+  setSetting('hr_enabled', '0');
+  initSchema();   // đã có giá trị → không tự bật lại
+  assert.equal(getSetting('hr_enabled'), '0');
 });

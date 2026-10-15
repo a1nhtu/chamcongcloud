@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node
 import { join, extname } from 'node:path';
 import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
-import { HR_FILES_DIR, hrToday } from '../../hr.js';
+import { HR_FILES_DIR, hrToday, hrGate } from '../../hr.js';
 import { currentContract, addDays, isDate } from '../../hr-rules.js';
 import { buildDocx, fillDocx, listPlaceholders } from '../../docx.js';
 import {
@@ -64,7 +64,7 @@ function empCtx(empId) {
 }
 
 export function registerHrDocRoutes(r, { need }) {
-  const hr = need('hr');
+  const hr = [hrGate, need('hr')];
 
   // ---------- Mẫu giấy tờ ----------
   r.get('/hr/templates', hr, (req, res) => {

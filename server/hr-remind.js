@@ -4,7 +4,7 @@
 // Mốc nhắc + nội dung: hàm thuần reminderStage / reminderDigest (hr-rules.js).
 import { db, getSetting } from './db.js';
 import { vnParts } from './util.js';
-import { loadContracts, warnDays } from './hr.js';
+import { loadContracts, warnDays, hrEnabled } from './hr.js';
 import { reminderStage, reminderDigest } from './hr-rules.js';
 import { notifyPerm } from './push.js';
 
@@ -27,7 +27,7 @@ export function dueReminders({ all = false } = {}) {
 
 // Gửi 1 lượt nhắc. Chỉ ghi "đã nhắc" khi có ít nhất 1 thiết bị nhận được (chưa ai bật thông báo → lượt sau gửi lại).
 export async function runHrReminders({ force = false, now = new Date(), send = notifyPerm } = {}) {
-  if (!force && !remindEnabled()) return { skipped: 'off' };
+  if (!force && (!remindEnabled() || !hrEnabled())) return { skipped: 'off' };
   const h = vnParts(now).h;
   if (!force && (h < 8 || h >= 20)) return { skipped: 'night' };
   const items = dueReminders({ all: force });

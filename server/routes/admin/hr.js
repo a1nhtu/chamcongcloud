@@ -11,7 +11,7 @@ import {
   CONTRACT_TYPES, CONTRACT_TYPE_LABEL, CONTRACT_STATUS_LABEL, TRANSFER_KINDS, RESIGN_KINDS, RESIGN_KIND_LABEL,
   DEFAULT_HANDOVER, noticeWarning, currentContract, dmy,
 } from '../../hr-rules.js';
-import { hrToday, warnDays, loadContracts, currentContractsByEmp, applyDecision, applyDueDecisions, HR_FILES_DIR } from '../../hr.js';
+import { hrToday, warnDays, loadContracts, currentContractsByEmp, applyDecision, applyDueDecisions, HR_FILES_DIR, hrGate } from '../../hr.js';
 import { remindEnabled, runHrReminders } from '../../hr-remind.js';
 
 const HR_DIR = HR_FILES_DIR;   // giấy tờ đính kèm: data/hr-files/<employee_id>/ (không phát công khai)
@@ -154,7 +154,7 @@ function buildProfiles() {
 }
 
 export function registerHrRoutes(r, { need }) {
-  const hr = need('hr');
+  const hr = [hrGate, need('hr')];   // phân hệ phải được tài khoản tổng bật + người dùng có quyền Nhân sự
 
   // Danh mục cho giao diện (trường hồ sơ, loại HĐ, loại quyết định…)
   r.get('/hr/meta', hr, (req, res) => {

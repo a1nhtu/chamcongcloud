@@ -9,6 +9,12 @@ import { contractStatus, currentContract, decisionDue, expiredTooLong, EMP_TYPE_
 // Có trong bản "Sao lưu toàn bộ" (server/backup.js).
 export const HR_FILES_DIR = join(DATA_DIR, 'hr-files');
 export const hrToday = () => vnDateStr();
+// Công tắc phân hệ (chỉ tài khoản tổng bật — Cài đặt). Tắt: menu ẩn, API Nhân sự trả 403, không gửi nhắc.
+export const hrEnabled = () => getSetting('hr_enabled', '0') === '1';
+export function hrGate(req, res, next) {
+  if (hrEnabled()) return next();
+  res.status(403).json({ error: 'Phân hệ Nhân sự chưa được bật (chỉ tài khoản tổng bật được trong Cài đặt).' });
+}
 export const warnDays = () => Math.max(1, Math.min(365, parseInt(getSetting('hr_contract_warn_days', '30'), 10) || 30));
 
 // Lương / chức danh hiệu lực của 1 HĐ tại ngày `today` (phụ lục mới nhất đã hiệu lực đè lên)

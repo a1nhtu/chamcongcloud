@@ -136,7 +136,8 @@ async function afterLogin() {
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())
     && !(key === 'shiftreq' && !selfShiftEnabled())
-    && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1'));   // công ảo: chỉ hiện khi tài khoản tổng đã bật
+    && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1')   // công ảo: chỉ hiện khi tài khoản tổng đã bật
+    && !(key.startsWith('hr') && SETTINGS.hr_enabled !== '1'));   // nhân sự: chỉ hiện khi tài khoản tổng đã bật
   // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
   _navGrp.clear();
   const visKeys = new Set(visible.map((v) => v[0]));
@@ -6294,6 +6295,7 @@ async function pageSettings() {
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}) });
   const tcpDevChk = el('input', { type: 'checkbox', id: 'st-tcpdev', style: 'width:auto', ...(s.tcp_device_enabled === '1' ? { checked: '' } : {}) });
   const auditChk = el('input', { type: 'checkbox', id: 'st-audit', style: 'width:auto', ...(s.audit_enabled === '1' ? { checked: '' } : {}) });
+  const hrChk = el('input', { type: 'checkbox', id: 'st-hr', style: 'width:auto', ...(s.hr_enabled === '1' ? { checked: '' } : {}) });
   const inclAdminChk = el('input', { type: 'checkbox', id: 'st-incladmin', style: 'width:auto', ...(s.payroll_include_admin === '1' ? { checked: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
@@ -6310,6 +6312,7 @@ async function pageSettings() {
         body.tcp_device_enabled = tcpDevChk.checked;
         body.phone_enabled = phoneChk.checked;
         body.audit_enabled = auditChk.checked;
+        body.hr_enabled = hrChk.checked;
       }
       await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
@@ -6379,6 +6382,10 @@ async function pageSettings() {
       isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, auditChk,
         el('div', {}, el('b', {}, '🎭 Cho hiển thị công ảo / lương ảo (audit)'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin (và người được cấp quyền "Xem công ảo") thấy nút "🎭 Công ảo" ở Tính công / Báo cáo / Lương và mục cài đặt hạn mức tăng ca. Công thật không thay đổi. Tắt: ẩn hoàn toàn.'))) : null,
+      // Phân hệ Nhân sự: CHỈ tài khoản tổng thấy và bật/tắt
+      isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, hrChk,
+        el('div', {}, el('b', {}, '📇 Bật phân hệ Nhân sự (hồ sơ, hợp đồng lao động, thuyên chuyển / nghỉ việc)'),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin thấy nhóm menu "Nhân sự"; Quản lý cần được tích quyền "Nhân sự" ở hồ sơ nhân viên. Tắt: ẩn hoàn toàn, dữ liệu đã nhập vẫn giữ nguyên, bật lại là thấy.'))) : null,
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:4px' }, inclAdminChk,
         el('div', {}, el('b', {}, '👑 Tính công cho cả tài khoản Admin'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Mặc định người quyền Admin (chủ/quản trị) KHÔNG hiện ở Tính công / Báo cáo / Lương / Phân ca. Bật nếu Admin cũng là người đi làm cần chấm công.'))),
