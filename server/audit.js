@@ -81,10 +81,27 @@ const LABELS = {
   'POST /devices/:id/clear-admins': 'Xóa quyền admin trên máy',
   'POST /devices/:id/clear-all': 'Xóa TOÀN BỘ dữ liệu trên máy',
   'POST /devices/:id/delete-users': 'Xóa nhân viên trên máy',
+  'PUT /hr/settings': 'Nhân sự: đổi số ngày cảnh báo hết hạn HĐ',
+  'PUT /hr/profiles/:id': 'Nhân sự: sửa hồ sơ',
+  'POST /hr/profiles/:id/family': 'Nhân sự: thêm người thân',
+  'PUT /hr/family/:fid': 'Nhân sự: sửa người thân',
+  'DELETE /hr/family/:fid': 'Nhân sự: xóa người thân',
+  'POST /hr/profiles/:id/documents': 'Nhân sự: tải lên giấy tờ',
+  'DELETE /hr/documents/:docId': 'Nhân sự: xóa giấy tờ',
+  'POST /hr/contracts': 'Nhân sự: ký hợp đồng',
+  'PUT /hr/contracts/:id': 'Nhân sự: sửa hợp đồng',
+  'POST /hr/contracts/:id/terminate': 'Nhân sự: chấm dứt hợp đồng',
+  'DELETE /hr/contracts/:id': 'Nhân sự: xóa hợp đồng',
+  'POST /hr/contracts/:id/annexes': 'Nhân sự: thêm phụ lục hợp đồng',
+  'DELETE /hr/annexes/:aid': 'Nhân sự: xóa phụ lục hợp đồng',
+  'POST /hr/decisions': 'Nhân sự: lập quyết định thuyên chuyển / nghỉ việc',
+  'PUT /hr/decisions/:id': 'Nhân sự: sửa quyết định',
+  'POST /hr/decisions/:id/cancel': 'Nhân sự: huỷ quyết định',
+  'DELETE /hr/decisions/:id': 'Nhân sự: xóa quyết định',
 };
 
 // Không ghi các thao tác nhiễu (đăng ký nhận thông báo trình duyệt).
-const SKIP = [/^\/push\//];
+const SKIP = [/^\/push\//, /^\/hr\/(contracts|decisions)\/check$/];   // + nút kiểm tra luật của Nhân sự (chỉ đọc)
 
 function labelFor(req) {
   const key = req.method + ' ' + (req.route?.path || req.path || '');

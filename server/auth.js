@@ -112,6 +112,7 @@ export function roleRequired(...roles) {
 export const PERMISSIONS = [
   ['reports',     'Tổng quan & Báo cáo'],
   ['employees',   'Quản lý nhân viên'],
+  ['hr',          'Nhân sự (hồ sơ, hợp đồng, thuyên chuyển, nghỉ việc)'],
   ['shifts',      'Quản lý ca & lịch trình'],
   ['assignments', 'Phân ca'],
   ['shift_requests', 'Duyệt nhân viên chọn ca'],

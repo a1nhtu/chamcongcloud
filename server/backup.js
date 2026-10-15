@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, rmSync, wri
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { db, DATA_DIR, DB_PATH, getSetting, setSetting } from './db.js';
+import { HR_FILES_DIR } from './hr.js';
 import { UPLOAD_DIR } from './storage.js';
 import { userError } from './util.js';
 
@@ -88,6 +89,7 @@ export function doFullBackup() {
   try {
     const args = ['--format', 'zip', '-cf', dest, '-C', stage, 'digiplus.db'];
     if (existsSync(UPLOAD_DIR)) args.push('-C', ROOT, 'uploads');   // kèm ảnh + logo nếu có (không bị khoá)
+    if (existsSync(HR_FILES_DIR)) args.push('-C', DATA_DIR, 'hr-files');   // giấy tờ nhân sự (CCCD, bằng cấp…)
     execFileSync(winTar(), args, { stdio: 'ignore' });
   } finally { rmSync(stage, { recursive: true, force: true }); }
   return { name, size: statSync(dest).size };
@@ -111,6 +113,11 @@ export function stageFullRestore(buffer) {
   if (existsSync(upIn)) {                              // thay ảnh + logo ngay
     try { rmSync(UPLOAD_DIR, { recursive: true, force: true }); } catch {}
     try { cpSync(upIn, UPLOAD_DIR, { recursive: true }); } catch {}
+  }
+  const hrIn = join(tmp, 'hr-files');
+  if (existsSync(hrIn)) {                              // giấy tờ nhân sự
+    try { rmSync(HR_FILES_DIR, { recursive: true, force: true }); } catch {}
+    try { cpSync(hrIn, HR_FILES_DIR, { recursive: true }); } catch {}
   }
   rmSync(tmp, { recursive: true, force: true });
   return true;

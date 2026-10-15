@@ -2,7 +2,7 @@
 // Hàm thuần (không đụng DB) để dễ viết test — gọi từ server/routes/admin/employees.js.
 import { effectivePermissions, hasPerm } from './auth.js';
 
-function isSuperUser(caller) {
+export function isSuperUser(caller) {
   return !!(caller && (caller.master || caller.role === 'admin'));
 }
 

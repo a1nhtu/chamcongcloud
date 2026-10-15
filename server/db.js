@@ -4,6 +4,7 @@ import { mkdirSync, existsSync, copyFileSync, renameSync, rmSync } from 'node:fs
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
+import { HR_FIELD_KEYS } from './hr-rules.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(__dirname, '..');
@@ -694,6 +695,101 @@ function migrateColumns() {
   // Index khớp NV theo Số ID máy
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_emp_device_pin ON employees(device_pin)'); } catch {}
 
+  // PHÂN HỆ NHÂN SỰ (hồ sơ, hợp đồng, thuyên chuyển / nghỉ việc) — bảng riêng, không đụng dữ liệu chấm công
+  // Ngày nghỉ việc (ngày ĐẦU TIÊN không còn làm) — chỉ phân hệ Nhân sự ghi; rỗng = chưa nghỉ / khoá theo kiểu cũ
+  add('employees', 'leave_date', "TEXT NOT NULL DEFAULT ''");
+  db.exec(`CREATE TABLE IF NOT EXISTS hr_profiles (
+      employee_id INTEGER PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE,
+      updated_by  TEXT NOT NULL DEFAULT '',
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS hr_family (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      full_name   TEXT NOT NULL,
+      relation    TEXT NOT NULL DEFAULT '',
+      birth_date  TEXT NOT NULL DEFAULT '',
+      phone       TEXT NOT NULL DEFAULT '',
+      job         TEXT NOT NULL DEFAULT '',
+      dependent   INTEGER NOT NULL DEFAULT 0,   -- 1 = người phụ thuộc (giảm trừ gia cảnh)
+      note        TEXT NOT NULL DEFAULT ''
+    );
+    CREATE TABLE IF NOT EXISTS hr_documents (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      kind        TEXT NOT NULL DEFAULT '',
+      title       TEXT NOT NULL DEFAULT '',
+      file_name   TEXT NOT NULL,                -- tên file lưu trong data/hr-files/<employee_id>/
+      orig_name   TEXT NOT NULL DEFAULT '',
+      mime        TEXT NOT NULL DEFAULT '',
+      size        INTEGER NOT NULL DEFAULT 0,
+      uploaded_by TEXT NOT NULL DEFAULT '',
+      uploaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS hr_contracts (
+      id               INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id      INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      contract_no      TEXT NOT NULL DEFAULT '',
+      ctype            TEXT NOT NULL,             -- thu_viec | xac_dinh | khong_xac_dinh | dich_vu (server/hr-rules.js)
+      term_months      INTEGER NOT NULL DEFAULT 0,
+      sign_date        TEXT NOT NULL DEFAULT '',
+      start_date       TEXT NOT NULL,
+      end_date         TEXT NOT NULL DEFAULT '',  -- rỗng = không xác định thời hạn
+      department       TEXT NOT NULL DEFAULT '',
+      position         TEXT NOT NULL DEFAULT '',
+      work_place       TEXT NOT NULL DEFAULT '',
+      salary           REAL NOT NULL DEFAULT 0,   -- lương thoả thuận
+      insurance_salary REAL NOT NULL DEFAULT 0,   -- lương đóng BHXH
+      allowance        TEXT NOT NULL DEFAULT '',
+      signer           TEXT NOT NULL DEFAULT '',  -- người đại diện công ty ký
+      note             TEXT NOT NULL DEFAULT '',
+      parent_id        INTEGER,                   -- HĐ trước (khi tái ký)
+      terminated_date  TEXT NOT NULL DEFAULT '',  -- chấm dứt KỂ TỪ ngày này
+      terminate_reason TEXT NOT NULL DEFAULT '',
+      created_by       TEXT NOT NULL DEFAULT '',
+      created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_hrc_emp ON hr_contracts(employee_id);
+    CREATE TABLE IF NOT EXISTS hr_contract_annexes (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      contract_id    INTEGER NOT NULL REFERENCES hr_contracts(id) ON DELETE CASCADE,
+      annex_no       TEXT NOT NULL DEFAULT '',
+      sign_date      TEXT NOT NULL DEFAULT '',
+      effective_date TEXT NOT NULL DEFAULT '',
+      salary         REAL NOT NULL DEFAULT 0,     -- lương mới (0 = không đổi)
+      position       TEXT NOT NULL DEFAULT '',    -- chức danh mới (rỗng = không đổi)
+      content        TEXT NOT NULL DEFAULT '',
+      created_by     TEXT NOT NULL DEFAULT '',
+      created_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS hr_decisions (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id     INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      kind            TEXT NOT NULL,              -- transfer (thuyên chuyển) | resign (nghỉ việc)
+      sub_kind        TEXT NOT NULL DEFAULT '',
+      decision_no     TEXT NOT NULL DEFAULT '',
+      decision_date   TEXT NOT NULL DEFAULT '',
+      effective_date  TEXT NOT NULL,              -- ngày hiệu lực (nghỉ việc: ngày đầu tiên không còn làm)
+      signer          TEXT NOT NULL DEFAULT '',
+      from_department TEXT NOT NULL DEFAULT '',
+      to_department   TEXT NOT NULL DEFAULT '',
+      from_position   TEXT NOT NULL DEFAULT '',
+      to_position     TEXT NOT NULL DEFAULT '',
+      request_date    TEXT NOT NULL DEFAULT '',   -- nghỉ việc: ngày nộp đơn
+      reason          TEXT NOT NULL DEFAULT '',
+      note            TEXT NOT NULL DEFAULT '',
+      handover        TEXT NOT NULL DEFAULT '[]', -- JSON [{t, done}] — việc bàn giao khi nghỉ
+      end_contract    INTEGER NOT NULL DEFAULT 1, -- nghỉ việc: chấm dứt HĐ đang hiệu lực
+      lock_account    INTEGER NOT NULL DEFAULT 1, -- nghỉ việc: khoá tài khoản chấm công từ ngày nghỉ
+      status          TEXT NOT NULL DEFAULT 'pending', -- pending | applied | cancelled
+      applied_at      TEXT NOT NULL DEFAULT '',
+      created_by      TEXT NOT NULL DEFAULT '',
+      created_at      TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_hrd_emp ON hr_decisions(employee_id);
+    CREATE INDEX IF NOT EXISTS idx_hrd_status ON hr_decisions(status, effective_date);`);
+  for (const k of HR_FIELD_KEYS) add('hr_profiles', k, "TEXT NOT NULL DEFAULT ''");   // mỗi trường hồ sơ 1 cột
+
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN
   if (getSetting('weekend_work_as_ot') == null) setSetting('weekend_work_as_ot', '1');   // đi làm ngày cuối tuần = tăng ca (8 giờ = 1 công)
@@ -821,6 +917,11 @@ export function adminAttWhere(col = 'role') {
   const p = col.includes('.') ? col.slice(0, col.indexOf('.') + 1) : '';
   return (getSetting('payroll_include_admin', '0') === '1' ? '' : ` AND ${col}!='admin'`) + ` AND IFNULL(${p}audit_only,0)=0`;
 }
+
+// Điều kiện "NV có đi làm trong kỳ bắt đầu từ ngày ?" cho bảng công / báo cáo / lương: đang làm, HOẶC đã nghỉ việc qua
+// phân hệ Nhân sự (có leave_date) SAU ngày đầu kỳ → tháng cuối vẫn còn công. NV khoá kiểu cũ (leave_date rỗng) loại như trước.
+// Dùng: `WHERE ${EMP_IN_PERIOD} ...` và truyền ngày đầu kỳ làm tham số ĐẦU TIÊN.
+export const EMP_IN_PERIOD = "(active = 1 OR (leave_date <> '' AND leave_date > ?))";
 
 // Danh sách định vị (văn phòng) mà NV được phép chấm. Chưa cấu hình → TẤT CẢ định vị đang bật.
 export function allowedOffices(employeeId) {

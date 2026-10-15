@@ -1,5 +1,5 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
-import { db, getSetting, adminAttWhere, empHourly, deptWithChildren } from './db.js';
+import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, empHourly, deptWithChildren } from './db.js';
 import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
 import { splitOtTiers } from './attendance-calc.js';
 import { virtualOt, applyVirtual } from './virtual-att.js';
@@ -126,8 +126,8 @@ export function computePayrollTable(year, month, filter) {
   const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
   const ids = (f.ids || []).map(Number).filter(Boolean);
   const depts = deptWithChildren((f.depts || []).length ? f.depts : f.dept ? [f.dept] : []);   // gồm cả bộ phận con
-  let sql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
-  const args = [];
+  let sql = `SELECT id, code, full_name, department FROM employees WHERE ${EMP_IN_PERIOD}` + adminAttWhere();
+  const args = [from];
   if (ids.length) { sql += ` AND id IN (${ids.map(() => '?').join(',')})`; args.push(...ids); }
   else if (depts.length) { sql += ` AND department IN (${depts.map(() => '?').join(',')})`; args.push(...depts); }
   else if (f.dept) { sql += ' AND department = ?'; args.push(f.dept); }
