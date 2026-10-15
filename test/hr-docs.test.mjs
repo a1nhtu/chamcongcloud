@@ -155,3 +155,41 @@ test('chọn mẫu theo loại HĐ; câu thời hạn; HĐ ghi bộ phận riên
   assert.equal(employeeFields({ ...EMP }, {}).xung_ho, 'Ông/Bà');
   assert.equal(employeeFields({ ...EMP }, {}).quoc_tich, 'Việt Nam');
 });
+
+// ===================== trình bày bản in (lỗi Anh thấy khi in thử 15/10) =====================
+test('bản in: không giãn chữ ở danh sách nhiều dòng, khối chữ ký không cắt đôi qua 2 trang, luôn có dấu cách trước tab', async () => {
+  const buf = await buildDocx([{ p: 'Bên B: Ông Nguyễn Thị Phương Thảo Hoàng\tMã nhân viên: NV1', tab: 9 }, { table: [[{ p: 'A' }], [{ p: 'B' }]] }]);
+  const zip = await JSZip.loadAsync(buf);
+  const settings = await zip.file('word/settings.xml').async('string');
+  assert.ok(settings.includes('<w:doNotExpandShiftReturn/>'), 'settings.xml có doNotExpandShiftReturn');
+  assert.ok((await zip.file('[Content_Types].xml').async('string')).includes('/word/settings.xml'));
+  assert.ok((await zip.file('word/_rels/document.xml.rels').async('string')).includes('settings.xml'));
+  const doc = await zip.file('word/document.xml').async('string');
+  assert.ok(doc.includes('<w:cantSplit/>'), 'hàng bảng chữ ký không bị cắt qua trang');
+  assert.ok((await docxText(buf)).includes('Hoàng \tMã nhân viên'), 'có dấu cách trước tab');
+});
+
+test('mẫu mặc định: họ tên Bên B đứng riêng 1 dòng (tên dài không dính "Mã nhân viên"); danh sách bàn giao căn trái', async () => {
+  for (const key of ['hd_thu_viec', 'hd_lao_dong', 'hd_dich_vu', 'phu_luc']) {
+    const lines = (await docxText(await buildDocx(defaultTemplateBlocks(key)))).split('\n');
+    const nameLine = lines.find((l) => l.includes('{xung_ho} {ho_ten}') && l.includes('Bên B'));
+    if (!nameLine) continue;   // HĐ dịch vụ gọi khác tên bên B
+    assert.ok(!nameLine.includes('{ma_nv}') && !nameLine.includes('\t'), `${key}: dòng họ tên không ghép cột`);
+    assert.ok(lines.some((l) => l.includes('Mã nhân viên: {ma_nv}')), `${key}: vẫn có mã nhân viên`);
+  }
+  const zip = await JSZip.loadAsync(await buildDocx(defaultTemplateBlocks('qd_nghi_viec')));
+  const doc = await zip.file('word/document.xml').async('string');
+  const p = doc.split('</w:p>').find((x) => x.includes('{viec_ban_giao}'));
+  assert.ok(p.includes('<w:jc w:val="left"/>') && !p.includes('w:val="both"'), 'danh sách bàn giao căn trái');
+});
+
+test('mẫu RIÊNG của khách có <w:compat>: điền trường nhiều dòng → tự thêm "không giãn chữ"; không có trường nhiều dòng → giữ nguyên', async () => {
+  const z = await JSZip.loadAsync(await buildDocx([{ p: '{viec_ban_giao}' }]));
+  z.file('word/settings.xml', '<?xml version="1.0"?><w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="100"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>');
+  const custom = await z.generateAsync({ type: 'nodebuffer' });
+  const multi = await JSZip.loadAsync((await fillDocx(custom, { viec_ban_giao: '- Việc 1\n- Việc 2' })).buffer);
+  const st = await multi.file('word/settings.xml').async('string');
+  assert.ok(st.includes('<w:compat><w:doNotExpandShiftReturn/><w:compatSetting'), 'chèn đầu <w:compat>');
+  const single = await JSZip.loadAsync((await fillDocx(custom, { viec_ban_giao: '- Việc 1' })).buffer);
+  assert.ok(!(await single.file('word/settings.xml').async('string')).includes('doNotExpandShiftReturn'));
+});
