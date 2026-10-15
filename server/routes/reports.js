@@ -9,6 +9,7 @@ import { resolveEffectiveShift } from '../shift-resolver.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
 import { customLeaveTypes } from '../leave-quota.js';
+import { trackCell, TRACK_ROWS } from '../track6.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -236,7 +237,7 @@ function loadRange(from, to, filter) {
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
-  return { from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt };
+  return { from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt, shiftsById };
 }
 
 // Loại nghỉ theo đơn từ (cột "type" của leave_requests). Loại lạ → "Nghỉ khác".
@@ -280,6 +281,35 @@ function otCellMin(c) {
   const t = (c && c._tiers) || [0, 0, 0, 0];
   return { ot1: t[0], ot2: t[1], ot3: t[2], ot4: t[3],
     otE: c && c.ot_type === 'cuoi_tuan' ? (c.ot_min || 0) : 0, otH: c && c.ot_type === 'le' ? (c.ot_min || 0) : 0 };
+}
+
+// "Bảng theo dõi chấm công" (6 dòng / người / ngày): compute(e) → { perDay: Map ngày → {v1,r1,v2,r2,hc,tc}, sum: {cong, gio, otNT, otNN, …nghỉ từng loại} }.
+// Công thật: 4 mốc từ các lượt quẹt thật trong ngày; công ảo: giờ vào / ra ảo + giờ trưa kiểu K (không lộ lượt quẹt thật).
+function track6Data(ctx, days) {
+  const timesOf = ctx.virt ? null : dayTimesLoader(days[0], days[days.length - 1], new Set(ctx.employees.map((e) => e.id)));
+  const compute = (e) => {
+    const perDay = new Map();
+    let cong = 0, mins = 0, otNT = 0, otNN = 0;
+    for (const d of days) {
+      const c = ctx.cell.get(e.id + '|' + d);
+      const lv = !c && ctx.leaveDays.get(e.id + '|' + d);
+      const sh = c && ctx.shiftsById.get(c.shift_id);
+      const breakStart = sh && sh.break_start ? Date.parse(`${d}T${sh.break_start}:00+07:00`) : null;
+      const punches = timesOf && c ? timesOf(e.id, d).map((x) => Date.parse(x)) : null;
+      perDay.set(d, trackCell({ virt: ctx.virt, c, punches, breakStart, leaveSym: lv ? lv.sym : '' }));
+      if (c) { cong += c.work_unit || 0; mins += c.work_minutes || 0; if ((c.ot_type || 'thuong') === 'thuong') otNT += c.ot_min || 0; else otNN += c.ot_min || 0; }
+    }
+    return { perDay, sum: { cong: round2(cong), gio: round2(mins / 60), otNT: round2(otNT / 60), otNN: round2(otNN / 60), ...leaveCounts(ctx, e.id, days) } };
+  };
+  // 6 dòng của 1 NV cho lưới trên màn hình (tổng ở dòng đầu)
+  const rowsOf = (e, stt = '') => {
+    const { perDay, sum } = compute(e);
+    const rows = TRACK_ROWS.map(([, lab]) => ({ loai: lab }));
+    for (const [d, t] of perDay) TRACK_ROWS.forEach(([k], i) => { rows[i]['d' + d] = t[k]; });
+    Object.assign(rows[0], { stt, code: e.code, name: e.full_name, hire: e.start_date ? fmtDMY(e.start_date) : '', ...sum });
+    return rows;
+  };
+  return { compute, rowsOf };
 }
 
 function symbolOf(ctx, empId, date) {
@@ -560,6 +590,21 @@ function buildReportRaw(type, from, to, filter) {
         rows.push(rIn, rCong, rOt);
       }
       return { title: `Giờ công & tăng ca ${PERIOD}`, columns, rows };
+    }
+
+    /* --- Bảng theo dõi chấm công: mỗi NV 6 dòng × từng ngày (Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ HC · Giờ TC) — khách chấm 4 lần/ngày --- */
+    case 'track6': {
+      const t6 = track6Data(ctx, days);
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), sub: WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()], weekend: ctx.isWeekend(d), w: 7 }));
+      const columns = [
+        { key: 'stt', label: 'STT', w: 5 }, { key: 'code', label: 'Mã nhân viên', w: 12 }, { key: 'name', label: 'Tên nhân viên', w: 20 }, { key: 'hire', label: 'Ngày vào', w: 11 },
+        { key: 'cong', label: 'Ngày công', w: 9 }, { key: 'gio', label: 'Giờ công', w: 9 }, ...leaveCols(ctx, true),
+        { key: 'otNT', label: 'Tăng ca ngày thường (giờ)', w: 11 }, { key: 'otNN', label: 'Tăng ca ngày nghỉ / lễ (giờ)', w: 11 },
+        { key: 'loai', label: 'Chỉ tiêu', w: 9 }, ...dayCols,
+      ];
+      const rows = []; let stt = 0;
+      for (const e of ctx.employees) rows.push(...t6.rowsOf(e, ++stt));
+      return { title: `Bảng theo dõi chấm công ${PERIOD}`, columns, rows };
     }
 
     /* --- Vắng mặt / nghỉ phép — mẫu VangMatNghiPhep --- */
@@ -1165,6 +1210,82 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   PROG && PROG(100, 'Xong');
 }
 
+/* ===== Xuất Excel "Bảng theo dõi chấm công" — mỗi NV 6 dòng (Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ HC · Giờ TC) × từng ngày ===== */
+async function exportTrack6Xlsx(res, from, to, filter, company, address) {
+  const PROG = filter._prog; let pi = 0;
+  const ctx = loadRange(from, to, filter);
+  PROG && PROG(30, 'Đã đọc xong dữ liệu, đang ghi từng nhân viên…');
+  const days = daysBetween(from, to);
+  const t6 = track6Data(ctx, days);
+  const lcols = leaveCols(ctx, true);
+  // cột cố định: STT, Mã NV, Tên NV, Ngày vào, Ngày công, Giờ công, [nghỉ từng loại], TC ngày thường, TC ngày nghỉ/lễ, Chỉ tiêu
+  const fixed = [['STT', 5], ['Mã nhân viên', 12], ['Tên nhân viên', 20], ['Ngày vào', 11], ['Ngày công', 9], ['Giờ công', 9],
+    ...lcols.map((c) => [c.label, 9]), ['Tăng ca ngày thường (giờ)', 11], ['Tăng ca ngày nghỉ / lễ (giờ)', 11]];
+  const LAB = fixed.length + 1;          // cột "Chỉ tiêu"
+  const D0 = LAB + 1;                    // cột ngày đầu tiên
+  const totalCols = LAB + days.length;
+  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
+  const ws = wb.addWorksheet('TheoDoiChamCong');
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  const teal = 'FF0F7D7D', pink = 'FFFFE0EC', grey = 'FFF3F4F6';
+  const lastLabelCol = Math.min(totalCols, 12);
+  ws.mergeCells(1, 1, 1, lastLabelCol); Object.assign(ws.getCell(1, 1), { value: 'Đơn vị: ' + company, font: { bold: true, size: 12 } });
+  ws.mergeCells(2, 1, 2, lastLabelCol); Object.assign(ws.getCell(2, 1), { value: 'BẢNG THEO DÕI CHẤM CÔNG', font: { bold: true, size: 14 } });
+  ws.mergeCells(3, 1, 3, lastLabelCol); ws.getCell(3, 1).value = `From ${fmtDMY(from)} To ${fmtDMY(to)}`;
+  if (address) { ws.mergeCells(4, 1, 4, lastLabelCol); ws.getCell(4, 1).value = 'Địa chỉ: ' + address; }
+
+  const H = 5;   // 2 dòng tiêu đề: số ngày + thứ
+  fixed.forEach(([lab], i) => { mergeFast(ws, H, i + 1, H + 1, i + 1); ws.getCell(H, i + 1).value = lab; });
+  mergeFast(ws, H, LAB, H + 1, LAB); ws.getCell(H, LAB).value = 'Chỉ tiêu';
+  days.forEach((d, di) => { ws.getCell(H, D0 + di).value = +d.slice(8); ws.getCell(H + 1, D0 + di).value = WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()]; });
+  for (let rr = H; rr <= H + 1; rr++) for (let c = 1; c <= totalCols; c++) {
+    const cell = ws.getCell(rr, c);
+    cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c >= D0 && ctx.isWeekend(days[c - D0]) ? 'FFB45309' : teal } };
+    cell.border = border;
+  }
+  ws.getRow(H).height = 30;
+
+  let r = H + 2, stt = 0;
+  for (const e of ctx.employees) {
+    loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
+    const { perDay, sum } = t6.compute(e);
+    const vals = [++stt, e.code, e.full_name, e.start_date ? fmtDMY(e.start_date) : '', sum.cong, sum.gio, ...lcols.map((c) => sum[c.key] || 0), sum.otNT, sum.otNN];
+    vals.forEach((v, i) => {
+      mergeFast(ws, r, i + 1, r + 5, i + 1);
+      Object.assign(ws.getCell(r, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 2 ? 'left' : 'center', wrapText: i === 2 } });
+      for (let k = 0; k < 6; k++) ws.getCell(r + k, i + 1).border = border;
+    });
+    TRACK_ROWS.forEach(([key, lab], k) => {
+      const lc = ws.getCell(r + k, LAB); lc.value = lab; lc.border = border;
+      lc.alignment = { horizontal: 'center' }; lc.font = { bold: k >= 4, size: 10 }; lc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: grey } };
+      days.forEach((d, di) => {
+        const cell = ws.getCell(r + k, D0 + di);
+        const v = perDay.get(d)[key];
+        cell.value = v === '' ? null : v;
+        cell.alignment = { horizontal: 'center' }; cell.border = border;
+        if (k >= 4) cell.font = { bold: true };
+        if (ctx.isWeekend(d)) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+      });
+    });
+    r += 6;
+  }
+  if (!ctx.employees.length) { ws.mergeCells(r, 1, r, lastLabelCol); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
+  fixed.forEach(([, w], i) => { ws.getColumn(i + 1).width = w; });
+  ws.getColumn(LAB).width = 9;
+  for (let i = 0; i < days.length; i++) ws.getColumn(D0 + i).width = 7;
+  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: 3 }];
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="theodoi_chamcong_${from}_${to}.xlsx"`);
+  PROG && PROG(90, 'Đang đóng gói file Excel…');
+  await wb.xlsx.write(res);
+  res.end();
+  PROG && PROG(100, 'Xong');
+}
+
 /* ===== Xuất Excel "Chi tiết giờ vào/ra" — ma trận 2 cột/ngày (Vào|Ra), 1 dòng/NV (mẫu ChiTietThoiGianLamViec) ===== */
 async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   const PROG = filter._prog; let pi = 0;
@@ -1334,6 +1455,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
 
   // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
   if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, filter, company, address);
+  if (type === 'track6') return exportTrack6Xlsx(res, from, to, filter, company, address);
   if (type === 'daytime') return exportDaytimeXlsx(res, from, to, filter, company, address);
   if (type === 'hourstat') return exportHourStatXlsx(res, from, to, filter, company, address);
   if (type === 'empsheet') return exportEmpSheetXlsx(res, from, to, filter, company, false);

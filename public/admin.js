@@ -5770,6 +5770,7 @@ const REPORT_GROUPS = [
     ['detailmulti', '🔁', 'Chi tiết chấm công (nhiều lần vào/ra)', 'Mỗi NV × mỗi ngày: Giờ vào 1 → Giờ ra 4 theo từng lần chấm, trễ, sớm, giờ, công, tăng ca'],
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
+    ['track6', '🗒️', 'Bảng theo dõi chấm công (4 lần quẹt)', 'Mỗi nhân viên 6 dòng × từng ngày: Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ HC · Giờ TC, kèm ngày công, giờ công, nghỉ từng loại, tăng ca. Dành cho công ty chấm 4 lần/ngày (Đến – Ra trưa – Vào lại – Về)'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: mỗi ô là SỐ CÔNG trong ngày + tổng công, tăng ca, trễ, sớm, vắng, nghỉ (xem số giờ ở Bảng thống kê chấm công (giờ))'],
     ['hourstat', '🕒', 'Bảng thống kê chấm công (giờ)', 'Ma trận ngày × NV theo SỐ GIỜ mỗi ngày + giờ công, tăng ca TC1–TC3, vắng, nghỉ từng loại, trễ, sớm'],
     ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · KL=không lương · CT=công tác · K=nghỉ khác · L=lễ · V=vắng · O=thiếu ra'],
