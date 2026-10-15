@@ -5,6 +5,7 @@
 // Chỉ dùng khi tài khoản tổng (sadmin) bật "audit_enabled" và người xem có quyền "audit".
 import { db, getSetting } from './db.js';
 import { hasPerm } from './auth.js';
+import { kDayTimes, realFourTimes, kSeed } from './k-times.js';
 
 const DAY = 86400000;
 const pad = (n) => String(n).padStart(2, '0');
@@ -21,6 +22,12 @@ export function auditSettings() {
     clampLv: lvs('audit_clamp_lv', ''),             // KHỐNG CHẾ GIỜ CHẤM áp cho những mức ảo nào (mặc định không mức nào)
     clampIn: Math.round(num('audit_clamp_in_min', 14)) * 60000,    // giờ vào không sớm hơn giờ vào ca quá N phút
     clampOut: Math.round(num('audit_clamp_out_min', 14)) * 60000,  // giờ ra không trễ hơn (giờ tan ca + tăng ca ảo) quá N phút
+    // GIỜ TRƯA & ĐI TRỄ KIỂU "CÔNG KHÁCH K" của HR-ERP (khách chấm 4 lần/ngày): áp cho những mức ảo nào (mặc định không mức nào = TẮT)
+    kLv: lvs('audit_k_lv', ''),
+    kEarly: Math.round(num('audit_k_early_min', 15)),    // đến sớm từ N phút → hiện 1–14 phút trước giờ vào ca
+    kLateMax: Math.round(num('audit_k_late_max', 60)),   // đi trễ 1…N phút → coi như đúng giờ (hiện sớm 1–14', trả đủ giờ công)
+    kOutGap: Math.round(num('audit_k_out_gap', 15)),     // ra trưa muộn hơn giờ bắt đầu nghỉ từ N phút → hiện 0–11 phút sau giờ nghỉ
+    kInGap: Math.round(num('audit_k_in_gap', 5)),        // vào lại sớm hơn giờ hết nghỉ quá N phút → hiện trong N phút cuối giờ nghỉ
     // số ngày nghỉ hằng tuần (chủ nhật…) đi làm tối đa / tháng lương của từng mức ảo; null = không giới hạn
     sunMax: Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting('audit_sun_l' + l, ''); const n = parseInt(v, 10); return [l, v === '' || v == null || !Number.isFinite(n) || n < 0 ? null : n]; })),
     enabled: getSetting('audit_enabled', '0') === '1',
@@ -197,7 +204,50 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
   }
   for (const [id, x] of sunHidden) if (x.date >= from && x.date <= to) out.set(id, { hidden: true, check_in_at: null, check_out_at: null, ot_min: 0, cut: x.ot });
   if (S.clampLv.has(lv)) clampRange(out, ids, from, to, S, lv, lockedDay);
+  if (S.kLv.has(lv)) kRange(out, ids, from, to, S, lv, lockedDay);
   return out;
+}
+
+// GIỜ TRƯA & ĐI TRỄ KIỂU K: chỉ chạy khi mức ảo được tích ở "Giờ trưa & đi trễ kiểu K" (mặc định tắt → hàm này không được gọi).
+// Với dòng công có ca nghỉ trưa CỐ ĐỊNH: sinh giờ Ra / Vào trưa ảo (k_ra, k_vao), đổi giờ Đến theo quy tắc K (xem k-times.js);
+// đi trễ được che thì giờ công / số công trả đủ, phút trễ = 0. Giờ VỀ và tăng ca do phần cắt tăng ca / khống chế giờ chấm ở trên lo.
+function kRange(out, ids, from, to, S, lv, lockedDay) {
+  const K = { early: S.kEarly, lateMax: S.kLateMax, outGap: S.kOutGap, inGap: S.kInGap };
+  const dec = parseInt(getSetting('workunit_rounding', '2'), 10), mode = parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0;
+  const dig = Number.isFinite(dec) ? Math.max(0, Math.min(3, dec)) : 2, f = Math.pow(10, dig);
+  const rf = mode === 1 ? Math.ceil : mode === 2 ? Math.round : Math.floor;
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500), ph = chunk.map(() => '?').join(',');
+    const punches = new Map();   // 'NV|ngày' → [mốc ms]
+    for (const p of db.prepare(`SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IN (${ph}) AND work_date >= ? AND work_date <= ? ORDER BY punch_at`).all(...chunk, from, to)) {
+      const k = p.employee_id + '|' + p.work_date; if (!punches.has(k)) punches.set(k, []); punches.get(k).push(Date.parse(p.punch_at));
+    }
+    for (const r of db.prepare(`SELECT a.id, a.employee_id, a.work_date, a.check_in_at, a.check_out_at, a.late_min, a.work_minutes, a.work_unit, a.ot_min,
+        s.start_time, s.end_time, s.break_start, s.break_minutes, s.work_unit_value FROM attendance a JOIN shifts s ON s.id = a.shift_id
+      WHERE a.employee_id IN (${ph}) AND a.work_date >= ? AND a.work_date <= ? AND a.check_in_at IS NOT NULL`).all(...chunk, from, to)) {
+      if (!r.start_time || !r.end_time || !r.break_start || !(r.break_minutes > 0) || lockedDay(r.work_date)) continue;
+      const cur = out.get(r.id);
+      if (cur && cur.hidden) continue;
+      const st = Date.parse(`${r.work_date}T${r.start_time}:00+07:00`);
+      let bs = Date.parse(`${r.work_date}T${r.break_start}:00+07:00`); if (bs < st) bs += DAY;
+      const be = bs + r.break_minutes * 60000;
+      const real = realFourTimes(punches.get(r.employee_id + '|' + r.work_date) || [Date.parse(r.check_in_at), ...(r.check_out_at ? [Date.parse(r.check_out_at)] : [])], bs);
+      const t = kDayTimes({ start: st, breakStart: bs, breakEnd: be, den: real.den ?? Date.parse(r.check_in_at), ra: real.ra, vao: real.vao }, K, kSeed(r.employee_id, r.work_date, lv));
+      const e = { hidden: false, ot_min: cur ? cur.ot_min : r.ot_min || 0, cut: cur ? cur.cut : 0,
+        check_in_at: cur ? cur.check_in_at : r.check_in_at, check_out_at: cur ? cur.check_out_at : r.check_out_at };
+      if (t.den !== real.den && t.den != null) e.check_in_at = new Date(t.den).toISOString();
+      if (t.ra != null && t.ra !== real.ra) e.k_ra = new Date(t.ra).toISOString(); else if (real.ra != null) e.k_ra = new Date(real.ra).toISOString();
+      if (t.vao != null && t.vao !== real.vao) e.k_vao = new Date(t.vao).toISOString(); else if (real.vao != null) e.k_vao = new Date(real.vao).toISOString();
+      if (t.lateHidden && r.work_unit > 0) {   // che đi trễ → trả đủ giờ công, phút trễ = 0
+        let en = Date.parse(`${r.work_date}T${r.end_time}:00+07:00`); if (en <= st) en += DAY;
+        const std = Math.max(1, Math.round((en - st) / 60000) - r.break_minutes);
+        e.late_min = 0;
+        e.work_minutes = Math.min(std, (r.work_minutes || 0) + (r.late_min || 0));
+        e.work_unit = Math.min(r.work_unit_value ?? 1, rf((r.work_unit_value ?? 1) * e.work_minutes / std * f) / f);
+      }
+      out.set(r.id, e);
+    }
+  }
 }
 
 // Chủ nhật (ngày nghỉ hằng tuần) đi làm vượt `max` ngày / tháng lương → Map attendance.id → { date, ot } của các dòng bị gỡ.
@@ -382,7 +432,10 @@ export function applyVirtual(rows, vmap, onlyEmp = null) {   // onlyEmp: map dù
     const v = vmap.get(row.id);
     if (!v) { res.push(row); continue; }
     if (v.hidden) continue;
-    res.push({ ...row, ot_min: v.ot_min, check_in_at: v.check_in_at, check_out_at: v.check_out_at });
+    res.push({ ...row, ot_min: v.ot_min, check_in_at: v.check_in_at, check_out_at: v.check_out_at,
+      // kiểu K (chỉ có khi mức ảo bật "Giờ trưa & đi trễ kiểu K"): giờ Ra / Vào trưa ảo, đi trễ được che → phút trễ 0 + đủ giờ công
+      ...(v.k_ra ? { k_ra: v.k_ra } : {}), ...(v.k_vao ? { k_vao: v.k_vao } : {}),
+      ...(v.work_minutes != null ? { late_min: v.late_min, work_minutes: v.work_minutes, work_unit: v.work_unit } : {}) });
   }
   if (LK) {
     const extra = [];

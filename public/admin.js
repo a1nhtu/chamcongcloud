@@ -3998,6 +3998,9 @@ function auditPanelEl(s) {
   };
   const pkWeek = lvPick(s.audit_week_lv, '1,2,3'), pkMonth = lvPick(s.audit_month_lv, '1,2,3'), pkYear = lvPick(s.audit_year_lv, '1,2,3'), pkClamp = lvPick(s.audit_clamp_lv, '');
   const clIn = num(s.audit_clamp_in_min ?? 14, '1'), clOut = num(s.audit_clamp_out_min ?? 14, '1');
+  // Giờ trưa & đi trễ kiểu "công khách K" của HR-ERP (khách chấm 4 lần / ngày) — mặc định không mức nào = TẮT
+  const pkK = lvPick(s.audit_k_lv, '');
+  const kEarly = num(s.audit_k_early_min ?? 15, '1'), kLate = num(s.audit_k_late_max ?? 60, '1'), kOut = num(s.audit_k_out_gap ?? 15, '1'), kIn = num(s.audit_k_in_gap ?? 5, '1');
   // chủ nhật (ngày nghỉ hằng tuần) đi làm tối đa / tháng — mỗi mức ảo 1 ô, để trống = không giới hạn
   const sunI = [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max: 6, step: 1, placeholder: '—', value: s['audit_sun_l' + l] ?? '' }));
   const sunBox = el('span', { class: 'lv-pick' }, ...sunI.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
@@ -4029,7 +4032,8 @@ function auditPanelEl(s) {
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value,
         audit_week_lv: pkWeek.val(), audit_month_lv: pkMonth.val(), audit_year_lv: pkYear.val(),
         audit_sun_l1: sunI[0].value, audit_sun_l2: sunI[1].value, audit_sun_l3: sunI[2].value,
-        audit_clamp_lv: pkClamp.val(), audit_clamp_in_min: clIn.value, audit_clamp_out_min: clOut.value } });
+        audit_clamp_lv: pkClamp.val(), audit_clamp_in_min: clIn.value, audit_clamp_out_min: clOut.value,
+        audit_k_lv: pkK.val(), audit_k_early_min: kEarly.value, audit_k_late_max: kLate.value, audit_k_out_gap: kOut.value, audit_k_in_gap: kIn.value } });
       SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -4047,6 +4051,12 @@ function auditPanelEl(s) {
         'Ở mức được tích, giờ vào / ra ảo luôn nằm sát giờ ca theo 2 số phút dưới đây. Ngày chia ca sáng / chiều thì giờ ra giữa ca và giờ vào chiều cũng theo luật này. Giờ nằm ngoài khoảng được đổi thành một giờ ngẫu nhiên trong khoảng (xem lại vẫn ra đúng giờ đó); đi trễ / về sớm thật giữ nguyên; công và tăng ca không đổi. Không tích mức nào = tắt.'),
       lvRow('· Vào sớm tối đa', clIn, 'phút trước giờ vào ca'),
       lvRow('· Ra trễ tối đa', clOut, 'phút sau giờ tan ca', '(đã cộng tăng ca ảo của ngày đó)'),
+      lvRow('Giờ trưa & đi trễ kiểu K', pkK.node,
+        'Dành cho công ty chấm 4 lần / ngày (Đến – Ra trưa – Vào lại – Về) như khách dùng HR-ERP "công khách K". Ở mức được tích: giờ ĐẾN sớm hoặc trễ trong khoảng cho phép hiện thành 1–14 phút trước giờ vào ca (đi trễ được che thì trả đủ giờ công, phút trễ = 0); giờ RA / VÀO trưa hiện sát giờ nghỉ của ca (cần ca có "Nghỉ giữa ca bắt đầu lúc"). Số phút ngẫu nhiên cố định theo từng nhân viên + ngày. Không tích mức nào = TẮT, công ty khác không bị ảnh hưởng.'),
+      lvRow('· Đến sớm từ', kEarly, 'phút → hiện 1–14 phút trước giờ vào ca', '(0 = không đổi giờ đến sớm)'),
+      lvRow('· Đi trễ tối đa được che', kLate, 'phút', '(trễ quá số này giữ giờ thật; 0 = không che)'),
+      lvRow('· Ra trưa muộn từ', kOut, 'phút sau giờ bắt đầu nghỉ → hiện 0–11 phút sau giờ nghỉ'),
+      lvRow('· Vào lại sớm hơn', kIn, 'phút trước giờ hết nghỉ → hiện trong chừng đó phút cuối của giờ nghỉ'),
       lvRow('Cách cắt khi vượt', auMethod, 'Chia đều: mọi ngày có tăng ca đều giảm theo cùng tỷ lệ. Gỡ nguyên ngày: bỏ hẳn tăng ca của một số ngày (chọn ngẫu nhiên nhưng cố định, ngày thường trước, ngày nghỉ / lễ sau) như HR-ERP.'),
       lvRow('Làm tròn tăng ca ảo', auBlock),
       el('label', { class: 'lv-chk' }, auWk, el('div', {}, el('b', {}, `Cộng cả tăng ca ngày nghỉ hằng tuần (${wkName})`), wkHint)),
