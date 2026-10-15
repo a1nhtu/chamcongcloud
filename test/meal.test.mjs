@@ -227,7 +227,9 @@ test('thực đơn → nhân viên chọn món trên app → HR xem tổng hợp
 test('màn hình bếp: cần khoá; lượt quẹt gần nhất hiện tên + món đã chọn + số lần quẹt', async () => {
   assert.equal((await call('GET', '/meal/kitchen/feed')).status, 401);   // chưa có khoá
   const k = (await call('GET', '/admin/meal/kitchen', { token: tok.ADM })).body.key;
-  assert.match(k, /^[0-9a-f]{24}$/);
+  assert.match(k, /^[A-HJKMNP-Z2-9]{6}$/);   // mã NGẮN 6 ký tự dễ gõ (không O/0, I/1, L)
+  assert.equal((await call('GET', '/meal/kitchen/feed?key=' + k.toLowerCase())).status, 200);   // không phân biệt hoa thường
+  assert.equal((await call('GET', '/meal/kitchen/feed?key=' + k + '%20')).status, 200);
   assert.equal((await call('GET', '/meal/kitchen/feed?key=sai')).status, 401);
   assert.equal((await call('GET', '/meal/kitchen/feed?key=' + k)).status, 200);
   // chọn món bữa trưa ngày D cho SX1 rồi quẹt → màn hình bếp hiện đúng món
@@ -247,6 +249,15 @@ test('màn hình bếp: cần khoá; lượt quẹt gần nhất hiện tên + m
   const k2 = (await call('POST', '/admin/meal/kitchen/renew', { token: tok.ADM })).body.key;
   assert.notEqual(k2, k);
   assert.equal((await call('GET', '/meal/kitchen/feed?key=' + k)).status, 401);
+});
+
+test('màn hình bếp: dò mã sai quá 10 lần / 5 phút theo IP thì bị chặn (429), IP khác vẫn vào được', async () => {
+  const k = (await call('GET', '/admin/meal/kitchen', { token: tok.ADM })).body.key;
+  const hit = (key, ip) => fetch(`${base}/meal/kitchen/feed?key=${key}`, { headers: { 'x-forwarded-for': ip } }).then((r) => r.status);
+  for (let i = 0; i < 10; i++) assert.equal(await hit('AAAAAA', '9.9.9.9'), 401);
+  assert.equal(await hit('AAAAAA', '9.9.9.9'), 429);
+  assert.equal(await hit(k, '9.9.9.9'), 429);          // đã bị chặn thì mã đúng cũng chờ
+  assert.equal(await hit(k, '8.8.8.8'), 200);          // IP khác không ảnh hưởng
 });
 
 /* ===================== MODULE ĐỘC LẬP ===================== */

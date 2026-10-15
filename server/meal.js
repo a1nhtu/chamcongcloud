@@ -2,7 +2,7 @@
 //   · chỉ ĐỌC chấm công (device_punches) + đăng ký làm thêm (ot_registrations); KHÔNG ghi / sửa bảng chấm công, KHÔNG đụng công thức tính công
 //   · ghi vào các bảng meal_* riêng (db.js › initSchema)
 //   · công tắc `meal_enabled` (Cài đặt, mặc định TẮT, chỉ tài khoản tổng bật): tắt → mọi API suất ăn trả 403, trang /bep + /suatan trả 404, menu ẩn
-import { randomBytes, timingSafeEqual } from 'node:crypto';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { db, getSetting, setSetting, adminAttWhere, deptWithChildren } from './db.js';
 import { hasPerm } from './auth.js';
 import { userError } from './util.js';
@@ -247,16 +247,18 @@ export function orderSummary(workDate, code) {
 }
 
 /* ---------------------------- màn hình bếp ---------------------------- */
-// Khoá riêng của màn hình bếp (trình duyệt bếp không đăng nhập; HR đổi khoá được → khoá cũ vô hiệu)
+// Mã riêng của màn hình bếp (trình duyệt bếp không đăng nhập; HR đổi mã được → mã cũ vô hiệu).
+// Mã NGẮN 6 ký tự dễ gõ (bỏ chữ dễ nhầm O/0, I/1, L); không phân biệt hoa thường. Dò mã bị chặn theo IP ở routes/meal.js.
+const KEY_CHARS = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 export function kitchenKey({ renew = false } = {}) {
   let k = getSetting('meal_kitchen_key', '');
-  if (!k || renew) { k = randomBytes(12).toString('hex'); setSetting('meal_kitchen_key', k); }
+  if (!k || renew) { k = Array.from({ length: 6 }, () => KEY_CHARS[randomInt(KEY_CHARS.length)]).join(''); setSetting('meal_kitchen_key', k); }
   return k;
 }
 export function kitchenKeyOk(given) {
-  const k = getSetting('meal_kitchen_key', '');
+  const k = getSetting('meal_kitchen_key', '').toUpperCase();
   if (!k || typeof given !== 'string' || !given) return false;
-  const a = Buffer.from(k), b = Buffer.from(given);
+  const a = Buffer.from(k), b = Buffer.from(given.trim().toUpperCase());
   return a.length === b.length && timingSafeEqual(a, b);
 }
 // Lượt quẹt mới (id > sinceId) trong 3 giờ qua, mỗi lượt gắn tên NV + món đã chọn của đúng bữa ăn lượt quẹt đó thuộc về.

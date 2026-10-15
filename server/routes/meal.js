@@ -10,11 +10,27 @@ import {
 import { vnNow, addDaysIso, isIsoDate } from '../meal-rules.js';
 
 const r = Router();
+// Chặn dò mã màn hình bếp: mỗi IP sai quá 10 lần trong 5 phút thì bị từ chối (429) tới hết 5 phút
+const fails = new Map();   // ip → { n, since }
+const clientIp = (req) => String(req.headers['cf-connecting-ip'] || req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+function tooManyFails(ip, now = Date.now()) {
+  const f = fails.get(ip);
+  if (!f) return false;
+  if (now - f.since > 5 * 60000) { fails.delete(ip); return false; }
+  return f.n >= 10;
+}
+function noteFail(ip, now = Date.now()) {
+  const f = fails.get(ip);
+  if (!f || now - f.since > 5 * 60000) fails.set(ip, { n: 1, since: now }); else f.n++;
+  if (fails.size > 2000) fails.clear();
+}
 const wrap = (name, fn) => (req, res) => { try { fn(req, res); } catch (e) { sendCaughtError(res, name, e); } };
 
 // Màn hình bếp: không đăng nhập, chỉ cần khoá do HR cấp (Suất ăn › Cấu hình). Đặt TRƯỚC authRequired.
 r.get('/kitchen/feed', mealGate, wrap('GET /meal/kitchen/feed', (req, res) => {
-  if (!kitchenKeyOk(String(req.query.key || ''))) return res.status(401).json({ error: 'Khoá màn hình bếp không đúng hoặc đã bị đổi' });
+  const ip = clientIp(req);
+  if (tooManyFails(ip)) return res.status(429).json({ error: 'Nhập sai mã quá nhiều lần — thử lại sau vài phút' });
+  if (!kitchenKeyOk(String(req.query.key || ''))) { noteFail(ip); return res.status(401).json({ error: 'Mã màn hình bếp không đúng hoặc đã bị đổi' }); }
   res.setHeader('Cache-Control', 'no-store');
   res.json(kitchenFeed(parseInt(req.query.since, 10) || 0));
 }));

@@ -269,18 +269,20 @@ export async function pageMealCfg(ctx) {
   /* --- màn hình bếp --- */
   main.append(el('div', { class: 'sa-sec' }, '4. Màn hình bếp'));
   const kBox = el('div', { class: 'sa-card' });
-  const urlOf = (k) => `${location.origin}/bep?key=${k}`;
-  const keyEl = el('div', { class: 'sa-key' }, urlOf(kit.key));
+  const urlOf = (k) => `${location.origin}/bep/${k}`;
+  const codeEl = el('div', { style: 'font-size:34px;font-weight:900;letter-spacing:8px;color:var(--sa-navy);margin:2px 0 8px' }, kit.key.toUpperCase());
+  const keyEl = el('div', { class: 'sa-key' }, urlOf(kit.key.toUpperCase()));
   const copy = el('button', { class: 'sa-btn ghost', type: 'button' }, '📋 Sao chép liên kết');
   copy.onclick = async () => { try { await navigator.clipboard.writeText(keyEl.textContent); toast('Đã sao chép', 'ok'); } catch { toast('Không sao chép được — bôi đen rồi Ctrl+C', 'err'); } };
   const open = el('button', { class: 'sa-btn', type: 'button' }, '↗ Mở màn hình bếp');
   open.onclick = () => window.open(keyEl.textContent, '_blank');
-  const renew = el('button', { class: 'sa-btn ghost', type: 'button' }, '🔑 Đổi khoá');
+  const renew = el('button', { class: 'sa-btn ghost', type: 'button' }, '🔑 Đổi mã');
   renew.onclick = async () => {
-    if (!confirm('Đổi khoá? Màn hình bếp đang mở sẽ ngừng hoạt động cho tới khi mở lại bằng liên kết mới.')) return;
-    try { kit = await api('/admin/meal/kitchen/renew', { method: 'POST' }); keyEl.textContent = urlOf(kit.key); toast('Đã đổi khoá', 'ok'); } catch (e) { toast(e.message, 'err'); }
+    if (!confirm('Đổi mã? Màn hình bếp đang mở sẽ ngừng hoạt động cho tới khi mở lại bằng mã / liên kết mới.')) return;
+    try { kit = await api('/admin/meal/kitchen/renew', { method: 'POST' }); keyEl.textContent = urlOf(kit.key.toUpperCase()); codeEl.textContent = kit.key.toUpperCase(); toast('Đã đổi mã', 'ok'); } catch (e) { toast(e.message, 'err'); }
   };
-  kBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Mở liên kết này trên máy tính / tivi ở khu nhà bếp (không cần đăng nhập). Khi nhân viên quẹt máy chấm công trong giờ ăn, màn hình hiện tên + món đã chọn.'),
+  kBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Trên máy tính / tivi ở khu nhà bếp (không cần đăng nhập): mở trình duyệt, gõ địa chỉ máy chủ + /bep rồi nhập MÃ dưới đây (hoặc mở thẳng liên kết ngắn bên dưới). Khi nhân viên quẹt máy chấm công trong giờ ăn, màn hình hiện tên + món đã chọn.'),
+    el('div', { class: 'sa-hint' }, 'Mã màn hình bếp (không phân biệt hoa thường):'), codeEl,
     keyEl, el('div', { class: 'sa-actions' }, open, copy, renew));
   main.append(kBox);
 }

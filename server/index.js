@@ -115,7 +115,7 @@ function sendHtmlNoCache(res, file) {
 }
 app.get('/admin', (req, res) => sendHtmlNoCache(res, 'admin.html'));
 app.get('/', (req, res) => sendHtmlNoCache(res, 'index.html'));
-app.get('/bep', mealStaticGate, (req, res) => sendHtmlNoCache(res, 'suatan/bep.html'));   // màn hình bếp (khoá do HR cấp)
+app.get(['/bep', '/bep/:key'], mealStaticGate, (req, res) => sendHtmlNoCache(res, 'suatan/bep.html'));   // màn hình bếp (mã ngắn do HR cấp: /bep/MÃ hoặc /bep rồi gõ mã)
 
 // Fallback lỗi JSON
 app.use((err, req, res, next) => {

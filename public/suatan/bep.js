@@ -5,8 +5,10 @@ const KEY_LS = 'digiplus_bep_key';
 let key = '', since = 0, first = true, lastShown = 0, soundOn = false, audio = null;
 
 try {
-  const u = new URL(location.href), k = u.searchParams.get('key');
-  if (k) { localStorage.setItem(KEY_LS, k); u.searchParams.delete('key'); history.replaceState(null, '', u.pathname + u.search); }
+  // mã đến từ /bep/MÃ (ngắn, dễ gõ) hoặc /bep?key=MÃ; nhớ trên máy rồi gỡ khỏi thanh địa chỉ
+  const u = new URL(location.href), seg = decodeURIComponent(u.pathname.replace(/^\/bep\/?/, '').split('/')[0] || '');
+  const k = seg || u.searchParams.get('key');
+  if (k) { localStorage.setItem(KEY_LS, k.trim().toUpperCase()); history.replaceState(null, '', '/bep'); }
   key = localStorage.getItem(KEY_LS) || '';
 } catch { /* trình duyệt chặn lưu trữ */ }
 
@@ -32,10 +34,12 @@ function showGate(msg) {
   $('#gate').style.display = 'flex';
   if (msg) $('#gk').placeholder = msg;
 }
+$('#gk').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#gb').click(); });
 $('#gb').onclick = () => {
   const v = $('#gk').value.trim();
   if (!v) return;
-  try { key = v.includes('key=') ? new URL(v).searchParams.get('key') || v : v; } catch { key = v; }
+  key = v.includes('/bep/') ? v.split('/bep/')[1].split(/[?#/]/)[0] : v.replace(/^.*key=/, '');   // dán cả link hay chỉ gõ mã đều được
+  key = key.trim().toUpperCase();
   try { localStorage.setItem(KEY_LS, key); } catch {}
   $('#gate').style.display = 'none'; since = 0; first = true; poll();
 };
@@ -57,7 +61,7 @@ async function poll() {
   if (!key) return showGate();
   try {
     const res = await fetch(`/api/meal/kitchen/feed?key=${encodeURIComponent(key)}&since=${since}`, { cache: 'no-store' });
-    if (res.status === 401) { $('#dot').classList.add('off'); try { localStorage.removeItem(KEY_LS); } catch {} key = ''; return showGate('Khoá không đúng / đã đổi — nhập lại'); }
+    if (res.status === 401) { $('#dot').classList.add('off'); try { localStorage.removeItem(KEY_LS); } catch {} key = ''; return showGate('Mã không đúng / đã đổi — nhập lại'); }
     if (res.status === 403 || res.status === 404) { $('#dot').classList.add('off'); $('#big').innerHTML = '<div class="wait">Phân hệ suất ăn đang tắt</div>'; return setTimeout(poll, 10000); }
     const d = await res.json();
     $('#dot').classList.remove('off');
