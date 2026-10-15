@@ -797,6 +797,13 @@ function migrateColumns() {
       PRIMARY KEY (contract_id, stage, end_date)
     );`);
   for (const k of HR_FIELD_KEYS) add('hr_profiles', k, "TEXT NOT NULL DEFAULT ''");   // mỗi trường hồ sơ 1 cột
+  // Công tắc PHÂN HỆ NHÂN SỰ: mặc định TẮT (ẩn hẳn), chỉ tài khoản tổng bật trong Cài đặt.
+  // Đặt 1 lần: bản 1.20.1–1.20.2 đã nhập dữ liệu nhân sự thì giữ BẬT để không "mất" dữ liệu trước mắt khách.
+  if (getSetting('hr_enabled') == null) {
+    const used = db.prepare(`SELECT (SELECT COUNT(*) FROM hr_contracts) + (SELECT COUNT(*) FROM hr_decisions)
+        + (SELECT COUNT(*) FROM hr_profiles) + (SELECT COUNT(*) FROM hr_documents) AS n`).get().n;
+    setSetting('hr_enabled', used > 0 ? '1' : '0');
+  }
 
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN

@@ -16,6 +16,7 @@ let db, initSchema, setSetting, runHrReminders, pickPermSubs, hrToday, addDays;
 before(async () => {
   ({ db, initSchema, setSetting } = await import('../server/db.js'));
   initSchema();
+  setSetting('hr_enabled', '1');   // phân hệ Nhân sự mặc định TẮT — các bài nhắc dưới đây cần bật
   ({ runHrReminders } = await import('../server/hr-remind.js'));
   ({ pickPermSubs } = await import('../server/push.js'));
   ({ hrToday } = await import('../server/hr.js'));

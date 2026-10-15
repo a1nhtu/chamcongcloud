@@ -40,7 +40,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       use_phone_cfg: ['0', '1'].includes(process.env.USE_PHONE) ? process.env.USE_PHONE : '',
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
-      audit_enabled: req.forceVirt ? '0' : getSetting('audit_enabled', '0'),   // CÔNG ẢO / LƯƠNG ẢO — chỉ tài khoản tổng bật (tài khoản kiểm tra: luôn '0')
+      audit_enabled: req.forceVirt ? '0' : getSetting('audit_enabled', '0'),
+      hr_enabled: req.forceVirt ? '0' : getSetting('hr_enabled', '0'),         // PHÂN HỆ NHÂN SỰ — chỉ tài khoản tổng bật   // CÔNG ẢO / LƯƠNG ẢO — chỉ tài khoản tổng bật (tài khoản kiểm tra: luôn '0')
       ...(auditAllowed(req.user) && !req.forceVirt ? {
         audit_ot_day_min: getSetting('audit_ot_day_min', '0'), audit_ot_week_h: getSetting('audit_ot_week_h', '0'),
         audit_ot_month_h: getSetting('audit_ot_month_h', '0'), audit_ot_year_h: getSetting('audit_ot_year_h', '0'),
@@ -121,6 +122,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
       if (b.device_key_required != null) setSetting('device_key_required', b.device_key_required ? '1' : '0');
       if (b.audit_enabled != null) setSetting('audit_enabled', b.audit_enabled ? '1' : '0');
+      if (b.hr_enabled != null) setSetting('hr_enabled', b.hr_enabled ? '1' : '0');
     }
     // Hạn mức công ảo: người được xem công ảo mới chỉnh được
     if (auditAllowed(req.user)) {

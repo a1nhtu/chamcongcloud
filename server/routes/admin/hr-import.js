@@ -12,6 +12,7 @@ import {
   fixIdNumber, fixPhone, normText,
 } from '../../hr-import.js';
 import { who, adminGuard, saveProfile, contractInput, CONTRACT_COLS, syncDatesFromContract } from './hr.js';
+import { hrGate } from '../../hr.js';
 
 const FIELD = Object.fromEntries(HR_FIELDS.map((f) => [f[0], f]));
 const MAX_MSG = 300;
@@ -58,7 +59,7 @@ function guideSheet(wb, title, lines) {
 }
 
 export function registerHrImportRoutes(r, { need }) {
-  const hr = need('hr');
+  const hr = [hrGate, need('hr')];
 
   /* ------------------------------ HỒ SƠ ------------------------------ */
   r.get('/hr/import/profiles-template.xlsx', hr, async (req, res) => {
