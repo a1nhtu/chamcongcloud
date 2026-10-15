@@ -19,6 +19,8 @@ import adminRoutes from './routes/admin.js';
 import reportRoutes from './routes/reports.js';
 import licenseRoutes from './routes/license.js';
 import shiftRequestRoutes from './routes/shift-requests.js';
+import mealRoutes from './routes/meal.js';
+import { mealStaticGate } from './meal.js';
 import iclockRoutes from './routes/iclock.js';
 import { isActivated } from './license.js';
 import { currentVersion } from './update.js';
@@ -77,6 +79,7 @@ app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/shift-requests', shiftRequestRoutes);
+app.use('/api/meal', mealRoutes);   // quản lý suất ăn — công tắc meal_enabled (tắt: 403)
 app.get('/api/config', (req, res) => res.json({
   company_name: getSetting('company_name', 'Digiplus'),
   attendance_mode: getSetting('attendance_mode', 'shift'),
@@ -97,6 +100,7 @@ app.use('/uploads', (req, res, next) => {
 }, express.static(UPLOAD_DIR, { maxAge: '7d' }));
 
 // Trang tĩnh (PWA nhân viên + trang admin)
+app.use('/suatan', mealStaticGate);   // giao diện Suất ăn: tắt công tắc meal_enabled → 404 (đặt TRƯỚC express.static)
 app.use(express.static(PUBLIC_DIR, { index: false }));
 // Trả HTML kèm cache-busting: chèn ?v=<version> vào js/css nội bộ để trình duyệt/Cloudflare
 // tự lấy bản mới mỗi khi lên version (khỏi phải xoá cache tay khi cập nhật).
@@ -111,6 +115,7 @@ function sendHtmlNoCache(res, file) {
 }
 app.get('/admin', (req, res) => sendHtmlNoCache(res, 'admin.html'));
 app.get('/', (req, res) => sendHtmlNoCache(res, 'index.html'));
+app.get('/bep', mealStaticGate, (req, res) => sendHtmlNoCache(res, 'suatan/bep.html'));   // màn hình bếp (khoá do HR cấp)
 
 // Fallback lỗi JSON
 app.use((err, req, res, next) => {

@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1e3a68" />
+  <title>Màn hình bếp — Digiplus</title>
+  <link rel="icon" href="/favicon.png" />
+  <style>
+    :root { --navy: #1e3a68; --navy-d: #12264a; --red: #d8382e; --ink: #fff; --mut: #9db3d6; }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body { background: var(--navy-d); color: var(--ink); font-family: system-ui, "Segoe UI", Roboto, Arial, sans-serif; display: flex; flex-direction: column; overflow: hidden; }
+    header { display: flex; align-items: center; gap: 18px; background: var(--navy); padding: 12px 28px; border-bottom: 4px solid var(--red); }
+    header img { height: 40px; }
+    header h1 { margin: 0; font-size: 24px; letter-spacing: .5px; flex: 1; }
+    #clock { font-size: 34px; font-weight: 800; font-variant-numeric: tabular-nums; }
+    #dot { width: 14px; height: 14px; border-radius: 50%; background: #3ddc84; }
+    #dot.off { background: var(--red); }
+    main { flex: 1; display: grid; grid-template-columns: 1.6fr 1fr; gap: 22px; padding: 22px 28px; min-height: 0; }
+    #big { background: #fff; color: #17233a; border-radius: 22px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 24px; border-bottom: 10px solid var(--navy); min-height: 0; }
+    #big.flash { animation: flash .9s ease-out; }
+    @keyframes flash { 0% { background: #ffe1de; transform: scale(1.015); } 100% { background: #fff; transform: none; } }
+    #big .wait { color: #7b8aa5; font-size: 34px; font-weight: 600; }
+    #big .name { font-size: clamp(40px, 7vw, 96px); font-weight: 900; color: var(--navy); line-height: 1.05; }
+    #big .meta { font-size: 28px; color: #5d6e8c; margin: 8px 0 22px; }
+    #big .dish { font-size: clamp(36px, 6vw, 84px); font-weight: 900; color: var(--red); line-height: 1.1; }
+    #big .dish.none { color: #b9791a; font-size: clamp(28px, 4vw, 54px); }
+    #big .tag { margin-top: 18px; display: inline-block; background: var(--navy); color: #fff; font-size: 26px; font-weight: 700; border-radius: 999px; padding: 6px 22px; }
+    #big .tag.again { background: var(--red); }
+    aside { background: rgba(255, 255, 255, .06); border-radius: 22px; padding: 16px 18px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+    aside h2 { margin: 0 0 10px; font-size: 18px; color: var(--mut); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
+    #list { overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+    .it { background: rgba(255, 255, 255, .09); border-radius: 12px; padding: 10px 14px; display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; align-items: baseline; }
+    .it .t { color: var(--mut); font-variant-numeric: tabular-nums; font-size: 18px; grid-row: span 2; }
+    .it .n { font-size: 22px; font-weight: 700; }
+    .it .d { font-size: 20px; color: #ffb3ad; font-weight: 700; }
+    .it .d.none { color: #f0c36b; font-weight: 500; }
+    #gate { position: fixed; inset: 0; background: var(--navy-d); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 5; }
+    #gate input { font-size: 20px; padding: 10px 14px; border-radius: 10px; border: 0; width: min(520px, 90vw); }
+    #gate button { font-size: 18px; padding: 10px 24px; border: 0; border-radius: 10px; background: var(--red); color: #fff; font-weight: 700; cursor: pointer; }
+    #sound { background: transparent; border: 1px solid var(--mut); color: var(--mut); border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 15px; }
+    @media (max-width: 900px) { main { grid-template-columns: 1fr; overflow: auto; } }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="/icons/logo.png" alt="" />
+    <h1 id="title">MÀN HÌNH BẾP — SUẤT ĂN</h1>
+    <button id="sound" type="button">🔔 Bật tiếng</button>
+    <span id="dot" title="Kết nối"></span>
+    <div id="clock">--:--:--</div>
+  </header>
+  <main>
+    <section id="big"><div class="wait">Đang chờ nhân viên quẹt thẻ…</div></section>
+    <aside><h2>Lượt quẹt gần đây</h2><div id="list"></div></aside>
+  </main>
+  <div id="gate">
+    <div style="font-size:24px;font-weight:700">Nhập khoá màn hình bếp</div>
+    <div style="color:var(--mut)">HR lấy khoá ở Suất ăn › Cấu hình › Màn hình bếp</div>
+    <input id="gk" placeholder="Khoá" autocomplete="off" />
+    <button id="gb" type="button">Mở</button>
+  </div>
+  <script type="module" src="/suatan/bep.js"></script>
+</body>
+</html>

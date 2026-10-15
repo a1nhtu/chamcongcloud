@@ -23,6 +23,10 @@ const NAV = [
   ['otreg', '⏰', 'Đăng ký làm thêm', 'attendance_edit'],
   ['swap', '🔁', 'Đăng ký làm bù', 'attendance_edit'],
   ['abnormal', '🚨', 'Chấm công bất thường', 'reports'],
+  ['meal', '🍱', 'Đối chiếu & chốt suất ăn', 'meal'],
+  ['mealmenu', '🍽️', 'Thực đơn các bữa', 'meal'],
+  ['mealcfg', '⚙️', 'Cấu hình suất ăn', 'meal'],
+  ['mealme', '🥢', 'Suất ăn của tôi', null],   // ai cũng thấy khi phân hệ bật: chọn món + (trưởng bộ phận) nhập số đăng ký
   ['offices', '📍', 'Chi nhánh', 'offices'],
   ['leaves', '📝', 'Đơn từ', 'leaves'],
   ['salary', '💰', 'Lương', 'salary'],
@@ -41,6 +45,7 @@ const NAV_GROUPS = [
   ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision', 'hrtemplates']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
+  ['mealg', 'Suất ăn', ['meal', 'mealmenu', 'mealcfg', 'mealme']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
   ['audit', 'Công ảo', ['audit', 'auditlimits']],
   ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
@@ -131,13 +136,14 @@ async function afterLogin() {
   }
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
   const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
-  const visible = NAV.filter(([key, , , perm]) => hasPerm(perm) && (!isInspector() || INSPECTOR_NAV.includes(key))
+  const visible = NAV.filter(([key, , , perm]) => (perm == null || hasPerm(perm)) && (!isInspector() || INSPECTOR_NAV.includes(key))
     && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg' || key === 'swap' || key === 'abnormal'))
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())
     && !(key === 'shiftreq' && !selfShiftEnabled())
     && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1')   // công ảo: chỉ hiện khi tài khoản tổng đã bật
-    && !(key.startsWith('hr') && SETTINGS.hr_enabled !== '1'));   // nhân sự: chỉ hiện khi tài khoản tổng đã bật
+    && !(key.startsWith('hr') && SETTINGS.hr_enabled !== '1')   // nhân sự: chỉ hiện khi tài khoản tổng đã bật
+    && !(key.startsWith('meal') && SETTINGS.meal_enabled !== '1'));   // suất ăn: chỉ hiện khi tài khoản tổng đã bật
   // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
   _navGrp.clear();
   const visKeys = new Set(visible.map((v) => v[0]));
@@ -250,7 +256,14 @@ function go(key) {
   // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
   ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
-    hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates') }[key])();
+    hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates'),
+    meal: () => mealPage('pageMealBoard'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
+}
+// PHÂN HỆ QUẢN LÝ SUẤT ĂN (public/suatan/admin.js) — chỉ nạp khi mở menu Suất ăn (và chỉ có menu khi tài khoản tổng đã bật)
+async function mealPage(fn) {
+  setMain(loading());
+  try { const m = await import('/suatan/admin.js'); m[fn]({ head, setMain, openModal, closeModal, loading, hasPerm, go }); }
+  catch (e) { setMain(el('div', { class: 'empty' }, 'Không tải được phân hệ Suất ăn: ' + e.message)); }
 }
 // PHÂN HỆ NHÂN SỰ (public/hr.js) — chỉ nạp khi mở menu Nhân sự
 async function hrPage(fn) {
@@ -6296,6 +6309,7 @@ async function pageSettings() {
   const tcpDevChk = el('input', { type: 'checkbox', id: 'st-tcpdev', style: 'width:auto', ...(s.tcp_device_enabled === '1' ? { checked: '' } : {}) });
   const auditChk = el('input', { type: 'checkbox', id: 'st-audit', style: 'width:auto', ...(s.audit_enabled === '1' ? { checked: '' } : {}) });
   const hrChk = el('input', { type: 'checkbox', id: 'st-hr', style: 'width:auto', ...(s.hr_enabled === '1' ? { checked: '' } : {}) });
+  const mealChk = el('input', { type: 'checkbox', id: 'st-meal', style: 'width:auto', ...(s.meal_enabled === '1' ? { checked: '' } : {}) });
   const inclAdminChk = el('input', { type: 'checkbox', id: 'st-incladmin', style: 'width:auto', ...(s.payroll_include_admin === '1' ? { checked: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
@@ -6313,6 +6327,7 @@ async function pageSettings() {
         body.phone_enabled = phoneChk.checked;
         body.audit_enabled = auditChk.checked;
         body.hr_enabled = hrChk.checked;
+        body.meal_enabled = mealChk.checked;
       }
       await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
@@ -6386,6 +6401,10 @@ async function pageSettings() {
       isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, hrChk,
         el('div', {}, el('b', {}, '📇 Bật phân hệ Nhân sự (hồ sơ, hợp đồng lao động, thuyên chuyển / nghỉ việc)'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin thấy nhóm menu "Nhân sự"; Quản lý cần được tích quyền "Nhân sự" ở hồ sơ nhân viên. Tắt: ẩn hoàn toàn, dữ liệu đã nhập vẫn giữ nguyên, bật lại là thấy.'))) : null,
+      // Phân hệ Quản lý suất ăn: CHỈ tài khoản tổng thấy và bật/tắt
+      isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, mealChk,
+        el('div', {}, el('b', {}, '🍱 Bật phân hệ Quản lý suất ăn (đếm suất ăn 3 ca, đối chiếu chấm công, chọn món, màn hình bếp)'),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin thấy nhóm menu "Suất ăn"; Quản lý cần được tích quyền "Quản lý suất ăn" ở hồ sơ nhân viên; nhân viên thấy tab Suất ăn trên app. Tắt: ẩn hoàn toàn, chấm công / tính công hoạt động y như cũ, dữ liệu suất ăn đã nhập vẫn giữ.'))) : null,
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:4px' }, inclAdminChk,
         el('div', {}, el('b', {}, '👑 Tính công cho cả tài khoản Admin'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Mặc định người quyền Admin (chủ/quản trị) KHÔNG hiện ở Tính công / Báo cáo / Lương / Phân ca. Bật nếu Admin cũng là người đi làm cần chấm công.'))),

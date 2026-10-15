@@ -124,6 +124,7 @@ export const PERMISSIONS = [
   ['door_open',       'Mở cửa từ xa (kiểm soát cửa)'],
   ['salary',          'Bảng lương'],
   ['audit',           'Xem công ảo / lương ảo (audit)'],
+  ['meal',            'Quản lý suất ăn (đối chiếu, chốt số, thực đơn, cấu hình)'],
   ['holidays',        'Ngày lễ'],
   ['recompute',       'Tính lại công'],
   ['backup',          'Sao lưu & phục hồi'],

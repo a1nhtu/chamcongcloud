@@ -97,6 +97,8 @@ function showApp() {
   // Tab "Chọn ca" chỉ hiện khi bật tính năng + đang ở chế độ theo ca
   const navChonca = $('#nav-chonca');
   if (navChonca) navChonca.style.display = (SELF_SHIFT && MODE !== 'hourly') ? '' : 'none';
+  // Tab "Suất ăn" chỉ hiện khi tài khoản tổng đã bật phân hệ Quản lý suất ăn (tắt → không gọi gì thêm, app y như cũ)
+  api('/meal/config').then((m) => { const b = $('#nav-monan'); if (b && m && m.enabled) b.style.display = ''; }).catch(() => {});
   tickClock(); setInterval(tickClock, 1000);
   renderTab('cham');
 }
@@ -108,7 +110,7 @@ document.querySelectorAll('.bottom-nav button').forEach((b) =>
 function renderTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.bottom-nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  const map = { cham: renderCham, chonca: renderChonca, baocao: renderBaocao, dontu: renderDontu, bangcong: renderBangcong };
+  const map = { cham: renderCham, chonca: renderChonca, monan: renderMonan, baocao: renderBaocao, dontu: renderDontu, bangcong: renderBangcong };
   (map[tab] || renderCham)();
 }
 
@@ -330,6 +332,14 @@ async function doCheck(kind) {
 }
 
 /* ---------------- Tab CHỌN CA ---------------- */
+// Tab Suất ăn (chọn món + trưởng bộ phận đăng ký số) — mã giao diện nằm riêng ở /suatan/emp.js, chỉ nạp khi mở tab
+async function renderMonan() {
+  const c = $('#content'); c.innerHTML = '';
+  const box = el('div'); c.append(box);
+  try { const m = await import('/suatan/emp.js'); await m.renderMealTab(box); }
+  catch (e) { box.innerHTML = `<div class="empty">${e.message}</div>`; }
+}
+
 async function renderChonca() {
   const c = $('#content'); c.innerHTML = '<div class="empty"><span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span></div>';
   let info;
