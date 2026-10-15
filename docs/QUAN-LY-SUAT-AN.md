@@ -4,7 +4,7 @@
 Phân hệ **độc lập** với tính công: chỉ ĐỌC lượt quẹt máy chấm công (`device_punches`) và đăng ký làm thêm (`ot_registrations`), ghi vào các bảng `meal_*` riêng.
 
 ## Bật / tắt
-- Công tắc `meal_enabled` ở **Cài đặt › Hình thức chấm công** — **chỉ tài khoản tổng (sadmin) bật được**, mặc định **TẮT**.
+- Công tắc `meal_enabled` ở **Cài đặt › Kiểu chấm công** (mở mục ra, kéo xuống) — **chỉ tài khoản tổng (sadmin) bật được**, mặc định **TẮT**.
 - **Tắt** = app chạy y như cũ: menu "Suất ăn" ẩn, tab Suất ăn trên app nhân viên ẩn, `/api/meal/*` và `/api/admin/meal/*` trả 403, trang `/bep` + `/suatan/*` trả 404, bảng `meal_*` để trống. Dữ liệu đã nhập vẫn giữ khi tắt.
 - Quản lý (không phải admin) muốn dùng cần được tích quyền **"Quản lý suất ăn"** (`meal`) ở hồ sơ nhân viên.
 
@@ -19,10 +19,10 @@ Phân hệ **độc lập** với tính công: chỉ ĐỌC lượt quẹt máy 
 - HR **chốt** số của ngày + ca → khoá sửa (trưởng BP và HR) cho tới khi **mở lại**.
 
 ## Ai làm gì
-- **HR** (`/admin` › Suất ăn): Đối chiếu & chốt (nhập hộ / sửa số của mọi bộ phận) · Thực đơn các bữa · Cấu hình (3 ca + giờ chốt, chỉ định trưởng bộ phận, chọn máy chấm công tính suất ăn, khoá màn hình bếp).
+- **HR** (`/admin` › Suất ăn): Đối chiếu & chốt (nhập hộ / sửa số của mọi bộ phận) · Thực đơn các bữa · Cấu hình (3 ca + giờ chốt, chỉ định trưởng bộ phận, chọn máy chấm công tính suất ăn, mã màn hình bếp).
 - **Trưởng bộ phận**: app nhân viên › tab **Suất ăn** › "Đăng ký suất ăn của bộ phận" (chỉ bộ phận mình + bộ phận con, ngày hôm nay trở đi). Quản lý dùng menu "Suất ăn của tôi" trong /admin.
 - **Nhân viên**: app › tab **Suất ăn** › chọn món cho từng bữa (khoá khi bữa đã bắt đầu).
-- **Nhà bếp**: mở liên kết `/bep?key=…` (lấy ở Cấu hình › Màn hình bếp, không cần đăng nhập). Màn hình hỏi máy chủ mỗi 2 giây; mỗi lượt quẹt trong giờ ăn hiện **tên NV + món đã chọn** (cảnh báo nếu quẹt lần thứ 2 trong bữa). Đổi khoá = khoá cũ vô hiệu.
+- **Nhà bếp**: mở `/bep` rồi gõ **mã 6 ký tự** (hoặc liên kết ngắn `/bep/MÃ`) — lấy ở Cấu hình › Màn hình bếp, không cần đăng nhập; dò mã sai quá 10 lần/5 phút bị chặn theo IP. Màn hình hỏi máy chủ mỗi 2 giây; mỗi lượt quẹt trong giờ ăn hiện **tên NV + món đã chọn** (cảnh báo nếu quẹt lần thứ 2 trong bữa). Đổi mã = mã cũ vô hiệu.
 
 ## Bảng dữ liệu (CREATE TABLE IF NOT EXISTS trong `db.js › initSchema`)
 `meal_shifts` (3 ca + giờ chốt, tạo khi bật lần đầu) · `meal_registrations` (BP, ngày, ca, số, ghi chú) · `meal_closings` (đã chốt) · `meal_dept_heads` (trưởng BP) · `meal_menu` (món theo ngày + ca) · `meal_orders` (món NV đã chọn).
