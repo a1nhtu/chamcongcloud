@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
-import { db, getSetting, adminAttWhere, globalAttMode, deptWithChildren } from '../db.js';
+import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
@@ -147,8 +147,8 @@ function loadRange(from, to, filter) {
   const weekend = getSetting('weekend_days', '7');
   const ef = empFilterSql(filter);
   const empSql = `SELECT id, code, full_name, department, position, shift_id, att_mode, start_date
-                FROM employees WHERE active = 1${adminAttWhere()}${ef.where} ORDER BY department, full_name`;
-  let employees = db.prepare(empSql).all(...ef.args);
+                FROM employees WHERE ${EMP_IN_PERIOD}${adminAttWhere()}${ef.where} ORDER BY department, full_name`;
+  let employees = db.prepare(empSql).all(from, ...ef.args);
   // ?emode=shift|hourly: chỉ lấy nhân viên chấm công theo kiểu đó (công ty có cả 2 kiểu)
   const emode = filter && typeof filter === 'object' ? filter.emode : null;
   if (emode) employees = employees.filter((e) => effMode(e) === emode);

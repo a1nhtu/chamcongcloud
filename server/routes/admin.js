@@ -16,6 +16,7 @@ import { registerLogRoutes } from './admin/logs.js';
 import { registerAuditLimitRoutes } from './admin/audit-limits.js';
 import { registerOtRegRoutes } from './admin/ot-reg.js';
 import { registerSwapRoutes } from './admin/swap.js';
+import { registerHrRoutes } from './admin/hr.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
@@ -41,5 +42,6 @@ registerLogRoutes(r, { need, adminOnly });          // nhật ký thao tác
 registerAuditLimitRoutes(r, { need });   // công ảo: tăng ca tối đa / ngày 3 mức
 registerOtRegRoutes(r, { need });        // đăng ký làm thêm + chấm công bất thường
 registerSwapRoutes(r, { need });         // đăng ký làm bù (hoán đổi ngày làm việc)
+registerHrRoutes(r, { need });           // nhân sự: hồ sơ, hợp đồng, thuyên chuyển / nghỉ việc
 
 export default r;

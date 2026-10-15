@@ -10,6 +10,9 @@ const NAV = [
   ['dashboard', '📊', 'Tổng quan', 'reports'],
   ['employees', '👥', 'Nhân viên', 'employees'],
   ['org', '🏢', 'Bộ phận', 'departments'],
+  ['hrprofile', '📇', 'Hồ sơ nhân sự', 'hr'],
+  ['hrcontract', '📄', 'Hợp đồng lao động', 'hr'],
+  ['hrdecision', '🔀', 'Thuyên chuyển & nghỉ việc', 'hr'],
   ['shifts', '🕐', 'Ca làm', 'shifts'],
   ['assignments', '🗓️', 'Phân ca', 'assignments'],
   ['shiftreq', '🙋', 'Duyệt chọn ca', 'shift_requests'],
@@ -33,6 +36,7 @@ const NAV = [
 // Nhóm chỉ còn 1 mục nhìn thấy (do phân quyền / tắt tính năng) thì hiện thẳng mục đó, không cần tiêu đề nhóm.
 const NAV_GROUPS = [
   ['org', 'Tổ chức', ['employees', 'org', 'offices']],
+  ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
@@ -227,7 +231,14 @@ function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
   // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
-  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings }[key])();
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
+    hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions') }[key])();
+}
+// PHÂN HỆ NHÂN SỰ (public/hr.js) — chỉ nạp khi mở menu Nhân sự
+async function hrPage(fn) {
+  setMain(loading());
+  try { const m = await import('/hr.js'); m[fn]({ head, setMain, openModal, closeModal, loading, hasPerm, go }); }
+  catch (e) { setMain(el('div', { class: 'empty' }, 'Không tải được phân hệ Nhân sự: ' + e.message)); }
 }
 
 /* ---------- Lựa chọn phụ khi chấm "Theo giờ": đầu–cuối (FILO) / theo cặp vào–ra ----------
@@ -288,6 +299,7 @@ function loading() { return el('div', { class: 'empty' }, 'Đang tải…'); }
 function openModal(title, bodyNodes, footNodes) {
   const modal = $('#modal');
   modal.innerHTML = '';
+  modal.style.maxWidth = '';   // hộp thoại rộng (Nhân sự) tự đặt lại sau khi mở
   const close = el('button', { class: 'x-close' }, '×'); close.onclick = closeModal;
   modal.append(el('div', { class: 'm-head' }, el('h3', {}, title), close));
   modal.append(el('div', { class: 'm-body' }, ...bodyNodes));

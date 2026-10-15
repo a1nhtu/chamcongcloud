@@ -1,5 +1,5 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
-import { db, getSetting, adminAttWhere, deptWithChildren } from '../../db.js';
+import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren } from '../../db.js';
 import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
@@ -127,8 +127,8 @@ export function registerAttendanceRoutes(r, { need }) {
     const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
     const mode = req.query.mode === 'summary' ? 'summary' : 'detail';
 
-    let esql = "SELECT id, code, full_name, department FROM employees WHERE active=1" + adminAttWhere();
-    const eargs = [];
+    let esql = `SELECT id, code, full_name, department FROM employees WHERE ${EMP_IN_PERIOD}` + adminAttWhere();
+    const eargs = [from];
     if (ids.length) { esql += ` AND id IN (${ids.map(() => '?').join(',')})`; eargs.push(...ids); }
     else if (deptList.length) { esql += ` AND department IN (${deptList.map(() => '?').join(',')})`; eargs.push(...deptList); }
     else if (dept) { esql += ' AND department=?'; eargs.push(dept); }
