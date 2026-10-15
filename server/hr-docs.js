@@ -212,7 +212,7 @@ export function mergeFields(...layers) {
  * MẪU MẶC ĐỊNH (khối nội dung cho buildDocx) — chuẩn Bộ luật Lao động 2019
  * ===================================================================== */
 const P = (p, o = {}) => ({ p, align: 'both', ...o });
-const H = (p, o = {}) => ({ p, bold: true, before: 6, align: 'both', ...o });   // tiêu đề Điều
+const H = (p, o = {}) => ({ p, bold: true, before: 6, align: 'both', keepNext: true, ...o });   // tiêu đề Điều (dính với dòng sau)
 const C = (p, o = {}) => ({ p, align: 'center', ...o });
 const BLANK = { p: '' };
 // Đầu văn bản: tên công ty + số văn bản | Quốc hiệu, tiêu ngữ, địa danh ngày tháng
@@ -230,8 +230,9 @@ const partyA = (label = 'Bên A – Người sử dụng lao động') => [
   P('Đại diện: Ông/Bà {dai_dien}\tChức vụ: {chuc_vu_dai_dien}', { tab: 9 }),
 ];
 const partyB = (label = 'Bên B – Người lao động') => [
-  P(`**${label}:** {xung_ho} {ho_ten}\tMã nhân viên: {ma_nv}`, { tab: 9, before: 4 }),
-  P('Ngày sinh: {ngay_sinh}\tGiới tính: {gioi_tinh}', { tab: 9 }), P('Quốc tịch: {quoc_tich}\tĐiện thoại: {dien_thoai}', { tab: 9 }),
+  P(`**${label}:** {xung_ho} {ho_ten}`, { before: 4 }),   // họ tên đứng riêng 1 dòng: tên dài không dính sang cột phải
+  P('Mã nhân viên: {ma_nv}\tGiới tính: {gioi_tinh}', { tab: 9 }), P('Ngày sinh: {ngay_sinh}\tQuốc tịch: {quoc_tich}', { tab: 9 }),
+  P('Điện thoại: {dien_thoai}'),
   P('Số CCCD/CMND: {cccd}\tCấp ngày: {ngay_cap}', { tab: 9 }), P('Nơi cấp: {noi_cap}'),
   P('Nơi cư trú: {dia_chi_thuong_tru}'), P('Chỗ ở hiện nay: {cho_o_hien_nay}'), P('Mã số thuế cá nhân: {mst_ca_nhan}\tSố sổ BHXH: {so_bhxh}', { tab: 9 }),
 ];
@@ -346,7 +347,8 @@ const TPL_PHU_LUC = () => [
   P('- Căn cứ nhu cầu công việc và thỏa thuận của hai bên,', { italic: true }),
   P('Hôm nay, {ngay_ky_pl_chu}, chúng tôi gồm:', { before: 6 }),
   ...partyA(),
-  P('**Bên B – Người lao động:** {xung_ho} {ho_ten}\tMã nhân viên: {ma_nv}', { tab: 9, before: 4 }),
+  P('**Bên B – Người lao động:** {xung_ho} {ho_ten}', { before: 4 }),
+  P('Mã nhân viên: {ma_nv}\tNgày sinh: {ngay_sinh}', { tab: 9 }),
   P('Số CCCD/CMND: {cccd}\tCấp ngày: {ngay_cap}', { tab: 9 }),
   P('Hai bên thỏa thuận sửa đổi, bổ sung hợp đồng lao động số {so_hd} như sau:', { before: 4 }),
   H('Điều 1. Nội dung sửa đổi, bổ sung'),
@@ -364,14 +366,14 @@ const decisionSigns = () => ({ table: [
 
 const TPL_QD_THUYEN_CHUYEN = () => [
   header('so_qd', 'ngay_qd_chu'),
-  C('QUYẾT ĐỊNH', { bold: true, size: 14, before: 18, after: 0 }), C('Về việc {loai_qd_thuong} nhân sự', { bold: true, after: 2 }),
-  C('______________', { after: 8 }),
+  C('QUYẾT ĐỊNH', { bold: true, size: 14, before: 12, after: 0 }), C('Về việc {loai_qd_thuong} nhân sự', { bold: true, after: 2 }),
+  C('______________', { after: 4 }),
   C('{chuc_vu_dai_dien_hoa} {cong_ty_hoa}', { bold: true, after: 8 }),
   P('- Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20 tháng 11 năm 2019;', { italic: true }),
   P('- Căn cứ Điều lệ tổ chức và hoạt động của {cong_ty};', { italic: true }),
   P('- Căn cứ hợp đồng lao động đã ký với người lao động và nội quy lao động của công ty;', { italic: true }),
   P('- Căn cứ nhu cầu công việc và năng lực của nhân viên,', { italic: true }),
-  C('QUYẾT ĐỊNH:', { bold: true, before: 8, after: 6 }),
+  C('QUYẾT ĐỊNH:', { bold: true, before: 6, after: 4 }),
   P('**Điều 1.** {loai_qd} {xung_ho} {ho_ten}, mã nhân viên {ma_nv}, hiện đang làm việc tại bộ phận {bo_phan_cu}, chức danh {chuc_danh_cu}, đến nhận nhiệm vụ tại bộ phận {bo_phan_moi}, chức danh {chuc_danh_moi}, kể từ ngày {ngay_hieu_luc}.', { indent: true }),
   P('Lý do: {ly_do}.', { indent: true }),
   P('**Điều 2.** Tiền lương và các chế độ khác của {xung_ho} {ho_ten} thực hiện theo hợp đồng lao động, phụ lục hợp đồng (nếu có) và quy chế của công ty.', { indent: true }),
@@ -381,25 +383,27 @@ const TPL_QD_THUYEN_CHUYEN = () => [
 
 const TPL_QD_NGHI_VIEC = () => [
   header('so_qd', 'ngay_qd_chu'),
-  C('QUYẾT ĐỊNH', { bold: true, size: 14, before: 18, after: 0 }), C('{tieu_de_qd_nghi}', { bold: true, after: 2 }),
-  C('______________', { after: 8 }),
+  C('QUYẾT ĐỊNH', { bold: true, size: 14, before: 12, after: 0 }), C('{tieu_de_qd_nghi}', { bold: true, after: 2 }),
+  C('______________', { after: 4 }),
   C('{chuc_vu_dai_dien_hoa} {cong_ty_hoa}', { bold: true, after: 8 }),
   P('- Căn cứ Bộ luật Lao động số 45/2019/QH14 ngày 20 tháng 11 năm 2019;', { italic: true }),
   P('- Căn cứ Điều lệ tổ chức và hoạt động của {cong_ty};', { italic: true }),
   P('- Căn cứ Hợp đồng lao động số {so_hd} ký ngày {ngay_ky_hd};', { italic: true }),
   P('- Căn cứ {can_cu_nghi},', { italic: true }),
-  C('QUYẾT ĐỊNH:', { bold: true, before: 8, after: 6 }),
+  C('QUYẾT ĐỊNH:', { bold: true, before: 6, after: 4 }),
   P('**Điều 1.** Chấm dứt hợp đồng lao động đối với {xung_ho} {ho_ten}, mã nhân viên {ma_nv}, chức danh {chuc_danh}, bộ phận {bo_phan}. {xung_ho} {ho_ten} được nghỉ việc kể từ ngày {ngay_nghi} (ngày làm việc cuối cùng: {ngay_lam_cuoi}).', { indent: true }),
   P('Hình thức: {hinh_thuc_nghi}. Lý do: {ly_do}.', { indent: true }),
   P('**Điều 2.** {xung_ho} {ho_ten} có trách nhiệm bàn giao đầy đủ công việc, tài sản, hồ sơ, tài liệu trước ngày nghỉ việc:', { indent: true }),
-  P('{viec_ban_giao}', { indent: true }),
+  P('{viec_ban_giao}', { align: 'left', left: 1 }),   // căn TRÁI, thụt cả khối: mỗi việc 1 dòng, không bị dàn chữ
   P('Công ty có trách nhiệm thanh toán đầy đủ tiền lương và các khoản liên quan đến quyền lợi của người lao động trong thời hạn 14 ngày làm việc kể từ ngày chấm dứt hợp đồng lao động; hoàn thành thủ tục xác nhận thời gian đóng bảo hiểm xã hội, bảo hiểm thất nghiệp và trả lại giấy tờ bản chính (nếu có) cho người lao động (Điều 48 Bộ luật Lao động 2019).', { indent: true }),
   P('**Điều 3.** Bộ phận Hành chính – Nhân sự, Kế toán, các bộ phận có liên quan và {xung_ho} {ho_ten} chịu trách nhiệm thi hành Quyết định này. Quyết định có hiệu lực kể từ ngày ký.', { indent: true }),
   decisionSigns(),
 ];
 
+// Quyết định: giãn dòng ĐƠN (Nghị định 30/2020 cho phép từ dòng đơn đến 1,5 dòng) → gọn 1 trang, chữ ký không bị đẩy sang trang 2
+const single = (tpl) => () => tpl().map((b) => (b.table ? { ...b, table: b.table.map((col) => col.map((x) => ({ line: 240, ...x }))) } : { line: 240, ...b }));
 const TPL_BLOCKS = {
   hd_thu_viec: TPL_HD_THU_VIEC, hd_lao_dong: TPL_HD_LAO_DONG, hd_dich_vu: TPL_HD_DICH_VU,
-  phu_luc: TPL_PHU_LUC, qd_thuyen_chuyen: TPL_QD_THUYEN_CHUYEN, qd_nghi_viec: TPL_QD_NGHI_VIEC,
+  phu_luc: TPL_PHU_LUC, qd_thuyen_chuyen: single(TPL_QD_THUYEN_CHUYEN), qd_nghi_viec: single(TPL_QD_NGHI_VIEC),
 };
 export const defaultTemplateBlocks = (key) => (TPL_BLOCKS[key] ? TPL_BLOCKS[key]() : null);

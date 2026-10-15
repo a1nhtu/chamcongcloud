@@ -11,6 +11,8 @@ const PARTS = /^word\/(document|header\d*|footer\d*|footnotes|endnotes)\.xml$/;
 const T_RE = /<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>|<\/w:p>/g;
 const PH_RE = /\{\s*([A-Za-z0-9_]+)\s*\}/g;
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+// Word: "không giãn chữ ở dòng kết thúc bằng Shift+Enter" — danh sách nhiều dòng trong đoạn căn đều không bị dàn chữ
+const NO_EXPAND = '<w:doNotExpandShiftReturn/>';
 
 // Quét các <w:t> của 1 phần XML → danh sách nút + chuỗi phẳng (mỗi hết đoạn văn chèn \u0001 để trường không vắt qua 2 đoạn)
 function scan(xml) {
@@ -96,6 +98,11 @@ export async function fillDocx(buf, data) {
     const filled = fillXml(xml, data, report);
     if (filled !== xml) zip.file(name, filled);
   }
+  // mẫu riêng của khách + trường nhiều dòng: thêm thiết lập trên vào <w:compat> sẵn có (không tự tạo mới để khỏi sai thứ tự XML)
+  if (Object.values(data).some((v) => /\n/.test(String(v ?? ''))) && zip.file('word/settings.xml')) {
+    const st = await zip.file('word/settings.xml').async('string');
+    if (!st.includes('doNotExpandShiftReturn') && /<w:compat\s*>/.test(st)) zip.file('word/settings.xml', st.replace(/<w:compat\s*>/, (m) => m + NO_EXPAND));
+  }
   const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
   return { buffer, unknown: [...report.unknown], empty: [...report.empty] };
 }
@@ -105,20 +112,24 @@ export async function fillDocx(buf, data) {
 //         indent (thụt đầu dòng 1 cm), before/after (pt), tab (cm — điểm dừng tab cho '\t') }
 //       { table: [[khối cột trái…], [khối cột phải…]], widths: [twip, twip] }  — bảng 2 cột không viền
 const W_NS = 'xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"';
-const PAGE_W = 11906, MARGIN_L = 1701, MARGIN_R = 1134;   // A4, lề trái 3 cm, phải 2 cm
+const PAGE_W = 11906, MARGIN_L = 1701, MARGIN_R = 850;   // A4, lề trái 3 cm, phải 1,5 cm (Nghị định 30/2020: 15–20 mm)
 export const TEXT_W = PAGE_W - MARGIN_L - MARGIN_R;
 
 function runXml(text, o) {
   const rpr = (o.bold ? '<w:b/><w:bCs/>' : '') + (o.italic ? '<w:i/><w:iCs/>' : '')
     + (o.size ? `<w:sz w:val="${o.size * 2}"/><w:szCs w:val="${o.size * 2}"/>` : '') + (o.underline ? '<w:u w:val="single"/>' : '');
-  const body = String(text).split('\t').map((t) => (t ? `<w:t xml:space="preserve">${esc(t)}</w:t>` : '')).join('<w:tab/>');
+  // luôn có ít nhất 1 dấu cách trước tab: chữ bên trái dài quá điểm dừng tab thì vẫn không dính vào chữ bên phải
+  const parts = String(text).split('\t');
+  const body = parts.map((t, i) => (i < parts.length - 1 && t && !/\s$/.test(t) ? t + ' ' : t))
+    .map((t) => (t ? `<w:t xml:space="preserve">${esc(t)}</w:t>` : '')).join('<w:tab/>');
   return `<w:r>${rpr ? `<w:rPr>${rpr}</w:rPr>` : ''}${body}</w:r>`;
 }
 function pXml(b) {
-  let ppr = '';
+  let ppr = b.keepNext ? '<w:keepNext/>' : '';   // tiêu đề Điều không đứng lẻ cuối trang (phải đứng TRƯỚC tabs/spacing trong w:pPr)
   if (b.tab) ppr += `<w:tabs><w:tab w:val="left" w:pos="${Math.round(b.tab * 567)}"/></w:tabs>`;
   ppr += `<w:spacing w:before="${Math.round((b.before || 0) * 20)}" w:after="${Math.round((b.after ?? 3) * 20)}" w:line="${b.line || 276}" w:lineRule="auto"/>`;
   if (b.indent) ppr += '<w:ind w:firstLine="567"/>';
+  else if (b.left) ppr += `<w:ind w:left="${Math.round(b.left * 567)}"/>`;   // thụt trái CẢ đoạn (cm) — danh sách nhiều dòng
   if (b.align) ppr += `<w:jc w:val="${b.align}"/>`;
   // **đậm** trong câu: tách thành nhiều đoạn chữ
   const runs = String(b.p || '').split('**').map((seg, i) => (seg ? runXml(seg, { ...b, bold: b.bold || i % 2 === 1 }) : '')).join('');
@@ -129,12 +140,13 @@ function tableXml(b) {
   const none = ['top', 'left', 'bottom', 'right', 'insideH', 'insideV'].map((k) => `<w:${k} w:val="nil"/>`).join('');
   const cells = b.table.map((col, i) => `<w:tc><w:tcPr><w:tcW w:w="${widths[i]}" w:type="dxa"/></w:tcPr>${col.map(pXml).join('') || '<w:p/>'}</w:tc>`).join('');
   return `<w:tbl><w:tblPr><w:tblW w:w="${widths.reduce((a, x) => a + x, 0)}" w:type="dxa"/><w:tblBorders>${none}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblLook w:val="0000"/></w:tblPr>`
-    + `<w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid><w:tr>${cells}</w:tr></w:tbl>`;
+    + `<w:tblGrid>${widths.map((w) => `<w:gridCol w:w="${w}"/>`).join('')}</w:tblGrid><w:tr><w:trPr><w:cantSplit/></w:trPr>${cells}</w:tr></w:tbl>`;   // khối chữ ký không bị cắt đôi qua 2 trang
 }
 
 export async function buildDocx(blocks, { title = '' } = {}) {
-  // văn bản Word phải kết thúc bằng 1 đoạn văn (không được là bảng)
-  const body = blocks.map((b) => (b.table ? tableXml(b) : pXml(b))).join('') + (blocks.length && blocks[blocks.length - 1].table ? '<w:p/>' : '');
+  // văn bản Word phải kết thúc bằng 1 đoạn văn (không được là bảng) — đoạn này cao 1pt để không đẻ ra trang trắng khi trang đã đầy
+  const TAIL = '<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="20" w:lineRule="exact"/><w:rPr><w:sz w:val="2"/></w:rPr></w:pPr></w:p>';
+  const body = blocks.map((b) => (b.table ? tableXml(b) : pXml(b))).join('') + (blocks.length && blocks[blocks.length - 1].table ? TAIL : '');
   const zip = new JSZip();
   zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
@@ -142,6 +154,7 @@ export async function buildDocx(blocks, { title = '' } = {}) {
     + '<Default Extension="xml" ContentType="application/xml"/>'
     + '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>'
     + '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>'
+    + '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>'
     + '<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>'
     + '</Types>');
   zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
@@ -155,7 +168,9 @@ export async function buildDocx(blocks, { title = '' } = {}) {
   zip.file('word/_rels/document.xml.rels', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
     + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
     + '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+    + '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>'
     + '</Relationships>');
+  zip.file('word/settings.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:settings ${W_NS}><w:compat>${NO_EXPAND}</w:compat></w:settings>`);
   // Times New Roman 13 — cỡ chữ văn bản hành chính (Nghị định 30/2020/NĐ-CP)
   zip.file('word/styles.xml', `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles ${W_NS}>`
     + '<w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:eastAsia="Times New Roman" w:cs="Times New Roman"/>'
