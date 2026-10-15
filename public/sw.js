@@ -42,7 +42,12 @@ self.addEventListener('notificationclick', (e) => {
   e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then((cs) => {
     // Ưu tiên cửa sổ đang mở đúng trang (quản lý /admin hoặc app nhân viên /)
     const want = new URL(url, self.location.origin).pathname.startsWith('/admin');
-    for (const c of cs) { if (new URL(c.url).pathname.startsWith('/admin') === want && 'focus' in c) return c.focus(); }
+    for (const c of cs) {
+      if (new URL(c.url).pathname.startsWith('/admin') !== want || !('focus' in c)) continue;
+      // thông báo có #trang (vd nhắc hợp đồng → /admin#hrcontract): chuyển cửa sổ đang mở sang đúng trang đó
+      if (url.includes('#') && 'navigate' in c) return c.navigate(url).then((w) => (w || c).focus()).catch(() => c.focus());
+      return c.focus();
+    }
     return clients.openWindow(url);
   }));
 });

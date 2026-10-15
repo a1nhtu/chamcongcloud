@@ -2,6 +2,7 @@
 // Chuẩn: VAPID (RFC 8292) + mã hoá payload aes128gcm (RFC 8291/8188).
 import crypto from 'node:crypto';
 import { db, getSetting, setSetting } from './db.js';
+import { hasPerm } from './auth.js';
 
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const b64urlDec = (s) => Buffer.from(String(s).replace(/-/g, '+').replace(/_/g, '/'), 'base64');
@@ -109,6 +110,31 @@ export async function notifyEmployee(employeeId, payloadObj) {
   let subs = [];
   try { subs = db.prepare('SELECT * FROM push_subscriptions WHERE employee_id = ?').all(employeeId); }
   catch { return { total: 0, sent: 0 }; }
+  let sent = 0;
+  for (const s of subs) {
+    try {
+      const code = await sendOne(s, payloadObj);
+      if (code >= 200 && code < 300) sent++;
+      if (code === 404 || code === 410) removeSubscription(s.endpoint);
+    } catch { /* bỏ qua sub lỗi */ }
+  }
+  return { total: subs.length, sent };
+}
+
+// Chọn thiết bị của người có QUYỀN `perm`: tài khoản tổng (employee_id NULL) + NV đang làm có quyền đó
+// (Admin luôn có; tài khoản kiểm tra chỉ có quyền xem → không nhận). rows = push_subscriptions JOIN employees.
+export function pickPermSubs(rows, perm) {
+  return rows.filter((s) => s.employee_id == null
+    || (s.active === 1 && hasPerm({ role: s.role, permissions: s.permissions, audit_only: s.audit_only }, perm)));
+}
+
+// Gửi cho người có quyền `perm` (vd 'hr' — nhắc hợp đồng sắp hết hạn). Trả { total, sent }.
+export async function notifyPerm(perm, payloadObj) {
+  let subs = [];
+  try {
+    subs = pickPermSubs(db.prepare(`SELECT s.*, e.active, e.role, e.permissions, e.audit_only FROM push_subscriptions s
+      LEFT JOIN employees e ON e.id = s.employee_id`).all(), perm);
+  } catch { return { total: 0, sent: 0 }; }
   let sent = 0;
   for (const s of subs) {
     try {

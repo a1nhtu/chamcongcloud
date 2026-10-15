@@ -48,10 +48,25 @@ async function download(path, name) {
   try {
     const res = await api(path, { raw: true });
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Không tải được');
+    const cd = res.headers.get('Content-Disposition') || '';
+    const m = cd.match(/filename\*=UTF-8''([^;]+)/);
+    if (m) { try { name = decodeURIComponent(m[1]); } catch {} }
     const url = URL.createObjectURL(await res.blob());
     const a = el('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-  } catch (e) { toast(e.message, 'err'); }
+    return res;
+  } catch (e) { toast(e.message, 'err'); return null; }
+}
+// In giấy tờ (.docx đã điền sẵn) — báo các trường còn trống để bổ sung hồ sơ
+async function printDoc(path, name) {
+  const res = await download(path, name);
+  if (!res) return;
+  const dec = (h) => { try { return decodeURIComponent(res.headers.get(h) || ''); } catch { return ''; } };
+  const missing = dec('X-Doc-Missing'), unknown = dec('X-Doc-Unknown'), noCo = res.headers.get('X-Doc-Missing-Co') === '1';
+  if (unknown) { toast(`Đã tải file Word. Mẫu có trường không nhận ra: ${unknown} — sửa lại mẫu ở trang 🖨️ Mẫu giấy tờ`, 'err'); return; }
+  const gaps = [noCo ? 'chưa đủ thông tin công ty (điền ở 🖨️ Mẫu giấy tờ)' : '', missing ? `còn trống: ${missing}` : ''].filter(Boolean);
+  if (gaps.length) toast(`Đã tải file Word — ${gaps.join('; ')}. Chỗ trống in ra là dấu …… để viết tay.`, '');
+  else toast('Đã tải file Word — mở bằng Word để in', 'ok');
 }
 // Ô chọn nhân viên có ô lọc nhanh (công ty đông người)
 function empPicker(value, { activeOnly = false, onChange } = {}) {
@@ -97,7 +112,9 @@ export async function pageHrProfiles(ctx) {
     ['expiring', 'HĐ sắp hết hạn'], ['expired', 'HĐ hết hạn chưa tái ký'], ['sap_nghi', 'Sắp nghỉ việc'], ['da_nghi', 'Đã nghỉ việc'], ['all', 'Tất cả']], _pf.status);
   const xbtn = el('button', { class: 'btn ghost sm' }, '⬇ Xuất Excel');
   xbtn.onclick = () => download('/admin/hr/profiles/export.xlsx', 'ho_so_nhan_su.xlsx');
-  const tools = [q, dsel, ssel, xbtn];
+  const ibtn = el('button', { class: 'btn ghost sm' }, '⬆ Nhập Excel');
+  ibtn.onclick = () => importDialog('profiles', () => pageHrProfiles(C));
+  const tools = [q, dsel, ssel, xbtn, ibtn];
   if (C.hasPerm('employees')) { const add = el('button', { class: 'btn sm' }, '＋ Thêm hồ sơ'); add.onclick = addEmployeeForm; tools.push(add); }
 
   const card = (n, l, cls, st) => {
@@ -368,8 +385,25 @@ export async function pageHrContracts(ctx) {
   wdSave.onclick = async () => { try { await api('/admin/hr/settings', { method: 'PUT', body: { warn_days: +wd.value } }); toast('Đã lưu', 'ok'); pageHrContracts(C); } catch (e) { toast(e.message, 'err'); } };
   const xbtn = el('button', { class: 'btn ghost sm' }, '⬇ Xuất Excel');
   xbtn.onclick = () => download('/admin/hr/contracts/export.xlsx', 'hop_dong_lao_dong.xlsx');
+  const ibtn = el('button', { class: 'btn ghost sm' }, '⬆ Nhập Excel');
+  ibtn.onclick = () => importDialog('contracts', () => pageHrContracts(C));
   const add = el('button', { class: 'btn sm' }, '＋ Ký hợp đồng');
   add.onclick = () => contractForm({ done: () => pageHrContracts(C) });
+  // Nhắc HĐ sắp hết hạn / hết thử việc qua thông báo đẩy (người có quyền Nhân sự, mỗi người bật thông báo trên máy mình)
+  const rp = el('input', { type: 'checkbox', style: 'width:auto', ...(data.remind_push ? { checked: '' } : {}) });
+  rp.onchange = async () => { try { await api('/admin/hr/settings', { method: 'PUT', body: { remind_push: rp.checked } }); toast(rp.checked ? 'Đã bật nhắc qua thông báo đẩy' : 'Đã tắt nhắc qua thông báo đẩy', 'ok'); } catch (e) { toast(e.message, 'err'); rp.checked = !rp.checked; } };
+  const rtest = el('button', { class: 'btn ghost sm', title: 'Gửi ngay 1 thông báo nhắc (gồm cả HĐ đã nhắc trước đó)' }, 'Gửi thử nhắc');
+  rtest.onclick = async () => {
+    rtest.disabled = true;
+    try {
+      const r = await api('/admin/hr/remind/test', { method: 'POST' });
+      if (!r.total) toast('Chưa có máy nào của người có quyền Nhân sự bật thông báo — bật ở ⚙️ Cài đặt → 🔔 Thông báo (mỗi người bật trên máy của mình)', 'err');
+      else if (r.sent) toast(`✅ Đã gửi tới ${r.sent}/${r.total} thiết bị: ${r.title}${r.items ? ` (${r.items} hợp đồng)` : ''}`, 'ok');
+      else toast('Gửi không thành công — thử Tắt rồi Bật lại thông báo ở ⚙️ Cài đặt', 'err');
+    } catch (e) { toast(e.message, 'err'); }
+    finally { rtest.disabled = false; }
+  };
+  const remindBox = el('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px;color:var(--muted);white-space:nowrap', title: 'Gửi thông báo cho người có quyền Nhân sự khi HĐ vào ngưỡng cảnh báo, khi còn 7 ngày và khi đã hết hạn chưa tái ký (8:00–20:00)' }, rp, '🔔 Nhắc qua thông báo đẩy');
 
   const card = (n, l, cls, st) => {
     const c = el('div', { class: 'mcard ' + cls, style: 'cursor:pointer' + (_cf.status === st ? ';outline:2px solid var(--brand)' : '') }, el('div', { class: 'n' }, String(n)), el('div', { class: 'l' }, l));
@@ -394,7 +428,7 @@ export async function pageHrContracts(ctx) {
   tsel.onchange = () => { _cf.type = tsel.value; render(); };
   ssel.onchange = () => { _cf.status = ssel.value; pageHrContracts(C); };
   render();
-  C.setMain(C.head('📄 Hợp đồng lao động', q, tsel, ssel, el('span', { style: 'font-size:13px;color:var(--muted)' }, 'Cảnh báo trước'), wd, el('span', { style: 'font-size:13px;color:var(--muted)' }, 'ngày'), wdSave, xbtn, add),
+  C.setMain(C.head('📄 Hợp đồng lao động', q, tsel, ssel, el('span', { style: 'font-size:13px;color:var(--muted)' }, 'Cảnh báo trước'), wd, el('span', { style: 'font-size:13px;color:var(--muted)' }, 'ngày'), wdSave, remindBox, rtest, xbtn, ibtn, add),
     cards, alertBox, el('div', { class: 'panel' }, wrap));
 }
 
@@ -404,6 +438,7 @@ function contractsTable(list, { inProfile = false, done } = {}) {
   for (const c of list) {
     const acts = el('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' });
     const b = (txt, fn, title) => { const x = el('button', { class: 'btn ghost sm', title: title || '' }, txt); x.onclick = (ev) => { ev.stopPropagation(); fn(); }; acts.append(x); };
+    b('🖨️ In', () => printDoc(`/admin/hr/contracts/${c.id}/print`, `HD_${c.id}.docx`), 'Tải file Word hợp đồng đã điền sẵn để in');
     b('Sửa', () => contractForm({ contract: c, done }));
     if (!c.terminated_date) {
       b('Tái ký', () => contractForm({ renewFrom: c, done }), 'Ký hợp đồng mới nối tiếp (nhân bản hợp đồng này)');
@@ -532,9 +567,11 @@ function annexForm(c, done) {
   for (const a of c.annexes) {
     const del = el('button', { class: 'btn ghost sm' }, 'Xoá');
     del.onclick = async () => { if (!confirm('Xoá phụ lục này?')) return; try { await api('/admin/hr/annexes/' + a.id, { method: 'DELETE' }); C.closeModal(); done && done(); } catch (e) { toast(e.message, 'err'); } };
+    const prt = el('button', { class: 'btn ghost sm', title: 'Tải file Word phụ lục đã điền sẵn để in' }, '🖨️ In');
+    prt.onclick = () => printDoc(`/admin/hr/annexes/${a.id}/print`, `PL_${a.id}.docx`);
     list.append(el('div', { style: 'display:flex;gap:8px;align-items:center;border:1px solid var(--line);border-radius:10px;padding:8px 10px;font-size:13px' },
       el('div', { style: 'flex:1' }, el('b', {}, `Phụ lục ${a.annex_no || ''} · hiệu lực ${dmy(a.effective_date)}`),
-        small([a.salary ? 'Lương mới ' + money(a.salary) + 'đ' : '', a.position ? 'Chức danh: ' + a.position : '', a.content].filter(Boolean).join(' · '))), del));
+        small([a.salary ? 'Lương mới ' + money(a.salary) + 'đ' : '', a.position ? 'Chức danh: ' + a.position : '', a.content].filter(Boolean).join(' · '))), prt, del));
   }
   const no = inp('', { placeholder: 'VD 01/PLHĐ' }), sign = dateInp(META.today), eff = dateInp(META.today);
   const salary = inp('', { inputmode: 'numeric', placeholder: 'để trống = không đổi' });
@@ -614,6 +651,7 @@ function decisionsTable(list, kind, done) {
   for (const d of list) {
     const acts = el('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' });
     const b = (txt, fn) => { const x = el('button', { class: 'btn ghost sm' }, txt); x.onclick = fn; acts.append(x); };
+    if (d.status !== 'cancelled') b('🖨️ In', () => printDoc(`/admin/hr/decisions/${d.id}/print`, `QD_${d.id}.docx`));
     b(d.status === 'applied' ? (kind === 'resign' ? 'Bàn giao / sửa' : 'Sửa') : 'Sửa', () => decisionForm(kind, { decision: d, done }));
     if (d.status === 'pending') b('Huỷ', async () => { if (!confirm('Huỷ quyết định này (chưa tới ngày hiệu lực)?')) return; try { await api(`/admin/hr/decisions/${d.id}/cancel`, { method: 'POST' }); done(); } catch (e) { toast(e.message, 'err'); } });
     if (d.status !== 'applied') b('Xoá', async () => { if (!confirm('Xoá quyết định này?')) return; try { await api('/admin/hr/decisions/' + d.id, { method: 'DELETE' }); done(); } catch (e) { toast(e.message, 'err'); } });
@@ -729,4 +767,145 @@ function decisionForm(kind, { employee_id, decision, done }) {
   C.openModal(decision ? 'Sửa quyết định' : kind === 'resign' ? '🚪 Quyết định nghỉ việc' : '🔀 Quyết định thuyên chuyển', rows, [save]);
   document.getElementById('modal').style.maxWidth = '680px';
   check();
+}
+
+/* =====================================================================
+ * 4. NHẬP EXCEL (hồ sơ / hợp đồng)
+ * ===================================================================== */
+function importDialog(kind, done) {
+  const isP = kind === 'profiles';
+  const tplName = isP ? 'mau_ho_so_nhan_su.xlsx' : 'mau_hop_dong_lao_dong.xlsx';
+  const tpl = el('button', { class: 'btn ghost sm', type: 'button' }, '⬇ Tải file mẫu');
+  tpl.onclick = () => download(`/admin/hr/import/${kind}-template.xlsx`, tplName);
+  const MODES = isP
+    ? [['update', 'Cập nhật hồ sơ', 'Điền / sửa hồ sơ của nhân viên ĐÃ CÓ theo mã NV. Ô để trống = giữ nguyên.'],
+      ['add', 'Thêm nhân viên mới', 'Tạo nhân viên mới (mã chưa có) kèm hồ sơ — tài khoản = mã NV, mật khẩu 123456. Mã đã có sẽ bỏ qua.']]
+    : [['add', 'Thêm hợp đồng mới', 'Mỗi dòng kiểm luật như nhập tay. HĐ bắt đầu ngay sau HĐ trước của cùng người tự nối thành "tái ký". Số HĐ đã có sẽ bỏ qua.'],
+      ['update', 'Cập nhật hợp đồng', 'Sửa hợp đồng đã có theo Số HĐ. Ô để trống = giữ nguyên.']];
+  let mode = MODES[0][0];
+  const modeBox = el('div', { style: 'display:flex;flex-direction:column;gap:8px;margin-top:6px' });
+  for (const [k, t, desc] of MODES) {
+    const r = el('input', { type: 'radio', name: 'hr-imp-mode', value: k, style: 'width:auto;margin-top:3px', ...(k === mode ? { checked: '' } : {}) });
+    r.onchange = () => { mode = k; };
+    modeBox.append(el('label', { style: 'display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);border-radius:10px;padding:8px 10px;cursor:pointer' }, r,
+      el('div', {}, el('b', { style: 'font-size:13.5px' }, t), small(desc))));
+  }
+  const file = el('input', { type: 'file', accept: '.xlsx', style: 'width:auto' });
+  const result = el('div', { style: 'display:flex;flex-direction:column;gap:8px' });
+  const run = el('button', { class: 'btn' }, '⬆ Nhập');
+  run.onclick = () => {
+    const f = file.files[0];
+    if (!f) return toast('Chọn file Excel (.xlsx)', 'err');
+    if (f.size > 4 * 1024 * 1024) return toast('File quá lớn (tối đa 4MB)', 'err');
+    const rd = new FileReader();
+    rd.onload = async () => {
+      run.disabled = true; run.textContent = 'Đang nhập…';
+      try {
+        const r = await api(`/admin/hr/import/${kind}`, { method: 'POST', body: { mode, fileBase64: rd.result } });
+        result.innerHTML = '';
+        const errs = r.messages.filter((m) => m.type === 'err').length, warns = r.messages.length - errs;
+        const head = [r.mode === 'add' ? `✅ Đã thêm ${r.added} ${isP ? 'nhân viên + hồ sơ' : 'hợp đồng'}` : `✅ Đã cập nhật ${r.updated} ${isP ? 'hồ sơ' : 'hợp đồng'}`,
+          r.linked ? `🔗 ${r.linked} HĐ nối thành tái ký` : '', r.skipped ? `⏭️ Bỏ qua ${r.skipped} dòng` : '', warns ? `⚠️ ${warns} lưu ý` : ''].filter(Boolean).join(' · ');
+        result.append(el('div', { style: 'font-weight:600' }, head));
+        if (r.messages.length) {
+          const tb = el('tbody', {}, ...r.messages.map((m) => el('tr', {}, el('td', {}, String(m.row)), el('td', {}, m.type === 'err' ? pill('Bỏ qua', 'bad') : pill('Lưu ý', 'warn')), el('td', { style: 'font-size:12.5px' }, m.msg))));
+          result.append(el('div', { class: 'tbl-scroll', style: 'max-height:280px;overflow:auto' }, el('table', { class: 'data' }, el('thead', {}, el('tr', {}, el('th', {}, 'Dòng'), el('th', {}, ''), el('th', {}, 'Nội dung'))), tb)));
+        }
+        if (r.added || r.updated) done && done();
+      } catch (e) { toast(e.message, 'err'); }
+      run.disabled = false; run.textContent = '⬆ Nhập';
+    };
+    rd.readAsDataURL(f);
+  };
+  C.openModal(isP ? '⬆ Nhập hồ sơ nhân sự từ Excel' : '⬆ Nhập hợp đồng lao động từ Excel', [
+    el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('b', {}, '1.'), tpl,
+      small(isP ? 'Có cột cho mọi trường hồ sơ, ô chọn có danh sách thả xuống. File "Xuất Excel" của trang này cũng nhập lại được.' : 'Mã NV, Số HĐ, Loại HĐ, ngày ký / hiệu lực / hết hạn hoặc số tháng, lương, phụ cấp…')),
+    el('div', {}, el('b', {}, '2. Chọn cách nhập'), modeBox),
+    el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, el('b', {}, '3.'), file),
+    result,
+  ], [run]);
+  document.getElementById('modal').style.maxWidth = '720px';
+}
+
+/* =====================================================================
+ * 5. MẪU GIẤY TỜ (in hợp đồng / phụ lục / quyết định theo mẫu Word)
+ * ===================================================================== */
+export async function pageHrTemplates(ctx) {
+  C = ctx;
+  C.setMain(C.loading());
+  let d;
+  try { d = await api('/admin/hr/templates'); } catch (e) { return C.setMain(el('div', { class: 'empty' }, e.message)); }
+  const co = d.company, eff = d.effective;
+  // Thông tin công ty trên giấy tờ
+  const appName = d.app_company.name && d.app_company.name !== 'Digiplus' ? d.app_company.name : '';
+  const ci = {
+    name: inp(co.name, { placeholder: appName ? `để trống = ${appName}` : 'VD Công ty TNHH Thương mại ABC' }),
+    address: inp(co.address, { placeholder: d.app_company.address ? `để trống = ${d.app_company.address}` : 'Địa chỉ trụ sở' }),
+    tax: inp(co.tax, { placeholder: 'VD 0312345678' }), phone: inp(co.phone),
+    rep: inp(co.rep, { placeholder: 'Họ tên người đại diện ký' }), rep_title: inp(co.rep_title, { placeholder: 'Giám đốc' }),
+    place: inp(co.place, { placeholder: 'VD TP. Hồ Chí Minh — in trước ngày tháng' }),
+  };
+  const coSave = el('button', { class: 'btn' }, '💾 Lưu thông tin công ty');
+  coSave.onclick = async () => {
+    coSave.disabled = true;
+    try { await api('/admin/hr/templates/company', { method: 'PUT', body: Object.fromEntries(Object.entries(ci).map(([k, n]) => [k, n.value])) }); toast('Đã lưu', 'ok'); pageHrTemplates(C); }
+    catch (e) { toast(e.message, 'err'); coSave.disabled = false; }
+  };
+  const missing = [!eff.name && 'tên công ty', !eff.address && 'địa chỉ', !eff.rep && 'người đại diện', !eff.place && 'địa danh'].filter(Boolean);
+  const coPanel = el('div', { class: 'panel', style: 'padding:16px;display:flex;flex-direction:column;gap:12px' },
+    el('h3', { style: 'margin:0' }, '🏢 Thông tin công ty in trên giấy tờ'),
+    missing.length ? box('warn', [`Còn thiếu: ${missing.join(', ')} — giấy tờ in ra sẽ để trống (……) chỗ đó.`]) : null,
+    el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px' },
+      fld('Tên công ty (đầy đủ, như đăng ký kinh doanh)', ci.name), fld('Địa chỉ', ci.address), fld('Mã số thuế', ci.tax), fld('Điện thoại', ci.phone),
+      fld('Người đại diện ký', ci.rep), fld('Chức vụ người đại diện', ci.rep_title), fld('Địa danh', ci.place)),
+    el('div', {}, coSave));
+
+  // Danh sách mẫu
+  const tbody = el('tbody');
+  for (const t of d.templates) {
+    const acts = el('div', { style: 'display:flex;gap:4px;flex-wrap:wrap' });
+    const b = (txt, fn, cls = 'btn ghost sm') => { const x = el('button', { class: cls }, txt); x.onclick = fn; acts.append(x); return x; };
+    b('⬇ Mẫu mặc định', () => download(`/admin/hr/templates/${t.key}/file?which=default`, `Mau_${t.key}_mac_dinh.docx`));
+    if (t.custom) b('⬇ Mẫu đang dùng', () => download(`/admin/hr/templates/${t.key}/file`, `Mau_${t.key}_rieng.docx`));
+    const fi = el('input', { type: 'file', accept: '.docx', style: 'display:none' });
+    fi.onchange = () => {
+      const f = fi.files[0]; if (!f) return;
+      if (f.size > 4 * 1024 * 1024) return toast('File quá lớn (tối đa 4MB)', 'err');
+      const rd = new FileReader();
+      rd.onload = async () => {
+        try {
+          const r = await api('/admin/hr/templates/' + t.key, { method: 'POST', body: { fileName: f.name, fileBase64: rd.result } });
+          if (r.unknown.length) alert(`Đã lưu mẫu, nhưng có trường không nhận ra (gõ sai tên?):\n\n${r.unknown.map((k) => '{' + k + '}').join('  ')}\n\nCác trường này sẽ giữ nguyên chữ khi in. Xem bảng "Các trường tự điền" bên dưới để sửa lại mẫu.`);
+          else if (r.no_fields) alert('Đã lưu mẫu, nhưng mẫu chưa có trường tự điền nào (VD {ho_ten}) — in ra sẽ không điền dữ liệu.');
+          else toast(`Đã lưu mẫu riêng (${r.fields} trường tự điền)`, 'ok');
+          pageHrTemplates(C);
+        } catch (e) { toast(e.message, 'err'); }
+      };
+      rd.readAsDataURL(f);
+    };
+    acts.append(fi);
+    b('⬆ Tải mẫu riêng lên', () => fi.click(), 'btn sm');
+    if (t.custom) b('Về mẫu mặc định', async () => { if (!confirm(`Bỏ mẫu riêng "${t.name || ''}" và dùng lại mẫu mặc định?`)) return; try { await api('/admin/hr/templates/' + t.key, { method: 'DELETE' }); toast('Đã về mẫu mặc định', 'ok'); pageHrTemplates(C); } catch (e) { toast(e.message, 'err'); } });
+    tbody.append(el('tr', {},
+      el('td', {}, el('b', {}, t.label)),
+      el('td', {}, t.custom ? el('div', {}, pill('Mẫu riêng của công ty', 'ok'), small(`${t.name || ''}${t.by ? ' · ' + t.by : ''}${t.at ? ' · ' + new Date(t.at).toLocaleDateString('vi-VN') : ''}`)) : pill('Mẫu mặc định (BLLĐ 2019)', 'muted')),
+      el('td', {}, acts)));
+  }
+  const tplPanel = el('div', { class: 'panel' },
+    el('div', { class: 'tbl-scroll' }, el('table', { class: 'data' }, el('thead', {}, el('tr', {}, ...['Giấy tờ', 'Đang dùng', 'Thao tác'].map((h) => el('th', {}, h)))), tbody)),
+    el('div', { style: 'padding:12px 14px' }, hint('Cách dùng mẫu riêng: ① bấm "⬇ Mẫu mặc định" → ② mở bằng Word, sửa câu chữ / thêm logo, GIỮ NGUYÊN các chữ trong ngoặc nhọn như {ho_ten}, {luong} (thêm trường khác: chép từ bảng bên dưới) → ③ Lưu dạng .docx → ④ "⬆ Tải mẫu riêng lên". In: bấm 🖨️ In ở từng hợp đồng, phụ lục, quyết định → được file Word đã điền sẵn để in hoặc sửa thêm.')));
+
+  // Bảng trường tự điền
+  const KIND_LABEL = { contract: 'hợp đồng', annex: 'phụ lục', transfer: 'QĐ thuyên chuyển', resign: 'QĐ nghỉ việc' };
+  const copy = async (k) => { const t = '{' + k + '}'; try { await navigator.clipboard.writeText(t); toast('Đã chép ' + t, 'ok'); } catch { prompt('Chép trường này vào mẫu Word:', t); } };
+  const groups = d.groups.map(([, title, kinds, fields]) => el('details', { style: 'border-top:1px solid var(--line);padding:8px 14px' },
+    el('summary', { style: 'cursor:pointer;font-weight:600' }, `${title} `, el('span', { style: 'font-weight:400;color:var(--muted);font-size:12.5px' }, `— dùng được trong: ${kinds.map((k) => KIND_LABEL[k]).join(', ')}`)),
+    el('div', { class: 'tbl-scroll' }, el('table', { class: 'data' }, el('tbody', {}, ...fields.map(([k, label, ex]) => {
+      const c = el('button', { class: 'btn ghost sm', title: 'Chép' }, '{' + k + '}');
+      c.onclick = () => copy(k);
+      return el('tr', {}, el('td', { style: 'white-space:nowrap' }, c), el('td', {}, label), el('td', { style: 'color:var(--muted);font-size:12.5px' }, ex || ''));
+    }))))));
+  const fieldPanel = el('div', { class: 'panel' }, el('div', { style: 'padding:12px 14px' }, el('b', {}, '🔤 Các trường tự điền'), small('Bấm vào tên trường để chép, rồi dán vào mẫu Word. Trường không có dữ liệu sẽ in thành dấu …… để viết tay.')), ...groups);
+
+  C.setMain(C.head('🖨️ Mẫu giấy tờ'), coPanel, el('div', { style: 'height:14px' }), tplPanel, el('div', { style: 'height:14px' }), fieldPanel);
 }

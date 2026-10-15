@@ -5,6 +5,7 @@ import {
 
 let ME = null;
 let SETTINGS = {};        // cache cấu hình (attendance_mode, geofence…)
+let _navKeys = new Set(); // các trang (key NAV) tài khoản đang đăng nhập được mở — cho /admin#<trang>
 // [key, icon, label, quyền cần có để thấy mục này]
 const NAV = [
   ['dashboard', '📊', 'Tổng quan', 'reports'],
@@ -13,6 +14,7 @@ const NAV = [
   ['hrprofile', '📇', 'Hồ sơ nhân sự', 'hr'],
   ['hrcontract', '📄', 'Hợp đồng lao động', 'hr'],
   ['hrdecision', '🔀', 'Thuyên chuyển & nghỉ việc', 'hr'],
+  ['hrtemplates', '🖨️', 'Mẫu giấy tờ', 'hr'],
   ['shifts', '🕐', 'Ca làm', 'shifts'],
   ['assignments', '🗓️', 'Phân ca', 'assignments'],
   ['shiftreq', '🙋', 'Duyệt chọn ca', 'shift_requests'],
@@ -36,7 +38,7 @@ const NAV = [
 // Nhóm chỉ còn 1 mục nhìn thấy (do phân quyền / tắt tính năng) thì hiện thẳng mục đó, không cần tiêu đề nhóm.
 const NAV_GROUPS = [
   ['org', 'Tổ chức', ['employees', 'org', 'offices']],
-  ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision']],
+  ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision', 'hrtemplates']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
@@ -183,7 +185,22 @@ async function afterLogin() {
   });
   // Lần đầu khởi tạo: Admin chọn kiểu chấm công + phạm vi
   if (isAdmin() && SETTINGS.setup_done !== '1') { setupWizard(); return; }
-  if (visible.length) go(visible[0][0]);
+  // /admin#hrcontract (bấm vào thông báo nhắc hợp đồng) → mở thẳng trang đó nếu có quyền; đọc xong thì xoá #
+  // để lần bấm thông báo sau (cửa sổ đang mở) vẫn có sự kiện hashchange
+  _navKeys = new Set(visible.map((v) => v[0]));
+  const want = (location.hash || '').slice(1);
+  if (want) history.replaceState(null, '', location.pathname + location.search);
+  if (!window._hashNav) {
+    window._hashNav = true;
+    window.addEventListener('hashchange', () => {
+      const k = (location.hash || '').slice(1);
+      if (!k) return;
+      history.replaceState(null, '', location.pathname + location.search);
+      if (_navKeys.has(k)) go(k);
+    });
+  }
+  if (want && _navKeys.has(want)) go(want);
+  else if (visible.length) go(visible[0][0]);
   else setMain(el('div', { class: 'empty' }, 'Tài khoản của bạn chưa được cấp quyền dùng chức năng nào. Vui lòng liên hệ quản trị viên.'));
   checkUpdateBanner();   // báo khi có bản mới
 }
@@ -232,7 +249,7 @@ function go(key) {
   // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
   ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
-    hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions') }[key])();
+    hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates') }[key])();
 }
 // PHÂN HỆ NHÂN SỰ (public/hr.js) — chỉ nạp khi mở menu Nhân sự
 async function hrPage(fn) {

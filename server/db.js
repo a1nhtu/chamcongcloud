@@ -787,7 +787,15 @@ function migrateColumns() {
       created_at      TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_hrd_emp ON hr_decisions(employee_id);
-    CREATE INDEX IF NOT EXISTS idx_hrd_status ON hr_decisions(status, effective_date);`);
+    CREATE INDEX IF NOT EXISTS idx_hrd_status ON hr_decisions(status, effective_date);
+    -- Nhắc HĐ sắp hết hạn đã gửi (mỗi mốc 1 lần; đổi ngày hết hạn thì nhắc lại) — server/hr-remind.js
+    CREATE TABLE IF NOT EXISTS hr_reminders (
+      contract_id INTEGER NOT NULL REFERENCES hr_contracts(id) ON DELETE CASCADE,
+      stage       TEXT NOT NULL,                -- warn | d7 | expired
+      end_date    TEXT NOT NULL DEFAULT '',
+      sent_at     TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (contract_id, stage, end_date)
+    );`);
   for (const k of HR_FIELD_KEYS) add('hr_profiles', k, "TEXT NOT NULL DEFAULT ''");   // mỗi trường hồ sơ 1 cột
 
   // Cấu hình mặc định
