@@ -805,6 +805,62 @@ function migrateColumns() {
     setSetting('hr_enabled', used > 0 ? '1' : '0');
   }
 
+  // PHÂN HỆ QUẢN LÝ SUẤT ĂN (server/meal.js) — bảng RIÊNG, chỉ ĐỌC chấm công + đăng ký làm thêm, không ghi đè dữ liệu công.
+  // Công tắc `meal_enabled` mặc định TẮT (không ghi vào settings: thiếu = '0'), chỉ tài khoản tổng bật. Tắt: không route, không menu.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meal_shifts (          -- 3 ca ăn + giờ chốt (HR đổi được); dòng mặc định tạo khi phân hệ được bật lần đầu
+      code       TEXT PRIMARY KEY,                    -- trua | chieu | dem
+      name       TEXT NOT NULL,
+      from_time  TEXT NOT NULL,                       -- 'HH:MM' bắt đầu khung giờ chốt
+      to_time    TEXT NOT NULL,                       -- 'HH:MM' giờ chốt (nhỏ hơn from_time = qua nửa đêm)
+      mode       TEXT NOT NULL DEFAULT 'punch',       -- punch = đối chiếu lượt chấm công · ot = đối chiếu đăng ký làm thêm
+      enabled    INTEGER NOT NULL DEFAULT 1,
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS meal_registrations (   -- số suất ăn trưởng bộ phận đăng ký (HR sửa / nhập hộ được)
+      department TEXT NOT NULL,
+      work_date  TEXT NOT NULL,
+      shift      TEXT NOT NULL,
+      count      INTEGER NOT NULL,
+      note       TEXT NOT NULL DEFAULT '',
+      updated_by TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (department, work_date, shift)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mealreg_date ON meal_registrations(work_date, shift);
+    CREATE TABLE IF NOT EXISTS meal_closings (        -- HR đã CHỐT số suất của ngày + ca (khoá sửa; mở lại mới sửa được)
+      work_date  TEXT NOT NULL,
+      shift      TEXT NOT NULL,
+      total      INTEGER NOT NULL DEFAULT 0,
+      snapshot   TEXT NOT NULL DEFAULT '',            -- JSON bảng đối chiếu lúc chốt
+      closed_by  TEXT NOT NULL DEFAULT '',
+      closed_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (work_date, shift)
+    );
+    CREATE TABLE IF NOT EXISTS meal_dept_heads (      -- ai là TRƯỞNG BỘ PHẬN (được nhập đăng ký cho bộ phận đó và bộ phận con)
+      department  TEXT NOT NULL,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      PRIMARY KEY (department, employee_id)
+    );
+    CREATE TABLE IF NOT EXISTS meal_menu (            -- món của từng ca từng ngày
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_date  TEXT NOT NULL,
+      shift      TEXT NOT NULL,
+      name       TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(work_date, shift, name)
+    );
+    CREATE TABLE IF NOT EXISTS meal_orders (          -- món nhân viên đã chọn trên app (tên món lưu kèm để màn hình bếp không mất khi sửa thực đơn)
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      work_date   TEXT NOT NULL,
+      shift       TEXT NOT NULL,
+      menu_id     INTEGER,
+      dish        TEXT NOT NULL,
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (employee_id, work_date, shift)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mealord_date ON meal_orders(work_date, shift);`);
+
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN
   if (getSetting('weekend_work_as_ot') == null) setSetting('weekend_work_as_ot', '1');   // đi làm ngày cuối tuần = tăng ca (8 giờ = 1 công)
