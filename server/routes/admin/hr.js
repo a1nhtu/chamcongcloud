@@ -12,6 +12,7 @@ import {
   DEFAULT_HANDOVER, noticeWarning, currentContract, dmy,
 } from '../../hr-rules.js';
 import { hrToday, warnDays, loadContracts, currentContractsByEmp, applyDecision, applyDueDecisions, HR_FILES_DIR } from '../../hr.js';
+import { remindEnabled, runHrReminders } from '../../hr-remind.js';
 
 const HR_DIR = HR_FILES_DIR;   // giấy tờ đính kèm: data/hr-files/<employee_id>/ (không phát công khai)
 const DOC_EXT = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx', '.xls', '.xlsx']);
@@ -20,19 +21,19 @@ const MIME = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/
   '.doc': 'application/msword', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xls': 'application/vnd.ms-excel', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' };
 
-const who = (req) => req.user?.full_name || 'Quản lý';
+export const who = (req) => req.user?.full_name || 'Quản lý';
 const str = (v, n = 200) => (v == null ? '' : String(v).trim().slice(0, n));
 // tiền VNĐ: bỏ dấu chấm / phẩy ngăn cách nghìn ("7.500.000" → 7500000)
 const num = (v) => { const n = Number(String(v ?? '').replace(/\D/g, '')); return Number.isFinite(n) && n > 0 ? n : 0; };
 const dateOr = (v) => (isDate(v) ? v : '');
-const getEmp = (id) => db.prepare('SELECT id, code, full_name, department, position, phone, role, active, start_date, leave_date, audit_only FROM employees WHERE id = ?').get(+id);
+export const getEmp = (id) => db.prepare('SELECT id, code, full_name, department, position, phone, role, active, start_date, leave_date, audit_only FROM employees WHERE id = ?').get(+id);
 // Quản lý (không phải admin) không được lập quyết định / hợp đồng cho tài khoản Admin
-const adminGuard = (req, emp) => (emp && emp.role === 'admin' && !isSuperUser(req.user) ? 'Bạn không có quyền thao tác hồ sơ của tài khoản Admin' : '');
+export const adminGuard = (req, emp) => (emp && emp.role === 'admin' && !isSuperUser(req.user) ? 'Bạn không có quyền thao tác hồ sơ của tài khoản Admin' : '');
 
-function profileOf(empId) {
+export function profileOf(empId) {
   return db.prepare('SELECT * FROM hr_profiles WHERE employee_id = ?').get(empId) || {};
 }
-function saveProfile(empId, fields, by) {
+export function saveProfile(empId, fields, by) {
   const keys = Object.keys(fields).filter((k) => HR_FIELD_KEYS.includes(k));
   db.prepare('INSERT OR IGNORE INTO hr_profiles(employee_id) VALUES (?)').run(empId);
   if (keys.length) db.prepare(`UPDATE hr_profiles SET ${keys.map((k) => k + ' = ?').join(', ')}, updated_by = ?, updated_at = datetime('now') WHERE employee_id = ?`)
@@ -52,7 +53,7 @@ function workStatus(e, pendingResign, empType) {
   return { key: 'chua_ro', label: 'Đang làm việc' };   // chưa có HĐ / chưa khai tính chất lao động
 }
 
-function contractInput(b) {
+export function contractInput(b) {
   const c = {
     contract_no: str(b.contract_no, 60), ctype: str(b.ctype, 30), term_months: Math.max(0, Math.min(120, parseInt(b.term_months, 10) || 0)),
     sign_date: dateOr(b.sign_date), start_date: dateOr(b.start_date), end_date: dateOr(b.end_date),
@@ -64,11 +65,11 @@ function contractInput(b) {
   if (!c.end_date && c.term_months && c.start_date && c.ctype !== 'khong_xac_dinh') c.end_date = contractEndDate(c.start_date, c.term_months);
   return c;
 }
-const CONTRACT_COLS = ['contract_no', 'ctype', 'term_months', 'sign_date', 'start_date', 'end_date', 'department', 'position', 'work_place',
+export const CONTRACT_COLS = ['contract_no', 'ctype', 'term_months', 'sign_date', 'start_date', 'end_date', 'department', 'position', 'work_place',
   'salary', 'insurance_salary', 'allowance', 'signer', 'note', 'parent_id'];
 
 // Ký HĐ xong: điền giúp ngày vào làm / ngày thử việc / ngày chính thức nếu hồ sơ còn trống
-function syncDatesFromContract(empId, c) {
+export function syncDatesFromContract(empId, c) {
   const emp = getEmp(empId);
   const first = db.prepare('SELECT MIN(start_date) d FROM hr_contracts WHERE employee_id = ?').get(empId).d;
   if (emp && !emp.start_date && first) db.prepare('UPDATE employees SET start_date = ? WHERE id = ?').run(first, empId);
@@ -160,16 +161,25 @@ export function registerHrRoutes(r, { need }) {
     res.json({
       groups: HR_GROUPS, fields: HR_FIELDS, contract_types: CONTRACT_TYPES, contract_status: CONTRACT_STATUS_LABEL,
       transfer_kinds: TRANSFER_KINDS, resign_kinds: RESIGN_KINDS, handover: DEFAULT_HANDOVER, doc_kinds: DOC_KINDS,
-      warn_days: warnDays(), today: hrToday(),
+      warn_days: warnDays(), today: hrToday(), remind_push: remindEnabled(),
       departments: db.prepare('SELECT name FROM departments ORDER BY name').all().map((x) => x.name),
       positions: db.prepare('SELECT name FROM positions ORDER BY name').all().map((x) => x.name),
     });
   });
   r.put('/hr/settings', hr, (req, res) => {
-    const d = parseInt(req.body?.warn_days, 10);
-    if (!(d >= 1 && d <= 365)) return res.status(400).json({ error: 'Số ngày cảnh báo phải từ 1 đến 365' });
-    setSetting('hr_contract_warn_days', String(d));
-    res.json({ ok: true, warn_days: d });
+    const b = req.body || {};
+    if (b.warn_days !== undefined) {
+      const d = parseInt(b.warn_days, 10);
+      if (!(d >= 1 && d <= 365)) return res.status(400).json({ error: 'Số ngày cảnh báo phải từ 1 đến 365' });
+      setSetting('hr_contract_warn_days', String(d));
+    }
+    if (b.remind_push !== undefined) setSetting('hr_remind_push', b.remind_push ? '1' : '0');
+    res.json({ ok: true, warn_days: warnDays(), remind_push: remindEnabled() });
+  });
+  // Gửi thử nhắc HĐ ngay (gồm cả HĐ đã nhắc) — để kiểm tra thông báo đẩy tới được người có quyền Nhân sự
+  r.post('/hr/remind/test', hr, async (req, res) => {
+    try { res.json({ ok: true, ...(await runHrReminders({ force: true })) }); }
+    catch (e) { sendCaughtError(res, 'POST /admin/hr/remind/test', e); }
   });
 
   // ---------- HỒ SƠ ----------
@@ -317,7 +327,7 @@ export function registerHrRoutes(r, { need }) {
   r.get('/hr/contracts', hr, (req, res) => {
     applyDueDecisions();
     const rows = loadContracts();
-    res.json({ rows, warn_days: warnDays(), today: hrToday() });
+    res.json({ rows, warn_days: warnDays(), today: hrToday(), remind_push: remindEnabled() });
   });
 
   // Kiểm tra trước khi lưu (giao diện gọi để hiện cảnh báo luật ngay khi nhập)

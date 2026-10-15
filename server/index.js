@@ -25,6 +25,7 @@ import { currentVersion } from './update.js';
 import { offload } from './heavy.js';
 import { startTcpScheduler } from './zk-tcp.js';
 import { startHrScheduler } from './hr.js';
+import { startHrRemindScheduler } from './hr-remind.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -35,6 +36,7 @@ optimizeDb();
 startTcpScheduler();   // tự tải máy chấm công TCP/IP theo lịch (chỉ chạy khi đã bật + đặt số phút)
 ensureSeed();
 startHrScheduler();   // nhân sự: tới ngày hiệu lực thì tự áp dụng quyết định thuyên chuyển / nghỉ việc
+startHrRemindScheduler();   // nhân sự: nhắc HĐ sắp hết hạn / hết thử việc qua thông báo đẩy (công tắc hr_remind_push)
 
 // Tự động sao lưu dữ liệu: kiểm tra mỗi 5 phút, chạy khi tới giờ đã đặt (1 lần/ngày)
 maybeAutoBackup();

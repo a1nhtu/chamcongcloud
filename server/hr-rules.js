@@ -200,3 +200,34 @@ export function noticeWarning(kind, cur, requestDate, leaveDate) {
 
 // Quyết định đã tới ngày hiệu lực, chờ áp dụng
 export const decisionDue = (d, today) => d.status === 'pending' && isDate(d.effective_date) && d.effective_date <= today;
+
+// ---------- Nhắc hợp đồng sắp hết hạn / hết thử việc (thông báo đẩy) ----------
+// Mốc nhắc của 1 HĐ (đã có status / days_left / emp_active từ loadContracts). Mỗi mốc chỉ gửi 1 lần (bảng hr_reminders):
+//  warn = vừa vào ngưỡng cảnh báo (hr_contract_warn_days) · d7 = còn ≤ 7 ngày · expired = đã hết hạn chưa tái ký (trong 7 ngày đầu)
+// Bỏ qua: HĐ không thời hạn, đã tái ký, đã / sẽ chấm dứt, NV đã nghỉ hoặc có QĐ nghỉ việc trước khi HĐ hết hạn.
+export function reminderStage(c, warnDays = 30, { leavingOn = '' } = {}) {
+  if (!c.end_date || c.terminated_date || c.emp_active !== 1 || c.days_left == null) return null;
+  if (c.status === 'da_tai_ky' || c.status === 'cham_dut' || c.status === 'chua_hieu_luc') return null;
+  if (leavingOn && leavingOn <= addDays(c.end_date, 1)) return null;
+  const left = c.days_left;
+  if (left < 0) return left >= -7 ? 'expired' : null;
+  if (left <= 7 && warnDays > 7) return 'd7';
+  if (left <= warnDays) return 'warn';
+  return null;
+}
+// Gộp các HĐ cần nhắc thành 1 thông báo. items: [{ name, code, ctype, days_left, end_date }]
+export function reminderDigest(items) {
+  const line = (i) => {
+    const what = i.ctype === 'thu_viec' ? 'hết thử việc' : 'HĐ hết hạn';
+    const when = i.days_left < 0 ? `đã quá ${-i.days_left} ngày` : i.days_left === 0 ? 'hôm nay' : `còn ${i.days_left} ngày`;
+    return `${i.name} (${i.code}): ${what} ${when}${i.end_date ? ' — ' + dmy(i.end_date) : ''}`;
+  };
+  const probation = items.filter((i) => i.ctype === 'thu_viec').length;
+  const title = items.length === 1
+    ? (probation ? '⏳ Sắp hết thử việc' : items[0].days_left < 0 ? '⛔ Hợp đồng đã hết hạn' : '📄 Hợp đồng sắp hết hạn')
+    : `📄 ${items.length} hợp đồng cần xử lý${probation ? ` (${probation} hết thử việc)` : ''}`;
+  const lines = items.slice(0, 4).map(line);
+  if (items.length > 4) lines.push(`… và ${items.length - 4} người khác`);
+  if (items.length === 1) lines.push(probation ? 'Đánh giá kết quả thử việc và ký HĐ chính thức.' : 'Tái ký hoặc lập quyết định nghỉ việc.');
+  return { title, body: lines.join('\n') };
+}

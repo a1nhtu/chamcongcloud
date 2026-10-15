@@ -17,6 +17,8 @@ import { registerAuditLimitRoutes } from './admin/audit-limits.js';
 import { registerOtRegRoutes } from './admin/ot-reg.js';
 import { registerSwapRoutes } from './admin/swap.js';
 import { registerHrRoutes } from './admin/hr.js';
+import { registerHrDocRoutes } from './admin/hr-docs.js';
+import { registerHrImportRoutes } from './admin/hr-import.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
@@ -43,5 +45,7 @@ registerAuditLimitRoutes(r, { need });   // công ảo: tăng ca tối đa / ng�
 registerOtRegRoutes(r, { need });        // đăng ký làm thêm + chấm công bất thường
 registerSwapRoutes(r, { need });         // đăng ký làm bù (hoán đổi ngày làm việc)
 registerHrRoutes(r, { need });           // nhân sự: hồ sơ, hợp đồng, thuyên chuyển / nghỉ việc
+registerHrDocRoutes(r, { need });        // nhân sự: mẫu Word + in hợp đồng / phụ lục / quyết định
+registerHrImportRoutes(r, { need });     // nhân sự: nhập hồ sơ / hợp đồng từ Excel
 
 export default r;
