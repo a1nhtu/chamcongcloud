@@ -516,3 +516,8 @@ input[type=checkbox].sw:disabled { opacity: .45; cursor: not-allowed; }
 .f-sec-h .sum { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .f-sec-b { padding: 0 12px 12px; }
 .f-sec:not(.open) > .f-sec-b { display: none; }
+/* Tiêu đề cột bấm để sắp xếp */
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { color: var(--brand); }
+th.sortable .sort-ic { font-size: 11px; color: #b5b9c0; }
+th.sortable.on, th.sortable.on .sort-ic { color: var(--brand); }

@@ -560,33 +560,46 @@ function deptOrdered(list = DEPARTMENTS) {
 }
 // Trang Nhân viên: bộ phận đang chọn trên cây ('*' = tất cả), các nhánh đang gọn, ô tìm — giữ khi làm mới/sửa
 let empDeptSel = '*', empSearch = '';
+let empSort = null;   // { key, dir: 1 tăng | -1 giảm } — null = mặc định: nhóm theo bộ phận
 const empDeptClosed = new Set(); let _empTreeInit = false;   // mặc định THU GỌN mọi bộ phận có cấp con
+// Cột sắp xếp được ở bảng Nhân viên: [khoá, nhãn, gợi ý]
+const EMP_SORT_COLS = [['code', 'Mã'], ['device_pin', 'Số ID', 'Số ID trên máy chấm công'], ['full_name', 'Họ tên'], ['position', 'Chức danh'],
+  ['username', 'Tài khoản'], ['role', 'Quyền'], ['active', 'TT']];
+// So sánh 2 NV theo cột: số so như số (2 < 10), chữ so tiếng Việt; ô trống luôn nằm CUỐI dù tăng hay giảm
+function empCompare({ key, dir }) {
+  const RANK = { employee: 1, manager: 2, admin: 3 };
+  const val = (e) => key === 'role' ? (e.audit_only ? 2.5 : RANK[e.role] || 0) : key === 'active' ? (e.active ? 1 : 0) : String(e[key] ?? '').trim();
+  return (a, b) => {
+    const x = val(a), y = val(b);
+    if (x === '' || y === '') return x === y ? 0 : x === '' ? 1 : -1;
+    const c = typeof x === 'number' ? x - y : x.localeCompare(y, 'vi', { numeric: true, sensitivity: 'base' });
+    return c * dir || a.full_name.localeCompare(b.full_name, 'vi');
+  };
+}
 async function pageEmployees() {
   const addBtn = hasPerm('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
   const canEdit = hasPerm('employees');
-  const tmplBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '📄 Tải mẫu Excel') : null;
-  const impAddBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '⬆ Nhập thêm mới') : null;
-  const impUpdBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '🔄 Cập nhật từ Excel') : null;
-  const exportBtn = canEdit ? el('button', { class: 'btn ghost sm', title: 'Xuất toàn bộ nhân viên ra Excel (cùng mẫu cột với file nhập — sửa xong nhập lại được)' }, '⬇ Xuất danh sách') : null;
-  if (exportBtn) exportBtn.onclick = downloadEmpExport;
-  if (tmplBtn) tmplBtn.onclick = downloadEmpTemplate;
-  if (impAddBtn) impAddBtn.onclick = () => importEmployees('add');
-  if (impUpdBtn) impUpdBtn.onclick = () => importEmployees('update');
+  // Thanh nút GỌN: các việc Excel và máy chấm công gom vào 2 menu thả xuống
+  const excelMenu = canEdit ? rowMenu([
+    { label: '⬇ Xuất danh sách nhân viên', hint: 'Cùng mẫu cột với file nhập — sửa xong nhập lại được', fn: downloadEmpExport },
+    { label: '📄 Tải file mẫu', fn: downloadEmpTemplate },
+    { label: '⬆ Nhập nhân viên mới từ Excel', fn: () => importEmployees('add') },
+    { label: '🔄 Cập nhật nhân viên từ Excel', fn: () => importEmployees('update') },
+  ], '📊 Excel ▾') : null;
   // Làm mới danh sách (NV tải từ máy chấm công về không tự hiện, trước đây phải F5 cả trang)
-  const refreshBtn = el('button', { class: 'btn ghost sm', title: 'Tải lại danh sách nhân viên' }, '↻ Làm mới');
+  const refreshBtn = el('button', { class: 'btn ghost sm', title: 'Làm mới danh sách nhân viên' }, '↻');
   refreshBtn.onclick = () => pageEmployees();
-  // NV nghỉ việc: xoá trên TẤT CẢ máy chấm công 1 lần (rồi hỏi khoá luôn)
-  const devDelBtn = (hasPerm('devices') && deviceEnabled()) ? el('button', { class: 'btn ghost sm', title: 'Xoá nhân viên nghỉ việc trên tất cả máy chấm công 1 lần' }, '🗑 Xóa NV trên máy chấm công') : null;
-  if (devDelBtn) devDelBtn.onclick = () => deleteUsersAllModal(pageEmployees);
-  const devPushBtn = (hasPerm('devices') && deviceEnabled()) ? el('button', { class: 'btn ghost sm', title: 'Đẩy nhân viên (Số ID + tên, kèm vân tay/mặt nếu có) xuống máy chấm công' }, '⬇ Đẩy NV xuống máy') : null;
-  if (devPushBtn) devPushBtn.onclick = async () => { try { pushEmpModal((await api('/admin/devices')).rows, pageEmployees); } catch (e) { toast(e.message, 'err'); } };
-  const headArgs = ['Nhân viên', refreshBtn, addBtn, exportBtn, tmplBtn, impAddBtn, impUpdBtn, devPushBtn, devDelBtn].filter(Boolean);
+  const devMenu = (hasPerm('devices') && deviceEnabled()) ? rowMenu([
+    { label: '⬇ Đẩy NV xuống máy…', hint: 'Số ID + tên, kèm vân tay/mặt nếu có', fn: async () => { try { pushEmpModal((await api('/admin/devices')).rows, pageEmployees); } catch (e) { toast(e.message, 'err'); } } },
+    { label: '🗑 Xóa NV trên máy…', hint: 'NV nghỉ việc: xoá trên tất cả máy 1 lần rồi hỏi khoá luôn', fn: () => deleteUsersAllModal(pageEmployees) },
+  ], '🔌 Máy chấm công ▾') : null;
+  const headArgs = ['Nhân viên', refreshBtn, addBtn, excelMenu, devMenu].filter(Boolean);
   setMain(head(...headArgs), loading());
   try {
     await loadRefs();
     const { rows } = await api('/admin/employees');
     if (addBtn) addBtn.onclick = () => empModal(null);
-    const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, exportBtn, tmplBtn, impAddBtn, impUpdBtn, devPushBtn, devDelBtn].filter(Boolean);
+    const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, excelMenu, devMenu].filter(Boolean);
 
     // ===== Cây BỘ PHẬN bên trái (bấm để lọc) + bảng nhân viên GỌN bên phải, xếp theo bộ phận =====
     const NONE = '\u0000none';                       // khoá cho NV chưa có bộ phận
@@ -636,19 +649,36 @@ async function pageEmployees() {
       const sel = nodes.find((n) => n.key === empDeptSel);
       const allow = sel ? new Set(sel.names) : null;
       const q = empSearch.trim().toLowerCase();
-      const list = rows.filter((e) => (!allow || allow.has(e.department || NONE))
-        && (!q || [e.code, e.full_name, e.username, e.device_pin, e.position].some((v) => String(v || '').toLowerCase().includes(q))))
-        .sort((x, y) => (orderOf.get(x.department || NONE) ?? 9999) - (orderOf.get(y.department || NONE) ?? 9999) || x.full_name.localeCompare(y.full_name, 'vi'));
-      countLbl.textContent = list.length + ' nhân viên' + (sel ? ' · ' + sel.label : '');
-      const tbl = el('table', { class: 'data emp-compact' });
       // Cột Số ID máy chấm công: chỉ hiện khi đang dùng máy chấm công (chỉ chấm định vị/điện thoại thì ẩn)
       const showPin = deviceEnabled(), NCOL = showPin ? 8 : 7;
-      tbl.innerHTML = `<thead><tr><th>Mã</th>${showPin ? '<th title="Số ID trên máy chấm công">Số ID</th>' : ''}<th>Họ tên</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
+      if (empSort && empSort.key === 'device_pin' && !showPin) empSort = null;
+      const list = rows.filter((e) => (!allow || allow.has(e.department || NONE))
+        && (!q || [e.code, e.full_name, e.username, e.device_pin, e.position].some((v) => String(v || '').toLowerCase().includes(q))))
+        .sort(empSort ? empCompare(empSort) : (x, y) => (orderOf.get(x.department || NONE) ?? 9999) - (orderOf.get(y.department || NONE) ?? 9999) || x.full_name.localeCompare(y.full_name, 'vi'));
+      countLbl.innerHTML = '';
+      countLbl.append(list.length + ' nhân viên' + (sel ? ' · ' + sel.label : ''));
+      if (empSort) {
+        const lb = EMP_SORT_COLS.find((c) => c[0] === empSort.key)?.[1] || '';
+        countLbl.append(' · ', el('span', { class: 'pill', style: 'cursor:pointer', title: 'Bỏ sắp xếp — về nhóm theo bộ phận', onclick: () => { empSort = null; renderList(); } },
+          `Sắp theo ${lb} ${empSort.dir > 0 ? '▲' : '▼'}  ✕`));
+      }
+      const tbl = el('table', { class: 'data emp-compact' });
+      // Tiêu đề cột bấm được: lần 1 thấp → cao, lần 2 cao → thấp
+      const hrow = el('tr');
+      for (const [key, label, tip] of EMP_SORT_COLS) {
+        if (key === 'device_pin' && !showPin) continue;
+        const on = empSort && empSort.key === key;
+        hrow.append(el('th', { class: 'sortable' + (on ? ' on' : ''), title: (tip ? tip + ' — ' : '') + 'Bấm để sắp xếp (lần 1 thấp → cao, lần 2 cao → thấp)',
+          onclick: () => { empSort = on && empSort.dir > 0 ? { key, dir: -1 } : { key, dir: 1 }; renderList(); } },
+          label, el('span', { class: 'sort-ic' }, on ? (empSort.dir > 0 ? ' ▲' : ' ▼') : ' ⇅')));
+      }
+      hrow.append(el('th'));
+      tbl.append(el('thead', {}, hrow));
       const tb = el('tbody');
       let lastDept = null;
       for (const e of list) {
         const dk = e.department || NONE;
-        if (dk !== lastDept) {   // dòng tiêu đề nhóm bộ phận
+        if (!empSort && dk !== lastDept) {   // dòng tiêu đề nhóm bộ phận (chỉ khi không sắp xếp theo cột)
           lastDept = dk;
           const n = list.filter((x) => (x.department || NONE) === dk).length;
           tb.append(el('tr', { class: 'grp' }, el('td', { colspan: NCOL }, (dk === NONE ? 'Chưa có bộ phận' : dk) + ' (' + n + ')')));
