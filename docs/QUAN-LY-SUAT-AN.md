@@ -21,7 +21,7 @@ Phân hệ **độc lập** với tính công: chỉ ĐỌC lượt quẹt máy 
 ## Ai làm gì
 - **HR** (`/admin` › Suất ăn): Đối chiếu & chốt (nhập hộ / sửa số của mọi bộ phận) · Thực đơn các bữa · Cấu hình (3 ca + giờ chốt, chỉ định trưởng bộ phận, chọn máy chấm công tính suất ăn, mã màn hình bếp).
 - **Trưởng bộ phận**: app nhân viên › tab **Suất ăn** › "Đăng ký suất ăn của bộ phận" (chỉ bộ phận mình + bộ phận con, ngày hôm nay trở đi). Quản lý dùng menu "Suất ăn của tôi" trong /admin.
-- **Nhân viên**: app › tab **Suất ăn** › chọn món cho từng bữa (khoá khi bữa đã bắt đầu).
+- **Nhân viên**: app › tab **Suất ăn** › chọn món cho từng bữa trước **hạn chọn món** (app ghi "chọn món trước HH:MM"). HR đặt hạn ở Cấu hình › từng ca › **Khoá chọn món**: *Khi bắt đầu giờ ăn* (mặc định, như cũ) · *Trước giờ ăn N tiếng* (lẻ được, tối đa 48) · *Lúc giờ cố định* (muộn hơn giờ bắt đầu = của hôm trước, VD bữa trưa khoá 20:00 tối hôm trước) — để bếp kịp chuẩn bị.
 - **Nhà bếp**: mở `/bep` rồi gõ **mã 6 ký tự** (hoặc liên kết ngắn `/bep/MÃ`) — lấy ở Cấu hình › Màn hình bếp, không cần đăng nhập; dò mã sai quá 10 lần/5 phút bị chặn theo IP. Màn hình hỏi máy chủ mỗi 2 giây; mỗi lượt quẹt trong giờ ăn hiện **tên NV + món đã chọn** (cảnh báo nếu quẹt lần thứ 2 trong bữa). Quẹt nhanh quá chưa kịp nhìn: **bấm một lượt ở cột "Lượt quẹt gần đây"** (hoặc phím ↓/↑) để hiện lại to ở giữa; 10 giây sau tự về lượt mới nhất (Esc / nút "Về lượt mới nhất" để về ngay). Liên kết bếp in theo **tên miền** điền ở Cấu hình › Màn hình bếp (để trống = theo địa chỉ đang mở). Đổi mã = mã cũ vô hiệu.
 
 ## Bảng dữ liệu (CREATE TABLE IF NOT EXISTS trong `db.js › initSchema`)

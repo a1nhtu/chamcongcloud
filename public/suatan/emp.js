@@ -52,7 +52,9 @@ async function drawOrders(box, me) {
     const day = r.days[0];
     if (!day || !day.shifts.length) { list.append(el('div', { class: 'sa-empty' }, 'Chưa có ca ăn nào được bật.')); return; }
     for (const s of day.shifts) {
-      const card = el('div', { class: 'sa-meal' }, el('h4', {}, 'Bữa ' + s.name.toLowerCase()), el('div', { class: 'when' }, `Quẹt thẻ khoảng ${s.from_time} → ${s.to_time}` + (s.editable ? '' : ' · đã khoá chọn món')));
+      // hạn chọn món 'YYYY-MM-DD HH:MM' (giờ VN): cùng ngày ăn chỉ ghi giờ, khác ngày ghi thêm ngày
+      const dl = s.deadline ? s.deadline.slice(11) + (s.deadline.slice(0, 10) === sel ? '' : ' ngày ' + dmy(s.deadline.slice(0, 10))) : '';
+      const card = el('div', { class: 'sa-meal' }, el('h4', {}, 'Bữa ' + s.name.toLowerCase()), el('div', { class: 'when' }, `Quẹt thẻ khoảng ${s.from_time} → ${s.to_time}` + (s.editable ? (dl ? ` · chọn món trước ${dl}` : '') : ' · đã khoá chọn món' + (dl ? ` (hạn ${dl})` : ''))));
       if (!s.dishes.length) card.append(el('div', { class: 'sa-empty' }, 'Chưa có thực đơn cho bữa này.'));
       for (const m of s.dishes) {
         const on = s.chosen && s.chosen.menu_id === m.id;

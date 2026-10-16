@@ -207,13 +207,38 @@ export async function pageMealCfg(ctx) {
     const modeS = el('select', {}, el('option', { value: 'punch' }, 'Đếm lượt chấm công'), el('option', { value: 'ot' }, 'Đối chiếu đăng ký làm thêm (không đếm chấm công)'));
     modeS.value = s.mode;
     const enI = el('input', { type: 'checkbox', style: 'width:auto', ...(s.enabled ? { checked: '' } : {}) });
+    // hạn chọn món: để bếp có thời gian chuẩn bị (server/meal-rules.js orderDeadlineMs)
+    const lockS = el('select', {}, el('option', { value: 'start' }, 'Khi bắt đầu giờ ăn'), el('option', { value: 'before' }, 'Trước giờ ăn … tiếng'), el('option', { value: 'at' }, 'Lúc giờ cố định'));
+    lockS.value = s.lock_at ? 'at' : s.lock_before_min > 0 ? 'before' : 'start';
+    const lockH = el('input', { type: 'number', min: '0.5', max: '48', step: '0.5', value: s.lock_before_min > 0 ? String(s.lock_before_min / 60) : '2', style: 'width:90px' });
+    const lockAt = el('input', { type: 'time', value: s.lock_at || '' });
+    const lockHint = el('div', { class: 'sa-hint', style: 'margin-top:4px' });
+    const lockBox = el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:6px' });
+    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const toMin = (v) => { const [h, m] = String(v || '').split(':').map(Number); return h * 60 + m; };
+    const drawLock = () => {
+      lockBox.innerHTML = '';
+      if (lockS.value === 'before') lockBox.append(lockH, el('span', {}, 'tiếng trước giờ bắt đầu'));
+      if (lockS.value === 'at') lockBox.append(lockAt, el('span', {}, '(muộn hơn giờ bắt đầu = của hôm trước)'));
+      const f = toMin(fromI.value);
+      let dl = NaN;
+      if (lockS.value === 'start') dl = f;
+      else if (lockS.value === 'before') dl = f - Math.round(Number(lockH.value) * 60);
+      else if (lockAt.value) { const l = toMin(lockAt.value); dl = l > f ? l - 1440 : l; }
+      if (Number.isNaN(dl)) { lockHint.textContent = ''; return; }
+      const days = Math.floor(dl / 1440), at = hm(dl - days * 1440);
+      lockHint.textContent = `→ Nhân viên chọn / đổi món đến ${at} ${days === 0 ? 'cùng ngày ăn' : days === -1 ? 'hôm trước' : -days + ' ngày trước'}; sau đó khoá.`;
+    };
+    lockS.onchange = drawLock; lockH.oninput = drawLock; lockAt.oninput = drawLock; fromI.addEventListener('input', drawLock);
+    drawLock();
     const save = el('button', { class: 'sa-btn', type: 'button', style: 'margin-top:10px' }, '💾 Lưu ca');
     save.onclick = async () => {
-      try { await api('/admin/meal/shifts/' + s.code, { method: 'PUT', body: { name: nameI.value, from_time: fromI.value, to_time: toI.value, mode: modeS.value, enabled: enI.checked } }); toast('Đã lưu ' + nameI.value, 'ok'); }
+      try { await api('/admin/meal/shifts/' + s.code, { method: 'PUT', body: { name: nameI.value, from_time: fromI.value, to_time: toI.value, mode: modeS.value, enabled: enI.checked, lock_mode: lockS.value, lock_hours: lockH.value, lock_at: lockAt.value } }); toast('Đã lưu ' + nameI.value, 'ok'); }
       catch (e) { toast(e.message, 'err'); }
     };
     g1.append(el('div', { class: 'sa-card' }, el('h4', {}, s.name), el('label', {}, 'Tên ca'), nameI,
       el('div', { class: 'sa-row2' }, el('div', {}, el('label', {}, 'Bắt đầu'), fromI), el('div', {}, el('label', {}, 'Giờ chốt'), toI)),
+      el('label', {}, 'Khoá chọn món'), lockS, lockBox, lockHint,
       el('label', {}, 'Cách đối chiếu'), modeS,
       el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:10px;color:inherit' }, enI, 'Bật ca này'), save));
   }

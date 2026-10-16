@@ -28,6 +28,7 @@ export function registerMealRoutes(r) {
     if (!c.ok) return res.status(400).json({ error: c.error });
     const v = c.value;
     db.prepare('UPDATE meal_shifts SET name = ?, from_time = ?, to_time = ?, mode = ?, enabled = ? WHERE code = ?').run(v.name, v.from_time, v.to_time, v.mode, v.enabled, req.params.code);
+    if (v.lock_before_min != null) db.prepare('UPDATE meal_shifts SET lock_before_min = ?, lock_at = ? WHERE code = ?').run(v.lock_before_min, v.lock_at, req.params.code);
     res.json({ ok: true, shifts: listShifts() });
   }));
 

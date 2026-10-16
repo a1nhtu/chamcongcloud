@@ -8,7 +8,7 @@ import { hasPerm } from './auth.js';
 import { userError } from './util.js';
 import {
   DEFAULT_MEAL_SHIFTS, NON_MACHINE_SERIALS, windowBoundsUtc, countValidPunches, buildBoard, shiftForPunch, vnNow,
-  isIsoDate, parseCount, cleanDishes, canOrderMeal, addDaysIso,
+  isIsoDate, parseCount, cleanDishes, canOrderMeal, orderDeadlineVn, addDaysIso,
 } from './meal-rules.js';
 
 /* ---------------------------- công tắc + quyền ---------------------------- */
@@ -218,7 +218,7 @@ export function myMealPlan(empId, from, to, now = new Date()) {
       shifts: shifts.map((s) => {
         const o = orders.get(d + '|' + s.code);
         return { code: s.code, name: s.name, from_time: s.from_time, to_time: s.to_time, dishes: menu.get(d + '|' + s.code) || [],
-          chosen: o ? { menu_id: o.menu_id, dish: o.dish } : null, editable: canOrderMeal(d, s, now) };
+          chosen: o ? { menu_id: o.menu_id, dish: o.dish } : null, editable: canOrderMeal(d, s, now), deadline: orderDeadlineVn(d, s) };
       }),
     });
   }
@@ -229,7 +229,10 @@ export function setMyOrder(empId, workDate, code, menuId, now = new Date()) {
   needDate(workDate);
   const shift = needShift(code);
   if (!shift.enabled) throw userError('Ca ăn này đang tắt');
-  if (!canOrderMeal(workDate, shift, now)) throw userError('Đã hết thời hạn chọn món cho bữa này');
+  if (!canOrderMeal(workDate, shift, now)) {
+    const dl = orderDeadlineVn(workDate, shift);   // 'YYYY-MM-DD HH:MM'
+    throw userError(`Đã hết hạn chọn món cho bữa này (hạn ${dl.slice(11)} ngày ${dl.slice(8, 10)}/${dl.slice(5, 7)}) — bếp cần thời gian chuẩn bị`);
+  }
   if (menuId == null || menuId === '') { db.prepare('DELETE FROM meal_orders WHERE employee_id = ? AND work_date = ? AND shift = ?').run(empId, workDate, code); return null; }
   const m = db.prepare('SELECT id, name FROM meal_menu WHERE id = ? AND work_date = ? AND shift = ?').get(Number(menuId), workDate, code);
   if (!m) throw userError('Món này không có trong thực đơn của bữa đã chọn');

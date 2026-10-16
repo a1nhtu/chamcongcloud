@@ -126,12 +126,25 @@ export function vnNow(now = new Date()) {
   return { date: t.toISOString().slice(0, 10), min: t.getUTCHours() * 60 + t.getUTCMinutes() };
 }
 
-// Nhân viên còn được chọn / đổi món cho ca này không: ngày sau hôm nay → được; hôm nay → chỉ trước giờ bắt đầu khung ăn; ngày qua → khoá
+// HẠN CHỌN MÓN (mốc ms UTC) của ca `shift` cho ngày ăn `workDate` — HR đặt ở Cấu hình suất ăn để bếp kịp chuẩn bị:
+//   · lock_at 'HH:MM'     → khoá lúc giờ đó; giờ khoá MUỘN hơn giờ bắt đầu khung ăn = của HÔM TRƯỚC (VD bữa trưa 10:30, khoá 20:00 → 20:00 hôm trước)
+//   · lock_before_min = N → khoá trước giờ bắt đầu khung ăn N phút (0 = đúng lúc bắt đầu — như bản cũ)
+export function orderDeadlineMs(workDate, shift) {
+  const base = Date.parse(workDate + 'T00:00:00Z') - VN_MS;   // 00:00 giờ VN của ngày ăn
+  const f = hhmmToMin(shift.from_time);
+  if (isHHMM(shift.lock_at)) {
+    const l = hhmmToMin(shift.lock_at);
+    return base + (l > f ? l - 1440 : l) * 60000;
+  }
+  return base + (f - Math.max(0, Number(shift.lock_before_min) || 0)) * 60000;
+}
+// Hạn chọn món dạng giờ VN 'YYYY-MM-DD HH:MM' (để hiện cho nhân viên)
+export function orderDeadlineVn(workDate, shift) {
+  return new Date(orderDeadlineMs(workDate, shift) + VN_MS).toISOString().slice(0, 16).replace('T', ' ');
+}
+// Nhân viên còn được chọn / đổi món cho ca này không: chỉ TRƯỚC hạn chọn món (orderDeadlineMs); ngày đã qua luôn khoá
 export function canOrderMeal(workDate, shift, now = new Date()) {
-  const n = vnNow(now);
-  if (workDate > n.date) return true;
-  if (workDate < n.date) return false;
-  return n.min < hhmmToMin(shift.from_time);
+  return now.getTime() < orderDeadlineMs(workDate, shift);
 }
 
 // Chuẩn hoá danh sách tên món HR nhập (bỏ dòng trống, trùng, cắt độ dài); tối đa 40 món / ca / ngày
@@ -154,5 +167,17 @@ export function checkShiftConfig(b) {
   if (!isHHMM(b.from_time) || !isHHMM(b.to_time)) return { ok: false, error: 'Giờ chốt phải dạng HH:MM (VD 10:30)' };
   if (b.from_time === b.to_time) return { ok: false, error: 'Giờ bắt đầu và giờ chốt không được trùng nhau' };
   if (!MEAL_MODES.includes(b.mode)) return { ok: false, error: 'Cách đối chiếu không hợp lệ' };
-  return { ok: true, value: { name, from_time: b.from_time, to_time: b.to_time, mode: b.mode, enabled: b.enabled ? 1 : 0 } };
+  const value = { name, from_time: b.from_time, to_time: b.to_time, mode: b.mode, enabled: b.enabled ? 1 : 0 };
+  // Hạn chọn món: 'start' = lúc bắt đầu khung ăn · 'before' = trước lock_hours giờ (lẻ được, tối đa 48) · 'at' = lúc lock_at
+  // Không gửi lock_mode (giao diện cũ) → không đụng tới hạn đang lưu
+  if (b.lock_mode === 'start') Object.assign(value, { lock_before_min: 0, lock_at: '' });
+  else if (b.lock_mode === 'before') {
+    const h = Number(String(b.lock_hours ?? '').replace(',', '.'));
+    if (!Number.isFinite(h) || h <= 0 || h > 48) return { ok: false, error: 'Số giờ khoá chọn món trước bữa phải từ lớn hơn 0 đến 48 (VD 1 hoặc 1.5)' };
+    Object.assign(value, { lock_before_min: Math.round(h * 60), lock_at: '' });
+  } else if (b.lock_mode === 'at') {
+    if (!isHHMM(b.lock_at)) return { ok: false, error: 'Giờ khoá chọn món phải dạng HH:MM (VD 14:00)' };
+    Object.assign(value, { lock_before_min: 0, lock_at: b.lock_at });
+  } else if (b.lock_mode != null) return { ok: false, error: 'Cách khoá chọn món không hợp lệ' };
+  return { ok: true, value };
 }

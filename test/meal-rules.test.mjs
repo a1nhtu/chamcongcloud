@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_MEAL_SHIFTS, windowBoundsUtc, inWindow, shiftForPunch, countValidPunches, buildBoard, parseCount, canOrderMeal,
-  cleanDishes, checkShiftConfig, isOvernight, isHHMM, isIsoDate, addDaysIso, vnNow,
+  cleanDishes, checkShiftConfig, isOvernight, isHHMM, isIsoDate, addDaysIso, vnNow, orderDeadlineMs, orderDeadlineVn,
 } from '../server/meal-rules.js';
 
 const [TRUA, CHIEU, DEM] = DEFAULT_MEAL_SHIFTS;
@@ -112,4 +112,40 @@ test('tiện ích ngày giờ', () => {
   assert.equal(isHHMM('09:05'), true); assert.equal(isHHMM('9:05'), false);
   assert.equal(isIsoDate('2026-10-15'), true); assert.equal(isIsoDate('2026-13-45'), false); assert.equal(isIsoDate('15/10/2026'), false);
   assert.equal(addDaysIso('2026-12-31', 1), '2027-01-01');
+});
+
+test('hạn chọn món: khoá trước N giờ / lúc giờ cố định (muộn hơn giờ ăn = hôm trước); mặc định = lúc bắt đầu như cũ', () => {
+  const CHIEU = { from_time: '16:00', to_time: '20:00' };
+  const vn = (s) => new Date(s + ':00+07:00');   // giờ VN → Date
+  // mặc định (không cấu hình) = đúng 16:00
+  assert.equal(orderDeadlineVn('2026-10-16', CHIEU), '2026-10-16 16:00');
+  assert.equal(canOrderMeal('2026-10-16', CHIEU, vn('2026-10-16T15:58')), true);
+  // trước 2 tiếng → 14:00: 13:59 còn chọn được, 15:58 đã khoá (đúng tình huống Anh nêu)
+  const T2 = { ...CHIEU, lock_before_min: 120 };
+  assert.equal(orderDeadlineVn('2026-10-16', T2), '2026-10-16 14:00');
+  assert.equal(canOrderMeal('2026-10-16', T2, vn('2026-10-16T13:59')), true);
+  assert.equal(canOrderMeal('2026-10-16', T2, vn('2026-10-16T15:58')), false);
+  // khoá lúc 10:00 cùng ngày
+  assert.equal(orderDeadlineVn('2026-10-16', { ...CHIEU, lock_at: '10:00' }), '2026-10-16 10:00');
+  // bữa trưa 10:30 khoá lúc 20:00 → 20:00 HÔM TRƯỚC; tối hôm trước 20:30 đã khoá bữa trưa mai
+  const TRUA20 = { from_time: '10:30', to_time: '13:30', lock_at: '20:00' };
+  assert.equal(orderDeadlineVn('2026-10-17', TRUA20), '2026-10-16 20:00');
+  assert.equal(canOrderMeal('2026-10-17', TRUA20, vn('2026-10-16T19:59')), true);
+  assert.equal(canOrderMeal('2026-10-17', TRUA20, vn('2026-10-16T20:30')), false);
+  assert.equal(canOrderMeal('2026-10-18', TRUA20, vn('2026-10-16T20:30')), true);
+  // bữa đêm 23:00 trước 24 tiếng → 23:00 hôm trước
+  assert.equal(orderDeadlineVn('2026-10-17', { from_time: '23:00', to_time: '02:00', lock_before_min: 1440 }), '2026-10-16 23:00');
+  // lock_at được ưu tiên hơn lock_before_min
+  assert.equal(orderDeadlineMs('2026-10-16', { ...CHIEU, lock_at: '15:00', lock_before_min: 600 }), vn('2026-10-16T15:00').getTime());
+});
+
+test('checkShiftConfig: cách khoá chọn món', () => {
+  const B = { name: 'Chiều', from_time: '16:00', to_time: '20:00', mode: 'ot', enabled: true };
+  assert.deepEqual(pick(checkShiftConfig({ ...B, lock_mode: 'before', lock_hours: '1,5' })), { lock_before_min: 90, lock_at: '' });
+  assert.deepEqual(pick(checkShiftConfig({ ...B, lock_mode: 'at', lock_at: '14:00' })), { lock_before_min: 0, lock_at: '14:00' });
+  assert.deepEqual(pick(checkShiftConfig({ ...B, lock_mode: 'start' })), { lock_before_min: 0, lock_at: '' });
+  assert.equal(checkShiftConfig(B).value.lock_before_min, undefined);   // giao diện cũ không gửi → giữ nguyên
+  for (const bad of [{ lock_mode: 'before', lock_hours: '0' }, { lock_mode: 'before', lock_hours: '49' }, { lock_mode: 'before', lock_hours: 'x' },
+    { lock_mode: 'at', lock_at: '25:00' }, { lock_mode: 'abc' }]) assert.equal(checkShiftConfig({ ...B, ...bad }).ok, false, JSON.stringify(bad));
+  function pick(c) { assert.equal(c.ok, true); return { lock_before_min: c.value.lock_before_min, lock_at: c.value.lock_at }; }
 });

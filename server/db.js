@@ -888,6 +888,10 @@ function migrateColumns() {
       PRIMARY KEY (employee_id, work_date, shift)
     );
     CREATE INDEX IF NOT EXISTS idx_mealord_date ON meal_orders(work_date, shift);`);
+  // Hạn chọn món của từng ca (meal-rules.js orderDeadlineMs): lock_at 'HH:MM' = khoá lúc giờ cố định (muộn hơn giờ bắt đầu = hôm trước);
+  // không có lock_at = khoá trước giờ bắt đầu khung ăn lock_before_min phút (0 = đúng lúc bắt đầu, như bản cũ)
+  add('meal_shifts', 'lock_before_min', 'INTEGER NOT NULL DEFAULT 0');
+  add('meal_shifts', 'lock_at',         "TEXT NOT NULL DEFAULT ''");
 
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN
