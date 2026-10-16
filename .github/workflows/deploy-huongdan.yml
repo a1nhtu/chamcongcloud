@@ -9,7 +9,7 @@ on:
     branches: [main]
     paths:
       - 'public/huong-dan.html'
-      - 'public/hd-worker.js'
+      - 'HuongDan/hd-worker.js'
       - 'HuongDan/**'
       - '.github/workflows/deploy-huongdan.yml'
   workflow_dispatch: {}   # cho phép bấm chạy tay trong tab Actions
@@ -28,7 +28,7 @@ jobs:
         run: |
           mkdir -p _site
           cp public/huong-dan.html _site/index.html
-          cp public/hd-worker.js _site/_worker.js
+          cp HuongDan/hd-worker.js _site/_worker.js   # worker để NGOÀI public/ → không vào bộ cài / không chép sang khách khi cập nhật
           # Các trang bán khách: bảng giá, giới thiệu, cẩm nang đại lý, hướng dẫn...
           cp HuongDan/*.html _site/ 2>/dev/null || true
           # Ảnh minh hoạ cho các trang hướng dẫn
