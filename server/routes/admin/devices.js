@@ -52,6 +52,14 @@ export function registerDeviceRoutes(r, { need }) {
     }
     res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), push_names: pushNamesOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
+  // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được.
+  // (Dùng máy chấm công / Bắt buộc key / Máy TCP/IP vẫn CHỈ tài khoản tổng — đổi ở PUT /settings.)
+  r.put('/device-options', need('devices'), (req, res) => {
+    const b = req.body || {};
+    for (const k of ['device_autocreate', 'device_pin_guard', 'device_push_names', 'device_name_ascii'])
+      if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
+    res.json({ ok: true });
+  });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
   r.get('/server-ips', need('devices'), (req, res) => {
     res.json({ ips: lanIPs(), port: Number(process.env.PORT || 8080) });

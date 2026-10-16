@@ -5196,10 +5196,13 @@ async function pageLogs() {
 }
 
 // 1 ô công tắc trong lưới cài đặt máy chấm công: công tắc gạt + tiêu đề + mô tả (+ phần phụ)
+// chk.disabled = khoá (chỉ tài khoản tổng đổi được) → hiện 🔒
 function devToggle(chk, title, desc, extra) {
-  return el('div', { class: 'dev-tg' },
-    el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin:0' }, chk,
-      el('div', {}, el('b', { style: 'color:var(--ink)' }, title), el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400;margin-top:2px;line-height:1.45' }, desc))),
+  const locked = chk.disabled;
+  return el('div', { class: 'dev-tg' + (locked ? ' locked' : '') },
+    el('label', { style: 'display:flex;gap:10px;align-items:flex-start;margin:0;cursor:' + (locked ? 'not-allowed' : 'pointer') }, chk,
+      el('div', {}, el('b', { style: 'color:var(--ink)' }, title, locked ? el('span', { title: 'Chỉ tài khoản tổng (Digiplus) đổi được', style: 'margin-left:6px;font-size:12px' }, '🔒') : ''),
+        el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400;margin-top:2px;line-height:1.45' }, desc))),
     extra ? el('div', { style: 'padding-left:52px' }, extra) : '');
 }
 /* ---------- MÁY CHẤM CÔNG (ZKTeco ADMS push) ---------- */
@@ -5208,24 +5211,30 @@ async function pageDevices() {
   let d;
   try { d = await api('/admin/devices'); } catch (e) { setMain(head('Máy chấm công'), el('div', { class: 'empty' }, e.message)); return; }
 
-  // Bật/tắt dùng máy chấm công + tự tạo NV — CHỈ tài khoản tổng đổi được
-  const enChk = el('input', { type: 'checkbox', class: 'sw', ...(d.enabled ? { checked: '' } : {}) });
+  // Công tắc máy chấm công. Dùng máy / Bắt buộc key / TCP/IP: CHỈ tài khoản tổng; còn lại admin (quyền Máy chấm công) đổi được
+  const lockMaster = isMaster() ? {} : { disabled: '' };
+  const enChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.enabled ? { checked: '' } : {}) });
   const autoChk = el('input', { type: 'checkbox', class: 'sw', ...(d.autocreate ? { checked: '' } : {}) });
-  const keyReqChk = el('input', { type: 'checkbox', class: 'sw', ...(d.key_required ? { checked: '' } : {}) });
-  const tcpChk = el('input', { type: 'checkbox', class: 'sw', ...(d.tcp_enabled ? { checked: '' } : {}) });
+  const keyReqChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.key_required ? { checked: '' } : {}) });
+  const tcpChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.tcp_enabled ? { checked: '' } : {}) });
   const guardChk = el('input', { type: 'checkbox', class: 'sw', ...(d.pin_guard ? { checked: '' } : {}) });
   const pushNameChk = el('input', { type: 'checkbox', class: 'sw', ...(d.push_names ? { checked: '' } : {}) });
   const asciiChk = el('input', { type: 'checkbox', class: 'sw sm', ...(d.name_ascii ? { checked: '' } : {}) });
   const saveEn = el('button', { class: 'btn sm' }, 'Lưu');
   saveEn.onclick = async () => {
     try {
+      if (!isMaster()) {   // admin: chỉ lưu các công tắc vận hành
+        await api('/admin/device-options', { method: 'PUT', body: { device_autocreate: autoChk.checked, device_pin_guard: guardChk.checked,
+          device_push_names: pushNameChk.checked, device_name_ascii: asciiChk.checked } });
+        toast('Đã lưu', 'ok'); pageDevices(); return;
+      }
       await api('/admin/settings', { method: 'PUT', body: { device_enabled: enChk.checked, device_autocreate: autoChk.checked, device_key_required: keyReqChk.checked, tcp_device_enabled: tcpChk.checked,
         device_pin_guard: guardChk.checked, device_push_names: pushNameChk.checked, device_name_ascii: asciiChk.checked } });
       SETTINGS.device_enabled = enChk.checked ? '1' : '0'; SETTINGS.tcp_device_enabled = tcpChk.checked ? '1' : '0';
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 600);
     } catch (e) { toast(e.message, 'err'); }
   };
-  const togglePanel = isMaster()
+  const togglePanel = hasPerm('devices')
     ? el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:1100px' },
         el('div', { class: 'dev-tg-grid' },
           devToggle(enChk, 'Dùng máy chấm công (kết nối máy ZKTeco)', 'Nhận dữ liệu chấm công máy tự đẩy về. Tắt = chỉ chấm bằng điện thoại (dùng song song được).'),
@@ -5235,7 +5244,8 @@ async function pageDevices() {
           devToggle(guardChk, 'Cảnh báo trùng Số ID giữa các máy', 'Máy đăng ký người mới vào Số ID đã có chủ → cảnh báo, tạm dừng đồng bộ và GIỮ lượt quẹt tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (tự cấp Số ID mới, giữ nguyên vân tay/thẻ).'),
           devToggle(pushNameChk, 'Đẩy tên nhân viên từ phần mềm xuống máy', 'Lưu NV có Số ID → tên trên máy đổi theo phần mềm; đồng bộ máy↔máy cũng dùng tên phần mềm.',
             el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU — tối đa 24 ký tự'))),
-        el('div', { style: 'margin-top:14px' }, saveEn))
+        el('div', { style: 'margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, saveEn,
+          isMaster() ? '' : el('span', { class: 'map-hint', style: 'margin:0' }, '🔒 = chỉ tài khoản tổng (Digiplus) đổi được')))
     : el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
         el('div', { class: 'dev-st-grid' },
           ...[['Máy chấm công', d.enabled], ['Tự tạo NV từ máy', d.autocreate], ['Bắt buộc key theo máy', d.key_required],
@@ -5274,9 +5284,8 @@ async function pageDevices() {
   const domCopy = domain ? el('button', { class: 'btn ghost sm', title: 'Copy tên miền', style: 'padding:2px 6px', onclick: () => copySerial(domain) }, '📋') : '';
   const domNote = domain ? '' : el('div', { style: 'font-size:12px;color:var(--muted);margin-top:4px' }, 'Bản LAN chưa có tên miền — liên hệ Digiplus nếu cần dùng qua Internet.');
   const guide = el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
-    el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap' },
-      el('h3', { style: 'margin:0;font-size:15px' }, '🔧 Cách kết nối máy chấm công'), refreshNet),
-    el('div', { style: 'font-size:13.5px;margin:6px 0 10px;color:var(--muted)', html: 'Trên máy: <b style="color:var(--ink)">Menu → Comm → Cloud Server (ADMS)</b>, điền theo 1 trong 2 cách:' }),
+    el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 10px' },
+      el('div', { style: 'font-size:13.5px;color:var(--muted)', html: 'Trên máy: <b style="color:var(--ink)">Menu → Comm → Cloud Server (ADMS)</b>, điền theo 1 trong 2 cách:' }), refreshNet),
     el('div', { class: 'dev-tg-grid' },
       el('div', { class: 'dev-tg' },
         el('b', {}, 'Cách A · Cùng mạng LAN'),
@@ -5499,6 +5508,14 @@ async function pageDevices() {
         ? 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về (lúc tải máy tạm khoá vài giây). Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
         : 'Đang tắt: dữ liệu chỉ về khi bấm "⬇ Tải chấm công". Chọn chu kỳ để phần mềm tự tải.'));
   }
+  // 2 khung trên cùng: mặc định THU GỌN (chỉ 1 dòng tóm tắt), bấm ▶ để mở — nhớ trên máy
+  const FEAT = [['Máy chấm công', d.enabled], ['Tự tạo NV', d.autocreate], ['Bắt buộc key', d.key_required], ['TCP/IP', d.tcp_enabled],
+    ['Cảnh báo trùng Số ID', d.pin_guard], ['Đẩy tên NV', d.push_names]];
+  foldPanel(togglePanel, 'dev_features', '⚙️ Tính năng máy chấm công', () => {
+    const on = FEAT.filter((f) => f[1]).map((f) => f[0]);
+    return on.length ? '— Bật: ' + on.join(' · ') : '— Đang tắt hết';
+  }, true);
+  foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
   setMain(head('Máy chấm công', tcpBtn, usbBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
@@ -6035,12 +6052,12 @@ const REPORT_GROUPS = [
 
 // KHUNG THU GỌN được: nút tam giác ▼/▶ cạnh tiêu đề; gọn = chỉ còn 1 dòng tiêu đề + tóm tắt (nhường chỗ cho lưới chính).
 // Nhớ trạng thái trên máy theo `key`. summary(): chữ tóm tắt hiện khi đang gọn.
-function foldPanel(panel, key, title, summary) {
+function foldPanel(panel, key, title, summary, defFolded = false) {
   const tg = el('button', { type: 'button', class: 'fold-tg', title: 'Thu gọn / mở rộng' });
   const sum = el('span', { class: 'fold-sum muted' });
   const head = el('div', { class: 'fold-head' }, tg, el('b', {}, title), sum);
   panel.prepend(head);
-  let folded = false; try { folded = localStorage.getItem('fold_' + key) === '1'; } catch {}
+  let folded = defFolded; try { const v = localStorage.getItem('fold_' + key); if (v != null) folded = v === '1'; } catch {}
   const apply = () => { panel.classList.toggle('folded', folded); tg.textContent = folded ? '▶' : '▼'; sum.textContent = folded && summary ? summary() : ''; };
   head.onclick = (ev) => { if (ev.target.closest('input,select,button:not(.fold-tg)')) return; folded = !folded; try { localStorage.setItem('fold_' + key, folded ? '1' : '0'); } catch {} apply(); };
   apply();

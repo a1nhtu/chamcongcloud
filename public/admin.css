@@ -505,3 +505,5 @@ input[type=checkbox].sw.sm:checked::after { left: 17px; }
 .dev-st-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 24px; }
 .dev-st { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px dashed var(--line); font-weight: 600; font-size: 14px; }
 @media (max-width: 700px) { .dev-st-grid { grid-template-columns: 1fr; } }
+input[type=checkbox].sw:disabled { opacity: .45; cursor: not-allowed; }
+.dev-tg.locked { background: #fafafa; }
