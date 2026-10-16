@@ -84,6 +84,7 @@ const LABELS = {
   'POST /devices/delete-users-all': 'Xóa nhân viên trên TẤT CẢ máy',
   'POST /devices/pin-conflicts/:id/resolve': 'Xử lý cảnh báo trùng Số ID',
   'POST /devices/push-names': 'Đẩy tên NV xuống máy chấm công',
+  'POST /devices/push-employees': 'Đẩy nhân viên từ phần mềm xuống máy chấm công',
   'PUT /device-options': 'Bật/tắt tuỳ chọn máy chấm công (tự tạo NV, cảnh báo trùng Số ID, đẩy tên)',
   'POST /employees/lock-by-pins': 'Khoá nhân viên hàng loạt (sau khi xóa trên máy)',
   'PUT /hr/settings': 'Nhân sự: đổi số ngày cảnh báo hết hạn HĐ',

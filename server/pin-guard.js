@@ -125,12 +125,16 @@ function detect(dev, pin, it, enrolledNow, realtime) {
   const emp = db.prepare("SELECT full_name FROM employees WHERE device_pin=? AND device_pin<>''").get(pin);
   const others = db.prepare(`SELECT s.name FROM device_users_serial s JOIN push_devices d ON d.serial=s.serial
     WHERE s.pin=? AND s.serial<>? AND d.active=1`).all(pin, serial);
+  // Máy khác đã có SINH TRẮC của Số ID này (chỉ có tên do phần mềm đẩy xuống thì không tính — đó là quy trình
+  // "khai trên phần mềm → đẩy xuống máy → đăng ký vân tay tại 1 máy", không phải trùng)
+  const othersBio = db.prepare(`SELECT COUNT(*) c FROM device_bio_templates b JOIN push_devices d ON d.serial=b.serial
+    WHERE b.pin=? AND b.serial<>? AND d.active=1`).get(pin, serial).c;
   const refName = (emp && !placeholder(emp.full_name, pin)) ? emp.full_name
     : (others.map((o) => o.name).find((n) => !placeholder(n, pin)) || '');
   const incName = placeholder(it.name, pin) ? '' : it.name;
   const isNewHere = !prior || enrolledNow;
-  // 1) Máy này vừa TỰ đăng ký Số ID đang có ở máy khác (tên trùng khớp thì bỏ qua)
-  if (realtime && isNewHere && !syncedIn && !accepted && others.length
+  // 1) Máy này vừa TỰ đăng ký Số ID mà máy khác đang giữ sinh trắc (tên trùng khớp thì bỏ qua)
+  if (realtime && isNewHere && !syncedIn && !accepted && othersBio > 0
       && !(incName && refName && !namesDiffer(incName, refName))) return { reason: 'enroll', refName };
   // 2) Tên máy gửi khác hẳn tên đang dùng Số ID này (đã thấy đúng tên này trước đó / đã xác nhận cùng người → bỏ qua)
   if (incName && refName && namesDiffer(incName, refName)
@@ -370,4 +374,57 @@ export function pushNames(pins = null, force = false) {
     }
   }
   return n;
+}
+
+/* ---------------- ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY ---------------- */
+// Công tắc device_auto_push_emp (mặc định BẬT): khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy.
+export const autoPushOn = () => getSetting('device_auto_push_emp', '1') === '1';
+
+// Máy nhận Số ID này khi tự đẩy: máy đang có Số ID + các máy cùng nhóm đồng bộ với chúng;
+// Số ID chưa ở máy nào (NV mới) → mọi máy đang dùng có bật "Nhận NV mới từ phần mềm".
+export function targetsFor(pin) {
+  const act = db.prepare("SELECT serial, sync_group, recv_new FROM push_devices WHERE active=1 AND conn_type<>'tcp'").all();
+  const have = new Set(db.prepare('SELECT serial FROM device_users_serial WHERE pin=?').all(pin).map((r) => r.serial));
+  const haveAct = act.filter((d) => have.has(d.serial));
+  if (!haveAct.length) return act.filter((d) => d.recv_new).map((d) => d.serial);
+  const groups = new Set(haveAct.map((d) => d.sync_group).filter(Boolean));
+  return act.filter((d) => have.has(d.serial) || (d.sync_group && groups.has(d.sync_group))).map((d) => d.serial);
+}
+
+// Đẩy NV (đang làm, có Số ID) xuống máy: Số ID + TÊN PHẦN MỀM (+ thẻ/mật mã đang có). withBio: kèm vân tay/khuôn mặt/ảnh
+// phần mềm đang lưu từ máy khác mà máy đích còn thiếu. serials rỗng → tự chọn máy (targetsFor).
+export function pushEmployees(pins, { serials = null, withBio = false } = {}) {
+  const held = heldSet();
+  const okTarget = new Set(db.prepare("SELECT serial FROM push_devices WHERE active=1 AND conn_type<>'tcp'").all().map((r) => r.serial));
+  const emp = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND active=1");
+  let users = 0, bios = 0;
+  const devs = new Set();
+  for (const p of pins || []) {
+    const pin = String(p || '').trim();
+    if (!pin || !emp.get(pin)) continue;
+    for (const serial of (serials ? serials.filter((x) => okTarget.has(x)) : targetsFor(pin))) {
+      if (held.has(serial + '|' + pin)) continue;   // máy đó đang có người khác mang Số ID này (nghi trùng)
+      queueCmd(serial, buildUserCommand(pin, serial, null, true), { pin, mkind: 'user' });
+      users++; devs.add(serial);
+      if (!withBio) continue;
+      const mine = new Set(db.prepare("SELECT bio_type||'|'||idx k FROM device_bio_templates WHERE serial=? AND pin=?").all(serial, pin).map((r) => r.k));
+      for (const t of db.prepare('SELECT * FROM device_bio_templates WHERE pin=? AND serial<>? ORDER BY id').all(pin, serial)) {
+        const k = t.bio_type + '|' + t.idx;
+        if (mine.has(k)) continue;
+        mine.add(k);
+        queueCmd(serial, buildBioCommand(t), { pin, bio_type: t.bio_type, idx: t.idx, mkind: 'bio' });
+        bios++;
+      }
+      const pc = buildPhotoCommand(pin); if (pc) queueCmd(serial, pc, { pin, mkind: 'photo' });
+    }
+  }
+  return { users, bios, devices: devs.size };
+}
+
+// Vừa lưu NV (khai báo / sửa / nhập Excel): bật tự đẩy → đẩy NV xuống máy; không thì (nếu bật đẩy tên) chỉ ghi tên ở máy đang có
+export function onEmployeesSaved(pins) {
+  const list = [...new Set((pins || []).map((p) => String(p || '').trim()).filter(Boolean))];
+  if (!list.length) return 0;
+  if (autoPushOn()) return pushEmployees(list).users;
+  return pushNames(list);
 }

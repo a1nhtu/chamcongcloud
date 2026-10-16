@@ -43,6 +43,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       device_pin_guard: getSetting('device_pin_guard', '1'),     // cảnh báo trùng Số ID giữa các máy
       device_push_names: getSetting('device_push_names', '1'),   // tự đẩy tên NV phần mềm xuống máy
       device_name_ascii: getSetting('device_name_ascii', '1'),   // tên đẩy xuống máy: bỏ dấu
+      device_auto_push_emp: getSetting('device_auto_push_emp', '1'), // khai NV có Số ID → tự đẩy xuống máy
       audit_enabled: req.forceVirt ? '0' : getSetting('audit_enabled', '0'),
       hr_enabled: req.forceVirt ? '0' : getSetting('hr_enabled', '0'),         // PHÂN HỆ NHÂN SỰ — chỉ tài khoản tổng bật   // CÔNG ẢO / LƯƠNG ẢO — chỉ tài khoản tổng bật (tài khoản kiểm tra: luôn '0')
       meal_enabled: req.forceVirt ? '0' : getSetting('meal_enabled', '0'),     // PHÂN HỆ QUẢN LÝ SUẤT ĂN — chỉ tài khoản tổng bật
@@ -128,6 +129,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.device_pin_guard != null) setSetting('device_pin_guard', b.device_pin_guard ? '1' : '0');
       if (b.device_push_names != null) setSetting('device_push_names', b.device_push_names ? '1' : '0');
       if (b.device_name_ascii != null) setSetting('device_name_ascii', b.device_name_ascii ? '1' : '0');
+      if (b.device_auto_push_emp != null) setSetting('device_auto_push_emp', b.device_auto_push_emp ? '1' : '0');
       if (b.audit_enabled != null) setSetting('audit_enabled', b.audit_enabled ? '1' : '0');
       if (b.hr_enabled != null) setSetting('hr_enabled', b.hr_enabled ? '1' : '0');
       if (b.meal_enabled != null) setSetting('meal_enabled', b.meal_enabled ? '1' : '0');

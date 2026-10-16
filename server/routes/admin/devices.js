@@ -6,7 +6,7 @@ import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES } from '../../zk-tcp.js';
 import { setSetting } from '../../db.js';
-import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, pushNames, guardOn, pushNamesOn } from '../../pin-guard.js';
+import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, pushNames, guardOn, pushNamesOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -50,13 +50,13 @@ export function registerDeviceRoutes(r, { need }) {
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
       try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
     }
-    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), push_names: pushNamesOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), push_names: pushNamesOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được.
   // (Dùng máy chấm công / Bắt buộc key / Máy TCP/IP vẫn CHỈ tài khoản tổng — đổi ở PUT /settings.)
   r.put('/device-options', need('devices'), (req, res) => {
     const b = req.body || {};
-    for (const k of ['device_autocreate', 'device_pin_guard', 'device_push_names', 'device_name_ascii'])
+    for (const k of ['device_autocreate', 'device_pin_guard', 'device_push_names', 'device_name_ascii', 'device_auto_push_emp'])
       if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
     res.json({ ok: true });
   });
@@ -80,6 +80,7 @@ export function registerDeviceRoutes(r, { need }) {
       return res.status(403).json({ error: 'Máy chưa có KEY bản quyền hợp lệ. Dán key Digiplus cấp cho serial ' + d.serial + ' rồi mới duyệt được.' });
     }
     const newGroup = b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || '');
+    if (b.recv_new != null) db.prepare('UPDATE push_devices SET recv_new=? WHERE id=?').run(b.recv_new ? 1 : 0, d.id);
     // Dải Số ID của máy (VD 1001-1999; rỗng = bỏ giới hạn)
     if (b.pin_range !== undefined) {
       const pr = String(b.pin_range || '').trim();
@@ -388,6 +389,16 @@ export function registerDeviceRoutes(r, { need }) {
       if (e.status === 400) return res.status(400).json({ error: e.message });
       sendCaughtError(res, 'POST /admin/devices/pin-conflicts/:id/resolve', e, { status: 400 });
     }
+  });
+  // ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY (bấm tay): pins = Số ID NV chọn, serials = máy chọn, with_bio = kèm vân tay/khuôn mặt phần mềm đang có
+  r.post('/devices/push-employees', need('devices'), (req, res) => {
+    const b = req.body || {};
+    const pins = (Array.isArray(b.pins) ? b.pins : []).map((p) => String(p).trim()).filter(Boolean);
+    const serials = (Array.isArray(b.serials) ? b.serials : []).map((p) => String(p).trim()).filter(Boolean);
+    if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    if (!serials.length) return res.status(400).json({ error: 'Chưa chọn máy' });
+    const r2 = pushEmployees(pins, { serials, withBio: !!b.with_bio });
+    res.json({ ok: true, ...r2, msg: r2.users ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy. Máy nhận dần khi kết nối.` : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
   });
   // Đẩy tên NV (phần mềm) xuống mọi máy đang có Số ID của họ — bấm tay, chạy cả khi chưa bật tự đẩy
   r.post('/devices/push-names', need('devices'), (req, res) => {

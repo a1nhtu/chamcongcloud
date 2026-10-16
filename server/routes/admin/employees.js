@@ -6,7 +6,7 @@ import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
 import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin } from '../../device-sync.js';
-import { pushNames } from '../../pin-guard.js';
+import { onEmployeesSaved } from '../../pin-guard.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
@@ -65,11 +65,9 @@ function saveAuditOnly(caller, id, b) {
   if (on) db.prepare("UPDATE employees SET role = 'manager' WHERE id = ? AND role <> 'manager'").run(id);
 }
 
-// Bật "đẩy tên NV xuống máy": lưu NV có Số ID → ghi tên mới xuống các máy đang có Số ID đó (lỗi chỉ ghi log)
-function pushNameSafe(pin) {
-  pin = String(pin || '').trim();
-  if (!pin) return;
-  try { pushNames([pin]); } catch (e) { console.error('[device] đẩy tên lỗi:', e.message); }
+// Lưu NV có Số ID → (bật tự đẩy) đẩy Số ID + tên xuống máy / (bật đẩy tên) ghi tên mới ở máy đang có. Lỗi chỉ ghi log.
+function pushNameSafe(...pins) {
+  try { onEmployeesSaved(pins.flat()); } catch (e) { console.error('[device] đẩy NV xuống máy lỗi:', e.message); }
 }
 
 export function registerEmployeeRoutes(r, { need }) {
@@ -218,6 +216,7 @@ export function registerEmployeeRoutes(r, { need }) {
     const insDept = db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)');
     const insPos = db.prepare('INSERT OR IGNORE INTO positions(name) VALUES(?)');
     const empByCode = new Map(db.prepare('SELECT id, code, role, device_pin FROM employees').all().map((e) => [String(e.code).trim().toUpperCase(), e]));
+    const savedPins = [];   // Số ID vừa thêm / đổi tên → đẩy xuống máy sau khi lưu xong
     const pwHash = passwordHasher();   // các dòng cùng mật khẩu (thường để trống = 123456) chỉ mã hoá 1 lần
     const pinUsed = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?");
 
@@ -267,6 +266,7 @@ export function registerEmployeeRoutes(r, { need }) {
               normPerms(role, role === 'admin' ? null : []), pinOk);
             empByCode.set(CODE, { id: info.lastInsertRowid, code, role, device_pin: pinOk });
             relinkSafe(info.lastInsertRowid, pinOk);
+            if (pinOk) savedPins.push(pinOk);
             if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
             if (role !== 'admin') activeCount++;
             added++;
@@ -289,6 +289,7 @@ export function registerEmployeeRoutes(r, { need }) {
           if (pin && !(existing.device_pin || '').trim() && !pinUsed.get(pin, existing.id)) { sets.push('device_pin=?'); args.push(pin); }
           if (sets.length) { args.push(existing.id); db.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE id=?`).run(...args); }
           if (sets.includes('device_pin=?')) relinkSafe(existing.id, pin);
+          if (name || sets.includes('device_pin=?')) savedPins.push(sets.includes('device_pin=?') ? pin : existing.device_pin);
           if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(pwHash(cellStr(row, 10)), existing.id);
           if (basic > 0) setBasicSalary(existing.id, basic);
           updated++;
@@ -296,6 +297,7 @@ export function registerEmployeeRoutes(r, { need }) {
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/import', e, { status: 400 }); }
+    pushNameSafe(savedPins);
     res.json({ ok: true, mode, added, updated, skipped, newDepts, newPos, errors: errors.slice(0, 80) });
   });
 
