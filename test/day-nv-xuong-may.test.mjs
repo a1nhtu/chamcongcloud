@@ -85,15 +85,15 @@ test('đẩy bằng tay xuống máy chọn (kèm sinh trắc phần mềm đang
   assert.equal(r2.bios, 0);
 });
 
-test('NV đã khoá không bị đẩy; tắt tự đẩy → chỉ ghi tên ở máy đang có (nếu bật đẩy tên)', () => {
+test('NV đã khoá không bị đẩy; TẮT đồng bộ NV xuống máy → lưu NV không đẩy gì, máy giữ tên gõ trên máy', () => {
   db.prepare("UPDATE push_device_commands SET trans_time=datetime('now') WHERE trans_time IS NULL").run();
   addEmp('70', 'Lê Văn Bảy', 0);
   assert.equal(G.pushEmployees(['70']).users, 0);
   setSetting('device_auto_push_emp', '0');
   addEmp('80', 'Phạm Văn Tám');
-  assert.equal(G.onEmployeesSaved(['80']), 0, 'chưa ở máy nào → không đẩy');
-  G.onEmployeesSaved(['50']);
-  assert.ok(pending('SN_A', '50').length > 0, 'đẩy tên ở máy đang có');
+  assert.equal(G.onEmployeesSaved(['80', '50']), 0);
+  assert.deepEqual(pending('SN_A', '50'), []);
+  assert.equal(G.pmNameFor('50'), null);   // đồng bộ máy↔máy dùng tên trên máy
   setSetting('device_auto_push_emp', '1');
 });
 

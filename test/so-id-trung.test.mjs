@@ -192,24 +192,25 @@ test('TẮT công tắc = như cũ: máy đăng ký người khác vào Số ID 
   setSetting('device_pin_guard', '1');
 });
 
-test('mặc định (chưa lưu cài đặt): BẬT cả cảnh báo trùng Số ID lẫn đẩy tên', () => {
-  db.prepare("DELETE FROM settings WHERE key IN ('device_pin_guard','device_push_names')").run();
-  assert.equal(G.guardOn(), true); assert.equal(G.pushNamesOn(), true);
+test('mặc định (chưa lưu cài đặt): BẬT cả cảnh báo trùng Số ID lẫn đồng bộ NV xuống máy', () => {
+  db.prepare("DELETE FROM settings WHERE key IN ('device_pin_guard','device_auto_push_emp')").run();
+  assert.equal(G.guardOn(), true); assert.equal(G.autoPushOn(), true);
 });
 
 test('đẩy tên NV xuống máy: tắt = dùng tên trên máy; bật = tên phần mềm bỏ dấu, tối đa 24 ký tự', () => {
   db.prepare("UPDATE employees SET full_name='Nguyễn Thị Phương Hoa Thanh Hương' WHERE device_pin='2'").run();
-  setSetting('device_push_names', '0');
+  setSetting('device_auto_push_emp', '0');
   assert.match(S.buildUserCommand('2', 'SN_A'), /Name=Tran Thu Hoa\t/);
-  setSetting('device_push_names', '1');
+  setSetting('device_auto_push_emp', '1');
   assert.match(S.buildUserCommand('2', 'SN_A'), /Name=Nguyen Thi Phuong Hoa Th\t/);
   setSetting('device_name_ascii', '0');
   assert.match(S.buildUserCommand('2', 'SN_A'), /Name=Nguyễn Thị Phương Hoa Th\t/);
   setSetting('device_name_ascii', '1');
   db.prepare("UPDATE push_device_commands SET trans_time=datetime('now') WHERE trans_time IS NULL").run();
-  const n = G.pushNames(['2']);
+  const n = G.onEmployeesSaved(['2']);
   assert.ok(n >= 2);
   assert.ok(pending('SN_B', '2').some((x) => x.includes('Name=Nguyen Thi Phuong Hoa Th')));
-  setSetting('device_push_names', '0');
-  assert.equal(G.pushNames(['2']), 0);   // tắt → không tự đẩy
+  setSetting('device_auto_push_emp', '0');
+  assert.equal(G.onEmployeesSaved(['2']), 0);   // tắt → không tự đẩy
+  setSetting('device_auto_push_emp', '1');
 });

@@ -1,5 +1,5 @@
 // CẢNH BÁO TRÙNG SỐ ID giữa các máy chấm công (công tắc device_pin_guard, mặc định BẬT — Anh chốt 16/10/2026)
-// + ĐẨY TÊN NV từ phần mềm xuống máy (công tắc device_push_names, mặc định BẬT).
+// + ĐỒNG BỘ NV từ phần mềm xuống máy (công tắc device_auto_push_emp, mặc định BẬT).
 //
 // Số ID (PIN) là toàn cục: ID 1 ở mọi máy = 1 người. Máy B lỡ đăng ký người khác vào Số ID đang có chủ thì
 // lượt quẹt dồn nhầm + vân tay người lạ bị đồng bộ đè sang máy khác. Khi bật công tắc:
@@ -342,42 +342,23 @@ export function dropConflicts(serial, pins) {
   }
 }
 
-/* ---------------- ĐẨY TÊN NV TỪ PHẦN MỀM XUỐNG MÁY ---------------- */
-export const pushNamesOn = () => getSetting('device_push_names', '1') === '1';
+/* ---------------- TÊN NV TRÊN MÁY ---------------- */
 // Tên ghi xuống máy: bỏ ký tự cấm, (tuỳ chọn) bỏ dấu, tối đa 24 ký tự
 export function deviceName(s) {
   let n = String(s || '').replace(/[\t\r\n=]/g, ' ').replace(/\s+/g, ' ').trim();
   if (getSetting('device_name_ascii', '1') === '1') n = n.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
   return n.slice(0, 24).trim();
 }
-// Tên NV phần mềm cho Số ID (null = không áp: chưa bật / không có NV đang làm)
+// Tên NV phần mềm cho Số ID (null = không áp: chưa bật đồng bộ NV xuống máy / không có NV đang làm)
 export function pmNameFor(pin, force = false) {
-  if (!force && !pushNamesOn()) return null;
+  if (!force && !autoPushOn()) return null;
   const e = db.prepare("SELECT full_name FROM employees WHERE device_pin=? AND device_pin<>'' AND active=1").get(String(pin));
   return e && e.full_name ? (deviceName(e.full_name) || null) : null;
 }
-// Xếp lệnh ghi tên xuống các máy (ADMS, đang dùng) đang có Số ID đó. pins rỗng = mọi NV đang làm có Số ID.
-export function pushNames(pins = null, force = false) {
-  if (!force && !pushNamesOn()) return 0;
-  const list = pins ? [...pins].map((p) => String(p).trim()).filter(Boolean)
-    : db.prepare("SELECT device_pin p FROM employees WHERE active=1 AND device_pin IS NOT NULL AND device_pin<>''").all().map((r) => String(r.p).trim());
-  const held = heldSet();
-  const on = db.prepare(`SELECT s.serial FROM device_users_serial s JOIN push_devices d ON d.serial=s.serial
-    WHERE s.pin=? AND d.active=1 AND d.conn_type<>'tcp'`);
-  let n = 0;
-  for (const pin of list) {
-    if (!pmNameFor(pin, true)) continue;
-    for (const { serial } of on.all(pin)) {
-      if (held.has(serial + '|' + pin)) continue;
-      queueCmd(serial, buildUserCommand(pin, serial, null, true), { pin, mkind: 'user' });
-      n++;
-    }
-  }
-  return n;
-}
 
-/* ---------------- ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY ---------------- */
-// Công tắc device_auto_push_emp (mặc định BẬT): khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy.
+/* ---------------- ĐỒNG BỘ NV TỪ PHẦN MỀM XUỐNG MÁY ---------------- */
+// Công tắc device_auto_push_emp (mặc định BẬT): khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy,
+// và máy luôn dùng TÊN PHẦN MỀM (cả khi đồng bộ máy↔máy — buildUserCommand → pmNameFor).
 export const autoPushOn = () => getSetting('device_auto_push_emp', '1') === '1';
 
 // Máy nhận Số ID này khi tự đẩy: máy đang có Số ID + các máy cùng nhóm đồng bộ với chúng;
@@ -421,10 +402,9 @@ export function pushEmployees(pins, { serials = null, withBio = false } = {}) {
   return { users, bios, devices: devs.size };
 }
 
-// Vừa lưu NV (khai báo / sửa / nhập Excel): bật tự đẩy → đẩy NV xuống máy; không thì (nếu bật đẩy tên) chỉ ghi tên ở máy đang có
+// Vừa lưu NV (khai báo / sửa / nhập Excel): bật đồng bộ NV xuống máy → đẩy Số ID + tên xuống máy. Trả số lệnh đã xếp.
 export function onEmployeesSaved(pins) {
   const list = [...new Set((pins || []).map((p) => String(p || '').trim()).filter(Boolean))];
-  if (!list.length) return 0;
-  if (autoPushOn()) return pushEmployees(list).users;
-  return pushNames(list);
+  if (!list.length || !autoPushOn()) return 0;
+  return pushEmployees(list).users;
 }

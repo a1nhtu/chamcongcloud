@@ -111,9 +111,9 @@ test('mở khoá lại → đồng bộ bình thường như cũ', async () => {
 test('admin (quyền Máy chấm công) bật/tắt được công tắc vận hành, KHÔNG đổi được Dùng máy chấm công / key / TCP', async () => {
   const { getSetting, setSetting } = await import('../server/db.js');
   setSetting('device_enabled', '1'); setSetting('device_key_required', '1');
-  await call('PUT /device-options', { device_pin_guard: false, device_push_names: false, device_autocreate: false, device_name_ascii: false,
+  await call('PUT /device-options', { device_pin_guard: false, device_auto_push_emp: false, device_autocreate: false, device_name_ascii: false,
     device_enabled: false, device_key_required: false, tcp_device_enabled: true });
-  assert.equal(getSetting('device_pin_guard', '1'), '0'); assert.equal(getSetting('device_push_names', '1'), '0');
+  assert.equal(getSetting('device_pin_guard', '1'), '0'); assert.equal(getSetting('device_auto_push_emp', '1'), '0');
   assert.equal(getSetting('device_autocreate', '1'), '0'); assert.equal(getSetting('device_name_ascii', '1'), '0');
   assert.equal(getSetting('device_enabled', '0'), '1'); assert.equal(getSetting('device_key_required', '0'), '1');
   assert.equal(getSetting('tcp_device_enabled', '0'), '0');

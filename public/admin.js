@@ -5225,7 +5225,6 @@ async function pageDevices() {
   const keyReqChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.key_required ? { checked: '' } : {}) });
   const tcpChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.tcp_enabled ? { checked: '' } : {}) });
   const guardChk = el('input', { type: 'checkbox', class: 'sw', ...(d.pin_guard ? { checked: '' } : {}) });
-  const pushNameChk = el('input', { type: 'checkbox', class: 'sw', ...(d.push_names ? { checked: '' } : {}) });
   const asciiChk = el('input', { type: 'checkbox', class: 'sw sm', ...(d.name_ascii ? { checked: '' } : {}) });
   const autoPushChk = el('input', { type: 'checkbox', class: 'sw', ...(d.auto_push ? { checked: '' } : {}) });
   const saveEn = el('button', { class: 'btn sm' }, 'Lưu');
@@ -5233,11 +5232,11 @@ async function pageDevices() {
     try {
       if (!isMaster()) {   // admin: chỉ lưu các công tắc vận hành
         await api('/admin/device-options', { method: 'PUT', body: { device_autocreate: autoChk.checked, device_pin_guard: guardChk.checked,
-          device_push_names: pushNameChk.checked, device_name_ascii: asciiChk.checked, device_auto_push_emp: autoPushChk.checked } });
+          device_name_ascii: asciiChk.checked, device_auto_push_emp: autoPushChk.checked } });
         toast('Đã lưu', 'ok'); pageDevices(); return;
       }
       await api('/admin/settings', { method: 'PUT', body: { device_enabled: enChk.checked, device_autocreate: autoChk.checked, device_key_required: keyReqChk.checked, tcp_device_enabled: tcpChk.checked,
-        device_pin_guard: guardChk.checked, device_push_names: pushNameChk.checked, device_name_ascii: asciiChk.checked, device_auto_push_emp: autoPushChk.checked } });
+        device_pin_guard: guardChk.checked, device_name_ascii: asciiChk.checked, device_auto_push_emp: autoPushChk.checked } });
       SETTINGS.device_enabled = enChk.checked ? '1' : '0'; SETTINGS.tcp_device_enabled = tcpChk.checked ? '1' : '0';
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 600);
     } catch (e) { toast(e.message, 'err'); }
@@ -5250,15 +5249,14 @@ async function pageDevices() {
           devToggle(keyReqChk, 'Bắt buộc KEY bản quyền theo máy', 'Máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không ảnh hưởng.'),
           devToggle(tcpChk, 'Dùng máy kết nối TCP/IP (cổng 4370)', 'Thêm máy theo IP trong LAN — phần mềm chủ động tải NV, tải chấm công, xoá dữ liệu. Cho máy đời cũ không có ADMS; cần cài trên máy tính Windows cùng mạng.'),
           devToggle(guardChk, 'Cảnh báo trùng Số ID giữa các máy', 'Máy đăng ký người mới vào Số ID đã có chủ → cảnh báo, tạm dừng đồng bộ và GIỮ lượt quẹt tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (tự cấp Số ID mới, giữ nguyên vân tay/thẻ).'),
-          devToggle(autoPushChk, 'Tự động đẩy NV từ phần mềm xuống máy', 'Khai / sửa / nhập Excel NV có Số ID → đẩy Số ID + tên xuống máy (NV mới: mọi máy đang dùng; NV đã có trên máy: máy đó + máy cùng nhóm). Vân tay/mặt/thẻ đăng ký ở 1 máy tự sang máy cùng nhóm + về phần mềm.'),
-          devToggle(pushNameChk, 'Đẩy tên nhân viên từ phần mềm xuống máy', 'Lưu NV có Số ID → tên trên máy đổi theo phần mềm; đồng bộ máy↔máy cũng dùng tên phần mềm.',
+          devToggle(autoPushChk, 'Đồng bộ nhân viên từ phần mềm xuống máy', 'Khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy; máy luôn dùng tên trong phần mềm. Vân tay / mặt / thẻ đăng ký ở 1 máy tự sang máy cùng nhóm + về phần mềm.',
             el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU — tối đa 24 ký tự'))),
         el('div', { style: 'margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, saveEn,
           isMaster() ? '' : el('span', { class: 'map-hint', style: 'margin:0' }, '🔒 = chỉ tài khoản tổng (Digiplus) đổi được')))
     : el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
         el('div', { class: 'dev-st-grid' },
           ...[['Máy chấm công', d.enabled], ['Tự tạo NV từ máy', d.autocreate], ['Bắt buộc key theo máy', d.key_required],
-            ['Máy TCP/IP (cổng 4370)', d.tcp_enabled], ['Cảnh báo trùng Số ID', d.pin_guard], ['Đẩy tên NV xuống máy', d.push_names]]
+            ['Máy TCP/IP (cổng 4370)', d.tcp_enabled], ['Cảnh báo trùng Số ID', d.pin_guard], ['Đồng bộ NV xuống máy', d.auto_push]]
             .map(([t, on]) => el('div', { class: 'dev-st' }, el('span', {}, t), el('span', { class: 'pill ' + (on ? 'ok' : 'muted') }, on ? 'Bật' : 'Tắt')))),
         el('div', { class: 'map-hint', style: 'margin:8px 0 0' }, '🔒 Chỉ tài khoản tổng (Digiplus) bật/tắt được.'));
 
@@ -5494,9 +5492,6 @@ async function pageDevices() {
     { label: '🔁 Đồng bộ thường (đẩy cái còn thiếu)', fn: () => doResync(false) },
     { label: '🔁 Ép đồng bộ lại TOÀN BỘ (khi lỗi/thiếu)', fn: () => doResync(true) },
     { label: '⬇ Đẩy NV từ phần mềm xuống máy…', hint: 'Chọn máy + chọn NV, kèm vân tay/khuôn mặt phần mềm đang có', fn: () => pushEmpModal(d.rows, pageDevices) },
-    { label: '✏️ Đẩy tên NV (phần mềm) xuống máy', hint: 'Ghi tên trong phần mềm xuống mọi máy đang có Số ID của NV', fn: async () => {
-      if (!confirm('Ghi TÊN nhân viên trong phần mềm xuống mọi máy đang có Số ID của họ?' + (d.name_ascii ? '\n(Tên không dấu, tối đa 24 ký tự)' : '\n(Tên có dấu, tối đa 24 ký tự)'))) return;
-      try { const r = await api('/admin/devices/push-names', { method: 'POST' }); toast(r.msg, 'ok'); } catch (e) { toast(e.message, 'err'); } } },
   ], '🔁 Đồng bộ');
   resyncBtn.className = 'btn';   // nút chính (không phải kiểu mờ)
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
@@ -5522,7 +5517,7 @@ async function pageDevices() {
   }
   // 2 khung trên cùng: mặc định THU GỌN (chỉ 1 dòng tóm tắt), bấm ▶ để mở — nhớ trên máy
   const FEAT = [['Máy chấm công', d.enabled], ['Tự tạo NV', d.autocreate], ['Bắt buộc key', d.key_required], ['TCP/IP', d.tcp_enabled],
-    ['Tự đẩy NV xuống máy', d.auto_push], ['Cảnh báo trùng Số ID', d.pin_guard], ['Đẩy tên NV', d.push_names]];
+    ['Cảnh báo trùng Số ID', d.pin_guard], ['Đồng bộ NV xuống máy', d.auto_push]];
   foldPanel(togglePanel, 'dev_features', '⚙️ Tính năng máy chấm công', () => {
     const on = FEAT.filter((f) => f[1]).map((f) => f[0]);
     return on.length ? '— Bật: ' + on.join(' · ') : '— Đang tắt hết';
