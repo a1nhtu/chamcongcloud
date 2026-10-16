@@ -30,7 +30,14 @@
     #big .tag.again { background: var(--red); }
     aside { background: rgba(255, 255, 255, .06); border-radius: 22px; padding: 16px 18px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
     aside h2 { margin: 0 0 10px; font-size: 18px; color: var(--mut); font-weight: 600; text-transform: uppercase; letter-spacing: 1px; }
-    #list { overflow: hidden; display: flex; flex-direction: column; gap: 8px; }
+    #list { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; scrollbar-width: thin; }
+    .it { cursor: pointer; border: 3px solid transparent; }
+    .it:hover { background: rgba(255, 255, 255, .16); }
+    .it:first-child { border-color: rgba(61, 220, 132, .55); }
+    .it.sel { border-color: #f0c36b; background: rgba(240, 195, 107, .2); }
+    #big.review { border-bottom-color: #f0c36b; }
+    #big .rv { background: #fff4d6; color: #8a5a00; font-size: 22px; font-weight: 800; border-radius: 999px; padding: 6px 8px 6px 20px; margin-bottom: 18px; display: flex; gap: 14px; align-items: center; }
+    #big .rv button { font-size: 18px; font-weight: 700; border: 0; border-radius: 999px; padding: 6px 16px; background: var(--navy); color: #fff; cursor: pointer; }
     .it { background: rgba(255, 255, 255, .09); border-radius: 12px; padding: 10px 14px; display: grid; grid-template-columns: auto 1fr; gap: 2px 14px; align-items: baseline; }
     .it .t { color: var(--mut); font-variant-numeric: tabular-nums; font-size: 18px; grid-row: span 2; }
     .it .n { font-size: 22px; font-weight: 700; }
@@ -53,7 +60,7 @@
   </header>
   <main>
     <section id="big"><div class="wait">Đang chờ nhân viên quẹt thẻ…</div></section>
-    <aside><h2>Lượt quẹt gần đây</h2><div id="list"></div></aside>
+    <aside><h2>Lượt quẹt gần đây <small style="text-transform:none;letter-spacing:0;font-size:14px">— bấm để xem lại</small></h2><div id="list"></div></aside>
   </main>
   <div id="gate">
     <div style="font-size:24px;font-weight:700">Nhập mã màn hình bếp</div>

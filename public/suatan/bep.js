@@ -1,4 +1,5 @@
-// MÀN HÌNH BẾP — hỏi máy chủ mỗi 2 giây xem có lượt quẹt máy chấm công mới không, hiện tên NV + món đã chọn của lượt gần nhất.
+// MÀN HÌNH BẾP — hỏi máy chủ mỗi 2 giây xem có lượt quẹt máy chấm công mới không, hiện tên NV + món đã chọn của lượt gần nhất
+// (bấm lượt cũ bên phải để xem lại).
 // Không đăng nhập: dùng khoá do HR cấp (liên kết /bep?key=…; khoá nhớ trên máy này).
 const $ = (s) => document.querySelector(s);
 const KEY_LS = 'digiplus_bep_key';
@@ -44,17 +45,47 @@ $('#gb').onclick = () => {
   $('#gate').style.display = 'none'; since = 0; first = true; poll();
 };
 
-function drawBig(e) {
+function drawBig(e, review = false) {
   const big = $('#big');
-  big.innerHTML = `<div class="name">${esc(e.name)}</div>
+  big.classList.toggle('review', review);
+  big.innerHTML = `${review ? `<div class="rv">↩ ĐANG XEM LẠI lượt ${hm(e.at)} <button id="live" type="button">Về lượt mới nhất</button></div>` : ''}
+    <div class="name">${esc(e.name)}</div>
     <div class="meta">${esc(e.code)}${e.department ? ' · ' + esc(e.department) : ''} · ${esc(e.shift_name)} · ${hm(e.at)}</div>
     ${e.dish ? `<div class="dish">${esc(e.dish)}</div>` : '<div class="dish none">Chưa chọn món — phát suất mặc định</div>'}
     ${e.times > 1 ? `<div class="tag again">⚠ Quẹt lần thứ ${e.times} trong bữa này</div>` : ''}`;
-  big.classList.remove('flash'); void big.offsetWidth; big.classList.add('flash');
+  if (review) $('#live').onclick = backToLive;
+  else { big.classList.remove('flash'); void big.offsetWidth; big.classList.add('flash'); }
 }
 function drawList(events) {
-  $('#list').innerHTML = events.slice(0, 9).map((e) => `<div class="it"><span class="t">${hm(e.at)}</span><span class="n">${esc(e.name)}</span><span class="d${e.dish ? '' : ' none'}">${e.dish ? esc(e.dish) : 'chưa chọn món'}</span></div>`).join('');
+  $('#list').innerHTML = events.map((e) => `<div class="it${e.id === viewing ? ' sel' : ''}" data-id="${e.id}"><span class="t">${hm(e.at)}</span><span class="n">${esc(e.name)}</span><span class="d${e.dish ? '' : ' none'}">${e.dish ? esc(e.dish) : 'chưa chọn món'}</span></div>`).join('');
 }
+
+// XEM LẠI: bấm 1 lượt bên phải (hoặc phím ↓/↑) → hiện to ở giữa; 10 giây không thao tác thì tự về lượt mới nhất.
+// Trong lúc xem lại, lượt mới vẫn vào danh sách + kêu, chỉ ô lớn đứng yên.
+let viewing = 0, viewTimer = 0;
+function view(id) {
+  const e = recent.find((x) => x.id === id);
+  if (!e) return;
+  if (e.id === recent[0]?.id) return backToLive();
+  viewing = e.id; drawBig(e, true); drawList(recent);
+  document.querySelector('#list .sel')?.scrollIntoView({ block: 'nearest' });
+  clearTimeout(viewTimer); viewTimer = setTimeout(backToLive, 10000);
+}
+function backToLive() {
+  clearTimeout(viewTimer); viewing = 0;
+  if (recent[0]) drawBig(recent[0]);
+  drawList(recent);
+}
+$('#list').onclick = (ev) => { const it = ev.target.closest('.it'); if (it) view(Number(it.dataset.id)); };
+document.addEventListener('keydown', (ev) => {
+  if ($('#gate').style.display === 'flex' || !recent.length) return;
+  const i = viewing ? recent.findIndex((x) => x.id === viewing) : 0;
+  if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight') view(recent[Math.min(i + 1, recent.length - 1)].id);
+  else if (ev.key === 'ArrowUp' || ev.key === 'ArrowLeft') view(recent[Math.max(i - 1, 0)].id);
+  else if (ev.key === 'Escape' || ev.key === 'Home') backToLive();
+  else return;
+  ev.preventDefault();
+});
 
 let recent = [];
 async function poll() {
@@ -71,7 +102,7 @@ async function poll() {
       drawList(recent);
       const newest = d.events[0];
       if (newest.id > lastShown) {
-        drawBig(newest);
+        if (!viewing) drawBig(newest);
         if (!first) beep();   // lần tải đầu chỉ hiện, không kêu
         lastShown = newest.id;
       }
