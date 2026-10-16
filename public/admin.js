@@ -5225,7 +5225,6 @@ async function pageDevices() {
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 600);
     } catch (e) { toast(e.message, 'err'); }
   };
-  const stPill = (on) => el('span', { class: 'pill ' + (on ? 'ok' : 'warn'), style: 'margin-left:6px' }, on ? 'ĐANG BẬT' : 'ĐANG TẮT');
   const togglePanel = isMaster()
     ? el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:1100px' },
         el('div', { class: 'dev-tg-grid' },
@@ -5237,14 +5236,12 @@ async function pageDevices() {
           devToggle(pushNameChk, 'Đẩy tên nhân viên từ phần mềm xuống máy', 'Lưu NV có Số ID → tên trên máy đổi theo phần mềm; đồng bộ máy↔máy cũng dùng tên phần mềm.',
             el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU — tối đa 24 ký tự'))),
         el('div', { style: 'margin-top:14px' }, saveEn))
-    : el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
-        el('div', {}, el('b', {}, 'Tính năng máy chấm công:'), stPill(d.enabled)),
-        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Tự tạo NV khi đăng ký vân tay:'), stPill(d.autocreate)),
-        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Bắt buộc key theo máy:'), stPill(d.key_required)),
-        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Máy kết nối TCP/IP (cổng 4370):'), stPill(d.tcp_enabled)),
-        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Cảnh báo trùng Số ID giữa các máy:'), stPill(d.pin_guard)),
-        el('div', { style: 'margin-top:6px' }, el('b', {}, 'Đẩy tên NV từ phần mềm xuống máy:'), stPill(d.push_names)),
-        el('div', { class: 'map-hint', style: 'margin-top:8px' }, '🔒 Chỉ tài khoản tổng (Digiplus) mới bật/tắt được tính năng máy chấm công.'));
+    : el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
+        el('div', { class: 'dev-st-grid' },
+          ...[['Máy chấm công', d.enabled], ['Tự tạo NV từ máy', d.autocreate], ['Bắt buộc key theo máy', d.key_required],
+            ['Máy TCP/IP (cổng 4370)', d.tcp_enabled], ['Cảnh báo trùng Số ID', d.pin_guard], ['Đẩy tên NV xuống máy', d.push_names]]
+            .map(([t, on]) => el('div', { class: 'dev-st' }, el('span', {}, t), el('span', { class: 'pill ' + (on ? 'ok' : 'muted') }, on ? 'Bật' : 'Tắt')))),
+        el('div', { class: 'map-hint', style: 'margin:8px 0 0' }, '🔒 Chỉ tài khoản tổng (Digiplus) bật/tắt được.'));
 
   // Hướng dẫn cấu hình máy + nút Refresh mạng (đổi mạng xong bấm để lấy IP mới)
   const ipVal = el('b', { style: 'color:var(--brand-ink,#c0392b);font-size:16px;font-family:monospace' }, d.server_ips[0] || '(IP máy chủ)');
@@ -5255,7 +5252,7 @@ async function pageDevices() {
     if (port != null) portVal.textContent = String(port);
     ipsHint.innerHTML = '';
     if (ips.length > 1) {
-      ipsHint.append('⚠️ Máy tính có nhiều mạng — chọn IP CÙNG lớp mạng với máy chấm công: ');
+      ipsHint.append('⚠️ Máy tính có nhiều mạng — chọn IP cùng lớp mạng với máy chấm công: ');
       ips.forEach((x, i) => ipsHint.append(i ? '  ·  ' : '', el('b', { style: 'font-family:monospace' }, x)));
     } else if (!ips.length) {
       ipsHint.textContent = 'Chưa thấy IP LAN — kiểm tra dây mạng / Wi-Fi rồi bấm Refresh mạng.';
@@ -5275,26 +5272,22 @@ async function pageDevices() {
   const domain = isDomain ? hostNow : (d.domain || '');
   const domVal = el('b', { style: 'color:var(--brand-ink,#c0392b);font-size:16px;font-family:monospace' }, domain || '(tên miền của công ty)');
   const domCopy = domain ? el('button', { class: 'btn ghost sm', title: 'Copy tên miền', style: 'padding:2px 6px', onclick: () => copySerial(domain) }, '📋') : '';
-  const domNote = domain ? '' : el('div', { style: 'font-size:12px;color:var(--muted)' }, 'Bản này chưa có tên miền (bản LAN) — chỉ dùng được Cách A. Cần dùng qua Internet thì liên hệ Digiplus để cấp tên miền.');
-  const guide = el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
+  const domNote = domain ? '' : el('div', { style: 'font-size:12px;color:var(--muted);margin-top:4px' }, 'Bản LAN chưa có tên miền — liên hệ Digiplus nếu cần dùng qua Internet.');
+  const guide = el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap' },
       el('h3', { style: 'margin:0;font-size:15px' }, '🔧 Cách kết nối máy chấm công'), refreshNet),
-    el('ol', { style: 'margin:10px 0 0;padding-left:18px;font-size:14px;line-height:1.9' },
-      el('li', { html: 'Trên máy: <b>Menu → Comm/Kết nối → Cloud Server (ADMS)</b>.' }),
-      el('li', {}, 'Điền địa chỉ máy chủ theo 1 trong 2 cách:',
-        el('div', { style: 'margin:4px 0 6px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;line-height:1.7' },
-          el('div', {}, el('b', {}, 'Cách A — máy chấm công CÙNG mạng LAN'), ' với máy tính cài phần mềm:'),
-          el('div', {}, 'Server IP: ', ipVal, '  ·  Port: ', portVal, '  ', el('span', { style: 'font-size:12px;color:var(--muted)' }, '(đổi mạng xong bấm “Refresh mạng”)')),
-          el('div', { html: 'Giao thức <b>HTTP</b> — KHÔNG bật SSL/HTTPS, KHÔNG bật tên miền.' })),
-        el('div', { style: 'margin:0 0 4px;padding:8px 12px;border:1px solid var(--line);border-radius:10px;line-height:1.7' },
-          el('div', {}, el('b', {}, 'Cách B — máy ở CHI NHÁNH KHÁC / qua Internet'), ' (dùng tên miền):'),
-          el('div', { html: 'Bật <b>Tên miền (Domain Name / Enable Domain)</b> rồi điền:' }),
-          el('div', {}, 'Địa chỉ máy chủ: ', domVal, ' ', domCopy, '  ·  Port: ', el('b', {}, '443')),
-          el('div', { html: 'Bật <b>HTTPS</b>. Máy phải có Internet (DNS đúng, ví dụ 8.8.8.8).' }),
-          domNote)),
-      el('li', { html: 'Lưu & khởi động lại máy.' }),
-      el('li', { html: 'Máy sẽ hiện bên dưới ở trạng thái <b>Chờ duyệt</b> → bấm <b>Duyệt</b>.' }),
-      el('li', { html: 'Đăng ký vân tay trên máy → NV tự về phần mềm (bản nháp). Điền <b>Số ID máy</b> trong hồ sơ NV cho khớp <b>số ID trên máy</b> để tính công.' })),
+    el('div', { style: 'font-size:13.5px;margin:6px 0 10px;color:var(--muted)', html: 'Trên máy: <b style="color:var(--ink)">Menu → Comm → Cloud Server (ADMS)</b>, điền theo 1 trong 2 cách:' }),
+    el('div', { class: 'dev-tg-grid' },
+      el('div', { class: 'dev-tg' },
+        el('b', {}, 'Cách A · Cùng mạng LAN'),
+        el('div', { style: 'margin-top:6px' }, 'IP: ', ipVal, ' · Port: ', portVal),
+        el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'HTTP · không bật tên miền')),
+      el('div', { class: 'dev-tg' },
+        el('b', {}, 'Cách B · Qua Internet / chi nhánh khác'),
+        el('div', { style: 'margin-top:6px' }, 'Tên miền: ', domVal, ' ', domCopy, ' · Port: ', el('b', {}, '443')),
+        el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy cần có Internet'),
+        domNote)),
+    el('div', { style: 'font-size:13.5px;margin-top:10px', html: 'Lưu, khởi động lại máy → máy hiện ở danh sách bên dưới (<b>Chờ duyệt</b>) → bấm <b>Duyệt</b>.' }),
     ipsHint);
 
   // Bảng danh sách máy
