@@ -7,6 +7,7 @@ import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
+import { heldSet, remapLoader, onUserAck, pmNameFor } from './pin-guard.js';
 
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
 function findEmpByPin(pin) {
@@ -48,6 +49,11 @@ export function upsertEmployeeFromDevice(pin, name, force = false) {
 
   // Tự tạo NV nháp (force=true khi nhập từ USB — luôn tạo dù tắt auto-create)
   if (!force && getSetting('device_autocreate', '1') !== '1') return null;
+  return createDraftEmployee(pin, name);
+}
+// Tạo NV nháp "từ máy" cho Số ID (mã NV / tài khoản tự sinh, mật khẩu mặc định) + gán lượt quẹt sẵn có của Số ID đó
+export function createDraftEmployee(pin, name) {
+  pin = String(pin || '').trim(); name = (name || '').trim();
   const code = uniqueValue('code', pin);
   const username = uniqueValue('username', `nv${pin}`);
   const fullName = name || `NV ${pin}`;
@@ -69,6 +75,7 @@ function relinkQuiet(empId, pin) {
 export function ingestUserData(serial, table, rawBody) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const seen = new Set();
+  const held = heldSet();
   // Cả khối (VD máy gửi 600 NV một lần) ghi trong MỘT giao dịch — nhanh hơn nhiều so với ghi từng dòng
   db.exec('SAVEPOINT ingest_users');
   try {
@@ -88,6 +95,8 @@ export function ingestUserData(serial, table, rawBody) {
     const card = kv.card && kv.card !== '0' ? kv.card : '';
     const passwd = kv.passwd && kv.passwd !== '0' ? kv.passwd : '';
     const pri = kv.pri !== undefined ? (parseInt(kv.pri, 10) || 0) : null;   // null = dòng không ghi quyền → giữ nguyên
+    // Số ID đang nghi trùng ở máy này: chỉ ghi theo máy, không đè dữ liệu chung / không tạo-sửa NV / không đồng bộ
+    if (held.has(serial + '|' + pin)) { upsertDeviceUserSerial(serial, pin, name, card, pri); continue; }
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
     const id = upsertEmployeeFromDevice(pin, name);
@@ -151,6 +160,7 @@ const kvOf = (line) => {
 export function storeTemplates(serial, table, rawBody) {
   const isFinger9 = /FINGERTMP|FP/i.test(table);
   const pins = new Set();
+  const held = heldSet();
   const up = db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
     VALUES(?,?,?,?,?,?,?,?,?)
     ON CONFLICT(serial,pin,bio_type,idx) DO UPDATE SET valid=excluded.valid,duress=excluded.duress,
@@ -169,6 +179,7 @@ export function storeTemplates(serial, table, rawBody) {
     const minor = parseInt(kv.minorver || '0', 10) || 0;
     try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
     upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
+    if (held.has(serial + '|' + pin)) continue;   // nghi trùng: giữ template theo máy, không tạo NV / không đồng bộ
     upsertEmployeeFromDevice(pin, '');   // đăng ký vân tay-only vẫn tạo NV nháp
     pins.add(pin);
   }
@@ -177,7 +188,7 @@ export function storeTemplates(serial, table, rawBody) {
 
 // Xếp 1 lệnh xuống máy đích (chống trùng: bỏ qua nếu đã có lệnh y hệt đang chờ gửi).
 // meta = { pin, bio_type, idx, mkind } → để khi máy XÁC NHẬN (ack OK) mới cộng số đếm (mirror).
-function queueCmd(serial, content, meta = {}) {
+export function queueCmd(serial, content, meta = {}) {
   const dup = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND content=? AND trans_time IS NULL").get(serial, content);
   if (dup) return;
   db.prepare('INSERT INTO push_device_commands(serial,content,pin,bio_type,idx,mkind) VALUES(?,?,?,?,?,?)')
@@ -186,14 +197,16 @@ function queueCmd(serial, content, meta = {}) {
 
 // Quyền ghi xuống = quyền của user TRÊN MÁY ĐÍCH (targetSerial), mặc định nhân viên (0) — không mang quyền
 // quản trị của máy nguồn sang máy khác. pri truyền vào thì dùng đúng giá trị đó.
-function buildUserCommand(pin, targetSerial, pri) {
+// forceName / bật "đẩy tên NV xuống máy": tên lấy từ NV phần mềm (thay vì tên gõ trên máy).
+export function buildUserCommand(pin, targetSerial, pri, forceName = false) {
   const u = db.prepare('SELECT * FROM device_users WHERE pin=?').get(pin) || {};
+  const name = pmNameFor(pin, forceName) || u.name || pin;
   if (pri == null) {
     const s = targetSerial ? db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(targetSerial, pin) : null;
     pri = (s && s.privilege) || 0;
   }
   const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
-  return `DATA UPDATE USERINFO PIN=${pin}\tName=${u.name || pin}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=1\tVerify=0`;
+  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=1\tVerify=0`;
 }
 
 // Quyền của 1 Số ID trên các máy đang hoạt động: [{ serial, name, online, onDevice, admin }]
@@ -207,6 +220,7 @@ export function deviceRolesForPin(pin) {
 }
 // Đặt quyền quản trị/nhân viên cho 1 Số ID trên 1 máy → lưu + gửi lệnh xuống máy. Trả true nếu có thay đổi.
 export function setDeviceAdmin(pin, serial, isAdmin, fallbackName = '') {
+  if (heldSet().has(serial + '|' + pin)) return false;   // Số ID đang nghi trùng ở máy này → chờ xử lý xong
   const cur = db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(serial, pin);
   const want = isAdmin ? 14 : 0;
   if (cur && (cur.privilege > 0) === !!isAdmin) return false;
@@ -291,12 +305,22 @@ export function deleteDeviceUsers(serial, pins) {
   let n = 0;
   for (const pin of (pins || [])) {
     const p = String(pin).trim(); if (!p) continue;
+    // bỏ các lệnh đồng bộ CHƯA gửi của người này (khỏi ghi lại lên máy rồi mới xoá)
+    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial, p);
     queueCmd(serial, `DATA DELETE USERINFO\tPIN=${p}`);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=? AND pin=?').run(serial, p);
     db.prepare('DELETE FROM device_users_serial WHERE serial=? AND pin=?').run(serial, p);
     n++;
   }
   return n;
+}
+// Máy TCP/IP đã xoá xong (qua SDK) → chỉ dọn số đếm phía phần mềm cho khớp
+export function forgetDeviceUsers(serial, pins) {
+  for (const pin of (pins || [])) {
+    const p = String(pin).trim(); if (!p) continue;
+    db.prepare('DELETE FROM device_bio_templates WHERE serial=? AND pin=?').run(serial, p);
+    db.prepare('DELETE FROM device_users_serial WHERE serial=? AND pin=?').run(serial, p);
+  }
 }
 // Xóa quyền quản trị: hạ tất cả user đang là admin (Pri>0) trên máy về user thường (Pri=0)
 export function clearDeviceAdmins(serial) {
@@ -305,13 +329,15 @@ export function clearDeviceAdmins(serial) {
     const set = new Set(db.prepare('SELECT pin FROM device_users_serial WHERE serial=?').all(serial).map((r) => r.pin));
     pins = db.prepare('SELECT pin FROM device_users WHERE privilege>0').all().map((r) => r.pin).filter((p) => !set.size || set.has(p));
   }
+  const held = heldSet();
   for (const pin of pins) {
+    if (held.has(serial + '|' + pin)) continue;
     queueCmd(serial, buildUserCommand(pin, serial, 0), { pin, mkind: 'user' });
     db.prepare('UPDATE device_users_serial SET privilege=0 WHERE serial=? AND pin=?').run(serial, pin);
   }
   return pins.length;
 }
-function buildBioCommand(t) {
+export function buildBioCommand(t) {
   if (t.bio_type === 1 && (t.major_ver || 10) < 10) // vân tay ZKFinger 9.0
     return `DATA UPDATE FINGERTMP PIN=${t.pin}\tFID=${t.idx}\tSize=${(t.tmp || '').length}\tValid=${t.valid}\tTMP=${t.tmp}`;
   // vân tay ZKFinger 10.0 hoặc khuôn mặt (type 2/9)
@@ -321,6 +347,7 @@ function buildBioCommand(t) {
 // Nạp ẢNH người dùng / ảnh khuôn mặt máy đẩy về (dòng USERPIC / BIOPHOTO, thường trong OPERLOG).
 export function storeUserPhotos(serial, rawBody) {
   const pins = new Set();
+  const held = heldSet();
   const up = db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo)
     VALUES(?,?,?,?)
     ON CONFLICT(pin) DO UPDATE SET kind=excluded.kind,face_type=excluded.face_type,photo=excluded.photo,updated_at=datetime('now')`);
@@ -332,6 +359,7 @@ export function storeUserPhotos(serial, rawBody) {
     const pin = (kv.pin || '').trim();
     const content = (kv.content || '').trim();
     if (!pin || content.length < 100) continue;   // ảnh phải có nội dung base64
+    if (held.has(serial + '|' + pin)) continue;   // nghi trùng: ảnh đã ghi vào cảnh báo, không đè ảnh của Số ID
     const faceType = isFace ? (parseInt(kv.type || '9', 10) || 9) : 0;
     try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
     upsertEmployeeFromDevice(pin, '');
@@ -383,7 +411,7 @@ export function storeDeviceOplogs(serial, rawBody) {
 }
 
 // Lệnh đẩy ẢNH của 1 pin xuống máy (BIOPHOTO nếu là ảnh mặt, USERPIC nếu ảnh người dùng). null nếu không có ảnh.
-function buildPhotoCommand(pin) {
+export function buildPhotoCommand(pin) {
   const p = db.prepare('SELECT * FROM device_user_photos WHERE pin=?').get(pin);
   if (!p || !p.photo) return null;
   if (p.kind === 'face')
@@ -391,9 +419,18 @@ function buildPhotoCommand(pin) {
   return `DATA UPDATE USERPIC PIN=${pin}\tSize=${p.photo.length}\tContent=${p.photo}`;
 }
 
+// Số ID của NV đã KHOÁ (nghỉ việc) → không đồng bộ xuống máy nữa (xoá trên máy rồi thì không bị đẩy lại)
+export function lockedPins() {
+  return new Set(db.prepare("SELECT device_pin FROM employees WHERE active=0 AND device_pin IS NOT NULL AND device_pin<>''").all()
+    .map((r) => String(r.device_pin).trim()));
+}
+
 // Sau khi 1 máy đẩy user/template về → đẩy các PIN đó sang MỌI máy cùng nhóm (real-time).
 export function syncPinsToGroup(sourceSerial, pins) {
   if (!pins || !pins.size) return 0;
+  const locked = lockedPins(), held = heldSet();
+  pins = new Set([...pins].filter((p) => !locked.has(String(p).trim()) && !held.has(sourceSerial + '|' + p)));
+  if (!pins.size) return 0;
   const src = db.prepare('SELECT sync_group FROM push_devices WHERE serial=?').get(sourceSerial);
   if (!src || !src.sync_group) return 0;
   const targets = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>? AND active=1")
@@ -402,6 +439,7 @@ export function syncPinsToGroup(sourceSerial, pins) {
   let n = 0;
   for (const t of targets) {
     for (const pin of pins) {
+      if (held.has(t.serial + '|' + pin)) continue;   // máy đích đang có người khác mang Số ID này (nghi trùng)
       queueCmd(t.serial, buildUserCommand(pin, t.serial), { pin, mkind: 'user' });
       const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
       for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp), { pin: tp.pin, bio_type: tp.bio_type, idx: tp.idx, mkind: 'bio' }); n++; }
@@ -425,10 +463,12 @@ export function syncFillDevice(serial, force = false) {
   if (!groupSerials.length) return;
   const ph = groupSerials.map(() => '?').join(',');
   const others = db.prepare(`SELECT * FROM device_bio_templates WHERE serial IN (${ph})`).all(...groupSerials);
+  const locked = lockedPins();   // NV đã khoá: không đẩy lại
+  const held = heldSet();       // Số ID đang nghi trùng (ở máy nguồn hoặc máy này): chờ xử lý xong
   const pushedPins = new Set();
   for (const t of others) {
     const key = `${t.pin}|${t.bio_type}|${t.idx}`;
-    if (mine.has(key)) continue;
+    if (mine.has(key) || locked.has(String(t.pin).trim()) || held.has(t.serial + '|' + t.pin) || held.has(serial + '|' + t.pin)) continue;
     if (!pushedPins.has(t.pin)) {
       queueCmd(serial, buildUserCommand(t.pin, serial), { pin: t.pin, mkind: 'user' });
       const pc = buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc, { pin: t.pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
@@ -440,7 +480,7 @@ export function syncFillDevice(serial, force = false) {
   const photoPins = db.prepare(`SELECT p.pin FROM device_user_photos p
      WHERE p.pin IN (SELECT DISTINCT pin FROM device_users_serial WHERE serial IN (${ph}))`).all(...groupSerials);
   for (const r of photoPins) {
-    if (pushedPins.has(r.pin)) continue;
+    if (pushedPins.has(r.pin) || locked.has(String(r.pin).trim()) || held.has(serial + '|' + r.pin)) continue;
     const pc = buildPhotoCommand(r.pin); if (!pc) continue;
     queueCmd(serial, buildUserCommand(r.pin, serial), { pin: r.pin, mkind: 'user' });
     queueCmd(serial, pc, { pin: r.pin, mkind: 'photo' });
@@ -480,6 +520,7 @@ export function nextCommand(serial) {
 export function ackCommand(id, ret) {
   const cmd = db.prepare('SELECT serial,pin,bio_type,idx,mkind FROM push_device_commands WHERE id=?').get(id);
   db.prepare("UPDATE push_device_commands SET return_value=?, response_at=datetime('now') WHERE id=?").run(String(ret), id);
+  if (cmd && cmd.mkind === 'user') { try { onUserAck(cmd.serial, cmd.pin, String(ret).trim() === '0'); } catch (e) { console.error('[pin-guard] ack lỗi:', e.message); } }
   if (!cmd || !cmd.mkind || String(ret).trim() !== '0') return;   // chỉ mirror khi thành công
   try {
     if (cmd.mkind === 'user') {
@@ -742,10 +783,11 @@ export function ingestAttlog(serial, rawBody) {
   let n = 0;
   const dedupMs = (parseInt(getSetting('punch_dedup_min', '15'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
+  const remap = remapLoader(serial);   // Số ID nghi trùng (giữ lại) / đã chuyển sang Số ID mới ở máy này
   for (const line of lines) {
     const p = line.split('\t');
     if (p.length < 2) continue;
-    const pin = (p[0] || '').trim();
+    let pin = (p[0] || '').trim();
     const timeStr = (p[1] || '').trim();          // 'yyyy-MM-dd HH:mm:ss'
     if (!/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}/.test(timeStr)) continue;
     const status = parseInt(p[2] || '0', 10) || 0;
@@ -753,6 +795,7 @@ export function ingestAttlog(serial, rawBody) {
     const d = new Date(timeStr.replace(' ', 'T') + '+07:00');   // giờ máy = giờ VN
     if (isNaN(d)) continue;
     const punchIso = d.toISOString();
+    if (remap) pin = remap(pin, punchIso);
     const workDate = timeStr.slice(0, 10);
     // Chống trùng: cụm lượt quẹt cách nhau dưới N phút chỉ giữ lượt ĐẦU (dùng làm giờ VÀO) và lượt CUỐI (dùng làm giờ RA).
     // VD quẹt ra 17:59 rồi 18:00 → giữ cả 2, giờ ra = 18:00 (trước đây chỉ giữ 17:59 → thành "về sớm 1 phút").
@@ -776,7 +819,7 @@ export function ingestAttlog(serial, rawBody) {
       const prevN = notifyNow.get(empId);
       if (!prevN || prevN.d < d) notifyNow.set(empId, { d, timeStr });
     }
-    if (!empId) askUserFromDevice(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
+    if (!empId && !pin.includes('#')) askUserFromDevice(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
     n++;
     if (empId) touched.add(empId + '|' + workDate);
   }

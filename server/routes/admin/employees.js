@@ -6,6 +6,7 @@ import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
 import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin } from '../../device-sync.js';
+import { pushNames } from '../../pin-guard.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
@@ -62,6 +63,13 @@ function saveAuditOnly(caller, id, b) {
   const on = [1, 2, 3].includes(+b.audit_only) ? +b.audit_only : b.audit_only ? 1 : 0;   // 1/2/3 = chỉ xem công ảo mức đó
   db.prepare('UPDATE employees SET audit_only = ? WHERE id = ?').run(on, id);
   if (on) db.prepare("UPDATE employees SET role = 'manager' WHERE id = ? AND role <> 'manager'").run(id);
+}
+
+// Bật "đẩy tên NV xuống máy": lưu NV có Số ID → ghi tên mới xuống các máy đang có Số ID đó (lỗi chỉ ghi log)
+function pushNameSafe(pin) {
+  pin = String(pin || '').trim();
+  if (!pin) return;
+  try { pushNames([pin]); } catch (e) { console.error('[device] đẩy tên lỗi:', e.message); }
 }
 
 export function registerEmployeeRoutes(r, { need }) {
@@ -146,6 +154,7 @@ export function registerEmployeeRoutes(r, { need }) {
       saveLeaveFields(info.lastInsertRowid, b);
       saveAuditOnly(req.user, info.lastInsertRowid, b);
       const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
+      pushNameSafe(b.device_pin);
       res.json({ ok: true, id: info.lastInsertRowid, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
@@ -331,6 +340,7 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
       saveLeaveFields(emp.id, b);
       saveAuditOnly(req.user, emp.id, b);
+      if (b.full_name != null || b.device_pin !== undefined) pushNameSafe(db.prepare('SELECT device_pin FROM employees WHERE id=?').get(emp.id)?.device_pin);
       res.json({ ok: true, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
@@ -342,6 +352,21 @@ export function registerEmployeeRoutes(r, { need }) {
   r.delete('/employees/:id', need('employees'), (req, res) => {
     db.prepare('UPDATE employees SET active = 0 WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
+  });
+  // Khoá HÀNG LOẠT theo Số ID máy (sau khi xoá NV trên tất cả máy) — NV đã khoá không bị đồng bộ lại xuống máy.
+  // Không tự khoá chính tài khoản đang đăng nhập.
+  r.post('/employees/lock-by-pins', need('employees'), (req, res) => {
+    const pins = [...new Set((Array.isArray(req.body?.pins) ? req.body.pins : []).map((p) => String(p).trim()).filter(Boolean))];
+    if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    const q = db.prepare("SELECT id FROM employees WHERE device_pin=? AND active=1");
+    const lock = db.prepare('UPDATE employees SET active=0 WHERE id=?');
+    let locked = 0, self = false;
+    for (const p of pins) {
+      const e = q.get(p); if (!e) continue;
+      if (req.user && req.user.id != null && Number(req.user.id) === e.id) { self = true; continue; }
+      lock.run(e.id); locked++;
+    }
+    res.json({ ok: true, locked, self });
   });
   // XÓA CỨNG nhân viên + toàn bộ dữ liệu liên quan (khác Khoá). Lượt quẹt máy thô được GỠ KHỚP
   // (employee_id=NULL) chứ không xoá, để không mất log; NV nếu được tải lại từ máy sẽ tạo mới.

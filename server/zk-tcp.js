@@ -8,6 +8,7 @@ import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
 import { ingestAttlog, ingestUserData } from './device-sync.js';
+import { guardIncoming } from './pin-guard.js';
 import { vnDateStr } from './util.js';
 
 const SCRIPT = process.env.ZK_TCP_SCRIPT || fileURLToPath(new URL('./zk/zk-tcp.ps1', import.meta.url));   // ZK_TCP_SCRIPT: script giả lập máy (chỉ dùng khi kiểm thử)
@@ -87,6 +88,8 @@ export async function tcpUsers(dev, prog = () => {}) {
     if (lines.length % 200 === 0) prog(`Đã đọc ${lines.length} nhân viên…`);
   });
   prog(`Đang lưu ${lines.length} nhân viên…`);
+  // Cảnh báo trùng Số ID (nếu bật): chỉ so tên (máy TCP/IP không báo đăng ký mới theo thời gian thực)
+  if (lines.length) { try { guardIncoming(dev.serial, 'USER', lines.join('\n'), { realtime: false }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); } }
   const seen = lines.length ? ingestUserData(dev.serial, 'USER', lines.join('\n')) : new Set();
   return { read: lines.length, saved: seen.size };
 }

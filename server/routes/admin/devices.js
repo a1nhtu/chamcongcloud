@@ -1,11 +1,12 @@
 // Nhóm route MÁY CHẤM CÔNG (ZKTeco ADMS push) — tách khỏi admin.js.
 import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES } from '../../zk-tcp.js';
 import { setSetting } from '../../db.js';
+import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, pushNames, guardOn, pushNamesOn } from '../../pin-guard.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -49,7 +50,7 @@ export function registerDeviceRoutes(r, { need }) {
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
       try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
     }
-    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), push_names: pushNamesOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
   r.get('/server-ips', need('devices'), (req, res) => {
@@ -71,6 +72,12 @@ export function registerDeviceRoutes(r, { need }) {
       return res.status(403).json({ error: 'Máy chưa có KEY bản quyền hợp lệ. Dán key Digiplus cấp cho serial ' + d.serial + ' rồi mới duyệt được.' });
     }
     const newGroup = b.sync_group !== undefined ? (b.sync_group || '').trim() : (d.sync_group || '');
+    // Dải Số ID của máy (VD 1001-1999; rỗng = bỏ giới hạn)
+    if (b.pin_range !== undefined) {
+      const pr = String(b.pin_range || '').trim();
+      if (pr && !parseRange(pr)) return res.status(400).json({ error: 'Dải Số ID phải dạng "từ-đến", VD 1001-1999' });
+      db.prepare('UPDATE push_devices SET pin_range=? WHERE id=?').run(pr.replace(/\s+/g, ''), d.id);
+    }
     db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=?, access_control=? WHERE id=?')
       .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active, newGroup,
            b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0),
@@ -351,6 +358,87 @@ export function registerDeviceRoutes(r, { need }) {
     const pins = Array.isArray(req.body?.pins) ? req.body.pins : [];
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     const n = deleteDeviceUsers(serial, pins);
+    dropConflicts(serial, pins);
     res.json({ ok: true, count: n, msg: `Đã gửi lệnh xóa ${n} nhân viên trên máy.` });
+  });
+
+  /* -------- CẢNH BÁO TRÙNG SỐ ID giữa các máy -------- */
+  r.get('/devices/pin-conflicts', need('devices'), (req, res) => {
+    if (req.query.count) return res.json({ count: countConflicts() });
+    res.json({ enabled: guardOn(), rows: listConflicts() });
+  });
+  // action: same (cùng 1 người) | other (người khác → cấp Số ID mới new_pin) | retry (máy báo lỗi → gửi lại)
+  r.post('/devices/pin-conflicts/:id/resolve', need('devices'), (req, res) => {
+    const b = req.body || {};
+    const by = req.user ? (req.user.full_name || req.user.username || '') : '';
+    try {
+      if (b.action === 'same') return res.json(resolveSame(+req.params.id, by));
+      if (b.action === 'other') return res.json(resolveOther(+req.params.id, b.new_pin, by));
+      if (b.action === 'retry') return res.json(retryMove(+req.params.id));
+      res.status(400).json({ error: 'Thao tác không hợp lệ' });
+    } catch (e) {
+      if (e.status === 400) return res.status(400).json({ error: e.message });
+      sendCaughtError(res, 'POST /admin/devices/pin-conflicts/:id/resolve', e, { status: 400 });
+    }
+  });
+  // Đẩy tên NV (phần mềm) xuống mọi máy đang có Số ID của họ — bấm tay, chạy cả khi chưa bật tự đẩy
+  r.post('/devices/push-names', need('devices'), (req, res) => {
+    const n = pushNames(null, true);
+    res.json({ ok: true, queued: n, msg: n ? `Đã gửi ${n} lệnh ghi tên xuống máy. Máy nhận dần khi kết nối.` : 'Không có tên nào cần đẩy (NV chưa có Số ID trên máy nào).' });
+  });
+
+  /* -------- Xóa nhân viên trên TẤT CẢ máy 1 lần (khỏi vào từng máy) -------- */
+  // Danh sách Số ID: có trên máy nào (theo đồng bộ) + NV phần mềm đang gắn Số ID đó
+  r.get('/devices/all-users', need('devices'), (req, res) => {
+    const devName = new Map(db.prepare('SELECT serial, name FROM push_devices').all().map((d) => [d.serial, d.name || d.serial]));
+    const onDev = new Map();
+    for (const s of db.prepare('SELECT serial, pin, name FROM device_users_serial').all()) {
+      const p = String(s.pin).trim();
+      if (!onDev.has(p)) onDev.set(p, { devices: [], name: '' });
+      const o = onDev.get(p); o.devices.push(devName.get(s.serial) || s.serial); if (!o.name && s.name) o.name = s.name;
+    }
+    const emps = new Map(db.prepare("SELECT id, code, full_name, department, active, device_pin FROM employees WHERE device_pin IS NOT NULL AND device_pin<>''").all()
+      .map((e) => [String(e.device_pin).trim(), e]));
+    const pins = new Set([...onDev.keys(), ...emps.keys()]);
+    const rows = [...pins].map((pin) => {
+      const e = emps.get(pin), o = onDev.get(pin) || { devices: [], name: '' };
+      return { pin, emp_id: e ? e.id : null, code: e ? e.code : '', name: e ? e.full_name : (o.name || ''), department: e ? (e.department || '') : '',
+        active: e ? !!e.active : null, devices: o.devices };
+    }).sort((a, b) => (Number(a.pin) - Number(b.pin)) || a.pin.localeCompare(b.pin));
+    res.json({ rows });
+  });
+  // Xóa các Số ID đã chọn trên MỌI máy đang dùng: máy đẩy (ADMS) xếp lệnh chờ máy lấy; máy TCP/IP chạy nền qua SDK
+  r.post('/devices/delete-users-all', need('devices'), (req, res) => {
+    const pins = [...new Set((Array.isArray(req.body?.pins) ? req.body.pins : []).map((p) => String(p).trim()).filter((p) => /^[0-9A-Za-z_-]{1,20}$/.test(p)))];
+    if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all();
+    const push = devs.filter((d) => d.conn_type !== 'tcp'), tcp = devs.filter((d) => d.conn_type === 'tcp');
+    for (const d of push) { deleteDeviceUsers(d.serial, pins); dropConflicts(d.serial, pins); }
+    let job = null, tcpNote = '';
+    if (tcp.length && !tcpEnabled()) tcpNote = `${tcp.length} máy TCP/IP chưa xoá được vì đang tắt "Dùng máy chấm công kết nối TCP/IP".`;
+    else if (tcp.length) {
+      job = startJob('delete-users-all', tcp.length + ' máy TCP/IP', async (prog) => {
+        const out = [];
+        for (const d of tcp) {
+          const name = d.name || d.serial;
+          prog(`Đang xoá trên máy ${name}…`);
+          try {
+            if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) throw new Error(`Không thấy máy ở ${d.tcp_ip}:${d.tcp_port}`);
+            const info = await tcpInfo(d);
+            if (info.serial && info.serial !== d.serial) throw new Error(`IP ${d.tcp_ip} giờ là máy khác (Serial ${info.serial}) — bỏ qua cho an toàn`);
+            const gone = [];
+            await zkRun(d, 'delete-users', { from: pins.join(','), timeoutMs: 5 * 60000 }, (k, c) => { if (k === 'D' && c[1] === '1') gone.push(c[0]); });
+            forgetDeviceUsers(d.serial, pins);
+            out.push({ device: name, ok: true, deleted: gone.length });
+          } catch (e) { out.push({ device: name, ok: false, error: e.message }); }
+        }
+        return { devices: out };
+      }).id;
+    }
+    // Máy đang tạm dừng / chờ duyệt mà vẫn còn người này → báo để người dùng biết chưa xoá ở đó
+    const ph = pins.map(() => '?').join(',');
+    const idle = db.prepare(`SELECT DISTINCT COALESCE(NULLIF(d.name,''), d.serial) AS n FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
+      WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins).map((x) => x.n);
+    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcp.map((d) => d.name || d.serial), job, tcpNote, idle });
   });
 }

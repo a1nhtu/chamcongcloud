@@ -117,6 +117,15 @@ try {
       if (-not $ok) { $e = 0; $z.GetLastError([ref]$e); $z.Disconnect(); Fail "DELUSER$e" "Không xoá được Số ID $From trên máy (mã lỗi $e)." }
       Done 'delete-user'
     }
+    'delete-users' {    # xoá NHIỀU NV trên máy; $From = các Số ID cách nhau dấu phẩy. In 'D <pin> <1|0>' từng người
+      Lock
+      foreach ($p in ($From -split ',')) {
+        $p = $p.Trim(); if (-not $p) { continue }
+        $ok = $false; try { $ok = [bool]$z.SSR_DeleteEnrollData($m, $p, 12) } catch {}
+        Out ("D`t$p`t" + ($(if ($ok) { 1 } else { 0 })))
+      }
+      [void]$z.RefreshData($m); Done 'delete-users'
+    }
     'set-time' {        # đặt giờ máy = giờ máy tính đang chạy phần mềm
       [void]$z.SetDeviceTime($m); [void]$z.RefreshData($m); Done ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))
     }

@@ -669,6 +669,32 @@ function migrateColumns() {
   add('push_devices', 'dev_key', "TEXT DEFAULT ''");
   // Quyền của user TRÊN TỪNG MÁY (0 = nhân viên, >0 = quản trị máy). Quản trị cơ sở này KHÔNG tự lan sang máy khác.
   add('device_users_serial', 'privilege', 'INTEGER DEFAULT 0');
+  // Dải Số ID của máy (VD '1001-1999', rỗng = không giới hạn): máy đăng ký số ngoài dải → cảnh báo nghi trùng
+  add('push_devices', 'pin_range', "TEXT DEFAULT ''");
+  // CẢNH BÁO TRÙNG SỐ ID (công tắc device_pin_guard): 1 dòng = máy `serial` vừa đăng ký Số ID `pin` đã có chủ.
+  // Trong lúc chờ xử lý: Số ID đó không đồng bộ từ/xuống máy này, lượt quẹt ở máy này (từ `since`) bị giữ lại.
+  db.exec(`CREATE TABLE IF NOT EXISTS device_pin_conflicts (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      serial      TEXT NOT NULL,
+      pin         TEXT NOT NULL,
+      reason      TEXT NOT NULL DEFAULT 'enroll',   -- enroll (máy đăng ký số đã có chủ) | name (tên khác hẳn) | range (ngoài dải)
+      ref_name    TEXT DEFAULT '',                  -- tên đang dùng Số ID này lúc phát hiện
+      dev_name    TEXT DEFAULT '', dev_card TEXT DEFAULT '', dev_passwd TEXT DEFAULT '', dev_pri INTEGER DEFAULT 0,
+      dev_photo   TEXT DEFAULT '', dev_photo_kind TEXT DEFAULT '', dev_face_type INTEGER DEFAULT 0,
+      since       TEXT NOT NULL,                    -- ISO UTC: lượt quẹt của Số ID này ở máy này từ mốc này bị giữ
+      status      TEXT NOT NULL DEFAULT 'open',     -- open | moving (đang cấp số mới) | moved | same | failed | dropped
+      new_pin     TEXT DEFAULT '', new_emp_id INTEGER, note TEXT DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')), resolved_at TEXT, resolved_by TEXT DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_pinconf_sp ON device_pin_conflicts(serial, pin);
+    -- Quy tắc đổi Số ID của lượt quẹt máy gửi về: Số ID \`pin\` ở máy \`serial\` trong [from_at, to_at) → \`new_pin\`
+    CREATE TABLE IF NOT EXISTS device_pin_remaps (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      serial      TEXT NOT NULL, pin TEXT NOT NULL,
+      from_at     TEXT NOT NULL, to_at TEXT,        -- ISO UTC; to_at NULL = đến nay
+      new_pin     TEXT NOT NULL, conflict_id INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_pinremap_sp ON device_pin_remaps(serial, pin);`);
   // Giờ đọc từ máy (nút "Xem giờ trên máy"): clock_text = giờ máy trả về, clock_at = giờ máy chủ (VN) lúc nhận
   add('push_devices', 'clock_text', "TEXT DEFAULT ''");
   add('push_devices', 'clock_at',   "TEXT DEFAULT ''");

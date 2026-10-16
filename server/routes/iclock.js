@@ -3,6 +3,7 @@
 // KHÔNG nằm sau cổng bản quyền — máy phải kết nối được. Chỉ XỬ LÝ khi bật "Dùng máy chấm công" + máy đã duyệt.
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
+import { guardIncoming } from '../pin-guard.js';
 import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult } from '../device-sync.js';
 
 const r = Router();
@@ -97,6 +98,8 @@ function handleCData(req, res) {
     if (enabled() && isActive(sn)) {
       const pins = new Set();
       try {
+        // Cảnh báo trùng Số ID (nếu bật): kiểm TRƯỚC khi lưu để người lạ không đè dữ liệu / không bị đồng bộ đi
+        try { guardIncoming(sn, table, body); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); }
         if (table === 'OPERLOG') {
           // OPERLOG trộn nhiều loại dòng: USER (thông tin NV) + FP/BIODATA (template) + USERPIC/BIOPHOTO (ảnh)
           const lines = body.split('\n').map((l) => l.trim()).filter(Boolean);
@@ -153,3 +156,5 @@ r.post(['/iclock/devicecmd', '/devicecmd'], textParser, handleDeviceCmd);
 r.all(['/iclock/edata', '/iclock/fdata'], textParser, (req, res) => res.type('text/plain').send('OK'));
 
 export default r;
+// Cho test gọi thẳng (giả lập máy đẩy dữ liệu)
+export { handleCData, handleGetRequest, handleDeviceCmd };
