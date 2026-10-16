@@ -104,7 +104,9 @@ export function registerMealRoutes(r) {
   // Tên miền in trên liên kết bếp (VD https://app.maychamcongcloud.com) — để trống = theo địa chỉ HR đang mở
   r.put('/meal/kitchen/base', wrap('PUT /admin/meal/kitchen/base', (req, res) => {
     let v = String(req.body?.base || '').trim().replace(/\/bep(\/.*)?$/i, '').replace(/\/+$/, '');
-    if (v && !/^https?:\/\//i.test(v)) v = 'https://' + v;
+    if (v && !/^https?:\/\//i.test(v)) v = (/^(localhost|\d{1,3}(\.\d{1,3}){3})(:\d+)?$/i.test(v) ? 'http://' : 'https://') + v;   // IP / localhost chạy http
+    // gõ ngắn "abc" (không có dấu chấm, không phải localhost) = tên miền con abc.maychamcongcloud.com
+    v = v.replace(/^(https?:\/\/)([^/:.]+)(:\d+)?$/i, (m, s, h, p) => (h.toLowerCase() === 'localhost' ? m : s + h + '.maychamcongcloud.com' + (p || '')));
     if (v && !/^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/i.test(v)) return res.status(400).json({ error: 'Tên miền không hợp lệ — VD: app.maychamcongcloud.com' });
     setSetting('meal_kitchen_base', v.toLowerCase());
     res.json({ ok: true, ...kitchenBase() });

@@ -292,7 +292,7 @@ export async function pageMealCfg(ctx) {
   kBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Trên máy tính / tivi ở khu nhà bếp (không cần đăng nhập): mở trình duyệt, gõ địa chỉ máy chủ + /bep rồi nhập MÃ dưới đây (hoặc mở thẳng liên kết ngắn bên dưới). Khi nhân viên quẹt máy chấm công trong giờ ăn, màn hình hiện tên + món đã chọn.'),
     el('div', { class: 'sa-hint' }, 'Mã màn hình bếp (không phân biệt hoa thường):'), codeEl,
     keyEl, el('div', { class: 'sa-actions' }, open, copy, renew),
-    el('div', { class: 'sa-hint', style: 'margin-top:10px' }, 'Tên miền in trên liên kết (để trống = theo địa chỉ đang mở trang này):'),
+    el('div', { class: 'sa-hint', style: 'margin-top:10px' }, 'Tên miền in trên liên kết (để trống = theo địa chỉ đang mở trang này; gõ ngắn "abc" = abc.maychamcongcloud.com):'),
     el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, baseIn, saveBase));
   main.append(kBox);
 }
