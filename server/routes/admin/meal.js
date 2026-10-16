@@ -11,6 +11,11 @@ import { checkShiftConfig } from '../../meal-rules.js';
 const who = (req) => req.user.full_name || req.user.username || '';
 // Chạy 1 handler, lỗi nghiệp vụ (userError) trả nguyên văn, lỗi khác che lại
 const wrap = (name, fn) => (req, res) => { try { fn(req, res); } catch (e) { sendCaughtError(res, name, e); } };
+// Tên miền đã lưu cho liên kết bếp + tên miền tunnel của bản cài (nếu có) để gợi ý khi HR mở bằng localhost/IP
+const kitchenBase = () => {
+  const c = (process.env.CUSTOMER || '').trim().toLowerCase();
+  return { base: getSetting('meal_kitchen_base', ''), domain: c && process.env.TUNNEL_TOKEN ? c + '.maychamcongcloud.com' : '' };
+};
 
 export function registerMealRoutes(r) {
   r.use('/meal', mealGate, mealManagerOnly);   // tắt công tắc → 403; không có quyền 'meal' → 403
@@ -94,6 +99,14 @@ export function registerMealRoutes(r) {
   }));
 
   // ---------- màn hình bếp ----------
-  r.get('/meal/kitchen', wrap('GET /admin/meal/kitchen', (req, res) => res.json({ key: kitchenKey(), path: '/bep' })));
-  r.post('/meal/kitchen/renew', wrap('POST /admin/meal/kitchen/renew', (req, res) => res.json({ key: kitchenKey({ renew: true }), path: '/bep' })));
+  r.get('/meal/kitchen', wrap('GET /admin/meal/kitchen', (req, res) => res.json({ key: kitchenKey(), path: '/bep', ...kitchenBase() })));
+  r.post('/meal/kitchen/renew', wrap('POST /admin/meal/kitchen/renew', (req, res) => res.json({ key: kitchenKey({ renew: true }), path: '/bep', ...kitchenBase() })));
+  // Tên miền in trên liên kết bếp (VD https://app.maychamcongcloud.com) — để trống = theo địa chỉ HR đang mở
+  r.put('/meal/kitchen/base', wrap('PUT /admin/meal/kitchen/base', (req, res) => {
+    let v = String(req.body?.base || '').trim().replace(/\/bep(\/.*)?$/i, '').replace(/\/+$/, '');
+    if (v && !/^https?:\/\//i.test(v)) v = 'https://' + v;
+    if (v && !/^https?:\/\/[a-z0-9.-]+(:\d{1,5})?$/i.test(v)) return res.status(400).json({ error: 'Tên miền không hợp lệ — VD: app.maychamcongcloud.com' });
+    setSetting('meal_kitchen_base', v.toLowerCase());
+    res.json({ ok: true, ...kitchenBase() });
+  }));
 }

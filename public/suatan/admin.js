@@ -269,7 +269,10 @@ export async function pageMealCfg(ctx) {
   /* --- màn hình bếp --- */
   main.append(el('div', { class: 'sa-sec' }, '4. Màn hình bếp'));
   const kBox = el('div', { class: 'sa-card' });
-  const urlOf = (k) => `${location.origin}/bep/${k}`;
+  // gốc liên kết: tên miền HR đã lưu > tên miền tunnel (khi đang mở bằng localhost/IP) > địa chỉ đang mở
+  const isLocal = /^(localhost|127\.|\[::1\]|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(location.hostname);
+  const baseOf = () => kit.base || (isLocal && kit.domain ? 'https://' + kit.domain : location.origin);
+  const urlOf = (k) => `${baseOf()}/bep/${k}`;
   const codeEl = el('div', { style: 'font-size:34px;font-weight:900;letter-spacing:8px;color:var(--sa-navy);margin:2px 0 8px' }, kit.key.toUpperCase());
   const keyEl = el('div', { class: 'sa-key' }, urlOf(kit.key.toUpperCase()));
   const copy = el('button', { class: 'sa-btn ghost', type: 'button' }, '📋 Sao chép liên kết');
@@ -281,9 +284,16 @@ export async function pageMealCfg(ctx) {
     if (!confirm('Đổi mã? Màn hình bếp đang mở sẽ ngừng hoạt động cho tới khi mở lại bằng mã / liên kết mới.')) return;
     try { kit = await api('/admin/meal/kitchen/renew', { method: 'POST' }); keyEl.textContent = urlOf(kit.key.toUpperCase()); codeEl.textContent = kit.key.toUpperCase(); toast('Đã đổi mã', 'ok'); } catch (e) { toast(e.message, 'err'); }
   };
+  const baseIn = el('input', { value: kit.base || '', placeholder: kit.domain || 'VD: app.maychamcongcloud.com', style: 'flex:1;min-width:220px' });
+  const saveBase = el('button', { class: 'sa-btn ghost', type: 'button' }, '💾 Lưu tên miền');
+  saveBase.onclick = async () => {
+    try { kit = { ...kit, ...(await api('/admin/meal/kitchen/base', { method: 'PUT', body: { base: baseIn.value } })) }; baseIn.value = kit.base; keyEl.textContent = urlOf(kit.key.toUpperCase()); toast('Đã lưu', 'ok'); } catch (e) { toast(e.message, 'err'); }
+  };
   kBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Trên máy tính / tivi ở khu nhà bếp (không cần đăng nhập): mở trình duyệt, gõ địa chỉ máy chủ + /bep rồi nhập MÃ dưới đây (hoặc mở thẳng liên kết ngắn bên dưới). Khi nhân viên quẹt máy chấm công trong giờ ăn, màn hình hiện tên + món đã chọn.'),
     el('div', { class: 'sa-hint' }, 'Mã màn hình bếp (không phân biệt hoa thường):'), codeEl,
-    keyEl, el('div', { class: 'sa-actions' }, open, copy, renew));
+    keyEl, el('div', { class: 'sa-actions' }, open, copy, renew),
+    el('div', { class: 'sa-hint', style: 'margin-top:10px' }, 'Tên miền in trên liên kết (để trống = theo địa chỉ đang mở trang này):'),
+    el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, baseIn, saveBase));
   main.append(kBox);
 }
 
