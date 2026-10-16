@@ -118,3 +118,17 @@ test('admin (quyền Máy chấm công) bật/tắt được công tắc vận h
   assert.equal(getSetting('device_enabled', '0'), '1'); assert.equal(getSetting('device_key_required', '0'), '1');
   assert.equal(getSetting('tcp_device_enabled', '0'), '0');
 });
+
+test('thêm NV: để trống tài khoản = mã NV, để trống mật khẩu = 123456; trùng tài khoản → báo rõ', async () => {
+  const { verifyPassword } = await import('../server/auth.js');
+  const { code, out } = await call('POST /employees', { code: 'NV900', full_name: 'Thử Mặc Định' });
+  assert.equal(code, 200, JSON.stringify(out));
+  const emp = db.prepare("SELECT * FROM employees WHERE code='NV900'").get();
+  assert.equal(emp.username, 'NV900');
+  assert.ok(verifyPassword('123456', emp.password_hash));
+  const r2 = await call('POST /employees', { code: 'NV901', full_name: 'Trùng TK', username: 'NV900' });
+  assert.equal(r2.code, 400); assert.match(r2.out.error, /Tài khoản đăng nhập "NV900" đã có/);
+  const r3 = await call('POST /employees', { code: 'NV902', full_name: 'Tự đặt', username: 'tudat', password: 'abc999' });
+  assert.equal(r3.code, 200);
+  assert.ok(verifyPassword('abc999', db.prepare("SELECT password_hash FROM employees WHERE code='NV902'").get().password_hash));
+});

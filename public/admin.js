@@ -767,6 +767,20 @@ function rowMenu(items, label = '⋯ Thêm') {
   return btn;
 }
 
+// Khung THU GỌN trong form: tiêu đề + dòng tóm tắt (khi gọn); bấm để mở/đóng. Trả node có .refresh() / .setOpen(o)
+function formSection(title, summary, nodes, open = false) {
+  const tg = el('span', { class: 'tg' });
+  const sum = el('span', { class: 'sum' });
+  const head = el('button', { type: 'button', class: 'f-sec-h' }, tg, el('b', {}, title), sum);
+  const sec = el('div', { class: 'f-sec' }, head, el('div', { class: 'f-sec-b' }, ...nodes));
+  const refresh = () => { tg.textContent = open ? '▾' : '▸'; sec.classList.toggle('open', open); sum.textContent = open ? '' : (summary ? '— ' + summary() : ''); };
+  sec.setOpen = (o) => { open = o; refresh(); };
+  sec.refresh = refresh;
+  head.onclick = () => sec.setOpen(!open);
+  sec.addEventListener('change', refresh); sec.addEventListener('input', refresh);
+  refresh();
+  return sec;
+}
 function empModal(e) {
   const f = {};
   const mk = (id, ph, val = '') => (f[id] = input('e-' + id, { placeholder: ph, value: val }));
@@ -862,22 +876,36 @@ function empModal(e) {
   const pinField = el('div', {}, el('label', {}, 'Số ID máy chấm công' + (pinLocked ? ' 🔒' : '')),
     pinInput, el('div', { class: 'map-hint', style: 'margin-top:3px' }, pinHint));
 
-  const body = [
-    el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name))),
-    el('div', { class: 'two-col' }, deptField, posField),
-    el('div', { class: 'two-col' }, field('Số điện thoại', mk('phone', '', e?.phone)), pinField),
-    el('div', { class: 'two-col' }, field('Ngày vào làm (tính phép năm, thâm niên)', input('e-start', { type: 'date', value: e?.start_date || '' })),
-      field('Phép năm riêng, chưa gồm thâm niên (trống = mức chung)', input('e-leaveyear', { type: 'number', min: 0, step: 0.5, value: e?.leave_days_year ?? '', placeholder: 'theo Cài đặt' }))),
-    field('Kiểu chấm công của nhân viên này',
-      el('select', { id: 'e-attmode' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v, ...((e?.att_mode || '') === v ? { selected: '' } : {}) },
-        v === '' ? `Theo cài đặt chung (hiện là: ${SETTINGS.attendance_mode === 'hourly' ? 'theo giờ' : 'theo ca'})` : ATT_MODE_LABEL[v])))),
-    el('div', { class: 'two-col' }, field('Tài khoản *', mk('username', 'nv002', e?.username)), field('Vai trò', roleSel)),
-    permWrap,
-    ...(isAdmin() && (SETTINGS.audit_enabled === '1' || e?.audit_only) ? [el('label', { class: 'lv-chk', style: 'padding:10px;border:1px dashed #f59e0b;border-radius:10px;background:#fffbeb' },
-      (() => { const sel = el('select', { id: 'e-auditonly', style: 'width:auto;margin:0' }, ...[['0', 'Không'], ['1', 'Chỉ xem Công ảo 1'], ['2', 'Chỉ xem Công ảo 2'], ['3', 'Chỉ xem Công ảo 3']].map(([v, t]) => el('option', { value: v }, t))); sel.value = String(e?.audit_only || 0); return sel; })(),
-      el('div', {}, el('b', {}, '🔍 Tài khoản kiểm tra — chỉ xem công ảo của 1 mức'),
-        el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Dùng khi có đoàn kiểm tra: đăng nhập tài khoản này chỉ thấy công / lương ẢO ở mọi màn (không có nút bật/tắt, không thấy lượt quẹt thật, sửa giờ, nhật ký, máy chấm công), chỉ được xem, không sửa gì. Tự đặt vai trò Quản lý. Tài khoản này không hiện trong bảng công / bảng lương.')))] : []),
-    field(e ? 'Mật khẩu mới (để trống nếu giữ nguyên)' : 'Mật khẩu *', input('e-password', { type: 'text', placeholder: e ? '••••••' : '123456' })),
+  const codeRow = el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name)));
+  // ----- Các mục ít dùng: gom vào khung THU GỌN (mặc định gọn, có dòng tóm tắt) -----
+  const attSel = el('select', { id: 'e-attmode' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v, ...((e?.att_mode || '') === v ? { selected: '' } : {}) },
+    v === '' ? `Theo cài đặt chung (hiện là: ${SETTINGS.attendance_mode === 'hourly' ? 'theo giờ' : 'theo ca'})` : ATT_MODE_LABEL[v])));
+  const startI = input('e-start', { type: 'date', value: e?.start_date || '' });
+  const leaveI = input('e-leaveyear', { type: 'number', min: 0, step: 0.5, value: e?.leave_days_year ?? '', placeholder: 'theo Cài đặt' });
+  const pwI = input('e-password', { type: 'text', placeholder: e ? 'Để trống = giữ nguyên' : 'Để trống = 123456' });
+  const userI = mk('username', e ? '' : 'Để trống = mã NV', e?.username);
+  const auditSel = (isAdmin() && (SETTINGS.audit_enabled === '1' || e?.audit_only))
+    ? (() => { const sel = el('select', { id: 'e-auditonly', style: 'width:auto;margin:0' }, ...[['0', 'Không'], ['1', 'Chỉ xem Công ảo 1'], ['2', 'Chỉ xem Công ảo 2'], ['3', 'Chỉ xem Công ảo 3']].map(([v, t]) => el('option', { value: v }, t))); sel.value = String(e?.audit_only || 0); return sel; })()
+    : null;
+  const ROLE_TXT = { employee: 'Nhân viên', manager: 'Quản lý', admin: 'Admin' };
+  const dmy = (iso) => iso ? iso.split('-').reverse().join('/') : '';
+  const accSec = formSection('🔑 Tài khoản đăng nhập', () => {
+    const u = userI.value.trim() || f.code.value.trim() || 'mã NV';
+    const pw = pwI.value ? 'mật khẩu mới' : (e ? 'giữ mật khẩu' : 'mật khẩu 123456');
+    return `${u} · ${ROLE_TXT[roleSel.value] || ''} · ${pw}`;
+  }, [
+    el('div', { class: 'two-col' }, field('Tài khoản', userI), field(e ? 'Mật khẩu mới' : 'Mật khẩu', pwI)),
+    field('Vai trò', roleSel), permWrap,
+  ]);
+  const advSec = formSection('⚙️ Nâng cao', () => {
+    const parts = [attSel.value ? '⚠ chấm ' + (ATT_MODE_LABEL[attSel.value] || attSel.value).toLowerCase() : 'Chấm công theo cài đặt chung'];
+    if (startI.value) parts.push('vào làm ' + dmy(startI.value));
+    if (leaveI.value !== '') parts.push('phép riêng ' + leaveI.value + ' ngày');
+    return parts.join(' · ');
+  }, [
+    field('Kiểu chấm công (chỉ đổi khi NV này ngoại lệ)', attSel),
+    el('div', { class: 'two-col' }, field('Ngày vào làm (tính phép năm, thâm niên)', startI),
+      field('Phép năm riêng, chưa gồm thâm niên (trống = mức chung)', leaveI)),
     ...(e && deviceLockEnabled() ? [(() => {
       const status = e.device_id ? 'Đã gắn 1 điện thoại' : (e.pending_device ? 'Đang chờ duyệt đổi máy' : 'Chưa gắn điện thoại nào');
       const wrap = el('div', { style: 'margin-top:4px' }, el('label', {}, '📱 Thiết bị chấm công'),
@@ -890,18 +918,31 @@ function empModal(e) {
       }
       return wrap;
     })()] : []),
-  ];
+  ]);
+  const auditSec = auditSel ? formSection('🔍 Quyền công ảo', () => auditSel.value === '0' ? 'Không' : auditSel.options[auditSel.selectedIndex].text, [
+    el('label', { class: 'lv-chk', style: 'padding:10px;border:1px dashed #f59e0b;border-radius:10px;background:#fffbeb;margin:0' }, auditSel,
+      el('div', {}, el('b', {}, 'Tài khoản kiểm tra — chỉ xem công ảo của 1 mức'),
+        el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Dùng khi có đoàn kiểm tra: đăng nhập tài khoản này chỉ thấy công / lương ẢO ở mọi màn (không có nút bật/tắt, không thấy lượt quẹt thật, sửa giờ, nhật ký, máy chấm công), chỉ được xem, không sửa gì. Tự đặt vai trò Quản lý. Tài khoản này không hiện trong bảng công / bảng lương.'))),
+  ]) : null;
+  f.code.addEventListener('input', () => accSec.refresh());   // tóm tắt tài khoản = mã NV khi để trống
+
+  const body = [
+    codeRow,
+    el('div', { class: 'two-col' }, deptField, posField),
+    el('div', { class: 'two-col' }, field('Số điện thoại', mk('phone', '', e?.phone)), pinField),
+    accSec, advSec, auditSec,
+  ].filter(Boolean);
   const save = el('button', { class: 'btn' }, e ? 'Lưu thay đổi' : 'Tạo nhân viên');
   save.onclick = async () => {
     const body = {
       code: f.code.value.trim(), full_name: f.full_name.value.trim(), department: deptSel.value,
-      position: posSel.value, phone: f.phone.value, role: $('#e-role').value,
-      username: f.username.value.trim(),
-      password: $('#e-password').value || undefined,
-      att_mode: $('#e-attmode') ? $('#e-attmode').value : undefined,
-      start_date: $('#e-start') ? $('#e-start').value : undefined,
-      leave_days_year: $('#e-leaveyear') ? $('#e-leaveyear').value : undefined,
-      audit_only: $('#e-auditonly') ? +$('#e-auditonly').value : undefined,
+      position: posSel.value, phone: f.phone.value, role: roleSel.value,
+      username: f.username.value.trim() || undefined,   // trống: tạo mới = mã NV, sửa = giữ nguyên
+      password: pwI.value || undefined,
+      att_mode: attSel.value,
+      start_date: startI.value,
+      leave_days_year: leaveI.value,
+      audit_only: auditSel ? +auditSel.value : undefined,
     };
     if (body.audit_only && body.role === 'admin') body.role = 'manager';   // tài khoản kiểm tra luôn là Quản lý
     // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
@@ -912,7 +953,7 @@ function empModal(e) {
       const r = e ? await api('/admin/employees/' + e.id, { method: 'PUT', body }) : await api('/admin/employees', { method: 'POST', body });
       toast(r && r.relinked ? `Đã lưu — gán ${r.relinked} lượt quẹt cũ của Số ID máy và tính lại công` : 'Đã lưu', 'ok');
       closeModal(); pageEmployees();
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { if (/tài khoản/i.test(err.message)) accSec.setOpen(true); toast(err.message, 'err'); }
   };
   // ----- 2 tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) -----
   let modalBody = body;

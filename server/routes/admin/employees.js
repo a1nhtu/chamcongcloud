@@ -122,8 +122,14 @@ export function registerEmployeeRoutes(r, { need }) {
 
   r.post('/employees', need('employees'), (req, res) => {
     const b = req.body || {};
-    if (!b.code || !b.full_name || !b.username || !b.password)
-      return res.status(400).json({ error: 'Thiếu mã NV, họ tên, tài khoản hoặc mật khẩu' });
+    if (!String(b.code || '').trim() || !String(b.full_name || '').trim())
+      return res.status(400).json({ error: 'Thiếu mã NV hoặc họ tên' });
+    // Tài khoản để trống = mã NV; mật khẩu để trống = 123456 (NV đổi sau trên app)
+    b.code = String(b.code).trim();
+    b.username = String(b.username || '').trim() || b.code;
+    if (!String(b.password || '')) b.password = '123456';
+    if (db.prepare('SELECT 1 FROM employees WHERE username=?').get(b.username))
+      return res.status(400).json({ error: `Tài khoản đăng nhập "${b.username}" đã có người dùng — mở mục "Tài khoản đăng nhập" điền tài khoản khác`, field: 'username' });
     // Chống trùng mã NV + số ID máy chấm công
     const code0 = b.code.trim();
     if (db.prepare('SELECT 1 FROM employees WHERE code=?').get(code0))

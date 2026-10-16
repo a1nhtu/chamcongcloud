@@ -507,3 +507,12 @@ input[type=checkbox].sw.sm:checked::after { left: 17px; }
 @media (max-width: 700px) { .dev-st-grid { grid-template-columns: 1fr; } }
 input[type=checkbox].sw:disabled { opacity: .45; cursor: not-allowed; }
 .dev-tg.locked { background: #fafafa; }
+/* Khung thu gọn trong form (Thêm/Sửa nhân viên…) */
+.f-sec { border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; }
+.f-sec-h { display: flex; gap: 8px; align-items: center; width: 100%; padding: 10px 12px; background: none; border: 0; cursor: pointer; text-align: left; font: inherit; color: var(--ink); }
+.f-sec-h .tg { width: 22px; height: 22px; border-radius: 6px; background: #f3f4f6; color: #6b7280; font-size: 10px; display: flex; align-items: center; justify-content: center; flex: none; }
+.f-sec-h:hover .tg { background: #ffedd5; color: var(--brand); }
+.f-sec-h b { white-space: nowrap; }
+.f-sec-h .sum { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.f-sec-b { padding: 0 12px 12px; }
+.f-sec:not(.open) > .f-sec-b { display: none; }
