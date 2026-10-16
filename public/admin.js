@@ -167,7 +167,12 @@ async function afterLogin() {
   visible.forEach(([key, ic, label]) => {
     const grp = groupFor(key); if (grp) ensureGroup(grp);
     const nav = boxOf.get(key) || $('#nav');   // mục trong nhóm gắn vào thân nhóm
-    const b = el('button', { 'data-k': key, title: label }, el('span', {}, ic), el('span', { class: 'nav-lb' }, label));
+    const b = el('button', { 'data-k': key, title: label + ' (Ctrl + bấm / chuột giữa: mở tab mới)' }, el('span', {}, ic), el('span', { class: 'nav-lb' }, label));
+    // Ctrl/⌘/Shift + bấm hoặc bấm chuột giữa → mở trang này ở TAB MỚI (/admin#key), tab hiện tại giữ nguyên
+    const openTab = (ev) => { ev.preventDefault(); ev.stopImmediatePropagation(); window.open(location.pathname + location.search + '#' + key, '_blank'); };
+    b.addEventListener('click', (ev) => { if (ev.ctrlKey || ev.metaKey || ev.shiftKey) openTab(ev); }, true);
+    b.addEventListener('auxclick', (ev) => { if (ev.button === 1) openTab(ev); });
+    b.addEventListener('mousedown', (ev) => { if (ev.button === 1) ev.preventDefault(); });   // chuột giữa: không bật cuộn tự động
     // Mục có MENU CON (kiểu ZKBio): bấm mũi tên hoặc bấm mục để xổ ra / thu lại
     const SUB = key === 'assignments' ? { id: 'nav-sub-as', tabs: AS_TABS, isOpen: () => _asNavOpen, setOpen: (o) => { _asNavOpen = o; }, pick: (tab) => { if (!asLeaveOk()) return false; _asTab = tab; _asAdd = null; return true; } }
       : key === 'shifts' ? { id: 'nav-sub-sh', tabs: SH_TABS, isOpen: () => _shNavOpen, setOpen: (o) => { _shNavOpen = o; }, pick: (tab) => { _shView = tab; _schEdit = null; return true; } }
