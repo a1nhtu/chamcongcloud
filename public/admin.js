@@ -5202,13 +5202,13 @@ async function pageDevices() {
   try { d = await api('/admin/devices'); } catch (e) { setMain(head('Máy chấm công'), el('div', { class: 'empty' }, e.message)); return; }
 
   // Bật/tắt dùng máy chấm công + tự tạo NV — CHỈ tài khoản tổng đổi được
-  const enChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.enabled ? { checked: '' } : {}) });
-  const autoChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.autocreate ? { checked: '' } : {}) });
-  const keyReqChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.key_required ? { checked: '' } : {}) });
-  const tcpChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.tcp_enabled ? { checked: '' } : {}) });
-  const guardChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.pin_guard ? { checked: '' } : {}) });
-  const pushNameChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.push_names ? { checked: '' } : {}) });
-  const asciiChk = el('input', { type: 'checkbox', style: 'width:auto', ...(d.name_ascii ? { checked: '' } : {}) });
+  const enChk = el('input', { type: 'checkbox', class: 'sw', ...(d.enabled ? { checked: '' } : {}) });
+  const autoChk = el('input', { type: 'checkbox', class: 'sw', ...(d.autocreate ? { checked: '' } : {}) });
+  const keyReqChk = el('input', { type: 'checkbox', class: 'sw', ...(d.key_required ? { checked: '' } : {}) });
+  const tcpChk = el('input', { type: 'checkbox', class: 'sw', ...(d.tcp_enabled ? { checked: '' } : {}) });
+  const guardChk = el('input', { type: 'checkbox', class: 'sw', ...(d.pin_guard ? { checked: '' } : {}) });
+  const pushNameChk = el('input', { type: 'checkbox', class: 'sw', ...(d.push_names ? { checked: '' } : {}) });
+  const asciiChk = el('input', { type: 'checkbox', class: 'sw sm', ...(d.name_ascii ? { checked: '' } : {}) });
   const saveEn = el('button', { class: 'btn sm' }, 'Lưu');
   saveEn.onclick = async () => {
     try {
@@ -5239,7 +5239,7 @@ async function pageDevices() {
         el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, pushNameChk,
           el('div', {}, el('b', {}, 'Đẩy tên nhân viên từ phần mềm xuống máy'),
             el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: lưu NV có Số ID → tên trên máy tự đổi theo tên trong phần mềm; đồng bộ máy↔máy cũng dùng tên phần mềm. Tắt: máy giữ tên gõ trên máy.'),
-            el('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:6px;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU (máy đời cũ hiện lỗi chữ có dấu) — tối đa 24 ký tự'))),
+            el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU (máy đời cũ hiện lỗi chữ có dấu) — tối đa 24 ký tự'))),
         el('div', { style: 'margin-top:12px' }, saveEn))
     : el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
         el('div', {}, el('b', {}, 'Tính năng máy chấm công:'), stPill(d.enabled)),
