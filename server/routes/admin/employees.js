@@ -1,7 +1,7 @@
 // Nhóm route NHÂN VIÊN + phân quyền chi tiết + khoá thiết bị chấm công điện thoại.
 import ExcelJS from 'exceljs';
 import { db, getSetting } from '../../db.js';
-import { hashPassword, passwordHasher, PERMISSIONS, isInspector } from '../../auth.js';
+import { hashPassword, passwordHasher, PERMISSIONS, isInspector, hasPerm } from '../../auth.js';
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
@@ -198,6 +198,33 @@ export function registerEmployeeRoutes(r, { need }) {
     g.getColumn(1).width = 26; g.getColumn(2).width = 60;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', 'attachment; filename="mau_nhan_vien.xlsx"');
+    await wb.xlsx.write(res);
+    res.end();
+  });
+
+  // XUẤT danh sách nhân viên ra Excel — CÙNG thứ tự cột với file nhập (sửa xong nhập lại bằng "Cập nhật từ Excel").
+  // Mật khẩu để trống (cập nhật = giữ nguyên). Lương cơ bản chỉ điền khi người xuất có quyền Lương. Thêm cột Trạng thái ở cuối.
+  r.get('/employees/export.xlsx', need('employees'), async (req, res) => {
+    const canSalary = hasPerm(req.user, 'salary');
+    const rows = db.prepare(`SELECT e.code, e.full_name, e.department, e.position, e.phone, e.role, e.device_pin, e.username, e.active, s.basic_salary
+      FROM employees e LEFT JOIN salary_configs s ON s.employee_id = e.id ORDER BY e.active DESC, e.department, e.full_name`).all();
+    const ROLE = { employee: 'Nhân viên', manager: 'Quản lý', admin: 'Admin' };
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('NhanVien');
+    const hr = ws.addRow([...EMP_IMPORT_COLS, 'Trạng thái']);
+    hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    hr.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
+    for (const e of rows) {
+      ws.addRow([e.code, e.full_name, e.department || '', e.position || '', e.phone || '', ROLE[e.role] || 'Nhân viên', e.device_pin || '',
+        canSalary && e.basic_salary ? e.basic_salary : '', e.username || '', '', e.active ? 'Đang làm' : 'Đã khoá']);
+    }
+    const widths = [12, 24, 20, 20, 14, 12, 16, 14, 18, 10, 12];
+    ws.columns.forEach((c, i) => { c.width = widths[i] || 14; });
+    ws.views = [{ state: 'frozen', ySplit: 1 }];
+    ws.autoFilter = { from: 'A1', to: 'K1' };
+    const d = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="danh_sach_nhan_vien_${d}.xlsx"`);
     await wb.xlsx.write(res);
     res.end();
   });

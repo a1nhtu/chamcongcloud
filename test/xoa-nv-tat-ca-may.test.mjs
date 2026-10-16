@@ -132,3 +132,22 @@ test('thêm NV: để trống tài khoản = mã NV, để trống mật khẩu 
   assert.equal(r3.code, 200);
   assert.ok(verifyPassword('abc999', db.prepare("SELECT password_hash FROM employees WHERE code='NV902'").get().password_hash));
 });
+
+test('xuất danh sách NV ra Excel: cùng thứ tự cột với file nhập, có Số ID + trạng thái, mật khẩu để trống', async () => {
+  const ExcelJS = (await import('exceljs')).default;
+  const headers = {};
+  const { PassThrough } = await import('node:stream');
+  const pt = new PassThrough(); const chunks = []; pt.on('data', (c) => chunks.push(c));
+  Object.assign(pt, { setHeader(k, v) { headers[k] = v; } });
+  db.prepare("INSERT INTO employees(code, full_name, role, username, password_hash, device_pin, active) VALUES ('NV950','Xuất Thử','employee','nv950','x','950',1)").run();
+  await routes['GET /employees/export.xlsx']({ user: ADMIN, query: {} }, pt);
+  await new Promise((r) => setImmediate(r));
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.concat(chunks));
+  const ws = wb.worksheets[0];
+  assert.equal(ws.getRow(1).getCell(1).value, 'Mã NV *'); assert.equal(ws.getRow(1).getCell(7).value, 'Số ID máy chấm công');
+  assert.equal(ws.getRow(1).getCell(11).value, 'Trạng thái');
+  let found = null;
+  ws.eachRow((r, i) => { if (i > 1 && r.getCell(1).value === 'NV950') found = r; });
+  assert.ok(found); assert.equal(String(found.getCell(7).value), '950'); assert.equal(found.getCell(9).value, 'nv950'); assert.ok(!found.getCell(10).value, 'mật khẩu để trống'); assert.equal(found.getCell(11).value, 'Đang làm');
+  assert.match(headers['Content-Disposition'], /danh_sach_nhan_vien_/);
+});

@@ -11,6 +11,7 @@ const NAV = [
   ['dashboard', '📊', 'Tổng quan', 'reports'],
   ['employees', '👥', 'Nhân viên', 'employees'],
   ['org', '🏢', 'Bộ phận', 'departments'],
+  ['positions', '💼', 'Chức danh', 'departments'],
   ['hrprofile', '📇', 'Hồ sơ nhân sự', 'hr'],
   ['hrcontract', '📄', 'Hợp đồng lao động', 'hr'],
   ['hrdecision', '🔀', 'Thuyên chuyển & nghỉ việc', 'hr'],
@@ -41,7 +42,7 @@ const NAV = [
 // NHÓM MENU TRÁI (menu dài → gom các mục cùng loại, mỗi nhóm 1 mũi tên xổ / thu). Mục không thuộc nhóm nào đứng riêng.
 // Nhóm chỉ còn 1 mục nhìn thấy (do phân quyền / tắt tính năng) thì hiện thẳng mục đó, không cần tiêu đề nhóm.
 const NAV_GROUPS = [
-  ['org', 'Tổ chức', ['employees', 'org', 'offices']],
+  ['org', 'Tổ chức', ['employees', 'org', 'positions', 'offices']],
   ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision', 'hrtemplates']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
@@ -135,7 +136,7 @@ async function afterLogin() {
     $('#side-brand').after(tg);
   }
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
-  const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
+  const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'positions', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
   const visible = NAV.filter(([key, , , perm]) => (perm == null || hasPerm(perm)) && (!isInspector() || INSPECTOR_NAV.includes(key))
     && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg' || key === 'swap' || key === 'abnormal'))
     && !(key === 'devices' && !deviceEnabled())
@@ -260,7 +261,7 @@ function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
   // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
-  ({ dashboard: pageDashboard, employees: pageEmployees, org: pageOrg, shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
+  ({ dashboard: pageDashboard, employees: pageEmployees, org: () => pageOrg('dept'), positions: () => pageOrg('pos'), shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
     hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates'),
     meal: () => mealPage('pageMealBoard'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
 }
@@ -566,6 +567,8 @@ async function pageEmployees() {
   const tmplBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '📄 Tải mẫu Excel') : null;
   const impAddBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '⬆ Nhập thêm mới') : null;
   const impUpdBtn = canEdit ? el('button', { class: 'btn ghost sm' }, '🔄 Cập nhật từ Excel') : null;
+  const exportBtn = canEdit ? el('button', { class: 'btn ghost sm', title: 'Xuất toàn bộ nhân viên ra Excel (cùng mẫu cột với file nhập — sửa xong nhập lại được)' }, '⬇ Xuất danh sách') : null;
+  if (exportBtn) exportBtn.onclick = downloadEmpExport;
   if (tmplBtn) tmplBtn.onclick = downloadEmpTemplate;
   if (impAddBtn) impAddBtn.onclick = () => importEmployees('add');
   if (impUpdBtn) impUpdBtn.onclick = () => importEmployees('update');
@@ -577,13 +580,13 @@ async function pageEmployees() {
   if (devDelBtn) devDelBtn.onclick = () => deleteUsersAllModal(pageEmployees);
   const devPushBtn = (hasPerm('devices') && deviceEnabled()) ? el('button', { class: 'btn ghost sm', title: 'Đẩy nhân viên (Số ID + tên, kèm vân tay/mặt nếu có) xuống máy chấm công' }, '⬇ Đẩy NV xuống máy') : null;
   if (devPushBtn) devPushBtn.onclick = async () => { try { pushEmpModal((await api('/admin/devices')).rows, pageEmployees); } catch (e) { toast(e.message, 'err'); } };
-  const headArgs = ['Nhân viên', refreshBtn, addBtn, tmplBtn, impAddBtn, impUpdBtn, devPushBtn, devDelBtn].filter(Boolean);
+  const headArgs = ['Nhân viên', refreshBtn, addBtn, exportBtn, tmplBtn, impAddBtn, impUpdBtn, devPushBtn, devDelBtn].filter(Boolean);
   setMain(head(...headArgs), loading());
   try {
     await loadRefs();
     const { rows } = await api('/admin/employees');
     if (addBtn) addBtn.onclick = () => empModal(null);
-    const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, tmplBtn, impAddBtn, impUpdBtn, devPushBtn, devDelBtn].filter(Boolean);
+    const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, exportBtn, tmplBtn, impAddBtn, impUpdBtn, devPushBtn, devDelBtn].filter(Boolean);
 
     // ===== Cây BỘ PHẬN bên trái (bấm để lọc) + bảng nhân viên GỌN bên phải, xếp theo bộ phận =====
     const NONE = '\u0000none';                       // khoá cho NV chưa có bộ phận
@@ -638,7 +641,9 @@ async function pageEmployees() {
         .sort((x, y) => (orderOf.get(x.department || NONE) ?? 9999) - (orderOf.get(y.department || NONE) ?? 9999) || x.full_name.localeCompare(y.full_name, 'vi'));
       countLbl.textContent = list.length + ' nhân viên' + (sel ? ' · ' + sel.label : '');
       const tbl = el('table', { class: 'data emp-compact' });
-      tbl.innerHTML = `<thead><tr><th>Mã</th><th>Họ tên</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
+      // Cột Số ID máy chấm công: chỉ hiện khi đang dùng máy chấm công (chỉ chấm định vị/điện thoại thì ẩn)
+      const showPin = deviceEnabled(), NCOL = showPin ? 8 : 7;
+      tbl.innerHTML = `<thead><tr><th>Mã</th>${showPin ? '<th title="Số ID trên máy chấm công">Số ID</th>' : ''}<th>Họ tên</th><th>Chức danh</th><th>Tài khoản</th><th>Quyền</th><th>TT</th><th></th></tr></thead>`;
       const tb = el('tbody');
       let lastDept = null;
       for (const e of list) {
@@ -646,7 +651,7 @@ async function pageEmployees() {
         if (dk !== lastDept) {   // dòng tiêu đề nhóm bộ phận
           lastDept = dk;
           const n = list.filter((x) => (x.department || NONE) === dk).length;
-          tb.append(el('tr', { class: 'grp' }, el('td', { colspan: 7 }, (dk === NONE ? 'Chưa có bộ phận' : dk) + ' (' + n + ')')));
+          tb.append(el('tr', { class: 'grp' }, el('td', { colspan: NCOL }, (dk === NONE ? 'Chưa có bộ phận' : dk) + ' (' + n + ')')));
         }
         const delBtn = btnSm('🗑', () => delEmp(e), 'ghost'); delBtn.style.color = '#c0392b'; delBtn.title = 'Xóa nhân viên';
         const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:4px;justify-content:flex-end' },
@@ -654,8 +659,8 @@ async function pageEmployees() {
           e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : btnSm('Mở khoá', () => unlockEmp(e), 'ghost'),
           delBtn) : '';
         tb.append(el('tr', {},
-          el('td', {}, e.code,
-            e.device_pin ? el('span', { style: 'color:#0a7;font-size:11px;margin-left:6px', title: 'Số ID trên máy chấm công' }, '🔌' + e.device_pin) : ''),
+          el('td', {}, e.code),
+          showPin ? el('td', {}, e.device_pin ? el('b', { style: 'color:#0a7' }, e.device_pin) : el('span', { class: 'muted' }, '—')) : '',
           el('td', {}, el('b', {}, e.full_name),
             e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px', title: 'Tự tạo khi đăng ký vân tay trên máy — bổ sung thông tin rồi lưu' }, 'nháp từ máy') : '',
             (e.device_admin_on || []).length ? el('span', { class: 'pill', style: 'margin-left:6px;background:#fdf0df;color:#a25a08', title: 'Quản trị MÁY chấm công (vào được menu máy) tại: ' + e.device_admin_on.join(', ') }, '👑 QT máy') : ''),
@@ -666,7 +671,7 @@ async function pageEmployees() {
           el('td', {}, actions),
         ));
       }
-      if (!list.length) tb.append(el('tr', {}, el('td', { colspan: 7 }, el('div', { class: 'empty' }, 'Không có nhân viên nào.'))));
+      if (!list.length) tb.append(el('tr', {}, el('td', { colspan: NCOL }, el('div', { class: 'empty' }, 'Không có nhân viên nào.'))));
       tbl.append(tb);
       listBox.innerHTML = ''; listBox.append(tbl);
     };
@@ -679,6 +684,19 @@ async function pageEmployees() {
         el('div', { class: 'panel emp-side' }, el('div', { class: 'emp-side-h' }, 'Bộ phận'), tree),
         el('div', { class: 'emp-main' }, el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap' }, searchI, countLbl), listBox)));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
+}
+// Xuất danh sách nhân viên ra Excel (cùng mẫu cột với file nhập)
+async function downloadEmpExport() {
+  try {
+    const res = await api('/admin/employees/export.xlsx', { raw: true });
+    if (!res.ok) { toast('Không xuất được danh sách', 'err'); return; }
+    const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'danh_sach_nhan_vien.xlsx';
+    const url = URL.createObjectURL(await res.blob());
+    const a = el('a', { href: url, download: name });
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    toast('Đã xuất danh sách nhân viên', 'ok');
+  } catch { toast('Không xuất được danh sách', 'err'); }
 }
 // Tải file Excel mẫu nhập nhân viên
 async function downloadEmpTemplate() {
@@ -823,7 +841,7 @@ function empModal(e) {
   const withAdd = (sel, kind) => el('div', { style: 'display:flex;gap:6px;align-items:center' }, sel, quickAdd(kind, sel));
   const deptField = el('div', {}, el('label', {}, 'Bộ phận'), withAdd(deptSel, 'dept'));
 
-  // Chức danh: chọn từ danh mục đã khai báo (tab "Bộ phận" → Chức danh)
+  // Chức danh: chọn từ danh mục đã khai báo (menu Tổ chức → Chức danh)
   const posSel = el('select', { id: 'e-position' },
     el('option', { value: '' }, '— Chọn chức danh —'),
     ...POSITIONS.map(p => el('option', { value: p.name, ...(e?.position === p.name ? { selected: '' } : {}) }, p.name)));
@@ -1063,15 +1081,14 @@ async function delEmp(e) {
 }
 
 // Trang "Bộ phận & Chức danh" — khai báo bộ phận CHA-CON + danh mục chức danh
-async function pageOrg() {
-  setMain(head('Bộ phận & Chức danh'), loading());
+// view: 'dept' = trang Bộ phận, 'pos' = trang Chức danh (2 mục riêng trong menu Tổ chức)
+async function pageOrg(view = 'dept') {
+  const title = view === 'pos' ? 'Chức danh' : 'Bộ phận';
+  setMain(head(title), loading());
   const ro = !hasPerm('departments');   // chỉ xem
-  const box = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:start' });
-  const deptPanel = el('div', { class: 'panel', style: 'padding:18px 20px' });
-  const posPanel = el('div', { class: 'panel', style: 'padding:18px 20px' });
-  box.append(deptPanel, posPanel);
-  if (innerWidth < 760) box.style.gridTemplateColumns = '1fr';
-  setMain(head('Bộ phận & Chức danh'), box);
+  const deptPanel = el('div', { class: 'panel', style: 'padding:18px 20px;max-width:760px' });
+  const posPanel = el('div', { class: 'panel', style: 'padding:18px 20px;max-width:760px' });
+  setMain(head(title), view === 'pos' ? posPanel : deptPanel);
 
   // ---------- BỘ PHẬN (cây cha-con) ----------
   const renderDept = () => {
@@ -1135,7 +1152,7 @@ async function pageOrg() {
 
   DEPARTMENTS = (await api('/admin/departments')).rows;
   try { POSITIONS = (await api('/admin/positions')).rows; } catch { POSITIONS = []; }
-  renderDept(); renderPos();
+  if (view === 'pos') renderPos(); else renderDept();
 }
 
 // Sửa 1 bộ phận: đổi tên + chọn bộ phận cha (không cho chọn chính nó)
