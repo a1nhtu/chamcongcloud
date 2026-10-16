@@ -192,8 +192,14 @@ test('TẮT công tắc = như cũ: máy đăng ký người khác vào Số ID 
   setSetting('device_pin_guard', '1');
 });
 
+test('mặc định (chưa lưu cài đặt): BẬT cả cảnh báo trùng Số ID lẫn đẩy tên', () => {
+  db.prepare("DELETE FROM settings WHERE key IN ('device_pin_guard','device_push_names')").run();
+  assert.equal(G.guardOn(), true); assert.equal(G.pushNamesOn(), true);
+});
+
 test('đẩy tên NV xuống máy: tắt = dùng tên trên máy; bật = tên phần mềm bỏ dấu, tối đa 24 ký tự', () => {
   db.prepare("UPDATE employees SET full_name='Nguyễn Thị Phương Hoa Thanh Hương' WHERE device_pin='2'").run();
+  setSetting('device_push_names', '0');
   assert.match(S.buildUserCommand('2', 'SN_A'), /Name=Tran Thu Hoa\t/);
   setSetting('device_push_names', '1');
   assert.match(S.buildUserCommand('2', 'SN_A'), /Name=Nguyen Thi Phuong Hoa Th\t/);

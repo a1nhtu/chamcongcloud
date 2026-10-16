@@ -40,8 +40,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       use_phone_cfg: ['0', '1'].includes(process.env.USE_PHONE) ? process.env.USE_PHONE : '',
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
-      device_pin_guard: getSetting('device_pin_guard', '0'),     // cảnh báo trùng Số ID giữa các máy
-      device_push_names: getSetting('device_push_names', '0'),   // tự đẩy tên NV phần mềm xuống máy
+      device_pin_guard: getSetting('device_pin_guard', '1'),     // cảnh báo trùng Số ID giữa các máy
+      device_push_names: getSetting('device_push_names', '1'),   // tự đẩy tên NV phần mềm xuống máy
       device_name_ascii: getSetting('device_name_ascii', '1'),   // tên đẩy xuống máy: bỏ dấu
       audit_enabled: req.forceVirt ? '0' : getSetting('audit_enabled', '0'),
       hr_enabled: req.forceVirt ? '0' : getSetting('hr_enabled', '0'),         // PHÂN HỆ NHÂN SỰ — chỉ tài khoản tổng bật   // CÔNG ẢO / LƯƠNG ẢO — chỉ tài khoản tổng bật (tài khoản kiểm tra: luôn '0')

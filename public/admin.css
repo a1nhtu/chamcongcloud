@@ -497,3 +497,7 @@ input[type=checkbox].sw:focus-visible { outline: 2px solid var(--brand); outline
 input[type=checkbox].sw.sm { width: 34px; height: 20px; border-radius: 10px; }
 input[type=checkbox].sw.sm::after { width: 14px; height: 14px; }
 input[type=checkbox].sw.sm:checked::after { left: 17px; }
+/* Lưới công tắc cài đặt máy chấm công: 2 cột, màn hình hẹp 1 cột */
+.dev-tg-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 14px; }
+.dev-tg { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+@media (max-width: 900px) { .dev-tg-grid { grid-template-columns: 1fr; } }

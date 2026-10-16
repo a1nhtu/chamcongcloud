@@ -1,5 +1,5 @@
-// CẢNH BÁO TRÙNG SỐ ID giữa các máy chấm công (công tắc device_pin_guard, mặc định TẮT)
-// + ĐẨY TÊN NV từ phần mềm xuống máy (công tắc device_push_names, mặc định TẮT).
+// CẢNH BÁO TRÙNG SỐ ID giữa các máy chấm công (công tắc device_pin_guard, mặc định BẬT — Anh chốt 16/10/2026)
+// + ĐẨY TÊN NV từ phần mềm xuống máy (công tắc device_push_names, mặc định BẬT).
 //
 // Số ID (PIN) là toàn cục: ID 1 ở mọi máy = 1 người. Máy B lỡ đăng ký người khác vào Số ID đang có chủ thì
 // lượt quẹt dồn nhầm + vân tay người lạ bị đồng bộ đè sang máy khác. Khi bật công tắc:
@@ -15,7 +15,7 @@ import {
   relinkPunchesForPin, rebuildDays, syncPinsToGroup, syncFillDevice,
 } from './device-sync.js';
 
-export const guardOn = () => getSetting('device_pin_guard', '0') === '1';
+export const guardOn = () => getSetting('device_pin_guard', '1') === '1';
 const HOLD = "('open','moving','failed')";
 export const holdPin = (pin, id) => `${pin}#${id}`;
 const err = (m) => Object.assign(new Error(m), { status: 400 });
@@ -339,7 +339,7 @@ export function dropConflicts(serial, pins) {
 }
 
 /* ---------------- ĐẨY TÊN NV TỪ PHẦN MỀM XUỐNG MÁY ---------------- */
-export const pushNamesOn = () => getSetting('device_push_names', '0') === '1';
+export const pushNamesOn = () => getSetting('device_push_names', '1') === '1';
 // Tên ghi xuống máy: bỏ ký tự cấm, (tuỳ chọn) bỏ dấu, tối đa 24 ký tự
 export function deviceName(s) {
   let n = String(s || '').replace(/[\t\r\n=]/g, ' ').replace(/\s+/g, ' ').trim();

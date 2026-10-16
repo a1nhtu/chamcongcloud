@@ -5195,6 +5195,13 @@ async function pageLogs() {
   load();
 }
 
+// 1 ô công tắc trong lưới cài đặt máy chấm công: công tắc gạt + tiêu đề + mô tả (+ phần phụ)
+function devToggle(chk, title, desc, extra) {
+  return el('div', { class: 'dev-tg' },
+    el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin:0' }, chk,
+      el('div', {}, el('b', { style: 'color:var(--ink)' }, title), el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400;margin-top:2px;line-height:1.45' }, desc))),
+    extra ? el('div', { style: 'padding-left:52px' }, extra) : '');
+}
 /* ---------- MÁY CHẤM CÔNG (ZKTeco ADMS push) ---------- */
 async function pageDevices() {
   setMain(head('Máy chấm công'), loading());
@@ -5220,27 +5227,16 @@ async function pageDevices() {
   };
   const stPill = (on) => el('span', { class: 'pill ' + (on ? 'ok' : 'warn'), style: 'margin-left:6px' }, on ? 'ĐANG BẬT' : 'ĐANG TẮT');
   const togglePanel = isMaster()
-    ? el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
-        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, enChk,
-          el('div', {}, el('b', {}, 'Dùng máy chấm công (kết nối máy ZKTeco)'),
-            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật để nhận dữ liệu chấm công máy tự đẩy về. Tắt = chỉ chấm bằng điện thoại. Có thể dùng song song.'))),
-        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, autoChk,
-          el('div', {}, el('b', {}, 'Tự tạo nhân viên khi đăng ký vân tay trên máy'),
-            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: đăng ký vân tay/khuôn mặt cho Số ID mới trên máy → phần mềm tự tạo NV nháp (Số ID + tên máy gửi về), admin bổ sung sau. Tắt: chỉ ghi nhận, chờ admin gán tay.'))),
-        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, keyReqChk,
-          el('div', {}, el('b', {}, 'Bắt buộc KEY bản quyền theo máy'),
-            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: mỗi máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không bị ảnh hưởng. Tắt: máy nào cắm vào cũng duyệt được.'))),
-        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, tcpChk,
-          el('div', {}, el('b', {}, 'Dùng máy chấm công kết nối TCP/IP (cổng 4370)'),
-            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: thêm được máy theo địa chỉ IP trong mạng LAN — phần mềm chủ động kết nối để tải nhân viên, tải dữ liệu chấm công theo khoảng ngày, xem dung lượng, xóa dữ liệu, xóa quản trị. Dùng cho máy đời cũ không có Cloud Server (ADMS). Cần phần mềm cài trên máy tính Windows cùng mạng với máy chấm công.'))),
-        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, guardChk,
-          el('div', {}, el('b', {}, 'Cảnh báo trùng Số ID giữa các máy'),
-            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: máy đăng ký người mới vào Số ID đã có chủ (ở máy khác / khác hẳn tên) → hiện cảnh báo, tạm dừng đồng bộ Số ID đó và GIỮ lượt quẹt ở máy đó (chưa tính công) tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (phần mềm tự cấp Số ID mới, giữ nguyên vân tay/thẻ). Tắt: như trước.'))),
-        el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:12px' }, pushNameChk,
-          el('div', {}, el('b', {}, 'Đẩy tên nhân viên từ phần mềm xuống máy'),
-            el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: lưu NV có Số ID → tên trên máy tự đổi theo tên trong phần mềm; đồng bộ máy↔máy cũng dùng tên phần mềm. Tắt: máy giữ tên gõ trên máy.'),
-            el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU (máy đời cũ hiện lỗi chữ có dấu) — tối đa 24 ký tự'))),
-        el('div', { style: 'margin-top:12px' }, saveEn))
+    ? el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:1100px' },
+        el('div', { class: 'dev-tg-grid' },
+          devToggle(enChk, 'Dùng máy chấm công (kết nối máy ZKTeco)', 'Nhận dữ liệu chấm công máy tự đẩy về. Tắt = chỉ chấm bằng điện thoại (dùng song song được).'),
+          devToggle(autoChk, 'Tự tạo nhân viên khi đăng ký vân tay trên máy', 'Số ID mới đăng ký trên máy → tự tạo NV nháp (Số ID + tên máy gửi), admin bổ sung sau. Tắt: chờ admin gán tay.'),
+          devToggle(keyReqChk, 'Bắt buộc KEY bản quyền theo máy', 'Máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không ảnh hưởng.'),
+          devToggle(tcpChk, 'Dùng máy kết nối TCP/IP (cổng 4370)', 'Thêm máy theo IP trong LAN — phần mềm chủ động tải NV, tải chấm công, xoá dữ liệu. Cho máy đời cũ không có ADMS; cần cài trên máy tính Windows cùng mạng.'),
+          devToggle(guardChk, 'Cảnh báo trùng Số ID giữa các máy', 'Máy đăng ký người mới vào Số ID đã có chủ → cảnh báo, tạm dừng đồng bộ và GIỮ lượt quẹt tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (tự cấp Số ID mới, giữ nguyên vân tay/thẻ).'),
+          devToggle(pushNameChk, 'Đẩy tên nhân viên từ phần mềm xuống máy', 'Lưu NV có Số ID → tên trên máy đổi theo phần mềm; đồng bộ máy↔máy cũng dùng tên phần mềm.',
+            el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU — tối đa 24 ký tự'))),
+        el('div', { style: 'margin-top:14px' }, saveEn))
     : el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:640px' },
         el('div', {}, el('b', {}, 'Tính năng máy chấm công:'), stPill(d.enabled)),
         el('div', { style: 'margin-top:6px' }, el('b', {}, 'Tự tạo NV khi đăng ký vân tay:'), stPill(d.autocreate)),

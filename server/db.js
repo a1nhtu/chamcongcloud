@@ -671,7 +671,7 @@ function migrateColumns() {
   add('device_users_serial', 'privilege', 'INTEGER DEFAULT 0');
   // Dải Số ID của máy (VD '1001-1999', rỗng = không giới hạn): máy đăng ký số ngoài dải → cảnh báo nghi trùng
   add('push_devices', 'pin_range', "TEXT DEFAULT ''");
-  // CẢNH BÁO TRÙNG SỐ ID (công tắc device_pin_guard): 1 dòng = máy `serial` vừa đăng ký Số ID `pin` đã có chủ.
+  // CẢNH BÁO TRÙNG SỐ ID (công tắc device_pin_guard, mặc định bật): 1 dòng = máy `serial` vừa đăng ký Số ID `pin` đã có chủ.
   // Trong lúc chờ xử lý: Số ID đó không đồng bộ từ/xuống máy này, lượt quẹt ở máy này (từ `since`) bị giữ lại.
   db.exec(`CREATE TABLE IF NOT EXISTS device_pin_conflicts (
       id          INTEGER PRIMARY KEY AUTOINCREMENT,
