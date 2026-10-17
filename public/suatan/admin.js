@@ -1,4 +1,4 @@
-// QUẢN LÝ SUẤT ĂN (giao diện HR trong /admin) — Đối chiếu & chốt · Báo cáo theo món · Thực đơn · Cấu hình · Suất ăn của tôi.
+// QUẢN LÝ SUẤT ĂN (giao diện HR trong /admin) — Đối chiếu & chốt · Tổng hợp & điều chỉnh theo món · Thực đơn · Cấu hình · Suất ăn của tôi.
 // Chỉ nạp khi mở menu "Suất ăn" (admin.js gọi import('/suatan/admin.js')), và chỉ khi tài khoản tổng đã bật phân hệ.
 import { api, toast, el } from '/common.js';
 import { renderMealTab } from '/suatan/emp.js';
@@ -322,11 +322,30 @@ export async function pageMealCfg(ctx) {
   main.append(kBox);
 }
 
-/* ===================== BÁO CÁO SUẤT ĂN (theo món · HR chỉnh tay có lưu vết · xuất Excel) ===================== */
+/* ===================== TỔNG HỢP & ĐIỀU CHỈNH SUẤT ĂN (theo món · HR chỉnh số suất / chọn món hộ có lưu vết · xuất Excel) ===================== */
+// Thu gọn / mở rộng từng khung (mỗi bữa + lịch sử); nhớ trên máy này. Mặc định: bữa mở, lịch sử thu gọn.
+const FOLD_LS = 'sa_rep_fold';
+const FOLD = (() => { try { return JSON.parse(localStorage.getItem(FOLD_LS) || '{}') || {}; } catch { return {}; } })();
+const foldSave = () => { try { localStorage.setItem(FOLD_LS, JSON.stringify(FOLD)); } catch { /* trình duyệt chặn lưu trữ */ } };
+// head: nút tiêu đề (bấm để đóng/mở) · sum: tóm tắt luôn hiện bên phải · body: phần thu gọn được
+function foldCard(key, defOpen, headNodes, sumNodes, bodyNodes) {
+  const card = el('div', { class: 'sa-card sa-fold', 'data-fold': key });
+  const chev = el('span', { class: 'sa-chev' }, '❯');
+  const head = el('div', { class: 'sa-fold-head', role: 'button', tabindex: '0', title: 'Bấm để thu gọn / mở rộng' }, chev, el('div', { class: 'sa-fold-title' }, ...headNodes), el('div', { class: 'sa-fold-sum' }, ...sumNodes));
+  const body = el('div', { class: 'sa-fold-body' }, ...bodyNodes);
+  const set = (open, save = true) => { card.classList.toggle('open', open); if (save) { FOLD[key] = open; foldSave(); } };
+  head.onclick = (ev) => { if (ev.target.closest('button, a, input, select')) return; set(!card.classList.contains('open')); };
+  head.onkeydown = (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); set(!card.classList.contains('open')); } };
+  card._set = set;
+  set(FOLD[key] ?? defOpen, false);
+  card.append(head, body);
+  return card;
+}
+
 export async function pageMealReport(ctx) {
   C = ctx; css();
   const main = el('div', { class: 'sa' });
-  C.setMain(C.head('📊 Suất ăn — báo cáo theo món'), main);
+  C.setMain(C.head('📋 Suất ăn — tổng hợp & điều chỉnh theo món'), main);
   if (!ST.date) ST.date = vnToday();
   const dateI = el('input', { type: 'date', value: ST.date });
   const prev = el('button', { class: 'sa-btn ghost', type: 'button', title: 'Hôm trước' }, '‹');
@@ -334,13 +353,17 @@ export async function pageMealReport(ctx) {
   const reload = el('button', { class: 'sa-btn ghost', type: 'button' }, '⟳ Làm mới');
   const xlsBtn = el('button', { class: 'sa-btn', type: 'button' }, '⬇ Xuất Excel');
   const forBtn = el('button', { class: 'sa-btn ghost', type: 'button' }, '➕ Chọn món hộ nhân viên');
+  const openAll = el('button', { class: 'sa-btn ghost', type: 'button', title: 'Mở rộng mọi khung' }, '⊞ Mở hết');
+  const closeAll = el('button', { class: 'sa-btn ghost', type: 'button', title: 'Thu gọn mọi khung' }, '⊟ Thu gọn hết');
+  openAll.onclick = () => body.querySelectorAll('.sa-fold').forEach((c) => c._set(true));
+  closeAll.onclick = () => body.querySelectorAll('.sa-fold').forEach((c) => c._set(false));
   dateI.onchange = () => { if (dateI.value) { ST.date = dateI.value; load(); } };
   prev.onclick = () => { ST.date = addDays(ST.date, -1); dateI.value = ST.date; load(); };
   next.onclick = () => { ST.date = addDays(ST.date, 1); dateI.value = ST.date; load(); };
   reload.onclick = () => load();
   xlsBtn.onclick = () => exportDlg();
   const body = el('div');
-  main.append(el('div', { class: 'sa-bar' }, prev, dateI, next, reload, forBtn, xlsBtn), body);
+  main.append(el('div', { class: 'sa-bar' }, prev, dateI, next, reload, forBtn, xlsBtn, el('span', { style: 'flex:1' }), openAll, closeAll), body);
   let R = null;
   forBtn.onclick = () => orderForDlg(R?.shifts?.[0]?.code);
 
@@ -354,8 +377,12 @@ export async function pageMealReport(ctx) {
     body.innerHTML = '';
     if (!R.shifts.length) { body.append(el('div', { class: 'empty' }, 'Chưa bật ca ăn nào — vào Suất ăn › Cấu hình để bật.')); return; }
     // dải tổng nhanh: mỗi bữa bao nhiêu suất phải nấu
-    body.append(el('div', { class: 'sa-kpis' }, ...R.shifts.map((s) => el('div', { class: 'sa-kpi' },
-      el('div', { class: 'k' }, s.name), el('div', { class: 'v' }, nf(s.totals.total)), el('div', { class: 'sa-hint' }, `suất phải nấu · đã quẹt ${nf(s.totals.ate)}`)))));
+    body.append(el('div', { class: 'sa-kpis' }, ...R.shifts.map((s) => {
+      const k = el('button', { type: 'button', class: 'sa-kpi', title: 'Bấm để mở bữa này' },
+        el('div', { class: 'k' }, s.name), el('div', { class: 'v' }, nf(s.totals.total)), el('div', { class: 'sa-hint' }, `suất phải nấu · đã quẹt ${nf(s.totals.ate)}`));
+      k.onclick = () => { const c = body.querySelector(`.sa-fold[data-fold="shift:${s.code}"]`); if (c) { c._set(true); c.scrollIntoView({ behavior: 'smooth', block: 'start' }); } };
+      return k;
+    })));
     for (const s of R.shifts) body.append(shiftCard(s));
     body.append(logBox(R.log));
   }
@@ -363,7 +390,7 @@ export async function pageMealReport(ctx) {
   function shiftCard(s) {
     const t = s.totals;
     const dl = `${s.deadline.slice(11)}${s.deadline.slice(0, 10) === R.date ? '' : ' ngày ' + dmy(s.deadline.slice(0, 10)).slice(0, 5)}`;
-    const info = el('div', { class: 'sa-info' },
+    const info = el('div', { class: 'sa-info sa-info-in' },
       el('span', {}, el('b', {}, s.name), ` · quẹt thẻ ${s.from_time} → ${s.to_time}`),
       s.locked ? el('span', { class: 'sa-pill muted' }, `🔒 Đã khoá chọn món lúc ${dl}`) : el('span', { class: 'sa-pill warn' }, `Còn mở chọn món đến ${dl} — số còn thay đổi`),
       el('span', {}, 'Trưởng BP đăng ký: ', el('b', {}, t.registered == null ? 'chưa' : nf(t.registered))),
@@ -393,9 +420,11 @@ export async function pageMealReport(ctx) {
         el('td', { class: 'num sa-total', style: 'font-size:17px' }, nf(t.total)), el('td', { class: 'num' }, nf(t.ate)))));
     const forOne = el('button', { class: 'sa-btn ghost', type: 'button' }, '➕ Chọn món hộ nhân viên');
     forOne.onclick = () => orderForDlg(s.code);
-    return el('div', { class: 'sa-card', style: 'margin-bottom:14px' }, info, s.rows.length ? null : el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Chưa có thực đơn cho bữa này (Suất ăn › Thực đơn các bữa).'),
-      el('div', { class: 'sa-wrap' }, tbl),
-      el('div', { class: 'sa-actions' }, forOne, el('span', { class: 'sa-hint' }, `Đã chọn món nhưng chưa quẹt: ${nf(t.not_yet)} người. Tổng phải nấu = NV tự chọn + HR chọn hộ + HR điều chỉnh.`)));
+    return foldCard('shift:' + s.code, true, [info],
+      [el('span', { class: 'sa-sum-n' }, nf(t.total)), el('span', { class: 'sa-hint' }, ` phải nấu · đã quẹt ${nf(t.ate)}`)],
+      [s.rows.length ? null : el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Chưa có thực đơn cho bữa này (Suất ăn › Thực đơn các bữa).'),
+        el('div', { class: 'sa-wrap' }, tbl),
+        el('div', { class: 'sa-actions' }, forOne, el('span', { class: 'sa-hint' }, `Đã chọn món nhưng chưa quẹt: ${nf(t.not_yet)} người. Tổng phải nấu = NV tự chọn + HR chọn hộ + HR điều chỉnh.`))]);
   }
 
   function logBox(log) {
@@ -404,13 +433,14 @@ export async function pageMealReport(ctx) {
     // datetime('now') UTC 'YYYY-MM-DD HH:MM:SS' → 'dd/mm HH:MM' giờ VN
     const stamp = (s) => { const t = new Date(Date.parse(s.replace(' ', 'T') + 'Z') + 7 * 3600000).toISOString(); return `${t.slice(8, 10)}/${t.slice(5, 7)} ${t.slice(11, 16)}`; };
     const val = (l, v) => (l.kind === 'adjust' ? (Number(v) > 0 ? '+' : '') + v : v || (l.kind === 'order' ? '(chưa chọn)' : ''));
-    return el('div', { class: 'sa-card' }, el('h4', {}, '📝 Lịch sử HR chỉnh tay trong ngày'),
+    return foldCard('log', false, [el('b', { class: 'sa-fold-h' }, '📝 Lịch sử HR chỉnh tay trong ngày')],
+      [log.length ? el('span', { class: 'sa-pill warn' }, `${nf(log.length)} lần sửa`) : el('span', { class: 'sa-pill muted' }, 'chưa có')], [
       log.length ? el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
         el('thead', {}, el('tr', {}, el('th', {}, 'Lúc'), el('th', {}, 'Người sửa'), el('th', {}, 'Bữa'), el('th', {}, 'Loại'), el('th', {}, 'Nhân viên / Món'), el('th', {}, 'Cũ → Mới'), el('th', {}, 'Lý do'))),
         el('tbody', {}, ...log.map((l) => el('tr', {}, el('td', {}, stamp(l.at)), el('td', {}, l.by_name), el('td', {}, name[l.shift] || l.shift), el('td', {}, KIND[l.kind] || l.kind),
           el('td', {}, l.emp_label ? `${l.emp_label}` : '', l.emp_label ? el('span', { class: 'sa-sub' }, l.dish) : (l.dish || 'Không chọn món (mặc định)')),
           el('td', { style: 'white-space:nowrap' }, `${val(l, l.old_value)} → ${l.kind === 'order' && !l.new_value ? '(bỏ món)' : val(l, l.new_value)}`), el('td', {}, l.reason))))))
-        : el('div', { class: 'sa-empty' }, 'Chưa có chỉnh sửa nào.'));
+        : el('div', { class: 'sa-empty' }, 'Chưa có chỉnh sửa nào.')]);
   }
 
   // HR thêm / bớt suất của 1 món (dish '' = suất không chọn món)

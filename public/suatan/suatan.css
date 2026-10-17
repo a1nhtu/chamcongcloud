@@ -106,3 +106,21 @@
 .sa input[type=text], .sa input[type=search], .sa select { width: 100%; }
 /* nút ở chân hộp thoại (nằm ngoài .sa) dùng chung màu suất ăn */
 .m-foot { --sa-navy: #1e3a68; --sa-navy-2: #2c5090; --sa-red: #d8382e; }
+
+/* ----- khung thu gọn / mở rộng (Tổng hợp & điều chỉnh) ----- */
+.sa-fold { margin-bottom: 14px; padding: 0; overflow: hidden; }
+.sa-fold-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; cursor: pointer; user-select: none; }
+.sa-fold-head:hover { background: var(--sa-soft); }
+.sa-fold-head:focus-visible { outline: 2px solid var(--sa-navy-2); outline-offset: -2px; }
+.sa-chev { flex: 0 0 26px; width: 26px; height: 26px; border-radius: 50%; background: #e8eef8; color: var(--sa-navy); font-size: 12px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; transition: transform .15s; }
+.sa-fold.open .sa-chev { transform: rotate(90deg); }
+.sa-fold-title { flex: 1; min-width: 0; }
+.sa-fold-title .sa-info-in { margin: 0; border: 0; background: none; padding: 0; }
+.sa-fold-h { color: var(--sa-navy); font-size: 15px; }
+.sa-fold-sum { flex: 0 0 auto; text-align: right; white-space: nowrap; }
+.sa-sum-n { color: var(--sa-navy); font-size: 22px; font-weight: 900; font-variant-numeric: tabular-nums; }
+.sa-fold-body { display: none; padding: 0 14px 14px; }
+.sa-fold.open .sa-fold-body { display: block; }
+button.sa-kpi { font: inherit; text-align: left; cursor: pointer; }
+button.sa-kpi:hover { border-color: var(--sa-navy); }
+@media (max-width: 640px) { .sa-fold-head { flex-wrap: wrap; } .sa-fold-sum { width: 100%; text-align: left; padding-left: 24px; } }

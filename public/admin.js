@@ -25,7 +25,7 @@ const NAV = [
   ['swap', '🔁', 'Đăng ký làm bù', 'attendance_edit'],
   ['abnormal', '🚨', 'Chấm công bất thường', 'reports'],
   ['meal', '🍱', 'Đối chiếu & chốt suất ăn', 'meal'],
-  ['mealrep', '📊', 'Báo cáo suất ăn', 'meal'],
+  ['mealrep', '📋', 'Tổng hợp & điều chỉnh suất ăn', 'meal'],
   ['mealmenu', '🍽️', 'Thực đơn các bữa', 'meal'],
   ['mealcfg', '⚙️', 'Cấu hình suất ăn', 'meal'],
   ['mealme', '🥢', 'Suất ăn của tôi', null],   // ai cũng thấy khi phân hệ bật: chọn món + (trưởng bộ phận) nhập số đăng ký
