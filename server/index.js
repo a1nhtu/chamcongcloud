@@ -26,6 +26,8 @@ import { isActivated } from './license.js';
 import { currentVersion } from './update.js';
 import { offload } from './heavy.js';
 import { startTcpScheduler } from './zk-tcp.js';
+import { attachAiWs } from './ai-ws.js';
+import { startHikScheduler } from './hik-isapi.js';
 import { startHrScheduler } from './hr.js';
 import { startHrRemindScheduler } from './hr-remind.js';
 
@@ -36,6 +38,7 @@ initSchema();
 fixOverlappingAssignmentsOnce();   // dọn 1 lần các lịch gán ca chồng ngày của bản cũ (chạy SAU khi CSDL đã khởi tạo)
 optimizeDb();
 startTcpScheduler();   // tự tải máy chấm công TCP/IP theo lịch (chỉ chạy khi đã bật + đặt số phút)
+startHikScheduler();   // tự tải máy Hikvision theo lịch (chỉ chạy khi đã bật "Dùng máy Hikvision" + đặt số phút)
 ensureSeed();
 startHrScheduler();   // nhân sự: tới ngày hiệu lực thì tự áp dụng quyết định thuyên chuyển / nghỉ việc
 startHrRemindScheduler();   // nhân sự: nhắc HĐ sắp hết hạn / hết thử việc qua thông báo đẩy (công tắc hr_remind_push)
@@ -144,6 +147,7 @@ function lanIPs() {
 
 // HTTP (localhost trên máy này + Cloudflare Tunnel ra internet) — BẮT BUỘC phải mở được
 const httpServer = createHttp(app);
+attachAiWs(httpServer);   // máy chấm công AI kết nối WebSocket vào CHÍNH cổng này (tắt công tắc "Dùng máy AI" → từ chối)
 httpServer.on('error', (e) => {
   if (e.code === 'EADDRINUSE') console.error(`\n  [X] Cổng HTTP ${PORT} đang bị chiếm — có thể app đã chạy sẵn. Không mở thêm.`);
   else console.error(`\n  [X] Không mở được cổng HTTP ${PORT}: ${e.code}. App không thể chạy.`);

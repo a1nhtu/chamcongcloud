@@ -34,6 +34,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       hourly_merge_rule: getSetting('hourly_merge_rule', 'filo'), // theo giờ: filo | pairs (nhiều lần vào/ra)
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
       tcp_device_enabled: getSetting('tcp_device_enabled', '0'), // dùng máy chấm công kết nối trực tiếp TCP/IP (cổng 4370)
+      ai_device_enabled: getSetting('ai_device_enabled', '0'),   // dùng máy AI (máy tự nối về qua WebSocket)
+      hik_device_enabled: getSetting('hik_device_enabled', '0'), // dùng máy Hikvision (phần mềm gọi ISAPI vào máy)
       phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)
       // Giá trị bộ cài (config.txt) đặt sẵn lúc cài — chỉ để hiện gợi ý; tài khoản tổng vẫn đổi được trên web
       use_device_cfg: ['0', '1'].includes(process.env.USE_DEVICE) ? process.env.USE_DEVICE : '',
@@ -125,6 +127,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (req.user.master) {
       if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');
       if (b.tcp_device_enabled != null) setSetting('tcp_device_enabled', b.tcp_device_enabled ? '1' : '0');
+      if (b.ai_device_enabled != null) setSetting('ai_device_enabled', b.ai_device_enabled ? '1' : '0');
+      if (b.hik_device_enabled != null) setSetting('hik_device_enabled', b.hik_device_enabled ? '1' : '0');
       if (b.phone_enabled != null) setSetting('phone_enabled', b.phone_enabled ? '1' : '0');
       if (b.device_autocreate != null) setSetting('device_autocreate', b.device_autocreate ? '1' : '0');
       if (b.device_key_required != null) setSetting('device_key_required', b.device_key_required ? '1' : '0');

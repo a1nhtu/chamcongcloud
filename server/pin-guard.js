@@ -216,7 +216,7 @@ export function listConflicts() {
       WHERE p.employee_id=? ORDER BY p.punch_at DESC LIMIT 1`).get(emp.id) : null;
     const held = db.prepare('SELECT COUNT(*) c FROM device_punches WHERE serial=? AND pin=?').get(c.serial, holdPin(c.pin, c.id)).c;
     return {
-      id: c.id, serial: c.serial, dev_label: c.dev_label, tcp: c.conn_type === 'tcp', pin: c.pin, reason: c.reason, status: c.status, note: c.note,
+      id: c.id, serial: c.serial, dev_label: c.dev_label, tcp: !!c.conn_type && c.conn_type !== 'push', pin: c.pin, reason: c.reason, status: c.status, note: c.note,
       since: c.since, new_pin: c.new_pin,
       ref: { name: emp ? emp.full_name : c.ref_name, emp_id: emp ? emp.id : null, code: emp ? emp.code : '', department: emp ? emp.department : '',
         devices: others.map((o) => o.n), fp: refFp, card: refCard, last_at: last ? last.punch_at : null, last_dev: last ? last.dev : '',
@@ -272,7 +272,7 @@ export function resolveOther(id, newPin, by = '') {
   const c = getConflict(id);
   if (!c || c.status !== 'open') throw err('Cảnh báo này đã được xử lý hoặc đang xử lý.');
   const dev = db.prepare('SELECT conn_type FROM push_devices WHERE serial=?').get(c.serial);
-  if (dev && dev.conn_type === 'tcp') throw err('Máy kết nối TCP/IP chưa tự đổi số được: đổi Số ID ngay trên máy rồi bấm "Tải nhân viên", sau đó chọn "Cùng 1 người" hoặc xoá cảnh báo.');
+  if (dev && dev.conn_type && dev.conn_type !== 'push') throw err('Máy kết nối TCP/IP / máy hãng khác chưa tự đổi số được: đổi Số ID ngay trên máy rồi bấm "Tải nhân viên", sau đó chọn "Cùng 1 người" hoặc xoá cảnh báo.');
   newPin = String(newPin || '').trim();
   if (!/^\d{1,9}$/.test(newPin)) throw err('Số ID mới phải là số (tối đa 9 chữ số).');
   if (newPin === c.pin || pinTaken(newPin)) throw err(`Số ID ${newPin} đã có người dùng — chọn số khác.`);
@@ -363,8 +363,14 @@ export const autoPushOn = () => getSetting('device_auto_push_emp', '1') === '1';
 
 // Máy nhận Số ID này khi tự đẩy: máy đang có Số ID + các máy cùng nhóm đồng bộ với chúng;
 // Số ID chưa ở máy nào (NV mới) → mọi máy đang dùng có bật "Nhận NV mới từ phần mềm".
+// Máy hãng khác tự đăng ký cách ghi NV xuống máy (máy AI: server/ai-device.js) — tránh import vòng.
+// fn(serial, pin, { withBio }) → { users, bios } = số lệnh đã xếp.
+const extraPushers = new Map();   // conn_type → fn
+export function registerPusher(connType, fn) { extraPushers.set(connType, fn); }
+const pushTypesSql = () => "conn_type IN ('push'" + [...extraPushers.keys()].map((t) => `,'${t.replace(/[^a-z]/g, '')}'`).join('') + ')';
+
 export function targetsFor(pin) {
-  const act = db.prepare("SELECT serial, sync_group, recv_new FROM push_devices WHERE active=1 AND conn_type<>'tcp'").all();
+  const act = db.prepare(`SELECT serial, sync_group, recv_new FROM push_devices WHERE active=1 AND ${pushTypesSql()}`).all();
   const have = new Set(db.prepare('SELECT serial FROM device_users_serial WHERE pin=?').all(pin).map((r) => r.serial));
   const haveAct = act.filter((d) => have.has(d.serial));
   if (!haveAct.length) return act.filter((d) => d.recv_new).map((d) => d.serial);
@@ -376,15 +382,21 @@ export function targetsFor(pin) {
 // phần mềm đang lưu từ máy khác mà máy đích còn thiếu. serials rỗng → tự chọn máy (targetsFor).
 export function pushEmployees(pins, { serials = null, withBio = false } = {}) {
   const held = heldSet();
-  const okTarget = new Set(db.prepare("SELECT serial FROM push_devices WHERE active=1 AND conn_type<>'tcp'").all().map((r) => r.serial));
+  const typeOf = new Map(db.prepare(`SELECT serial, conn_type FROM push_devices WHERE active=1 AND ${pushTypesSql()}`).all().map((r) => [r.serial, r.conn_type]));
   const emp = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND active=1");
   let users = 0, bios = 0;
   const devs = new Set();
   for (const p of pins || []) {
     const pin = String(p || '').trim();
     if (!pin || !emp.get(pin)) continue;
-    for (const serial of (serials ? serials.filter((x) => okTarget.has(x)) : targetsFor(pin))) {
+    for (const serial of (serials ? serials.filter((x) => typeOf.has(x)) : targetsFor(pin))) {
       if (held.has(serial + '|' + pin)) continue;   // máy đó đang có người khác mang Số ID này (nghi trùng)
+      const extra = extraPushers.get(typeOf.get(serial));
+      if (extra) {   // máy hãng khác: ghi theo giao thức của hãng
+        const r = extra(serial, pin, { withBio }) || {};
+        users += r.users || 0; bios += r.bios || 0; if (r.users) devs.add(serial);
+        continue;
+      }
       queueCmd(serial, buildUserCommand(pin, serial, null, true), { pin, mkind: 'user' });
       users++; devs.add(serial);
       if (!withBio) continue;

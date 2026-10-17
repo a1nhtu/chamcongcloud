@@ -7,6 +7,11 @@ import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES } from '../../zk-tcp.js';
 import { setSetting } from '../../db.js';
 import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, guardOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
+// Máy hãng khác (công tắc riêng, mặc định tắt): máy AI tự nối về qua WebSocket · máy Hikvision phần mềm gọi ISAPI vào máy
+import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isFace } from '../../ai-device.js';
+import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
+import { hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
+  hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES } from '../../hik-isapi.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -48,9 +53,18 @@ export function registerDeviceRoutes(r, { need }) {
       d.key_ok = deviceKeyOk(d);          // đã có key hợp lệ chưa
       delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
+      d.has_pass = !!d.dev_pass; delete d.dev_pass;      // không lộ mật khẩu máy Hikvision
       try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
+      if (d.conn_type === 'ai') {   // máy AI: mẫu vân tay / khuôn mặt lưu bảng riêng
+        d.online = aiOnline(d.serial);
+        const bns = db.prepare('SELECT backupnum b FROM ai_templates WHERE serial=?').all(d.serial).map((r) => r.b);
+        d.fp_count = bns.filter(isFp).length;
+        d.face_count = bns.filter(isFace).length;
+        d.emp_count = db.prepare('SELECT COUNT(*) c FROM (SELECT pin FROM device_users_serial WHERE serial=? UNION SELECT pin FROM ai_templates WHERE serial=?)').get(d.serial, d.serial).c;
+      }
     }
-    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32',
+      ai_enabled: aiEnabled(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được.
   // (Dùng máy chấm công / Bắt buộc key / Máy TCP/IP vẫn CHỈ tài khoản tổng — đổi ở PUT /settings.)
@@ -98,16 +112,22 @@ export function registerDeviceRoutes(r, { need }) {
     const becameActive = b.active != null && !!b.active && !d.active;
     if (newGroup && (b.sync_group !== undefined || becameActive)) {
       try {
-        const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1").all(newGroup).map((r) => r.serial);
+        // đồng bộ trong từng HÃNG (mẫu vân tay / khuôn mặt khác chuẩn nhau): máy ZKTeco với ZKTeco, máy AI với máy AI
+        const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1 AND conn_type IN ('push','tcp')").all(newGroup).map((r) => r.serial);
         if (groupSerials.length >= 2) { for (const s of groupSerials) syncFillDevice(s); synced = groupSerials.length; }
+        const aiSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1 AND conn_type='ai'").all(newGroup).map((r) => r.serial);
+        if (aiSerials.length >= 2) { for (const s of aiSerials) { aiFillDevice(s); aiPoke(s); } synced += aiSerials.length; }
       } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
     }
+    // Máy AI vừa duyệt / tạm dừng → ngắt kết nối để máy đăng ký lại, nhận kết quả mới ngay
+    if (d.conn_type === 'ai' && b.active != null && !!b.active !== !!d.active) aiKick(d.serial);
     // Vừa DUYỆT máy: lúc còn chờ duyệt máy chỉ nhận cấu hình tối thiểu → ra lệnh khởi động lại để máy
     // bắt tay đầy đủ (bật đẩy dữ liệu real-time + nhận lại giờ/múi giờ đúng).
     // KHÔNG tự tải toàn bộ NV từ máy (máy có thể cả nghìn người → nặng). NV đăng ký trước khi nối phần mềm
     // sẽ được hỏi RIÊNG từng người khi họ quẹt mà chưa khớp (askUserFromDevice); cần tải hết thì bấm tay.
-    if (becameActive && d.conn_type !== 'tcp') { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
-    res.json({ ok: true, synced, rebooting: becameActive && d.conn_type !== 'tcp' });
+    const zkPush = (d.conn_type || 'push') === 'push';
+    if (becameActive && zkPush) { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
+    res.json({ ok: true, synced, rebooting: becameActive && zkPush });
   });
   // Đồng bộ giờ: ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt mới nhận lệnh)
   r.post('/devices/:id/sync-time', need('devices'), (req, res) => {
@@ -151,10 +171,15 @@ export function registerDeviceRoutes(r, { need }) {
   });
   // Mở cửa từ xa (chỉ máy có kiểm soát cửa) — gửi lệnh ADMS AC_UNLOCK xuống hàng đợi
   r.post('/devices/:id/open-door', need('door_open'), (req, res) => {
-    const d = db.prepare('SELECT serial, access_control FROM push_devices WHERE id=?').get(req.params.id);
+    const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
     if (!d.access_control) return res.status(400).json({ error: 'Máy này chưa bật chức năng kiểm soát cửa.' });
-    openDoor(d.serial);
+    if (d.conn_type === 'hik') {   // Hikvision: phần mềm gọi thẳng vào máy
+      if (!hikEnabled()) return res.status(400).json({ error: 'Chưa bật "Dùng máy Hikvision".' });
+      return hikOpenDoor(d).then(() => res.json({ ok: true, msg: 'Đã mở cửa.' }), (e) => res.status(400).json({ error: e.message }));
+    }
+    if (d.conn_type === 'ai') { aiAction(d.serial, 'open-door'); aiPoke(d.serial); }
+    else openDoor(d.serial);
     res.json({ ok: true, msg: 'Đã gửi lệnh mở cửa. Máy sẽ mở khi có kết nối.' });
   });
   r.delete('/devices/:id', need('devices'), (req, res) => {
@@ -163,6 +188,8 @@ export function registerDeviceRoutes(r, { need }) {
     db.prepare('DELETE FROM push_devices WHERE id=?').run(req.params.id);
     db.prepare('DELETE FROM push_device_commands WHERE serial=?').run(d.serial);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(d.serial);
+    db.prepare('DELETE FROM ai_templates WHERE serial=?').run(d.serial);
+    aiKick(d.serial);   // máy AI đang kết nối → ngắt (kết nối lại sẽ hiện ở Chờ duyệt)
     res.json({ ok: true });
   });
   // Log quẹt gần đây (để kiểm tra kết nối)
@@ -362,11 +389,18 @@ export function registerDeviceRoutes(r, { need }) {
     res.json({ ok: true, msg: 'Đã gửi lệnh xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log).' });
   });
   r.post('/devices/:id/delete-users', need('devices'), (req, res) => {
-    const serial = serialOfDevice(req.params.id);
+    const dev = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
+    const serial = dev?.serial;
     if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
     const pins = Array.isArray(req.body?.pins) ? req.body.pins : [];
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
-    const n = deleteDeviceUsers(serial, pins);
+    if (dev.conn_type === 'hik') {   // Hikvision: xoá thẳng trên máy (chạy nền)
+      if (!hikEnabled()) return res.status(400).json({ error: 'Chưa bật "Dùng máy Hikvision".' });
+      const j = startJob('hik-delete-users', dev.name || serial, async () => { const r2 = await hikDeleteUsers(dev, pins); dropConflicts(serial, pins); return r2; });
+      return res.json({ ok: true, job: j.id, count: pins.length, msg: `Đang xoá ${pins.length} nhân viên trên máy…` });
+    }
+    const n = dev.conn_type === 'ai' ? aiDeleteUsers(serial, pins) : deleteDeviceUsers(serial, pins);
+    if (dev.conn_type === 'ai') aiPoke(serial);
     dropConflicts(serial, pins);
     res.json({ ok: true, count: n, msg: `Đã gửi lệnh xóa ${n} nhân viên trên máy.` });
   });
@@ -397,8 +431,25 @@ export function registerDeviceRoutes(r, { need }) {
     const serials = (Array.isArray(b.serials) ? b.serials : []).map((p) => String(p).trim()).filter(Boolean);
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     if (!serials.length) return res.status(400).json({ error: 'Chưa chọn máy' });
-    const r2 = pushEmployees(pins, { serials, withBio: !!b.with_bio });
-    res.json({ ok: true, ...r2, msg: r2.users ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy. Máy nhận dần khi kết nối.` : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
+    // máy Hikvision: phần mềm ghi thẳng vào máy (chạy nền); máy ZKTeco / AI: xếp lệnh, máy nhận khi kết nối
+    const hikDevs = hikEnabled() ? db.prepare(`SELECT * FROM push_devices WHERE active=1 AND conn_type='hik' AND serial IN (${serials.map(() => '?').join(',')})`).all(...serials) : [];
+    const hikSet = new Set(hikDevs.map((h) => h.serial));
+    const r2 = pushEmployees(pins, { serials: serials.filter((s) => !hikSet.has(s)), withBio: !!b.with_bio });
+    for (const s of serials) if (!hikSet.has(s)) aiPoke(s);
+    let job = null;
+    if (hikDevs.length) {
+      const okPins = db.prepare(`SELECT device_pin p FROM employees WHERE active=1 AND device_pin IN (${pins.map(() => '?').join(',')})`).all(...pins).map((x) => String(x.p));
+      if (okPins.length) job = startJob('hik-push', hikDevs.length + ' máy Hikvision', async (prog) => {
+        const out = [];
+        for (const h of hikDevs) {
+          try { prog(`Đang ghi NV xuống máy ${h.name || h.serial}…`); out.push({ device: h.name || h.serial, ok: true, ...(await hikPushUsers(h, okPins, prog)) }); }
+          catch (e) { out.push({ device: h.name || h.serial, ok: false, error: e.message }); }
+        }
+        return { devices: out };
+      }).id;
+    }
+    const any = r2.users || job;
+    res.json({ ok: true, ...r2, job, msg: any ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy${job ? ` + đang ghi xuống ${hikDevs.length} máy Hikvision` : ''}. Máy nhận dần khi kết nối.` : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
   });
 
   /* -------- Xóa nhân viên trên TẤT CẢ máy 1 lần (khỏi vào từng máy) -------- */
@@ -426,16 +477,29 @@ export function registerDeviceRoutes(r, { need }) {
     const pins = [...new Set((Array.isArray(req.body?.pins) ? req.body.pins : []).map((p) => String(p).trim()).filter((p) => /^[0-9A-Za-z_-]{1,20}$/.test(p)))];
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all();
-    const push = devs.filter((d) => d.conn_type !== 'tcp'), tcp = devs.filter((d) => d.conn_type === 'tcp');
-    for (const d of push) { deleteDeviceUsers(d.serial, pins); dropConflicts(d.serial, pins); }
+    const push = devs.filter((d) => (d.conn_type || 'push') === 'push' || d.conn_type === 'ai');
+    const tcpAll = devs.filter((d) => d.conn_type === 'tcp');
+    let tcp = tcpAll;
+    const hik = devs.filter((d) => d.conn_type === 'hik');
+    for (const d of push) {
+      if (d.conn_type === 'ai') { aiDeleteUsers(d.serial, pins); aiPoke(d.serial); } else deleteDeviceUsers(d.serial, pins);
+      dropConflicts(d.serial, pins);
+    }
     let job = null, tcpNote = '';
-    if (tcp.length && !tcpEnabled()) tcpNote = `${tcp.length} máy TCP/IP chưa xoá được vì đang tắt "Dùng máy chấm công kết nối TCP/IP".`;
-    else if (tcp.length) {
-      job = startJob('delete-users-all', tcp.length + ' máy TCP/IP', async (prog) => {
+    if (tcp.length && !tcpEnabled()) { tcpNote = `${tcp.length} máy TCP/IP chưa xoá được vì đang tắt "Dùng máy chấm công kết nối TCP/IP".`; tcp = []; }
+    if (hik.length && !hikEnabled()) { tcpNote += (tcpNote ? ' ' : '') + `${hik.length} máy Hikvision chưa xoá được vì đang tắt "Dùng máy Hikvision".`; }
+    const direct = [...tcp, ...(hikEnabled() ? hik : [])];   // máy phần mềm phải kết nối vào để xoá (chạy nền, tuần tự)
+    if (direct.length) {
+      job = startJob('delete-users-all', direct.length + ' máy kết nối trực tiếp', async (prog) => {
         const out = [];
-        for (const d of tcp) {
+        for (const d of direct) {
           const name = d.name || d.serial;
           prog(`Đang xoá trên máy ${name}…`);
+          if (d.conn_type === 'hik') {
+            try { const r3 = await hikDeleteUsers(d, pins); dropConflicts(d.serial, pins); out.push({ device: name, ok: true, deleted: r3.deleted }); }
+            catch (e) { out.push({ device: name, ok: false, error: e.message }); }
+            continue;
+          }
           try {
             if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) throw new Error(`Không thấy máy ở ${d.tcp_ip}:${d.tcp_port}`);
             const info = await tcpInfo(d);
@@ -453,6 +517,111 @@ export function registerDeviceRoutes(r, { need }) {
     const ph = pins.map(() => '?').join(',');
     const idle = db.prepare(`SELECT DISTINCT COALESCE(NULLIF(d.name,''), d.serial) AS n FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
       WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins).map((x) => x.n);
-    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcp.map((d) => d.name || d.serial), job, tcpNote, idle });
+    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), job, tcpNote, idle });
+  });
+
+  /* -------- MÁY AI (tự nối về qua WebSocket — server/ai-ws.js): thao tác = xếp lệnh, máy nhận khi đang kết nối -------- */
+  const aiOn = (req, res, next) => (aiEnabled() ? next() : res.status(400).json({ error: 'Chưa bật "Dùng máy AI" (Cài đặt → Hình thức chấm công, chỉ tài khoản tổng bật được).' }));
+  r.post('/devices/:id/ai/:action', need('devices'), aiOn, (req, res) => {
+    const d = db.prepare("SELECT * FROM push_devices WHERE id=? AND conn_type='ai'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy AI' });
+    const action = req.params.action, b = req.body || {};
+    if (!AI_ACTIONS[action]) return res.status(400).json({ error: 'Thao tác không hỗ trợ' });
+    if (!d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước.' });
+    const from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10);
+    if (action === 'logs' && (from || to) && (!ISO.test(from) || !ISO.test(to) || to < from)) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
+    aiAction(d.serial, action, { from, to });
+    aiPoke(d.serial);
+    const online = aiOnline(d.serial);
+    res.json({ ok: true, online, msg: `${AI_ACTIONS[action]}: đã gửi lệnh.` + (online ? ' Máy đang kết nối — chờ ít giây rồi bấm Làm mới.' : ' Máy đang OFFLINE — máy sẽ nhận lệnh khi kết nối lại.') });
+  });
+
+  /* -------- MÁY HIKVISION (phần mềm gọi ISAPI vào máy — server/hik-isapi.js) -------- */
+  const hikOn = (req, res, next) => (hikEnabled() ? next() : res.status(400).json({ error: 'Chưa bật "Dùng máy Hikvision" (Cài đặt → Hình thức chấm công, chỉ tài khoản tổng bật được).' }));
+  const hikConnOf = (b, old = {}) => {
+    const ip = String(b.ip ?? old.tcp_ip ?? '').trim();
+    const port = b.port != null && b.port !== '' ? parseInt(b.port, 10) : (old.tcp_port && old.conn_type === 'hik' ? old.tcp_port : 80);
+    const user = String(b.user ?? old.dev_user ?? 'admin').trim() || 'admin';
+    const pass = b.pass != null && b.pass !== '' ? String(b.pass) : (old.dev_pass || '');   // để trống khi sửa = giữ mật khẩu cũ
+    if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(ip) && !/^[a-z0-9.-]{3,100}$/i.test(ip)) return { error: 'Địa chỉ IP / tên miền máy Hikvision không hợp lệ (VD 192.168.1.64)' };
+    if (!(port > 0 && port < 65536)) return { error: 'Cổng không hợp lệ (mặc định 80)' };
+    if (!pass) return { error: 'Nhập mật khẩu đăng nhập máy Hikvision (mật khẩu lúc kích hoạt máy)' };
+    return { tcp_ip: ip, tcp_port: port, dev_user: user, dev_pass: pass };
+  };
+  // Thêm máy: đăng nhập thử → đọc Serial → ghi vào danh sách (Chờ duyệt, cần key như máy khác)
+  r.post('/devices/hik', need('devices'), hikOn, async (req, res) => {
+    const b = req.body || {}, c = hikConnOf(b);
+    if (c.error) return res.status(400).json({ error: c.error });
+    try {
+      const info = await hikInfo(c);
+      if (!info.serial) return res.status(400).json({ error: 'Kết nối được nhưng không đọc được Serial của máy.' });
+      const name = String(b.name || '').trim();
+      const old = db.prepare('SELECT * FROM push_devices WHERE serial=?').get(info.serial);
+      if (old && old.conn_type !== 'hik') return res.status(400).json({ error: `Serial ${info.serial} đang là máy khác trong danh sách.` });
+      if (old) db.prepare("UPDATE push_devices SET tcp_ip=?, tcp_port=?, dev_user=?, dev_pass=?, name=CASE WHEN ?<>'' THEN ? ELSE name END WHERE id=?").run(c.tcp_ip, c.tcp_port, c.dev_user, c.dev_pass, name, name, old.id);
+      else db.prepare("INSERT INTO push_devices(serial, name, active, conn_type, tcp_ip, tcp_port, dev_user, dev_pass) VALUES(?,?,0,'hik',?,?,?,?)").run(info.serial, name || info.name || '', c.tcp_ip, c.tcp_port, c.dev_user, c.dev_pass);
+      const d = db.prepare('SELECT id, serial, active FROM push_devices WHERE serial=?').get(info.serial);
+      saveHikInfo(d.id, info);
+      res.json({ ok: true, id: d.id, serial: d.serial, active: !!d.active, existed: !!old, info });
+    } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
+  });
+  // Sửa IP / cổng / tài khoản / mật khẩu
+  r.put('/devices/:id/hik', need('devices'), hikOn, (req, res) => {
+    const d = db.prepare("SELECT * FROM push_devices WHERE id=? AND conn_type='hik'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Hikvision' });
+    const c = hikConnOf(req.body || {}, d);
+    if (c.error) return res.status(400).json({ error: c.error });
+    db.prepare('UPDATE push_devices SET tcp_ip=?, tcp_port=?, dev_user=?, dev_pass=? WHERE id=?').run(c.tcp_ip, c.tcp_port, c.dev_user, c.dev_pass, d.id);
+    res.json({ ok: true });
+  });
+  r.put('/hik-devices/auto', need('devices'), hikOn, (req, res) => {
+    const n = parseInt(req.body?.minutes, 10) || 0;
+    if (!HIK_AUTO_CHOICES.includes(n)) return res.status(400).json({ error: 'Chu kỳ không hợp lệ' });
+    setSetting('hik_auto_min', String(n));
+    res.json({ ok: true, minutes: n });
+  });
+  r.put('/hik-devices/:id/auto', need('devices'), hikOn, (req, res) => {
+    const d = db.prepare("SELECT id FROM push_devices WHERE id=? AND conn_type='hik'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Hikvision' });
+    db.prepare('UPDATE push_devices SET tcp_auto=? WHERE id=?').run(req.body?.on ? 1 : 0, d.id);
+    res.json({ ok: true });
+  });
+  r.post('/hik-devices/auto/run', need('devices'), hikOn, (req, res) => {
+    const j = startJob('hik-auto', 'tất cả máy Hikvision', async (prog) => {
+      const out = await hikAutoCycle(true, prog);
+      if (out == null) throw new Error('Đang có một lượt tự tải chạy dở — chờ xong rồi thử lại.');
+      return { devices: out };
+    });
+    res.json({ ok: true, job: j.id, title: 'Tải dữ liệu chấm công tất cả máy Hikvision' });
+  });
+  const HIK_ACTIONS = { info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy' };
+  r.post('/devices/:id/hik/:action', need('devices'), hikOn, (req, res) => {
+    const d = db.prepare("SELECT * FROM push_devices WHERE id=? AND conn_type='hik'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Hikvision' });
+    const action = req.params.action, b = req.body || {};
+    if (!HIK_ACTIONS[action]) return res.status(400).json({ error: 'Thao tác không hỗ trợ' });
+    if (action !== 'info' && !d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước (dán key bản quyền nếu được yêu cầu).' });
+    const from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10);
+    if (action === 'logs' && (from || to) && (!ISO.test(from) || !ISO.test(to) || to < from)) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
+    const j = startJob('hik-' + action, d.name || d.serial, async (prog) => {
+      // luôn đọc Serial trước: IP này giờ là MÁY KHÁC (đổi máy / trùng IP) → dừng, không ghi nhầm dữ liệu
+      prog('Đang kết nối máy…');
+      const info = await hikInfo(d);
+      if (info.serial && info.serial !== d.serial) throw new Error(`Máy ở ${d.tcp_ip} có Serial ${info.serial}, KHÁC máy đã khai (${d.serial}). Dừng lại để tránh nhầm máy — sửa lại IP hoặc thêm máy mới.`);
+      let old = {}; try { old = JSON.parse(d.tcp_info || '{}'); } catch {}
+      saveHikInfo(d.id, { ...old, ...info });
+      if (action === 'info') return { info };
+      if (action === 'users') { prog('Đang đọc nhân viên từ máy…'); return await hikUsers(d, prog); }
+      if (action === 'logs') {
+        prog('Đang đọc nhân viên từ máy…');
+        const u = await hikUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
+        prog('Đang đọc dữ liệu chấm công từ máy…');
+        return { ...(await hikLogs(d, from, to, prog)), users: u.read, from, to };
+      }
+      if (action === 'set-time') { await hikSetTime(d); return { note: ['Đã đặt giờ máy theo máy chủ (múi giờ Việt Nam)'] }; }
+      if (action === 'restart') { await hikRestart(d); return { note: ['Máy đang khởi động lại'] }; }
+      return {};
+    });
+    res.json({ ok: true, job: j.id, title: HIK_ACTIONS[action] });
   });
 }

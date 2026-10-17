@@ -5426,6 +5426,8 @@ async function pageDevices() {
   const autoChk = el('input', { type: 'checkbox', class: 'sw', ...(d.autocreate ? { checked: '' } : {}) });
   const keyReqChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.key_required ? { checked: '' } : {}) });
   const tcpChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.tcp_enabled ? { checked: '' } : {}) });
+  const aiChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.ai_enabled ? { checked: '' } : {}) });
+  const hikChk = el('input', { type: 'checkbox', class: 'sw', ...lockMaster, ...(d.hik_enabled ? { checked: '' } : {}) });
   const guardChk = el('input', { type: 'checkbox', class: 'sw', ...(d.pin_guard ? { checked: '' } : {}) });
   const asciiChk = el('input', { type: 'checkbox', class: 'sw sm', ...(d.name_ascii ? { checked: '' } : {}) });
   const autoPushChk = el('input', { type: 'checkbox', class: 'sw', ...(d.auto_push ? { checked: '' } : {}) });
@@ -5438,8 +5440,10 @@ async function pageDevices() {
         toast('Đã lưu', 'ok'); pageDevices(); return;
       }
       await api('/admin/settings', { method: 'PUT', body: { device_enabled: enChk.checked, device_autocreate: autoChk.checked, device_key_required: keyReqChk.checked, tcp_device_enabled: tcpChk.checked,
+        ai_device_enabled: aiChk.checked, hik_device_enabled: hikChk.checked,
         device_pin_guard: guardChk.checked, device_name_ascii: asciiChk.checked, device_auto_push_emp: autoPushChk.checked } });
       SETTINGS.device_enabled = enChk.checked ? '1' : '0'; SETTINGS.tcp_device_enabled = tcpChk.checked ? '1' : '0';
+      SETTINGS.ai_device_enabled = aiChk.checked ? '1' : '0'; SETTINGS.hik_device_enabled = hikChk.checked ? '1' : '0';
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 600);
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -5450,6 +5454,8 @@ async function pageDevices() {
           devToggle(autoChk, 'Tự tạo nhân viên khi đăng ký vân tay trên máy', 'Số ID mới đăng ký trên máy → tự tạo NV nháp (Số ID + tên máy gửi), admin bổ sung sau. Tắt: chờ admin gán tay.'),
           devToggle(keyReqChk, 'Bắt buộc KEY bản quyền theo máy', 'Máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không ảnh hưởng.'),
           devToggle(tcpChk, 'Dùng máy kết nối TCP/IP (cổng 4370)', 'Thêm máy theo IP trong LAN — phần mềm chủ động tải NV, tải chấm công, xoá dữ liệu. Cho máy đời cũ không có ADMS; cần cài trên máy tính Windows cùng mạng.'),
+          devToggle(aiChk, 'Dùng máy AI (máy tự kết nối về)', 'Máy khuôn mặt / vân tay dòng "AI": trên máy điền IP / tên miền + cổng của phần mềm, máy tự kết nối về (chạy được cả qua Internet, khỏi mở port modem). Đồng bộ NV + vân tay / khuôn mặt giữa các máy AI cùng nhóm.'),
+          devToggle(hikChk, 'Dùng máy Hikvision', 'Thêm máy theo IP + tài khoản đăng nhập máy — phần mềm kết nối vào máy để tải NV, tải chấm công (tự tải theo lịch), ghi / xoá NV trên máy. Phần mềm phải cùng mạng LAN với máy (hoặc máy được mở port).'),
           devToggle(guardChk, 'Cảnh báo trùng Số ID giữa các máy', 'Máy đăng ký người mới vào Số ID đã có chủ → cảnh báo, tạm dừng đồng bộ và GIỮ lượt quẹt tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (tự cấp Số ID mới, giữ nguyên vân tay/thẻ).'),
           devToggle(autoPushChk, 'Đồng bộ nhân viên từ phần mềm xuống máy', 'Khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy; máy luôn dùng tên trong phần mềm. Vân tay / mặt / thẻ đăng ký ở 1 máy tự sang máy cùng nhóm + về phần mềm.',
             el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU — tối đa 24 ký tự'))),
@@ -5458,7 +5464,7 @@ async function pageDevices() {
     : el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
         el('div', { class: 'dev-st-grid' },
           ...[['Máy chấm công', d.enabled], ['Tự tạo NV từ máy', d.autocreate], ['Bắt buộc key theo máy', d.key_required],
-            ['Máy TCP/IP (cổng 4370)', d.tcp_enabled], ['Cảnh báo trùng Số ID', d.pin_guard], ['Đồng bộ NV xuống máy', d.auto_push]]
+            ['Máy TCP/IP (cổng 4370)', d.tcp_enabled], ['Máy AI', d.ai_enabled], ['Máy Hikvision', d.hik_enabled], ['Cảnh báo trùng Số ID', d.pin_guard], ['Đồng bộ NV xuống máy', d.auto_push]]
             .map(([t, on]) => el('div', { class: 'dev-st' }, el('span', {}, t), el('span', { class: 'pill ' + (on ? 'ok' : 'muted') }, on ? 'Bật' : 'Tắt')))),
         el('div', { class: 'map-hint', style: 'margin:8px 0 0' }, '🔒 Chỉ tài khoản tổng (Digiplus) bật/tắt được.'));
 
@@ -5504,7 +5510,13 @@ async function pageDevices() {
         el('b', {}, 'Cách B · Qua Internet / chi nhánh khác'),
         el('div', { style: 'margin-top:6px' }, 'Tên miền: ', domVal, ' ', domCopy, ' · Port: ', el('b', {}, '443')),
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy cần có Internet'),
-        domNote)),
+        domNote),
+      // Máy AI: giao thức WebSocket (ws://, không mã hoá) — vào CÙNG cổng web; qua tên miền thì cổng 80
+      d.ai_enabled ? el('div', { class: 'dev-tg' },
+        el('b', {}, 'Máy AI (khuôn mặt / vân tay)'),
+        el('div', { style: 'margin-top:6px' }, 'Server: ', el('b', { style: 'font-family:monospace' }, d.server_ips[0] || '(IP máy chủ)'), ' · Port: ', el('b', {}, String(d.port))),
+        domain ? el('div', { style: 'margin-top:4px' }, 'Qua Internet: ', el('b', { style: 'font-family:monospace' }, domain), ' · Port: ', el('b', {}, '80')) : '',
+        el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Trên máy: Menu → Network / Cloud Server, điền như trên. Máy tự kết nối về rồi hiện ở danh sách (Chờ duyệt).')) : ''),
     el('div', { style: 'font-size:13.5px;margin-top:10px', html: 'Lưu, khởi động lại máy → máy hiện ở danh sách bên dưới (<b>Chờ duyệt</b>) → bấm <b>Duyệt</b>.' }),
     ipsHint);
 
@@ -5560,7 +5572,7 @@ async function pageDevices() {
             toast('Máy ' + m.serial + ' chưa có KEY bản quyền — dán key Digiplus cấp rồi mới duyệt được.', 'err');
             return pasteDeviceKey(m);
           }
-          try { await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); toast('Đã duyệt máy ' + m.serial + ' — máy sẽ tự khởi động lại để nhận cấu hình và giờ đúng.', 'ok'); pageDevices(); }
+          try { const r = await api('/admin/devices/' + m.id, { method: 'PUT', body: { active: true } }); toast('Đã duyệt máy ' + m.serial + (r.rebooting ? ' — máy sẽ tự khởi động lại để nhận cấu hình và giờ đúng.' : ''), 'ok'); pageDevices(); }
           catch (e) { toast(e.message || 'Không duyệt được máy', 'err'); }
         })
       : null;
@@ -5568,8 +5580,11 @@ async function pageDevices() {
       ? btnSm('🔓 Mở cửa', async () => { if (!confirm(`Mở cửa tại máy "${m.name || m.serial}" ngay?`)) return; try { const r = await api('/admin/devices/' + m.id + '/open-door', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh mở cửa', 'ok'); } catch (e) { toast(e.message, 'err'); } })
       : null;
     const logBtn = btnSm('Xem quẹt', () => devicePunchesModal(m), 'ghost');
-    // Đồng bộ giờ = ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt)
-    const timeBtn = (m.active && hasPerm('devices'))
+    const isTcp = m.conn_type === 'tcp', isAi = m.conn_type === 'ai', isHik = m.conn_type === 'hik';
+    // Đồng bộ giờ = ra lệnh máy khởi động lại để lấy lại giờ máy chủ + múi giờ (chỉ máy đã duyệt). Máy AI: đặt giờ thẳng, không khởi động lại.
+    const timeBtn = (m.active && hasPerm('devices') && isAi)
+      ? btnSm('🕒 Đồng bộ giờ', () => aiCall(m, 'set-time', {}, `Đặt giờ máy "${m.name || m.serial}" theo giờ máy chủ?\nKiểm tra đồng hồ máy tính cài phần mềm đúng trước.`), 'ghost')
+      : (m.active && hasPerm('devices'))
       ? btnSm('🕒 Đồng bộ giờ', async () => {
           if (!confirm(`Đồng bộ giờ máy "${m.name || m.serial}" theo máy chủ?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 30 giây) rồi tự lấy giờ đúng. Trong lúc đó chưa chấm công được.\nLưu ý: giờ lấy theo đồng hồ của máy tính cài phần mềm — kiểm tra đồng hồ máy tính đúng trước.`)) return;
           try { const r = await api('/admin/devices/' + m.id + '/sync-time', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh đồng bộ giờ', 'ok'); }
@@ -5578,8 +5593,35 @@ async function pageDevices() {
       : null;
     const keyBtn = (d.key_required && !m.key_ok) ? btnSm('🔑 Dán key', () => pasteDeviceKey(m)) : null;
     const putDev = (body) => api('/admin/devices/' + m.id, { method: 'PUT', body });
-    const isTcp = m.conn_type === 'tcp';
-    const moreBtn = isTcp ? rowMenu([
+    const renameItem = { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } };
+    const keyItem = hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null;
+    const doorItem = hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null;
+    const pauseItem = m.active ? { group: 'Xóa / tạm dừng', label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null;
+    const removeItem = { danger: true, group: 'Xóa / tạm dừng', label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách? (Dữ liệu trên máy chấm công không bị ảnh hưởng)')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } };
+    const moreBtn = isHik ? rowMenu([   // máy Hikvision: phần mềm kết nối vào máy (giống TCP/IP)
+      { group: 'Dữ liệu từ máy', label: '📊 Thông tin & dung lượng máy', fn: () => tcpJob(m, 'info', {}, pageDevices, 'hik') },
+      m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: () => { if (confirm(`Tải danh sách nhân viên TỪ máy "${m.name || m.serial}" về phần mềm?`)) tcpJob(m, 'users', {}, pageDevices, 'hik'); } } : null,
+      m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải dữ liệu chấm công (từ ngày – đến ngày)', fn: () => tcpLogsModal(m, 'hik') } : null,
+      renameItem,
+      { group: 'Cài đặt máy', label: '🔌 Sửa kết nối (IP / cổng / tài khoản)', fn: () => hikAddModal(m) },
+      m.active ? { group: 'Cài đặt máy', label: m.tcp_auto ? '⏱ Tắt tự động tải máy này' : '⏱ Bật tự động tải máy này', fn: async () => { try { await api(`/admin/hik-devices/${m.id}/auto`, { method: 'PUT', body: { on: !m.tcp_auto } }); toast(m.tcp_auto ? 'Đã tắt tự động tải cho máy này' : 'Đã bật tự động tải cho máy này', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null,
+      m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy chủ', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ máy chủ (múi giờ Việt Nam)?\nKiểm tra đồng hồ máy tính cài phần mềm đúng trước.`)) tcpJob(m, 'set-time', {}, null, 'hik'); } } : null,
+      m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}, null, 'hik'); } } : null,
+      doorItem, keyItem, pauseItem, removeItem,
+    ]) : isAi ? rowMenu([   // máy AI: gửi lệnh, máy làm khi đang kết nối
+      m.active ? { group: 'Dữ liệu từ máy', label: '📊 Đọc thông tin máy', fn: () => aiCall(m, 'info') } : null,
+      m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên + vân tay / khuôn mặt từ máy', fn: () => aiCall(m, 'users', {}, `Tải danh sách nhân viên + vân tay / khuôn mặt TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy gửi dần lên; chờ chút rồi bấm Làm mới.`) } : null,
+      m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải lại log chấm công', fn: () => aiLogsModal(m) } : null,
+      renameItem,
+      { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy AI CÙNG nhóm tự đồng bộ NV / vân tay / khuôn mặt / thẻ / mật mã cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
+      { group: 'Cài đặt máy', hint: 'Bật: NV mới khai trên phần mềm tự đẩy xuống máy này (khi bật Tự động đẩy NV)', label: (m.recv_new ?? 1) ? '📥 Nhận NV mới từ phần mềm: BẬT' : '📥 Nhận NV mới từ phần mềm: TẮT', fn: async () => {
+        try { await putDev({ recv_new: !(m.recv_new ?? 1) }); toast((m.recv_new ?? 1) ? 'Máy này sẽ KHÔNG nhận NV mới từ phần mềm' : 'Máy này sẽ nhận NV mới từ phần mềm', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
+      m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => aiCall(m, 'restart', {}, `Khởi động lại máy "${m.name || m.serial}"?`) } : null,
+      doorItem, keyItem,
+      m.active ? { group: 'Bản quyền & quản trị', label: '👤 Xóa quyền quản trị', fn: () => aiCall(m, 'clear-admins', {}, `Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy).`) } : null,
+      m.active ? { group: 'Xóa / tạm dừng', label: '🗑 Xóa dữ liệu trên máy', fn: () => aiClearModal(m) } : null,
+      pauseItem, removeItem,
+    ]) : isTcp ? rowMenu([
       { group: 'Dữ liệu từ máy', label: '📊 Thông tin & dung lượng máy', fn: () => tcpInfoModal(m) },
       m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: () => { if (confirm(`Tải danh sách nhân viên TỪ máy "${m.name || m.serial}" về phần mềm?`)) tcpJob(m, 'users', {}, pageDevices); } } : null,
       m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải dữ liệu chấm công (từ ngày – đến ngày)', fn: () => tcpLogsModal(m) } : null,
@@ -5621,45 +5663,48 @@ async function pageDevices() {
       { danger: true, group: 'Xóa / tạm dừng', label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách?')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
     ]);
     const numTd = (v, bold) => el('td', { class: 'num' + (bold ? ' b' : '') + (v ? '' : ' zero') }, String(v));
-    // máy TCP/IP: số liệu lấy từ lần đọc thông tin máy gần nhất (kèm sức chứa)
-    const ti = isTcp ? (m.tcp_info || {}) : null;
+    // máy TCP/IP / Hikvision (phần mềm kết nối vào máy): số liệu lấy từ lần đọc thông tin máy gần nhất (kèm sức chứa)
+    const direct = isTcp || isHik, autoMin = isHik ? d.hik_auto_min : d.tcp_auto_min;
+    const ti = direct ? (m.tcp_info || {}) : null;
     const capTd = (v, cap, bold) => { const td = numTd(v ?? 0, bold); if (cap > 0) { td.append(el('div', { class: 'dv-sub' }, '/ ' + Number(cap).toLocaleString('vi'))); td.title = `Đang dùng ${v ?? 0} / sức chứa ${cap}`; } return td; };
-    const cNV = isTcp ? capTd(ti.users, ti.user_cap, true) : numTd(m.emp_count ?? 0, true);
-    const cFP = isTcp ? capTd(ti.fps, ti.fp_cap) : numTd(m.fp_count ?? 0);
-    const cFace = isTcp ? capTd(ti.faces > 0 ? ti.faces : 0, ti.face_cap) : numTd(m.face_count ?? 0);
-    const cCard = numTd(m.card_count ?? 0);
-    if (!isTcp) countCells[m.serial] = { cNV, cFP, cFace, cCard };
-    // Online = máy có gọi server trong vòng 2,5 phút gần đây (máy ADMS gọi ~mỗi 10s)
-    const online = !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
+    const cNV = direct ? capTd(ti.users, ti.user_cap, true) : numTd(m.emp_count ?? 0, true);
+    const cFP = direct ? capTd(ti.fps, ti.fp_cap) : numTd(m.fp_count ?? 0);
+    const cFace = direct ? capTd(ti.faces > 0 ? ti.faces : 0, ti.face_cap) : numTd(m.face_count ?? 0);
+    const cCard = numTd(isHik && ti.cards >= 0 ? ti.cards : (m.card_count ?? 0));
+    if (!direct) countCells[m.serial] = { cNV, cFP, cFace, cCard };
+    // Online = máy có gọi server trong vòng 2,5 phút gần đây (máy ADMS gọi ~mỗi 10s); máy AI = đang giữ kết nối WebSocket
+    const online = isAi ? !!m.online : !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
     const chips = [
       isTcp ? el('span', { class: 'chip', title: 'Máy kết nối trực tiếp TCP/IP — phần mềm chủ động kết nối khi bấm tải' }, '🔌 TCP/IP') : '',
-      isTcp && m.active && d.tcp_auto_min > 0 ? el('span', { class: 'chip' + (m.tcp_auto ? ' g' : ''), title: m.tcp_auto ? `Tự động tải ${d.tcp_auto_min} phút / lần` : 'Máy này đang TẮT tự động tải (bật ở ⋯ Thêm)' }, m.tcp_auto ? `⏱ tự tải ${d.tcp_auto_min}'` : '⏱ tắt tự tải') : '',
+      isHik ? el('span', { class: 'chip', title: 'Máy Hikvision — phần mềm kết nối vào máy (ISAPI) khi bấm tải / theo lịch tự tải' }, '📷 Hikvision') : '',
+      isAi ? el('span', { class: 'chip', title: 'Máy AI — máy tự kết nối về phần mềm (WebSocket)' }, '🤖 Máy AI') : '',
+      direct && m.active && autoMin > 0 ? el('span', { class: 'chip' + (m.tcp_auto ? ' g' : ''), title: m.tcp_auto ? `Tự động tải ${autoMin} phút / lần` : 'Máy này đang TẮT tự động tải (bật ở ⋯ Thêm)' }, m.tcp_auto ? `⏱ tự tải ${autoMin}'` : '⏱ tắt tự tải') : '',
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
       m.pin_range ? el('span', { class: 'chip', title: 'Dải Số ID của máy' }, '🔢 ' + m.pin_range) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
     ].filter(Boolean);
     const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';
-    tb.append(el('tr', { class: online || isTcp ? '' : 'off' },
+    tb.append(el('tr', { class: online || direct ? '' : 'off' },
       el('td', {},
         el('div', { class: 'dv-name' }, m.name || el('span', { style: 'color:#9ca3af;font-weight:500' }, 'Chưa đặt tên')),
         el('div', { class: 'dv-serial' }, m.serial,
           el('button', { class: 'cp', title: 'Copy serial', onclick: () => copySerial(m.serial) }, '📋')),
         chips.length ? el('div', { class: 'dv-chips' }, ...chips) : ''),
       el('td', {}, el('div', { class: 'dv-st' },
-        isTcp ? (m.tcp_auto_at && m.tcp_auto && d.tcp_auto_min > 0
+        direct ? (m.tcp_auto_at && m.tcp_auto && autoMin > 0
             ? el('span', { class: 'st ' + (m.tcp_auto_ok ? 'on' : 'offl'), title: `Lần tự tải gần nhất ${isoToHMS(m.tcp_auto_at)}: ${m.tcp_auto_msg || ''}` }, el('i', {}), m.tcp_auto_ok ? 'Kết nối tốt' : 'Không kết nối được')
-            : el('span', { class: 'st', title: 'Máy TCP/IP không tự gọi về — phần mềm kết nối khi bấm tải hoặc theo lịch tự tải' }, 'Kết nối khi tải'))
+            : el('span', { class: 'st', title: (isHik ? 'Máy Hikvision' : 'Máy TCP/IP') + ' không tự gọi về — phần mềm kết nối khi bấm tải hoặc theo lịch tự tải' }, 'Kết nối khi tải'))
           : el('span', { class: 'st ' + (online ? 'on' : 'offl'), title: online ? 'Máy đang kết nối' : 'Máy không gọi về trong 2,5 phút gần đây' }, el('i', {}), online ? 'Online' : 'Offline'),
         m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'),
         // Máy đã có key thì ẩn nhãn cho đỡ rối; chỉ cảnh báo khi CHƯA có key
         (d.key_required && !m.key_ok) ? el('span', { class: 'pill warn' }, '🔑 Chưa có key') : '')),
       idCell(m),
       cNV, cFP, cFace, cCard,
-      el('td', {}, el('div', { class: 'dv-ip' }, isTcp ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—')), seen ? el('div', { class: 'dv-sub' }, seen) : '',
-        isTcp && m.tcp_auto_at && m.tcp_auto && d.tcp_auto_min > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
+      el('td', {}, el('div', { class: 'dv-ip' }, direct ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—')), seen ? el('div', { class: 'dv-sub' }, seen) : '',
+        direct && m.tcp_auto_at && m.tcp_auto && autoMin > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
         m.unmatched ? el('div', { class: 'dv-warn', title: 'Số ID trên máy chưa khớp với nhân viên nào trong phần mềm' }, m.unmatched + ' mã chưa khớp') : ''),
-      el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : [doorBtn, timeBtn]), logBtn, moreBtn)),
+      el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : isHik ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m, 'hik')) : null, doorBtn] : [doorBtn, timeBtn]), logBtn, moreBtn)),
     ));
   }
   tbl.append(tb);
@@ -5702,30 +5747,34 @@ async function pageDevices() {
   delAllBtn.onclick = () => deleteUsersAllModal(pageDevices);
   const tcpBtn = d.tcp_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy TCP/IP') : null;
   if (tcpBtn) tcpBtn.onclick = () => tcpAddModal(null);
-  // Thanh TỰ ĐỘNG TẢI máy TCP/IP: chọn chu kỳ (lưu ngay) + nút tải ngay tất cả
-  let autoBar = null;
-  if (d.tcp_enabled && d.rows.some((m) => m.conn_type === 'tcp')) {
-    const sel = el('select', { style: 'width:auto;margin:0' }, ...(d.tcp_auto_choices || [0]).map((n) => el('option', { value: n, ...(n === d.tcp_auto_min ? { selected: '' } : {}) }, !n ? 'Tắt (chỉ tải khi bấm)' : n < 60 ? `${n} phút / lần` : `${n / 60} giờ / lần`)));
+  const hikBtn = d.hik_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy Hikvision') : null;
+  if (hikBtn) hikBtn.onclick = () => hikAddModal(null);
+  // Thanh TỰ ĐỘNG TẢI máy TCP/IP (kind 'tcp') / Hikvision (kind 'hik'): chọn chu kỳ (lưu ngay) + nút tải ngay tất cả
+  const autoBarOf = (kind, label, minutes, choices) => {
+    const sel = el('select', { style: 'width:auto;margin:0' }, ...(choices || [0]).map((n) => el('option', { value: n, ...(n === minutes ? { selected: '' } : {}) }, !n ? 'Tắt (chỉ tải khi bấm)' : n < 60 ? `${n} phút / lần` : `${n / 60} giờ / lần`)));
     sel.onchange = async () => {
-      try { await api('/admin/tcp-devices/auto', { method: 'PUT', body: { minutes: +sel.value } }); toast(+sel.value ? `Đã bật tự động tải ${sel.options[sel.selectedIndex].text}` : 'Đã tắt tự động tải', 'ok'); pageDevices(); }
-      catch (e) { toast(e.message, 'err'); sel.value = d.tcp_auto_min; }
+      try { await api(`/admin/${kind}-devices/auto`, { method: 'PUT', body: { minutes: +sel.value } }); toast(+sel.value ? `Đã bật tự động tải ${sel.options[sel.selectedIndex].text}` : 'Đã tắt tự động tải', 'ok'); pageDevices(); }
+      catch (e) { toast(e.message, 'err'); sel.value = minutes; }
     };
-    const runAll = btnSm('⬇ Tải ngay tất cả máy', () => tcpAutoRun(), 'ghost');
-    autoBar = el('div', { class: 'panel', style: 'padding:10px 14px;margin-bottom:10px;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap' },
-      el('b', {}, '⏱ Tự động tải máy TCP/IP'), sel, runAll,
-      el('span', { class: 'map-hint', style: 'margin:0;flex:1;min-width:260px' }, d.tcp_auto_min
-        ? 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về (lúc tải máy tạm khoá vài giây). Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
+    const runAll = btnSm('⬇ Tải ngay tất cả máy', () => tcpAutoRun(kind), 'ghost');
+    return el('div', { class: 'panel', style: 'padding:10px 14px;margin-bottom:10px;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap' },
+      el('b', {}, '⏱ Tự động tải ' + label), sel, runAll,
+      el('span', { class: 'map-hint', style: 'margin:0;flex:1;min-width:260px' }, minutes
+        ? (kind === 'hik' ? 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về. Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
+          : 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về (lúc tải máy tạm khoá vài giây). Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.')
         : 'Đang tắt: dữ liệu chỉ về khi bấm "⬇ Tải chấm công". Chọn chu kỳ để phần mềm tự tải.'));
-  }
+  };
+  const autoBar = d.tcp_enabled && d.rows.some((m) => m.conn_type === 'tcp') ? autoBarOf('tcp', 'máy TCP/IP', d.tcp_auto_min, d.tcp_auto_choices) : null;
+  const hikAutoBar = d.hik_enabled && d.rows.some((m) => m.conn_type === 'hik') ? autoBarOf('hik', 'máy Hikvision', d.hik_auto_min, d.hik_auto_choices) : null;
   // 2 khung trên cùng: mặc định THU GỌN (chỉ 1 dòng tóm tắt), bấm ▶ để mở — nhớ trên máy
-  const FEAT = [['Máy chấm công', d.enabled], ['Tự tạo NV', d.autocreate], ['Bắt buộc key', d.key_required], ['TCP/IP', d.tcp_enabled],
+  const FEAT = [['Máy chấm công', d.enabled], ['Tự tạo NV', d.autocreate], ['Bắt buộc key', d.key_required], ['TCP/IP', d.tcp_enabled], ['Máy AI', d.ai_enabled], ['Hikvision', d.hik_enabled],
     ['Cảnh báo trùng Số ID', d.pin_guard], ['Đồng bộ NV xuống máy', d.auto_push]];
   foldPanel(togglePanel, 'dev_features', '⚙️ Tính năng máy chấm công', () => {
     const on = FEAT.filter((f) => f[1]).map((f) => f[0]);
     return on.length ? '— Bật: ' + on.join(' · ') : '— Đang tắt hết';
   }, true);
   foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
-  setMain(head('Máy chấm công', tcpBtn, usbBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', tcpBtn, hikBtn, usbBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
 // Thanh vàng "Số ID nghi trùng" (null nếu không có)
@@ -5953,15 +6002,15 @@ async function deleteUsersAllModal(after) {
   try { rows = (await api('/admin/devices/all-users')).rows; } catch (e) { box.innerHTML = ''; box.append(el('div', { class: 'dv-warn' }, e.message)); return; }
   render();
 }
-// Tải ngay tất cả máy TCP/IP đang bật tự tải (1 lượt, tuần tự từng máy)
-async function tcpAutoRun() {
+// Tải ngay tất cả máy TCP/IP (kind 'tcp') / Hikvision (kind 'hik') đang bật tự tải (1 lượt, tuần tự từng máy)
+async function tcpAutoRun(kind = 'tcp') {
   const msg = el('div', { style: 'font-size:15px;font-weight:600' }, '⏳ Đang bắt đầu…');
   const out = el('div', { style: 'margin-top:12px' });
   const closeB = el('button', { class: 'btn', disabled: '' }, 'Đóng');
   closeB.onclick = () => { closeModal(); pageDevices(); };
-  openModal('Tải ngay tất cả máy TCP/IP', [msg, out], [closeB]);
+  openModal(kind === 'hik' ? 'Tải ngay tất cả máy Hikvision' : 'Tải ngay tất cả máy TCP/IP', [msg, out], [closeB]);
   const fail = (t) => { msg.textContent = '❌ ' + t; msg.style.color = '#c0392b'; closeB.disabled = false; };
-  let job; try { job = (await api('/admin/tcp-devices/auto/run', { method: 'POST' })).job; } catch (e) { return fail(e.message); }
+  let job; try { job = (await api(`/admin/${kind}-devices/auto/run`, { method: 'POST' })).job; } catch (e) { return fail(e.message); }
   for (;;) {
     await new Promise((ok) => setTimeout(ok, 1000));
     let j; try { j = await api('/admin/devices/tcp-jobs/' + job); } catch (e) { return fail(e.message); }
@@ -5976,9 +6025,10 @@ async function tcpAutoRun() {
 
 /* ---------- MÁY KẾT NỐI TRỰC TIẾP TCP/IP (cổng 4370) ---------- */
 // Chạy 1 thao tác trên máy: mở hộp thoại tiến độ, hỏi máy chủ mỗi giây tới khi xong. after(): gọi khi xong (VD tải lại danh sách).
-async function tcpJob(m, action, body, after) {
+// kind: 'tcp' (máy ZKTeco TCP/IP) | 'hik' (máy Hikvision) — cùng kiểu "phần mềm kết nối vào máy".
+async function tcpJob(m, action, body, after, kind = 'tcp') {
   const msg = el('div', { style: 'font-size:15px;font-weight:600' }, 'Đang kết nối máy…');
-  const sub = el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Trong lúc tải, máy chấm công tạm hiện "Đang làm việc…" và chưa chấm công được. Đừng tắt máy / rút dây mạng.');
+  const sub = el('div', { class: 'map-hint', style: 'margin-top:8px' }, kind === 'hik' ? 'Đang trao đổi dữ liệu với máy. Đừng tắt máy / rút dây mạng.' : 'Trong lúc tải, máy chấm công tạm hiện "Đang làm việc…" và chưa chấm công được. Đừng tắt máy / rút dây mạng.');
   const out = el('div', { style: 'margin-top:12px' });
   const closeB = el('button', { class: 'btn', disabled: '' }, 'Đóng');
   closeB.onclick = () => { closeModal(); after && after(); };
@@ -5986,7 +6036,7 @@ async function tcpJob(m, action, body, after) {
   openModal(title, [msg, sub, out], [closeB]);
   const fail = (t) => { msg.textContent = '❌ ' + t; msg.style.color = '#c0392b'; sub.style.display = 'none'; closeB.disabled = false; };
   let job;
-  try { const r = await api(`/admin/devices/${m.id}/tcp/${action}`, { method: 'POST', body: body || {} }); job = r.job; $('#modal h3') && r.title && ($('#modal h3').textContent = r.title + ' · ' + (m.name || m.serial)); }
+  try { const r = await api(`/admin/devices/${m.id}/${kind}/${action}`, { method: 'POST', body: body || {} }); job = r.job; $('#modal h3') && r.title && ($('#modal h3').textContent = r.title + ' · ' + (m.name || m.serial)); }
   catch (e) { return fail(e.message); }
   for (;;) {
     await new Promise((ok) => setTimeout(ok, 1000));
@@ -6001,12 +6051,12 @@ async function tcpJob(m, action, body, after) {
       msg.textContent = `✅ Đã tải xong${r.from ? ` ${r.from} → ${r.to}` : ' toàn bộ'}`;
       out.append(line('Lượt chấm đọc từ máy', n(r.read)), line('Lượt chấm MỚI thêm vào phần mềm', n(r.added)), line('Đã có sẵn (bỏ qua, không trùng)', n(r.read - r.added)), line('Nhân viên trên máy', n(r.users)));
       if (r.unmatched) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${r.unmatched} Số ID trên máy chưa khớp nhân viên nào — vào Nhân viên điền "Số ID máy" cho khớp.`));
-      if (!r.ranged && r.from) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, `Máy này (firmware cũ) không lọc được theo ngày nên phần mềm đã đọc cả ${n(r.onDevice)} lượt trên máy rồi lọc lại.`));
+      if (!r.ranged && r.from && kind === 'tcp') out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, `Máy này (firmware cũ) không lọc được theo ngày nên phần mềm đã đọc cả ${n(r.onDevice)} lượt trên máy rồi lọc lại.`));
       out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Công đã tự tính cho các ngày có lượt chấm mới. Xem ở menu Tính công.'));
     } else if (action === 'users') {
       msg.textContent = '✅ Đã tải nhân viên'; out.append(line('Nhân viên đọc từ máy', n(r.read)), line('Đã lưu / cập nhật', n(r.saved)));
     } else if (action === 'info') { msg.textContent = '✅ Đã đọc thông tin máy'; out.append(tcpInfoBox(r.info || {})); }
-    else { msg.textContent = '✅ Xong' + (action === 'set-time' && r.note ? ` — giờ máy: ${r.note[0]}` : ''); if (r.info) out.append(tcpInfoBox(r.info)); }
+    else { msg.textContent = '✅ Xong' + (action === 'set-time' && r.note ? (kind === 'hik' ? ` — ${r.note[0]}` : ` — giờ máy: ${r.note[0]}`) : ''); if (r.info) out.append(tcpInfoBox(r.info)); }
     return;
   }
 }
@@ -6022,7 +6072,7 @@ function tcpInfoBox(i) {
   };
   const kv = (k, v) => (v ? el('div', { style: 'display:flex;justify-content:space-between;gap:16px;padding:4px 0;font-size:13px' }, el('span', { class: 'muted' }, k), el('b', { style: 'font-family:monospace' }, String(v))) : null);
   return el('div', {},
-    bar('Nhân viên', i.users, i.user_cap), bar('Vân tay', i.fps, i.fp_cap), i.faces >= 0 && (i.faces > 0 || i.face_cap > 0) ? bar('Khuôn mặt', i.faces, i.face_cap) : null, bar('Lượt chấm công', i.logs, i.log_cap),
+    bar('Nhân viên', i.users, i.user_cap), bar('Vân tay', i.fps, i.fp_cap), i.faces >= 0 && (i.faces > 0 || i.face_cap > 0) ? bar('Khuôn mặt', i.faces, i.face_cap) : null, i.cards > 0 ? bar('Thẻ', i.cards) : null, bar('Lượt chấm công', i.logs, i.log_cap),
     i.log_cap > 0 && i.logs / i.log_cap >= 0.9 ? el('div', { class: 'dv-warn' }, 'Bộ nhớ lượt chấm sắp đầy — tải dữ liệu về phần mềm rồi xóa lượt chấm trên máy.') : null,
     el('div', { style: 'margin-top:10px;border-top:1px solid var(--line,#eee);padding-top:8px' },
       kv('Serial', i.serial), kv('Quản trị trên máy', i.admins >= 0 ? i.admins : ''), kv('Giờ trên máy', i.time), kv('Firmware', i.firmware), kv('Nền tảng', i.platform), kv('Model', i.model), kv('MAC', i.mac), kv('Thuật toán vân tay', i.fp_version ? 'ZKFinger ' + i.fp_version : '')));
@@ -6054,8 +6104,8 @@ function tcpAddModal(m) {
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), go]);
   setTimeout(() => (m ? ipI : nameI).focus(), 50);
 }
-// Tải dữ liệu chấm công từ ngày – đến ngày (hoặc toàn bộ)
-function tcpLogsModal(m) {
+// Tải dữ liệu chấm công từ ngày – đến ngày (hoặc toàn bộ). kind: 'tcp' | 'hik'
+function tcpLogsModal(m, kind = 'tcp') {
   const today = todayVN();
   const fromI = el('input', { type: 'date', value: today.slice(0, 8) + '01' }), toI = el('input', { type: 'date', value: today });
   const allChk = el('input', { type: 'checkbox', style: 'width:auto' });
@@ -6063,7 +6113,7 @@ function tcpLogsModal(m) {
   const go = el('button', { class: 'btn' }, '⬇ Tải về');
   go.onclick = () => {
     if (!allChk.checked && (!fromI.value || !toI.value || toI.value < fromI.value)) return toast('Khoảng ngày không hợp lệ', 'err');
-    tcpJob(m, 'logs', allChk.checked ? {} : { from: fromI.value, to: toI.value }, pageDevices);
+    tcpJob(m, 'logs', allChk.checked ? {} : { from: fromI.value, to: toI.value }, pageDevices, kind);
   };
   const last = m.tcp_sync_at ? `Lần tải gần nhất: ${isoToHMS(m.tcp_sync_at)} ngày ${m.tcp_sync_at.slice(8, 10)}/${m.tcp_sync_at.slice(5, 7)}.` : 'Máy này chưa tải lần nào.';
   openModal('Tải dữ liệu chấm công · ' + (m.name || m.serial), [
@@ -6087,6 +6137,77 @@ function tcpClearModal(m) {
     row('Xóa TOÀN BỘ lượt chấm', 'Giải phóng bộ nhớ lượt chấm khi máy sắp đầy. Nhân viên + vân tay giữ nguyên.', btnSm('Xóa lượt chấm', ask('clear-logs', 'Xóa TOÀN BỘ lượt chấm công trên máy?'), 'ghost')),
     row('Xóa toàn bộ nhân viên + vân tay', 'Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt chấm giữ nguyên.', btnSm('Xóa nhân viên', ask('clear-users', 'Xóa TOÀN BỘ nhân viên + vân tay trên máy?'), 'ghost')),
     row('Xóa sạch máy', 'Lượt chấm + nhân viên + vân tay. Dùng khi chuyển máy sang nơi khác.', btnSm('Xóa sạch', ask('clear-all', 'Xóa SẠCH máy (lượt chấm + nhân viên + vân tay)?'), 'danger')),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+}
+
+/* ---------- MÁY HIKVISION (phần mềm gọi ISAPI vào máy) ---------- */
+// Thêm máy (m = null) / sửa kết nối (m = máy)
+function hikAddModal(m) {
+  const nameI = el('input', { placeholder: 'VD Máy cổng chính', value: m ? (m.name || '') : '' });
+  const ipI = el('input', { placeholder: '192.168.1.64', value: m ? (m.tcp_ip || '') : '', style: 'font-family:monospace' });
+  const portI = el('input', { type: 'number', value: m ? (m.tcp_port || 80) : 80, style: 'width:100px' });
+  const userI = el('input', { value: m ? (m.dev_user || 'admin') : 'admin', style: 'width:140px' });
+  const passI = el('input', { type: 'password', placeholder: m && m.has_pass ? '(giữ nguyên)' : 'Mật khẩu máy', style: 'width:180px', autocomplete: 'new-password' });
+  const go = el('button', { class: 'btn' }, m ? 'Lưu' : '🔌 Kết nối & thêm máy');
+  go.onclick = async () => {
+    if (!ipI.value.trim()) return toast('Nhập địa chỉ IP của máy Hikvision', 'err');
+    if (!m && !passI.value) return toast('Nhập mật khẩu đăng nhập máy', 'err');
+    go.disabled = true; const t = go.textContent; go.textContent = 'Đang kết nối máy…';
+    const body = { ip: ipI.value.trim(), port: portI.value, user: userI.value.trim(), ...(passI.value ? { pass: passI.value } : {}) };
+    try {
+      if (m) { await api(`/admin/devices/${m.id}/hik`, { method: 'PUT', body }); if (nameI.value !== (m.name || '')) await api('/admin/devices/' + m.id, { method: 'PUT', body: { name: nameI.value } }); toast('Đã lưu kết nối', 'ok'); }
+      else { const r = await api('/admin/devices/hik', { method: 'POST', body: { ...body, name: nameI.value } }); toast(`Đã kết nối máy ${r.serial}` + (r.active ? '' : ' — bấm Duyệt để bắt đầu dùng'), 'ok'); }
+      closeModal(); pageDevices();
+    } catch (e) { toast(e.message, 'err'); go.disabled = false; go.textContent = t; }
+  };
+  openModal(m ? 'Sửa kết nối · ' + (m.name || m.serial) : 'Thêm máy chấm công Hikvision', [
+    m ? '' : el('div', { class: 'map-hint' }, 'Xem IP trên máy: Menu → Communication / Network. Tài khoản mặc định "admin", mật khẩu là mật khẩu đặt lúc kích hoạt máy. Phần mềm phải CÙNG mạng LAN với máy (hoặc máy đã được mở port ra internet). Phần mềm sẽ đăng nhập thử và tự đọc Serial.'),
+    el('label', { style: 'margin-top:10px' }, 'Tên máy'), nameI,
+    el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;margin-top:10px' },
+      el('div', { style: 'flex:1;min-width:180px' }, el('label', {}, 'Địa chỉ IP'), ipI),
+      el('div', {}, el('label', { title: 'Cổng web của máy (HTTP), mặc định 80' }, 'Cổng'), portI)),
+    el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;margin-top:10px' },
+      el('div', {}, el('label', {}, 'Tài khoản'), userI),
+      el('div', {}, el('label', {}, 'Mật khẩu'), passI)),
+    el('div', { class: 'map-hint', style: 'margin-top:8px' }, '⚠️ Nhập sai mật khẩu nhiều lần, máy Hikvision sẽ tạm khoá đăng nhập khoảng 30 phút.'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), go]);
+  setTimeout(() => (m ? ipI : nameI).focus(), 50);
+}
+
+/* ---------- MÁY AI (tự nối về qua WebSocket): thao tác = gửi lệnh, máy làm khi đang kết nối ---------- */
+async function aiCall(m, action, body, confirmMsg) {
+  if (confirmMsg && !confirm(confirmMsg)) return;
+  try { const r = await api(`/admin/devices/${m.id}/ai/${action}`, { method: 'POST', body: body || {} }); toast(r.msg || 'Đã gửi lệnh', r.online ? 'ok' : 'err'); }
+  catch (e) { toast(e.message, 'err'); }
+}
+// Tải lại lượt chấm cũ còn trên máy (theo khoảng ngày / toàn bộ) — máy gửi dần lên, công tự tính
+function aiLogsModal(m) {
+  const today = todayVN();
+  const fromI = el('input', { type: 'date', value: today.slice(0, 8) + '01' }), toI = el('input', { type: 'date', value: today });
+  const allChk = el('input', { type: 'checkbox', style: 'width:auto' });
+  allChk.onchange = () => { fromI.disabled = toI.disabled = allChk.checked; };
+  const go = el('button', { class: 'btn' }, '⬇ Tải về');
+  go.onclick = async () => {
+    if (!allChk.checked && (!fromI.value || !toI.value || toI.value < fromI.value)) return toast('Khoảng ngày không hợp lệ', 'err');
+    closeModal(); aiCall(m, 'logs', allChk.checked ? {} : { from: fromI.value, to: toI.value });
+  };
+  openModal('Tải lại dữ liệu chấm công · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint' }, 'Bình thường máy AI tự gửi lượt chấm về ngay khi chấm. Dùng mục này khi cần lấy lại lượt cũ (máy mới nối phần mềm, mất mạng lâu…). Lượt đã có tự bỏ qua, công tự tính lại. Máy phải đang kết nối.'),
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px' }, el('span', {}, 'Từ'), fromI, el('span', {}, 'đến'), toI),
+    el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer' }, allChk, 'Tải TOÀN BỘ lượt chấm còn trên máy'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go]);
+}
+// Xóa dữ liệu TRÊN MÁY AI (không xóa dữ liệu đã có trong phần mềm)
+function aiClearModal(m) {
+  const name = m.name || m.serial;
+  const row = (title, desc, btn) => el('div', { style: 'padding:12px 0;border-bottom:1px solid var(--line,#eee);display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap' },
+    el('div', { style: 'flex:1;min-width:220px' }, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)), btn);
+  const ask = (action, q) => () => { if (!confirm(q + `\n\nMáy: ${name}\nThao tác này KHÔNG hoàn tác được trên máy.`)) return; if (prompt('Gõ chữ XOA để xác nhận:') !== 'XOA') return toast('Chưa xác nhận — không xóa gì', 'err'); closeModal(); aiCall(m, action); };
+  openModal('Xóa dữ liệu trên máy · ' + name, [
+    el('div', { class: 'map-hint' }, 'Chỉ xóa trên MÁY CHẤM CÔNG. Dữ liệu đã có trong phần mềm vẫn giữ nguyên.'),
+    row('Xóa TOÀN BỘ lượt chấm', 'Giải phóng bộ nhớ lượt chấm. Nhân viên + vân tay / khuôn mặt giữ nguyên.', btnSm('Xóa lượt chấm', ask('clear-logs', 'Xóa TOÀN BỘ lượt chấm công trên máy?'), 'ghost')),
+    row('Xóa toàn bộ nhân viên', 'Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt chấm giữ nguyên.', btnSm('Xóa nhân viên', ask('clear-users', 'Xóa TOÀN BỘ nhân viên + vân tay / khuôn mặt trên máy?'), 'ghost')),
+    row('Xóa sạch máy', 'Nhân viên + lượt chấm (cài đặt máy giữ nguyên). Dùng khi chuyển máy sang nơi khác.', btnSm('Xóa sạch', ask('clear-all', 'Xóa SẠCH máy (nhân viên + lượt chấm)?'), 'danger')),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
 
@@ -6843,6 +6964,8 @@ async function pageSettings() {
   const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}) });
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}) });
   const tcpDevChk = el('input', { type: 'checkbox', id: 'st-tcpdev', style: 'width:auto', ...(s.tcp_device_enabled === '1' ? { checked: '' } : {}) });
+  const aiDevChk = el('input', { type: 'checkbox', id: 'st-aidev', style: 'width:auto', ...(s.ai_device_enabled === '1' ? { checked: '' } : {}) });
+  const hikDevChk = el('input', { type: 'checkbox', id: 'st-hikdev', style: 'width:auto', ...(s.hik_device_enabled === '1' ? { checked: '' } : {}) });
   const auditChk = el('input', { type: 'checkbox', id: 'st-audit', style: 'width:auto', ...(s.audit_enabled === '1' ? { checked: '' } : {}) });
   const inclAdminChk = el('input', { type: 'checkbox', id: 'st-incladmin', style: 'width:auto', ...(s.payroll_include_admin === '1' ? { checked: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
@@ -6858,6 +6981,8 @@ async function pageSettings() {
       if (isMaster()) {   // chỉ tài khoản tổng đổi được máy chấm công / chấm điện thoại
         body.device_enabled = devChk.checked;
         body.tcp_device_enabled = tcpDevChk.checked;
+        body.ai_device_enabled = aiDevChk.checked;
+        body.hik_device_enabled = hikDevChk.checked;
         body.phone_enabled = phoneChk.checked;
         body.audit_enabled = auditChk.checked;
       }
@@ -6895,6 +7020,19 @@ async function pageSettings() {
             el('div', {}, el('b', {}, '🔌 Dùng máy chấm công kết nối TCP/IP (cổng 4370)'),
               el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Cho máy đời cũ không có Cloud Server (ADMS): thêm máy theo địa chỉ IP trong mạng LAN, bấm tải nhân viên / dữ liệu chấm công theo khoảng ngày, xem dung lượng, xóa dữ liệu, xóa quản trị. Cần bật "Dùng máy chấm công" ở trên và phần mềm cài trên máy tính Windows cùng mạng với máy.')))
         : (s.tcp_device_enabled === '1' ? el('div', { style: 'font-size:13px;color:var(--muted);margin-left:26px' }, el('b', { style: 'color:var(--ink)' }, '🔌 Máy kết nối TCP/IP đang BẬT.')) : null);
+  // Máy hãng khác: máy AI (tự nối về qua WebSocket) · máy Hikvision (phần mềm gọi ISAPI vào máy)
+  const aiRow =
+      isMaster()
+        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-left:26px' }, aiDevChk,
+            el('div', {}, el('b', {}, '🤖 Dùng máy AI (máy tự kết nối về)'),
+              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Máy khuôn mặt / vân tay dòng "AI": trên máy điền IP / tên miền + cổng của phần mềm, máy tự kết nối về như máy ZKTeco — chạy được cả qua Internet. Cần bật "Dùng máy chấm công" ở trên.')))
+        : (s.ai_device_enabled === '1' ? el('div', { style: 'font-size:13px;color:var(--muted);margin-left:26px' }, el('b', { style: 'color:var(--ink)' }, '🤖 Máy AI đang BẬT.')) : null);
+  const hikRow =
+      isMaster()
+        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-left:26px' }, hikDevChk,
+            el('div', {}, el('b', {}, '📷 Dùng máy Hikvision'),
+              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Thêm máy theo IP + tài khoản đăng nhập máy — phần mềm kết nối vào máy để tải nhân viên, tải chấm công (tự tải theo lịch), ghi / xoá nhân viên trên máy. Phần mềm phải cùng mạng LAN với máy (hoặc máy được mở port). Cần bật "Dùng máy chấm công" ở trên.')))
+        : (s.hik_device_enabled === '1' ? el('div', { style: 'font-size:13px;color:var(--muted);margin-left:26px' }, el('b', { style: 'color:var(--ink)' }, '📷 Máy Hikvision đang BẬT.')) : null);
   const phoneRow =
       isMaster()
         ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, phoneChk,
@@ -6911,7 +7049,7 @@ async function pageSettings() {
     el('h3', { style: 'margin-top:0' }, 'Máy chấm công (máy chấm ăn)'),
     el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
       el('div', { class: 'map-hint' }, 'Công ty đang TẮT chấm công (Cấu hình hiển thị) — máy chấm công chỉ dùng để quẹt thẻ ăn. Các cài đặt tính công đang ẩn.'),
-      devRow, tcpRow, dedupRow, saveMode)) : el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+      devRow, tcpRow, aiRow, hikRow, dedupRow, saveMode)) : el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Kiểu chấm công'),
     el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
       modeRow(modeShift, '🕐 Theo ca làm việc', 'Có ca, tính đi muộn / về sớm / tăng ca, báo cáo đầy đủ. Phù hợp văn phòng, nhà máy.'),
@@ -6933,7 +7071,7 @@ async function pageSettings() {
       dedupRow,
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Hình thức chấm công'),
-      devRow, tcpRow, phoneRow,
+      devRow, tcpRow, aiRow, hikRow, phoneRow,
       // Công ảo / lương ảo: CHỈ tài khoản tổng thấy và bật/tắt (tắt thì người khác không biết có tính năng này)
       isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, auditChk,
         el('div', {}, el('b', {}, '🎭 Cho hiển thị công ảo / lương ảo (audit)'),

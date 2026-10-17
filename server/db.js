@@ -715,6 +715,20 @@ function migrateColumns() {
   add('push_devices', 'tcp_auto_ok',    'INTEGER NOT NULL DEFAULT 1');
   add('push_devices', 'tcp_auto_logs',  'INTEGER NOT NULL DEFAULT -1');   // số lượt chấm trên máy ở lần tự tải gần nhất (không đổi → khỏi tải)
   add('push_devices', 'tcp_auto_users', 'INTEGER NOT NULL DEFAULT -1');
+  // Máy HÃNG KHÁC (công tắc riêng, mặc định TẮT): conn_type 'ai' (máy AI tự nối WebSocket về — server/ai-ws.js)
+  // | 'hik' (Hikvision, phần mềm gọi ISAPI vào máy — server/hik-isapi.js; dùng chung tcp_ip/tcp_port/tcp_info/tcp_auto_*)
+  add('push_devices', 'dev_user', "TEXT DEFAULT ''");   // tài khoản đăng nhập máy Hikvision
+  add('push_devices', 'dev_pass', "TEXT DEFAULT ''");   // mật khẩu đăng nhập máy Hikvision (chỉ máy chủ dùng, không trả ra giao diện)
+  // Mẫu sinh trắc máy AI (định dạng riêng của hãng → bảng riêng, KHÔNG trộn với mẫu ZKTeco):
+  // backupnum 0-9 vân tay · 20-27 khuôn mặt · 30-37 lòng bàn tay · 50 ảnh (base64)
+  db.exec(`CREATE TABLE IF NOT EXISTS ai_templates (
+      serial      TEXT NOT NULL,
+      pin         TEXT NOT NULL,
+      backupnum   INTEGER NOT NULL,
+      record      TEXT NOT NULL,
+      received_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (serial, pin, backupnum)
+    )`);
   // Lệnh đồng bộ mang theo "đối tượng" để CHỈ cộng số đếm khi máy XÁC NHẬN đã nhận (chống đếm khống)
   add('push_device_commands', 'pin',      "TEXT DEFAULT ''");
   add('push_device_commands', 'bio_type', 'INTEGER');

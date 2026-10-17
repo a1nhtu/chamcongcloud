@@ -9,6 +9,10 @@ import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
 import { heldSet, remapLoader, onUserAck, pmNameFor } from './pin-guard.js';
 
+// Máy ZKTeco (đẩy ADMS 'push' / TCP-IP 'tcp'): CHỈ các máy này nhận lệnh + mẫu sinh trắc ZKTeco khi đồng bộ.
+// Máy hãng khác (AI 'ai', Hikvision 'hik') có cách đồng bộ riêng (server/ai-device.js, server/hik-isapi.js).
+export const ZK_TYPES = "conn_type IN ('push','tcp')";
+
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
 function findEmpByPin(pin) {
   return db.prepare("SELECT id, from_device FROM employees WHERE device_pin=? AND device_pin!='' AND active=1").get(pin)
@@ -126,7 +130,7 @@ function upsertDeviceUser(pin, name, card, passwd, pri) {
 
 // Ghi/nhật ký user theo TỪNG máy (đếm số NV/thẻ mỗi máy). Chỉ cập nhật name/card khi có giá trị mới.
 // pri: quyền trên máy này (undefined/null = không đổi quyền đang lưu).
-function upsertDeviceUserSerial(serial, pin, name, card, pri) {
+export function upsertDeviceUserSerial(serial, pin, name, card, pri) {
   const p = pri == null ? null : (pri > 0 ? pri : 0);
   db.prepare(`INSERT INTO device_users_serial(serial,pin,name,card,privilege) VALUES(?,?,?,?,COALESCE(?,0))
     ON CONFLICT(serial,pin) DO UPDATE SET
@@ -211,7 +215,7 @@ export function buildUserCommand(pin, targetSerial, pri, forceName = false) {
 
 // Quyền của 1 Số ID trên các máy đang hoạt động: [{ serial, name, online, onDevice, admin }]
 export function deviceRolesForPin(pin) {
-  const devs = db.prepare('SELECT serial, name, last_seen FROM push_devices WHERE active=1 ORDER BY name, serial').all();
+  const devs = db.prepare(`SELECT serial, name, last_seen FROM push_devices WHERE active=1 AND ${ZK_TYPES} ORDER BY name, serial`).all();
   return devs.map((d) => {
     const s = db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(d.serial, pin);
     return { serial: d.serial, name: d.name || d.serial, online: !!(d.last_seen && Date.now() - Date.parse(d.last_seen) < 150000),
@@ -431,9 +435,9 @@ export function syncPinsToGroup(sourceSerial, pins) {
   const locked = lockedPins(), held = heldSet();
   pins = new Set([...pins].filter((p) => !locked.has(String(p).trim()) && !held.has(sourceSerial + '|' + p)));
   if (!pins.size) return 0;
-  const src = db.prepare('SELECT sync_group FROM push_devices WHERE serial=?').get(sourceSerial);
+  const src = db.prepare(`SELECT sync_group FROM push_devices WHERE serial=? AND ${ZK_TYPES}`).get(sourceSerial);
   if (!src || !src.sync_group) return 0;
-  const targets = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>? AND active=1")
+  const targets = db.prepare(`SELECT serial FROM push_devices WHERE sync_group=? AND serial<>? AND active=1 AND ${ZK_TYPES}`)
     .all(src.sync_group, sourceSerial);
   if (!targets.length) return 0;
   let n = 0;
@@ -452,14 +456,14 @@ export function syncPinsToGroup(sourceSerial, pins) {
 // Khi 1 máy kết nối: kéo template hiện có của nó về (DATA QUERY) + đẩy những gì nhóm đã có mà máy này thiếu.
 // force=true: ĐẨY LẠI TOÀN BỘ template của nhóm (bỏ qua kiểm tra "đã có") — dùng khi đồng bộ lỗi.
 export function syncFillDevice(serial, force = false) {
-  const dev = db.prepare('SELECT sync_group FROM push_devices WHERE serial=?').get(serial);
+  const dev = db.prepare(`SELECT sync_group FROM push_devices WHERE serial=? AND ${ZK_TYPES}`).get(serial);
   if (!dev || !dev.sync_group) return;
   // 1) kéo template hiện có trên máy này về server (học dữ liệu sẵn có)
   queueCmd(serial, 'DATA QUERY FINGERTMP');
   queueCmd(serial, 'DATA QUERY BIODATA');
   // 2) đẩy template của nhóm mà máy này CHƯA có (force → đẩy hết)
   const mine = force ? new Set() : new Set(db.prepare("SELECT pin||'|'||bio_type||'|'||idx k FROM device_bio_templates WHERE serial=?").all(serial).map((r) => r.k));
-  const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND serial<>?").all(dev.sync_group, serial).map((r) => r.serial);
+  const groupSerials = db.prepare(`SELECT serial FROM push_devices WHERE sync_group=? AND serial<>? AND ${ZK_TYPES}`).all(dev.sync_group, serial).map((r) => r.serial);
   if (!groupSerials.length) return;
   const ph = groupSerials.map(() => '?').join(',');
   const others = db.prepare(`SELECT * FROM device_bio_templates WHERE serial IN (${ph})`).all(...groupSerials);
@@ -491,12 +495,12 @@ export function syncFillDevice(serial, force = false) {
 // Đồng bộ NGAY (bấm nút): mỗi máy trong nhóm (>=2 máy) học template sẵn có + nhận template nhóm còn thiếu.
 // Không cần khởi động lại máy. Trả số nhóm/máy/lệnh đã xếp.
 export function resyncNow(force = false) {
-  const rows = db.prepare("SELECT serial, sync_group FROM push_devices WHERE sync_group<>'' AND active=1").all();
+  const rows = db.prepare(`SELECT serial, sync_group FROM push_devices WHERE sync_group<>'' AND active=1 AND ${ZK_TYPES}`).all();
   const groups = new Set();
   let devices = 0;
   const before = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE trans_time IS NULL').get().c;
   for (const r of rows) {
-    const cnt = db.prepare("SELECT COUNT(*) c FROM push_devices WHERE sync_group=? AND active=1").get(r.sync_group).c;
+    const cnt = db.prepare(`SELECT COUNT(*) c FROM push_devices WHERE sync_group=? AND active=1 AND ${ZK_TYPES}`).get(r.sync_group).c;
     if (cnt < 2) continue;              // nhóm chỉ 1 máy thì không cần đồng bộ
     groups.add(r.sync_group);
     syncFillDevice(r.serial, force);
@@ -775,8 +779,10 @@ export function dayPairsFor(employeeId, workDate, shift) {
 }
 
 // Nạp khối ATTLOG (nhiều dòng), mỗi dòng: PIN \t Time \t Status \t Verify \t WorkCode
+// opts.ask(serial, pin): gặp Số ID chưa khớp NV thì làm gì (mặc định: xếp lệnh ADMS hỏi máy ZKTeco thông tin người đó).
 // Trả số dòng hợp lệ đã nhận.
-export function ingestAttlog(serial, rawBody) {
+export function ingestAttlog(serial, rawBody, opts = {}) {
+  const ask = opts.ask || askUserFromDevice;
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const touched = new Set();
   const notifyNow = new Map();   // empId → lượt quẹt mới nhất cần báo
@@ -819,7 +825,7 @@ export function ingestAttlog(serial, rawBody) {
       const prevN = notifyNow.get(empId);
       if (!prevN || prevN.d < d) notifyNow.set(empId, { d, timeStr });
     }
-    if (!empId && !pin.includes('#')) askUserFromDevice(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
+    if (!empId && !pin.includes('#')) ask(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
     n++;
     if (empId) touched.add(empId + '|' + workDate);
   }
