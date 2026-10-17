@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   DEFAULT_MEAL_SHIFTS, windowBoundsUtc, inWindow, shiftForPunch, countValidPunches, buildBoard, parseCount, canOrderMeal,
-  cleanDishes, checkShiftConfig, isOvernight, isHHMM, isIsoDate, addDaysIso, vnNow, orderDeadlineMs, orderDeadlineVn,
+  cleanDishes, checkShiftConfig, isOvernight, isHHMM, isIsoDate, addDaysIso, vnNow, orderDeadlineMs, orderDeadlineVn, buildDishReport, parseAdjust,
 } from '../server/meal-rules.js';
 
 const [TRUA, CHIEU, DEM] = DEFAULT_MEAL_SHIFTS;
@@ -148,4 +148,23 @@ test('checkShiftConfig: cách khoá chọn món', () => {
   for (const bad of [{ lock_mode: 'before', lock_hours: '0' }, { lock_mode: 'before', lock_hours: '49' }, { lock_mode: 'before', lock_hours: 'x' },
     { lock_mode: 'at', lock_at: '25:00' }, { lock_mode: 'abc' }]) assert.equal(checkShiftConfig({ ...B, ...bad }).ok, false, JSON.stringify(bad));
   function pick(c) { assert.equal(c.ok, true); return { lock_before_min: c.value.lock_before_min, lock_at: c.value.lock_at }; }
+});
+
+test('buildDishReport: tổng phải nấu = NV chọn + HR chọn hộ + điều chỉnh; suất mặc định = trưởng BP đăng ký vượt số người chọn; thực tế theo người quẹt', () => {
+  const orders = [{ employee_id: 1, dish: 'Cơm gà', set_by: '' }, { employee_id: 2, dish: 'Cơm gà', set_by: 'HR' }, { employee_id: 3, dish: 'Bún bò', set_by: '' },
+    { employee_id: 4, dish: 'Món đã gỡ', set_by: '' }];
+  const r = buildDishReport({ menu: ['Cơm gà', 'Bún bò', 'Cháo'], orders, adjust: { 'cơm gà': 2, '': -1, 'Cháo': -5 }, punchers: new Set([1, 3, 9]), registered: 10 });
+  assert.deepEqual(r.rows.map((x) => [x.dish, x.app, x.hr, x.adjust, x.total, x.ate]),
+    [['Cơm gà', 1, 1, 2, 4, 1], ['Bún bò', 1, 0, 0, 1, 1], ['Cháo', 0, 0, -5, 0, 0], ['Món đã gỡ', 1, 0, 0, 1, 0]]);   // không âm; món đã gỡ vẫn hiện
+  assert.deepEqual(r.default, { dish: '', base: 6, adjust: -1, total: 5, ate: 1 });   // 10 đăng ký − 4 người chọn; người 9 quẹt mà không chọn
+  assert.equal(r.totals.total, 4 + 1 + 0 + 1 + 5);
+  assert.equal(r.totals.not_yet, 2);   // người 2 và 4 đã chọn nhưng chưa quẹt
+  assert.equal(r.totals.ate, 3);
+  // chưa bộ phận nào đăng ký → không có suất mặc định
+  assert.equal(buildDishReport({ menu: ['A'], orders: [], registered: null }).default.base, 0);
+});
+
+test('parseAdjust: số nguyên −9999…9999, có dấu + được; rỗng = 0', () => {
+  assert.equal(parseAdjust('+3'), 3); assert.equal(parseAdjust('-2'), -2); assert.equal(parseAdjust(''), 0); assert.equal(parseAdjust(null), 0);
+  for (const bad of ['1.5', 'abc', 10000, '--1']) assert.equal(parseAdjust(bad), undefined, String(bad));
 });

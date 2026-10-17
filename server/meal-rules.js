@@ -120,6 +120,55 @@ export function buildBoard({ mode, depts, punch = {}, ot = {}, reg = {} }) {
   };
 }
 
+// BÁO CÁO SUẤT ĂN theo MÓN của 1 ngày + 1 ca. input:
+//   menu:       tên món theo thứ tự thực đơn
+//   orders:     [{ employee_id, dish, set_by }]  (set_by '' = NV tự chọn trên app, khác '' = HR chọn hộ)
+//   adjust:     { [dish]: qty }  HR điều chỉnh +/−; dish '' = suất không chọn món (mặc định)
+//   punchers:   Set employee_id đã quẹt máy chấm công trong khung giờ chốt (= thực tế đã đến ăn)
+//   registered: tổng số trưởng bộ phận đăng ký (null = chưa bộ phận nào đăng ký)
+// Mỗi món: app + hr + adjust = total (không âm); ate = số người chọn món đó đã quẹt.
+// Dòng mặc định (dish ''): suất trưởng BP đăng ký vượt số người đã chọn món (= người ăn mà không chọn) + điều chỉnh; ate = người quẹt mà không chọn món.
+export function buildDishReport({ menu = [], orders = [], adjust = {}, punchers = new Set(), registered = null }) {
+  const names = [...menu];
+  const seen = new Set(names.map((n) => n.toLocaleLowerCase('vi')));
+  for (const n of [...orders.map((o) => o.dish), ...Object.keys(adjust)]) {
+    if (!n || seen.has(n.toLocaleLowerCase('vi'))) continue;
+    seen.add(n.toLocaleLowerCase('vi')); names.push(n);   // món đã gỡ khỏi thực đơn nhưng vẫn có người chọn / có điều chỉnh
+  }
+  const key = (n) => names.find((x) => x.toLocaleLowerCase('vi') === String(n || '').toLocaleLowerCase('vi')) ?? n;
+  const rows = new Map(names.map((n) => [n, { dish: n, app: 0, hr: 0, adjust: 0, total: 0, ate: 0 }]));
+  const chosen = new Set();
+  for (const o of orders) {
+    const r = rows.get(key(o.dish)); if (!r) continue;
+    if (o.set_by) r.hr++; else r.app++;
+    if (punchers.has(o.employee_id)) r.ate++;
+    chosen.add(o.employee_id);
+  }
+  for (const [d, q] of Object.entries(adjust)) if (d) { const r = rows.get(key(d)); if (r) r.adjust += Number(q) || 0; }
+  for (const r of rows.values()) r.total = Math.max(0, r.app + r.hr + r.adjust);
+  const base = registered == null ? 0 : Math.max(0, registered - chosen.size);
+  const defAdj = Number(adjust['']) || 0;
+  let ateDefault = 0; for (const id of punchers) if (!chosen.has(id)) ateDefault++;
+  const def = { dish: '', base, adjust: defAdj, total: Math.max(0, base + defAdj), ate: ateDefault };
+  const list = [...rows.values()];
+  const sum = (f) => list.reduce((s, r) => s + f(r), 0);
+  const totalCook = sum((r) => r.total) + def.total;
+  return {
+    rows: list, default: def,
+    totals: {
+      chosen: chosen.size, app: sum((r) => r.app), hr: sum((r) => r.hr), adjust: sum((r) => r.adjust) + defAdj,
+      registered, total: totalCook, ate: punchers.size, not_yet: [...chosen].filter((id) => !punchers.has(id)).length,
+    },
+  };
+}
+
+// Số suất HR điều chỉnh: số nguyên −9999 … 9999 (0 = bỏ điều chỉnh); undefined = không hợp lệ
+export function parseAdjust(v) {
+  if (v === '' || v == null) return 0;
+  const n = Number(String(v).replace(/^\+/, ''));
+  return Number.isInteger(n) && Math.abs(n) <= 9999 ? n : undefined;
+}
+
 // Giờ VN hiện tại dạng { date: 'YYYY-MM-DD', min: số phút trong ngày }
 export function vnNow(now = new Date()) {
   const t = new Date(now.getTime() + VN_MS);

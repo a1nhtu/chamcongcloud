@@ -892,6 +892,34 @@ function migrateColumns() {
   // không có lock_at = khoá trước giờ bắt đầu khung ăn lock_before_min phút (0 = đúng lúc bắt đầu, như bản cũ)
   add('meal_shifts', 'lock_before_min', 'INTEGER NOT NULL DEFAULT 0');
   add('meal_shifts', 'lock_at',         "TEXT NOT NULL DEFAULT ''");
+  // HR chọn món HỘ nhân viên (quên đăng ký / điện thoại hỏng): set_by = tên HR; '' = nhân viên tự chọn trên app
+  add('meal_orders', 'set_by', "TEXT NOT NULL DEFAULT ''");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meal_adjust (          -- HR điều chỉnh SỐ SUẤT của 1 món (+ thêm / − bớt) cho ngày + ca; dish '' = suất không chọn món (mặc định)
+      work_date  TEXT NOT NULL,
+      shift      TEXT NOT NULL,
+      dish       TEXT NOT NULL,
+      qty        INTEGER NOT NULL,
+      note       TEXT NOT NULL DEFAULT '',
+      updated_by TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (work_date, shift, dish)
+    );
+    CREATE TABLE IF NOT EXISTS meal_adjust_log (      -- LƯU VẾT mọi chỉnh tay của HR (điều chỉnh số suất / chọn món hộ): ai, lúc nào, cũ → mới, lý do
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      at          TEXT NOT NULL DEFAULT (datetime('now')),
+      by_name     TEXT NOT NULL DEFAULT '',
+      work_date   TEXT NOT NULL,
+      shift       TEXT NOT NULL,
+      kind        TEXT NOT NULL,                      -- 'adjust' = sửa số suất món · 'order' = chọn món hộ NV
+      dish        TEXT NOT NULL DEFAULT '',
+      employee_id INTEGER,
+      emp_label   TEXT NOT NULL DEFAULT '',           -- "Mã - Họ tên" lúc ghi (NV bị xoá vẫn đọc được)
+      old_value   TEXT NOT NULL DEFAULT '',
+      new_value   TEXT NOT NULL DEFAULT '',
+      reason      TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_mealadjlog_date ON meal_adjust_log(work_date, shift);`);
 
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN

@@ -88,3 +88,21 @@
 /* ô số: bỏ mũi tên tăng/giảm cho gọn, số thẳng cột */
 .sa input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 .sa input[type=number]::-webkit-outer-spin-button, .sa input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* ----- báo cáo theo món ----- */
+.sa-kpis { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.sa-kpi { background: #fff; border: 1px solid var(--sa-line); border-top: 4px solid var(--sa-red); border-radius: 12px; padding: 10px 18px; min-width: 150px; }
+.sa-kpi .k { color: var(--sa-mut); font-size: 13px; font-weight: 600; }
+.sa-kpi .v { color: var(--sa-navy); font-size: 30px; font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1.15; }
+.sa-adj { border: 1px dashed #b5c0d3; background: #fff; border-radius: 8px; padding: 3px 10px; font: inherit; font-weight: 800; cursor: pointer; color: var(--sa-mut); min-width: 46px; }
+.sa-adj:hover { border-color: var(--sa-navy); color: var(--sa-navy); }
+.sa-adj.pos { border-style: solid; border-color: #e0a100; background: #fff7e0; color: var(--sa-warn); }
+.sa-adj.neg { border-style: solid; border-color: var(--sa-navy-2); background: #eaf0fb; color: var(--sa-navy-2); }
+.sa-tbl tr.sa-defrow td { background: #fbfcfe; font-style: italic; }
+.sa-picklist { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 220px; overflow-y: auto; }
+.sa-pick { text-align: left; border: 1px solid var(--sa-line); background: #fff; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13.5px; cursor: pointer; }
+.sa-pick:hover { border-color: var(--sa-navy); background: var(--sa-soft); }
+.sa label { display: block; font-size: 12.5px; color: var(--sa-mut); margin: 8px 0 3px; }
+.sa input[type=text], .sa input[type=search], .sa select { width: 100%; }
+/* nút ở chân hộp thoại (nằm ngoài .sa) dùng chung màu suất ăn */
+.m-foot { --sa-navy: #1e3a68; --sa-navy-2: #2c5090; --sa-red: #d8382e; }

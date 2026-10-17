@@ -4,8 +4,9 @@ import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
-  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments,
+  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, setMealAdjust, hrSetOrder, mealEmpSearch,
 } from '../../meal.js';
+import { writeMealReportXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
 
 const who = (req) => req.user.full_name || req.user.username || '';
@@ -98,6 +99,29 @@ export function registerMealRoutes(r) {
     setSetting('meal_serials', list.join(','));
     res.json({ ok: true, serials: list });
   }));
+
+  // ---------- BÁO CÁO suất ăn + HR chỉnh tay (lưu vết ở meal_adjust_log) ----------
+  r.get('/meal/report', wrap('GET /admin/meal/report', (req, res) => res.json(mealReport(needDate(req.query.date)))));
+  r.put('/meal/adjust', wrap('PUT /admin/meal/adjust', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, ...setMealAdjust({ workDate: needDate(b.date), code: b.shift, dish: b.dish, qty: b.qty, reason: b.reason, by: who(req) }) });
+  }));
+  r.put('/meal/order-for', wrap('PUT /admin/meal/order-for', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, ...hrSetOrder({ workDate: needDate(b.date), code: b.shift, employeeId: b.employee_id, menuId: b.menu_id, reason: b.reason, by: who(req) }) });
+  }));
+  r.get('/meal/emp-search', wrap('GET /admin/meal/emp-search', (req, res) => {
+    needShift(req.query.shift);
+    res.json({ rows: mealEmpSearch(req.query.q, needDate(req.query.date), req.query.shift) });
+  }));
+  r.get('/meal/report.xlsx', async (req, res) => {
+    try {
+      const from = needDate(req.query.from), to = needDate(req.query.to || req.query.from);
+      if (to < from) return res.status(400).json({ error: 'Ngày kết thúc phải sau ngày bắt đầu' });
+      if ((Date.parse(to) - Date.parse(from)) / 86400000 > 62) return res.status(400).json({ error: 'Xuất tối đa 62 ngày một lần' });
+      await writeMealReportXlsx(res, from, to);
+    } catch (e) { if (!res.headersSent) sendCaughtError(res, 'GET /admin/meal/report.xlsx', e); else res.end(); }
+  });
 
   // ---------- màn hình bếp ----------
   r.get('/meal/kitchen', wrap('GET /admin/meal/kitchen', (req, res) => res.json({ key: kitchenKey(), path: '/bep', ...kitchenBase() })));

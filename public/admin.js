@@ -25,6 +25,7 @@ const NAV = [
   ['swap', '🔁', 'Đăng ký làm bù', 'attendance_edit'],
   ['abnormal', '🚨', 'Chấm công bất thường', 'reports'],
   ['meal', '🍱', 'Đối chiếu & chốt suất ăn', 'meal'],
+  ['mealrep', '📊', 'Báo cáo suất ăn', 'meal'],
   ['mealmenu', '🍽️', 'Thực đơn các bữa', 'meal'],
   ['mealcfg', '⚙️', 'Cấu hình suất ăn', 'meal'],
   ['mealme', '🥢', 'Suất ăn của tôi', null],   // ai cũng thấy khi phân hệ bật: chọn món + (trưởng bộ phận) nhập số đăng ký
@@ -46,7 +47,7 @@ const NAV_GROUPS = [
   ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision', 'hrtemplates']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
-  ['mealg', 'Suất ăn', ['meal', 'mealmenu', 'mealcfg', 'mealme']],
+  ['mealg', 'Suất ăn', ['meal', 'mealrep', 'mealmenu', 'mealcfg', 'mealme']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
   ['audit', 'Công ảo', ['audit', 'auditlimits']],
   ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
@@ -263,7 +264,7 @@ function go(key) {
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
   ({ dashboard: pageDashboard, employees: pageEmployees, org: () => pageOrg('dept'), positions: () => pageOrg('pos'), shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
     hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates'),
-    meal: () => mealPage('pageMealBoard'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
+    meal: () => mealPage('pageMealBoard'), mealrep: () => mealPage('pageMealReport'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
 }
 // PHÂN HỆ QUẢN LÝ SUẤT ĂN (public/suatan/admin.js) — chỉ nạp khi mở menu Suất ăn (và chỉ có menu khi tài khoản tổng đã bật)
 async function mealPage(fn) {

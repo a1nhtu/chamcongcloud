@@ -1,4 +1,4 @@
-// QUẢN LÝ SUẤT ĂN (giao diện HR trong /admin) — Đối chiếu & chốt · Thực đơn · Cấu hình · Suất ăn của tôi.
+// QUẢN LÝ SUẤT ĂN (giao diện HR trong /admin) — Đối chiếu & chốt · Báo cáo theo món · Thực đơn · Cấu hình · Suất ăn của tôi.
 // Chỉ nạp khi mở menu "Suất ăn" (admin.js gọi import('/suatan/admin.js')), và chỉ khi tài khoản tổng đã bật phân hệ.
 import { api, toast, el } from '/common.js';
 import { renderMealTab } from '/suatan/emp.js';
@@ -320,6 +320,194 @@ export async function pageMealCfg(ctx) {
     el('div', { class: 'sa-hint', style: 'margin-top:10px' }, 'Tên miền in trên liên kết (để trống = theo địa chỉ đang mở trang này; gõ ngắn "abc" = abc.maychamcongcloud.com):'),
     el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, baseIn, saveBase));
   main.append(kBox);
+}
+
+/* ===================== BÁO CÁO SUẤT ĂN (theo món · HR chỉnh tay có lưu vết · xuất Excel) ===================== */
+export async function pageMealReport(ctx) {
+  C = ctx; css();
+  const main = el('div', { class: 'sa' });
+  C.setMain(C.head('📊 Suất ăn — báo cáo theo món'), main);
+  if (!ST.date) ST.date = vnToday();
+  const dateI = el('input', { type: 'date', value: ST.date });
+  const prev = el('button', { class: 'sa-btn ghost', type: 'button', title: 'Hôm trước' }, '‹');
+  const next = el('button', { class: 'sa-btn ghost', type: 'button', title: 'Hôm sau' }, '›');
+  const reload = el('button', { class: 'sa-btn ghost', type: 'button' }, '⟳ Làm mới');
+  const xlsBtn = el('button', { class: 'sa-btn', type: 'button' }, '⬇ Xuất Excel');
+  const forBtn = el('button', { class: 'sa-btn ghost', type: 'button' }, '➕ Chọn món hộ nhân viên');
+  dateI.onchange = () => { if (dateI.value) { ST.date = dateI.value; load(); } };
+  prev.onclick = () => { ST.date = addDays(ST.date, -1); dateI.value = ST.date; load(); };
+  next.onclick = () => { ST.date = addDays(ST.date, 1); dateI.value = ST.date; load(); };
+  reload.onclick = () => load();
+  xlsBtn.onclick = () => exportDlg();
+  const body = el('div');
+  main.append(el('div', { class: 'sa-bar' }, prev, dateI, next, reload, forBtn, xlsBtn), body);
+  let R = null;
+  forBtn.onclick = () => orderForDlg(R?.shifts?.[0]?.code);
+
+  async function load() {
+    body.innerHTML = ''; body.append(C.loading());
+    try { R = await api('/admin/meal/report?date=' + ST.date); } catch (e) { body.innerHTML = ''; body.append(el('div', { class: 'empty' }, e.message)); return; }
+    draw();
+  }
+
+  function draw() {
+    body.innerHTML = '';
+    if (!R.shifts.length) { body.append(el('div', { class: 'empty' }, 'Chưa bật ca ăn nào — vào Suất ăn › Cấu hình để bật.')); return; }
+    // dải tổng nhanh: mỗi bữa bao nhiêu suất phải nấu
+    body.append(el('div', { class: 'sa-kpis' }, ...R.shifts.map((s) => el('div', { class: 'sa-kpi' },
+      el('div', { class: 'k' }, s.name), el('div', { class: 'v' }, nf(s.totals.total)), el('div', { class: 'sa-hint' }, `suất phải nấu · đã quẹt ${nf(s.totals.ate)}`)))));
+    for (const s of R.shifts) body.append(shiftCard(s));
+    body.append(logBox(R.log));
+  }
+
+  function shiftCard(s) {
+    const t = s.totals;
+    const dl = `${s.deadline.slice(11)}${s.deadline.slice(0, 10) === R.date ? '' : ' ngày ' + dmy(s.deadline.slice(0, 10)).slice(0, 5)}`;
+    const info = el('div', { class: 'sa-info' },
+      el('span', {}, el('b', {}, s.name), ` · quẹt thẻ ${s.from_time} → ${s.to_time}`),
+      s.locked ? el('span', { class: 'sa-pill muted' }, `🔒 Đã khoá chọn món lúc ${dl}`) : el('span', { class: 'sa-pill warn' }, `Còn mở chọn món đến ${dl} — số còn thay đổi`),
+      el('span', {}, 'Trưởng BP đăng ký: ', el('b', {}, t.registered == null ? 'chưa' : nf(t.registered))),
+      el('span', {}, 'Đã chọn món: ', el('b', {}, nf(t.chosen)), ' người'),
+      s.closed ? el('span', { class: 'sa-pill red' }, `✔ HR đã chốt ${nf(s.closed.total)} suất (${s.closed.by || ''})`) : el('span', { class: 'sa-pill muted' }, 'HR chưa chốt số'));
+    const adjCell = (dish, val) => {
+      const b = el('button', { type: 'button', class: 'sa-adj' + (val ? (val > 0 ? ' pos' : ' neg') : ''), title: 'Bấm để HR chỉnh số suất (có lưu vết)' }, val ? (val > 0 ? '+' : '−') + nf(Math.abs(val)) : '✎');
+      b.onclick = () => adjustDlg(s, dish, val);
+      const n = s.adjust_notes[dish];
+      return el('td', { class: 'num' }, b, n ? el('span', { class: 'sa-sub', title: n.note }, n.note.length > 28 ? n.note.slice(0, 27) + '…' : n.note) : null);
+    };
+    const rows = s.rows.map((x) => el('tr', {},
+      el('td', { class: 'dept' }, x.dish), el('td', { class: 'num' }, nf(x.app)), el('td', { class: 'num' }, x.hr ? nf(x.hr) : '—'),
+      adjCell(x.dish, x.adjust), el('td', { class: 'num sa-total' }, nf(x.total)), el('td', { class: 'num' }, nf(x.ate))));
+    const d = s.default;
+    rows.push(el('tr', { class: 'sa-defrow' },
+      el('td', { class: 'dept', title: 'Người ăn mà không chọn món: số trưởng bộ phận đăng ký vượt số người đã chọn món, cộng điều chỉnh của HR' }, 'Không chọn món (suất mặc định)'),
+      el('td', { class: 'num' }, d.base ? nf(d.base) : '—', d.base ? el('span', { class: 'sa-sub' }, 'theo trưởng BP') : null), el('td', { class: 'num' }, '—'),
+      adjCell('', d.adjust), el('td', { class: 'num sa-total' }, nf(d.total)), el('td', { class: 'num' }, nf(d.ate))));
+    const tbl = el('table', { class: 'sa-tbl' },
+      el('thead', {}, el('tr', {}, el('th', {}, 'Món'), el('th', { class: 'num' }, 'NV tự chọn'), el('th', { class: 'num' }, 'HR chọn hộ'),
+        el('th', { class: 'num', title: 'HR thêm / bớt suất bằng tay — bấm để sửa, bắt buộc ghi lý do' }, 'HR điều chỉnh'), el('th', { class: 'num' }, 'Tổng phải nấu'),
+        el('th', { class: 'num', title: 'Số người đã quẹt máy chấm công trong giờ ăn' }, 'Thực tế đã quẹt'))),
+      el('tbody', {}, ...rows),
+      el('tfoot', {}, el('tr', {}, el('td', {}, 'Tổng cộng'), el('td', { class: 'num' }, nf(t.app)), el('td', { class: 'num' }, nf(t.hr)),
+        el('td', { class: 'num' }, t.adjust ? (t.adjust > 0 ? '+' : '−') + nf(Math.abs(t.adjust)) : '—'),
+        el('td', { class: 'num sa-total', style: 'font-size:17px' }, nf(t.total)), el('td', { class: 'num' }, nf(t.ate)))));
+    const forOne = el('button', { class: 'sa-btn ghost', type: 'button' }, '➕ Chọn món hộ nhân viên');
+    forOne.onclick = () => orderForDlg(s.code);
+    return el('div', { class: 'sa-card', style: 'margin-bottom:14px' }, info, s.rows.length ? null : el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Chưa có thực đơn cho bữa này (Suất ăn › Thực đơn các bữa).'),
+      el('div', { class: 'sa-wrap' }, tbl),
+      el('div', { class: 'sa-actions' }, forOne, el('span', { class: 'sa-hint' }, `Đã chọn món nhưng chưa quẹt: ${nf(t.not_yet)} người. Tổng phải nấu = NV tự chọn + HR chọn hộ + HR điều chỉnh.`)));
+  }
+
+  function logBox(log) {
+    const KIND = { adjust: 'Điều chỉnh số suất', order: 'Chọn món hộ NV' };
+    const name = Object.fromEntries(R.shifts.map((s) => [s.code, s.name]));
+    // datetime('now') UTC 'YYYY-MM-DD HH:MM:SS' → 'dd/mm HH:MM' giờ VN
+    const stamp = (s) => { const t = new Date(Date.parse(s.replace(' ', 'T') + 'Z') + 7 * 3600000).toISOString(); return `${t.slice(8, 10)}/${t.slice(5, 7)} ${t.slice(11, 16)}`; };
+    const val = (l, v) => (l.kind === 'adjust' ? (Number(v) > 0 ? '+' : '') + v : v || (l.kind === 'order' ? '(chưa chọn)' : ''));
+    return el('div', { class: 'sa-card' }, el('h4', {}, '📝 Lịch sử HR chỉnh tay trong ngày'),
+      log.length ? el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
+        el('thead', {}, el('tr', {}, el('th', {}, 'Lúc'), el('th', {}, 'Người sửa'), el('th', {}, 'Bữa'), el('th', {}, 'Loại'), el('th', {}, 'Nhân viên / Món'), el('th', {}, 'Cũ → Mới'), el('th', {}, 'Lý do'))),
+        el('tbody', {}, ...log.map((l) => el('tr', {}, el('td', {}, stamp(l.at)), el('td', {}, l.by_name), el('td', {}, name[l.shift] || l.shift), el('td', {}, KIND[l.kind] || l.kind),
+          el('td', {}, l.emp_label ? `${l.emp_label}` : '', l.emp_label ? el('span', { class: 'sa-sub' }, l.dish) : (l.dish || 'Không chọn món (mặc định)')),
+          el('td', { style: 'white-space:nowrap' }, `${val(l, l.old_value)} → ${l.kind === 'order' && !l.new_value ? '(bỏ món)' : val(l, l.new_value)}`), el('td', {}, l.reason))))))
+        : el('div', { class: 'sa-empty' }, 'Chưa có chỉnh sửa nào.'));
+  }
+
+  // HR thêm / bớt suất của 1 món (dish '' = suất không chọn món)
+  function adjustDlg(s, dish, cur) {
+    const row = dish ? s.rows.find((x) => x.dish === dish) : null;
+    const baseN = dish ? row.app + row.hr : s.default.base;
+    const qtyI = el('input', { type: 'number', step: '1', min: '-9999', max: '9999', value: cur ? String(cur) : '', placeholder: 'VD 3 hoặc -2', style: 'width:140px;font-weight:700' });
+    const why = el('input', { type: 'text', maxlength: '200', placeholder: 'VD: 3 khách đối tác ăn cùng · anh A quên đăng ký…', value: '' });
+    const prevw = el('div', { class: 'sa-hint', style: 'margin-top:6px' });
+    const upd = () => { const n = Number(qtyI.value || 0); prevw.textContent = Number.isInteger(n) ? `Tổng phải nấu món này sẽ là: ${nf(Math.max(0, baseN + n))} suất (${nf(baseN)} theo đăng ký ${n >= 0 ? '+' : '−'} ${nf(Math.abs(n))})` : ''; };
+    qtyI.oninput = upd; upd();
+    const save = el('button', { class: 'sa-btn', type: 'button' }, '💾 Lưu điều chỉnh');
+    save.onclick = async () => {
+      try { await api('/admin/meal/adjust', { method: 'PUT', body: { date: R.date, shift: s.code, dish, qty: qtyI.value.trim(), reason: why.value } }); C.closeModal(); toast('Đã lưu — có ghi lịch sử', 'ok'); load(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    C.openModal(`✎ HR điều chỉnh — ${s.name} ${dmy(R.date)}`, [el('div', { class: 'sa' },
+      el('div', { style: 'font-weight:700;color:#1e3a68;margin-bottom:6px' }, dish || 'Không chọn món (suất mặc định)'),
+      el('div', { class: 'sa-hint', style: 'margin-bottom:10px' }, `Theo đăng ký hiện có: ${nf(baseN)} suất. Nhập số THÊM (+) hoặc BỚT (−) so với đăng ký; để trống / 0 = bỏ điều chỉnh. Mỗi lần sửa đều được lưu vết.`),
+      el('label', {}, 'Điều chỉnh (+/−)'), qtyI, prevw, el('label', { style: 'margin-top:10px;display:block' }, 'Lý do (bắt buộc)'), why)], [save]);
+    setTimeout(() => qtyI.focus(), 50);
+  }
+
+  // HR chọn món hộ 1 nhân viên (quên đăng ký / điện thoại hỏng…) — bỏ qua hạn chọn món; bếp thấy món khi NV quẹt
+  async function orderForDlg(code) {
+    if (!R) return;
+    let menu;
+    try { menu = (await api('/admin/meal/menu?date=' + R.date)).menu || {}; } catch (e) { return toast(e.message, 'err'); }
+    let shift = code || R.shifts[0].code, emp = null, dishId = '';
+    const shSel = el('select', {}, ...R.shifts.map((s) => el('option', { value: s.code }, s.name)));
+    shSel.value = shift;
+    const q = el('input', { type: 'search', placeholder: 'Gõ mã hoặc tên nhân viên (không cần dấu)…', autocomplete: 'off' });
+    const results = el('div', { class: 'sa-picklist' });
+    const picked = el('div', { class: 'sa-hint', style: 'margin:6px 0' }, 'Chưa chọn nhân viên.');
+    const dishBox = el('div', { class: 'sa-dishes' });
+    const why = el('input', { type: 'text', maxlength: '200', placeholder: 'VD: quên đăng ký · điện thoại hỏng · không vào được mạng…' });
+    const drawDishes = () => {
+      dishBox.innerHTML = '';
+      const list = menu[shift] || [];
+      if (!list.length) { dishBox.append(el('div', { class: 'sa-hint' }, 'Bữa này chưa có thực đơn.')); return; }
+      for (const m of [...list, { id: '', name: '✕ Bỏ món của nhân viên này' }]) {
+        const b = el('button', { type: 'button', class: 'sa-dish' + (String(m.id) === String(dishId) && dishId !== null ? ' on' : '') }, el('span', { class: 'dot' }), m.name);
+        b.onclick = () => { dishId = m.id; dishBox.querySelectorAll('.sa-dish').forEach((x) => x.classList.toggle('on', x === b)); };
+        dishBox.append(b);
+      }
+    };
+    let timer = 0;
+    const search = async () => {
+      if (!q.value.trim()) { results.innerHTML = ''; return; }
+      try {
+        const r = await api(`/admin/meal/emp-search?date=${R.date}&shift=${shift}&q=${encodeURIComponent(q.value)}`);
+        results.innerHTML = '';
+        if (!r.rows.length) results.append(el('div', { class: 'sa-hint' }, 'Không tìm thấy.'));
+        for (const e of r.rows) {
+          const b = el('button', { type: 'button', class: 'sa-pick' }, el('b', {}, `${e.code || ''} ${e.full_name}`), el('span', { class: 'sa-hint' }, ` · ${e.department || '(chưa có BP)'} · ${e.dish ? 'đang chọn: ' + e.dish + (e.set_by ? ' (HR chọn hộ)' : '') : 'chưa chọn món'}`));
+          b.onclick = () => { emp = e; picked.textContent = `✔ ${e.code || ''} ${e.full_name} — ${e.dish ? 'đang chọn ' + e.dish : 'chưa chọn món'}`; results.innerHTML = ''; q.value = ''; };
+          results.append(b);
+        }
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    q.oninput = () => { clearTimeout(timer); timer = setTimeout(search, 250); };
+    shSel.onchange = () => { shift = shSel.value; dishId = null; emp = null; picked.textContent = 'Chưa chọn nhân viên.'; drawDishes(); };
+    dishId = null; drawDishes();
+    const save = el('button', { class: 'sa-btn', type: 'button' }, '💾 Lưu món cho nhân viên');
+    save.onclick = async () => {
+      if (!emp) return toast('Chọn nhân viên trước', 'err');
+      if (dishId === null) return toast('Chọn món', 'err');
+      try { const r = await api('/admin/meal/order-for', { method: 'PUT', body: { date: R.date, shift, employee_id: emp.id, menu_id: dishId, reason: why.value } }); C.closeModal(); toast(r.dish ? `Đã chọn ${r.dish} cho ${r.employee}` : `Đã bỏ món của ${r.employee}`, 'ok'); load(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    C.openModal(`➕ Chọn món hộ nhân viên — ${dmy(R.date)}`, [el('div', { class: 'sa' },
+      el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'Dùng khi nhân viên quên đăng ký, điện thoại hỏng / không vào mạng được. Không bị hạn chọn món chặn; màn hình bếp hiện món này khi nhân viên quẹt thẻ. Mỗi lần chọn hộ đều được lưu vết.'),
+      el('label', {}, 'Bữa'), shSel, el('label', { style: 'display:block;margin-top:8px' }, 'Nhân viên'), q, results, picked,
+      el('label', {}, 'Món'), dishBox, el('label', { style: 'display:block;margin-top:8px' }, 'Lý do (bắt buộc)'), why)], [save]);
+    setTimeout(() => q.focus(), 50);
+  }
+
+  function exportDlg() {
+    const f = el('input', { type: 'date', value: ST.date }), t = el('input', { type: 'date', value: ST.date });
+    const month = el('button', { class: 'sa-btn ghost', type: 'button' }, 'Cả tháng này');
+    month.onclick = () => { const d = ST.date; f.value = d.slice(0, 8) + '01'; const last = new Date(Date.UTC(+d.slice(0, 4), +d.slice(5, 7), 0)).toISOString().slice(0, 10); t.value = last; };
+    const go = el('button', { class: 'sa-btn', type: 'button' }, '⬇ Tải file Excel');
+    go.onclick = async () => {
+      try {
+        const res = await api(`/admin/meal/report.xlsx?from=${f.value}&to=${t.value}`, { raw: true });
+        if (!res.ok) { let m = 'Không xuất được báo cáo'; try { m = (await res.json()).error || m; } catch {} return toast(m, 'err'); }
+        const url = URL.createObjectURL(await res.blob());
+        const a = el('a', { href: url, download: `bao_cao_suat_an_${f.value}_${t.value}.xlsx` });
+        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+        C.closeModal(); toast('Đã xuất báo cáo', 'ok');
+      } catch { toast('Không xuất được báo cáo', 'err'); }
+    };
+    C.openModal('⬇ Xuất báo cáo suất ăn ra Excel', [el('div', { class: 'sa' },
+      el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'File gồm 3 sheet: Tổng hợp theo ngày/bữa/món · Chi tiết từng nhân viên · Lịch sử HR chỉnh sửa. Tối đa 62 ngày.'),
+      el('div', { style: 'display:flex;gap:10px;align-items:end;flex-wrap:wrap' }, el('div', {}, el('label', {}, 'Từ ngày'), f), el('div', {}, el('label', {}, 'Đến ngày'), t), month))], [go]);
+  }
+  load();
 }
 
 /* ===================== SUẤT ĂN CỦA TÔI (chọn món + trưởng BP nhập số) ===================== */

@@ -260,6 +260,74 @@ test('màn hình bếp: dò mã sai quá 10 lần / 5 phút theo IP thì bị ch
   assert.equal(await hit(k, '8.8.8.8'), 200);          // IP khác không ảnh hưởng
 });
 
+test('BÁO CÁO theo món + HR chỉnh tay (bắt buộc lý do, lưu vết) + chọn món hộ (qua hạn vẫn được, bếp thấy) + xuất Excel 3 sheet', async () => {
+  // ngày D bữa trưa: SX1 đã chọn "Cơm gà xối mỡ" + quẹt 11:00 (test màn hình bếp ở trên)
+  assert.equal((await call('GET', `/admin/meal/report?date=${D}`, { token: tok.MGR0 })).status, 403);   // quản lý không có quyền suất ăn
+  let r = (await call('GET', `/admin/meal/report?date=${D}`, { token: tok.ADM })).body;
+  let tr = r.shifts.find((s) => s.code === 'trua');
+  let ga = tr.rows.find((x) => x.dish === 'Cơm gà xối mỡ');
+  assert.deepEqual({ app: ga.app, hr: ga.hr, adjust: ga.adjust, total: ga.total, ate: ga.ate }, { app: 1, hr: 0, adjust: 0, total: 1, ate: 1 });
+  assert.equal(tr.locked, true);   // ngày đã qua → đã khoá chọn món
+  // điều chỉnh: thiếu lý do / món lạ / số sai → 400; đúng → tổng tăng + có lịch sử
+  const adj = (body) => call('PUT', '/admin/meal/adjust', { token: tok.ADM, body: { date: D, shift: 'trua', ...body } });
+  assert.equal((await adj({ dish: 'Cơm gà xối mỡ', qty: 2, reason: '' })).status, 400);
+  assert.equal((await adj({ dish: 'Phở', qty: 2, reason: 'khách đến' })).status, 400);
+  assert.equal((await adj({ dish: 'Cơm gà xối mỡ', qty: 'abc', reason: 'khách đến' })).status, 400);
+  assert.equal((await adj({ dish: 'cơm gà xối mỡ', qty: '+2', reason: '2 khách đối tác ăn cùng' })).status, 200);   // không phân biệt hoa thường
+  assert.equal((await adj({ dish: 'Cơm gà xối mỡ', qty: 2, reason: 'lặp lại' })).status, 400);                         // không đổi
+  assert.equal((await adj({ dish: '', qty: 3, reason: '3 NV mới chưa có app' })).status, 200);                         // suất không chọn món
+  // chọn món hộ SX2 dù đã quá hạn → bếp thấy món khi SX2 quẹt
+  const menuId = db.prepare("SELECT id FROM meal_menu WHERE work_date=? AND shift='trua' AND name='Cơm gà xối mỡ'").get(D).id;
+  const of = (body) => call('PUT', '/admin/meal/order-for', { token: tok.ADM, body: { date: D, shift: 'trua', ...body } });
+  assert.equal((await of({ employee_id: E.SX2, menu_id: menuId, reason: '' })).status, 400);
+  const o = await of({ employee_id: E.SX2, menu_id: menuId, reason: 'điện thoại hỏng' });
+  assert.equal(o.status, 200); assert.equal(o.body.dish, 'Cơm gà xối mỡ');
+  assert.equal(db.prepare("SELECT set_by FROM meal_orders WHERE employee_id=? AND work_date=? AND shift='trua'").get(E.SX2, D).set_by, 'Admin');
+  assert.equal(M.kitchenFeed(0, new Date(Z('05:40'))).events.find((e) => e.code === 'SX2').dish, 'Cơm gà xối mỡ');
+  assert.equal((await of({ employee_id: E.SX2, menu_id: menuId, reason: 'lặp lại' })).status, 400);   // đã đúng món đó
+  r = (await call('GET', `/admin/meal/report?date=${D}`, { token: tok.ADM })).body;
+  tr = r.shifts.find((s) => s.code === 'trua');
+  ga = tr.rows.find((x) => x.dish === 'Cơm gà xối mỡ');
+  assert.deepEqual({ app: ga.app, hr: ga.hr, adjust: ga.adjust, total: ga.total, ate: ga.ate }, { app: 1, hr: 1, adjust: 2, total: 4, ate: 2 });
+  assert.equal(tr.default.adjust, 3);
+  assert.equal(tr.totals.total, tr.default.total + tr.rows.reduce((s, x) => s + x.total, 0));
+  assert.equal(tr.adjust_notes['Cơm gà xối mỡ'].note, '2 khách đối tác ăn cùng');
+  // lịch sử: đủ 3 lần sửa, mới nhất trước, có người sửa + cũ → mới + lý do
+  assert.deepEqual(r.log.map((l) => [l.kind, l.old_value, l.new_value, l.by_name]), [['order', '', 'Cơm gà xối mỡ', 'Admin'], ['adjust', '0', '3', 'Admin'], ['adjust', '0', '2', 'Admin']]);
+  assert.equal(r.log[0].emp_label, 'SX2 - Trần B'); assert.equal(r.log[0].reason, 'điện thoại hỏng');
+  // bỏ điều chỉnh (0) cũng ghi lịch sử
+  assert.equal((await adj({ dish: '', qty: 0, reason: 'NV mới đã tự chọn món' })).status, 200);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM meal_adjust WHERE work_date=? AND dish=''").get(D).n, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM meal_adjust_log WHERE work_date=?').get(D).n, 4);
+  // HR chọn hộ ngày sau → NV tự đổi trên app thì không còn dấu "HR chọn hộ"
+  const F = '2099-03-01';
+  await call('PUT', '/admin/meal/menu', { token: tok.ADM, body: { date: F, shift: 'trua', dishes: ['Cơm tấm', 'Bún chả'] } });
+  const fm = db.prepare("SELECT id, name FROM meal_menu WHERE work_date=? AND shift='trua' ORDER BY sort_order").all(F);
+  assert.equal((await call('PUT', '/admin/meal/order-for', { token: tok.ADM, body: { date: F, shift: 'trua', employee_id: E.SX1, menu_id: fm[0].id, reason: 'quên đăng ký' } })).status, 200);
+  await call('PUT', '/meal/order', { token: tok.SX1, body: { date: F, shift: 'trua', menu_id: fm[1].id } });
+  assert.deepEqual({ ...db.prepare('SELECT dish, set_by FROM meal_orders WHERE employee_id=? AND work_date=?').get(E.SX1, F) }, { dish: 'Bún chả', set_by: '' });
+  // tìm NV không dấu
+  const sr = (await call('GET', `/admin/meal/emp-search?date=${D}&shift=trua&q=tran`, { token: tok.ADM })).body.rows;
+  assert.deepEqual(sr.map((x) => [x.code, x.dish]), [['SX2', 'Cơm gà xối mỡ']]);
+  // xuất Excel: 3 sheet, có dòng món + dòng cộng + chi tiết NV + lịch sử
+  const res = await fetch(`${base}/admin/meal/report.xlsx?from=${D}&to=${D}`, { headers: { Authorization: 'Bearer ' + tok.ADM } });
+  assert.equal(res.status, 200);
+  assert.match(res.headers.get('content-disposition'), /bao_cao_suat_an_2026-10-15_2026-10-15\.xlsx/);
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await res.arrayBuffer()));
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['Tổng hợp', 'Chi tiết NV', 'Lịch sử chỉnh sửa']);
+  const rowsOf = (w) => { const out = []; w.eachRow((row) => out.push(row.values.slice(1))); return out; };
+  const s1 = rowsOf(wb.worksheets[0]);
+  const gaRow = s1.find((v) => v[1] === 'Trưa' && v[2] === 'Cơm gà xối mỡ');
+  assert.deepEqual(gaRow.slice(3, 8), [1, 1, 2, 4, 2]);
+  assert.ok(s1.some((v) => v[2] === 'Cộng Trưa'));
+  const s2 = rowsOf(wb.worksheets[1]);
+  assert.ok(s2.some((v) => v[2] === 'SX2' && v[5] === 'Cơm gà xối mỡ' && String(v[6]).startsWith('HR chọn hộ')));
+  assert.ok(s2.some((v) => v[2] === 'KHO1' && v[5] === '(không chọn món)'), 'người quẹt mà không chọn món vẫn có trong chi tiết');
+  assert.equal(rowsOf(wb.worksheets[2]).length - 3, 4);   // 4 lần sửa (trừ 3 dòng tiêu đề)
+  assert.equal((await fetch(`${base}/admin/meal/report.xlsx?from=2026-01-01&to=2026-06-01`, { headers: { Authorization: 'Bearer ' + tok.ADM } })).status, 400);   // quá 62 ngày
+});
+
 /* ===================== MODULE ĐỘC LẬP ===================== */
 test('mọi thao tác suất ăn KHÔNG làm đổi bảng chấm công / đăng ký làm thêm / nhân viên / ca / lương', () => {
   assert.equal(digest(CORE_TABLES), coreBefore);
