@@ -190,11 +190,29 @@ export async function pageMealCfg(ctx) {
   const main = el('div', { class: 'sa' });
   C.setMain(C.head('⚙️ Suất ăn — cấu hình'), main);
   main.append(C.loading());
-  let shifts, heads, devs, kit;
+  let shifts, heads, devs, kit, opt;
   try {
-    [shifts, heads, devs, kit] = await Promise.all([api('/admin/meal/shifts'), api('/admin/meal/heads'), api('/admin/meal/devices'), api('/admin/meal/kitchen')]);
+    [shifts, heads, devs, kit, opt] = await Promise.all([api('/admin/meal/shifts'), api('/admin/meal/heads'), api('/admin/meal/devices'), api('/admin/meal/kitchen'), api('/admin/meal/options')]);
   } catch (e) { main.innerHTML = ''; main.append(el('div', { class: 'empty' }, e.message)); return; }
   main.innerHTML = '';
+
+  /* --- cách đăng ký suất ăn: công tắc "Nhân viên tự chọn món trên app" --- */
+  const selfI = el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.25)', ...(opt.self_order ? { checked: '' } : {}) });
+  const selfTxt = el('div', { class: 'sa-hint', style: 'margin-top:6px' });
+  const drawSelf = () => {
+    selfTxt.textContent = selfI.checked
+      ? 'ĐANG BẬT: nhân viên tự chọn món trên app (tab Suất ăn) trước hạn chọn món; trưởng bộ phận vẫn báo số; màn hình bếp hiện tên + món đã chọn.'
+      : 'ĐANG TẮT: chỉ dùng quy trình TRƯỞNG BỘ PHẬN báo số → HR đối chiếu & chốt. Nhân viên thường không thấy tab Suất ăn; màn hình bếp hiện tên + "Có suất ăn". HR vẫn chọn món hộ được nếu có thực đơn.';
+  };
+  selfI.onchange = async () => {
+    try { const r = await api('/admin/meal/options', { method: 'PUT', body: { self_order: selfI.checked } }); selfI.checked = r.self_order; drawSelf(); toast(r.self_order ? 'Đã BẬT nhân viên tự chọn món' : 'Đã TẮT nhân viên tự chọn món', 'ok'); }
+    catch (e) { selfI.checked = !selfI.checked; drawSelf(); toast(e.message, 'err'); }
+  };
+  drawSelf();
+  main.append(el('div', { class: 'sa-sec' }, 'Cách đăng ký suất ăn'),
+    el('div', { class: 'sa-card', style: 'margin-bottom:14px' },
+      el('label', { style: 'display:flex;gap:10px;align-items:center;margin:0;color:inherit;font-size:15px;font-weight:700;cursor:pointer' }, selfI, 'Nhân viên tự chọn món trên app'),
+      selfTxt));
 
   /* --- ca ăn + giờ chốt --- */
   main.append(el('div', { class: 'sa-sec' }, '1. Ba ca ăn & giờ chốt'),

@@ -98,7 +98,8 @@ function showApp() {
   const navChonca = $('#nav-chonca');
   if (navChonca) navChonca.style.display = (SELF_SHIFT && MODE !== 'hourly') ? '' : 'none';
   // Tab "Suất ăn" chỉ hiện khi tài khoản tổng đã bật phân hệ Quản lý suất ăn (tắt → không gọi gì thêm, app y như cũ)
-  api('/meal/config').then((m) => { const b = $('#nav-monan'); if (b && m && m.enabled) b.style.display = ''; }).catch(() => {});
+  // Tắt "Nhân viên tự chọn món" → chỉ trưởng bộ phận thấy tab (để nhập số đăng ký của bộ phận)
+  api('/meal/config').then((m) => { const b = $('#nav-monan'); if (b && m && m.enabled && (m.self_order !== false || m.head)) b.style.display = ''; }).catch(() => {});
   tickClock(); setInterval(tickClock, 1000);
   renderTab('cham');
 }

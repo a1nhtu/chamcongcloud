@@ -4,7 +4,7 @@ import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
-  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, setMealAdjust, hrSetOrder, mealEmpSearch,
+  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, selfOrderOn, setMealAdjust, hrSetOrder, mealEmpSearch,
 } from '../../meal.js';
 import { writeMealReportXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
@@ -122,6 +122,13 @@ export function registerMealRoutes(r) {
       await writeMealReportXlsx(res, from, to);
     } catch (e) { if (!res.headersSent) sendCaughtError(res, 'GET /admin/meal/report.xlsx', e); else res.end(); }
   });
+
+  // ---------- cách đăng ký: công tắc "Nhân viên tự chọn món trên app" (mặc định bật) ----------
+  r.get('/meal/options', wrap('GET /admin/meal/options', (req, res) => res.json({ self_order: selfOrderOn() })));
+  r.put('/meal/options', wrap('PUT /admin/meal/options', (req, res) => {
+    if (req.body?.self_order != null) setSetting('meal_self_order', req.body.self_order ? '1' : '0');
+    res.json({ ok: true, self_order: selfOrderOn() });
+  }));
 
   // ---------- màn hình bếp ----------
   r.get('/meal/kitchen', wrap('GET /admin/meal/kitchen', (req, res) => res.json({ key: kitchenKey(), path: '/bep', ...kitchenBase() })));

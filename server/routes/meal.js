@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { authRequired } from '../auth.js';
 import { sendCaughtError, userError } from '../util.js';
 import {
-  mealEnabled, mealGate, listShifts, needShift, needDate, loadBoard, saveRegistrations, closingOf, headDeptList,
+  mealEnabled, selfOrderOn, mealGate, listShifts, needShift, needDate, loadBoard, saveRegistrations, closingOf, headDeptList,
   getMenu, myMealPlan, setMyOrder, kitchenKeyOk, kitchenFeed,
 } from '../meal.js';
 import { vnNow, addDaysIso, isIsoDate } from '../meal-rules.js';
@@ -36,14 +36,19 @@ r.get('/kitchen/feed', mealGate, wrap('GET /meal/kitchen/feed', (req, res) => {
 }));
 
 r.use(authRequired);
-// App hỏi xem phân hệ có bật không (tắt → ẩn tab Suất ăn)
-r.get('/config', (req, res) => res.json({ enabled: mealEnabled() }));
+// App hỏi xem phân hệ có bật không (tắt → ẩn tab Suất ăn). self_order TẮT → tab chỉ hiện cho trưởng bộ phận (head).
+r.get('/config', (req, res) => {
+  const enabled = mealEnabled();
+  let head = false;
+  try { head = enabled && !req.user.master && headDeptList(req.user.id).list.length > 0; } catch { /* chưa có bảng suất ăn */ }
+  res.json({ enabled, self_order: selfOrderOn(), head });
+});
 r.use(mealGate);
 
 // Thông tin của tôi: các ca ăn đang bật + bộ phận tôi làm trưởng
 r.get('/me', wrap('GET /meal/me', (req, res) => {
   const h = req.user.master ? { roots: [], list: [] } : headDeptList(req.user.id);
-  res.json({ today: vnNow().date, shifts: listShifts({ onlyEnabled: true }), head_of: h.list });
+  res.json({ today: vnNow().date, shifts: listShifts({ onlyEnabled: true }), head_of: h.list, self_order: selfOrderOn() });
 }));
 
 // Thực đơn + món tôi đã chọn trong khoảng ngày (tối đa 14 ngày)

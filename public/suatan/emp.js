@@ -21,10 +21,10 @@ export async function renderMealTab(root) {
   try { me = await api('/meal/me'); } catch (e) { root.innerHTML = ''; root.append(el('div', { class: 'sa-empty' }, e.message)); return; }
   root.innerHTML = '';
   const orderBox = el('div'), headBox = el('div');
-  root.append(orderBox);
-  if (me.head_of.length) root.append(headBox);
-  drawOrders(orderBox, me);
-  if (me.head_of.length) drawHead(headBox, me);
+  // công ty tắt "Nhân viên tự chọn món" → bỏ phần chọn món, chỉ còn phần trưởng bộ phận nhập số
+  if (me.self_order !== false) { root.append(orderBox); drawOrders(orderBox, me); }
+  else if (!me.head_of.length) root.append(el('div', { class: 'sa-empty' }, 'Công ty đăng ký suất ăn theo bộ phận — trưởng bộ phận báo số giúp bạn, bạn không cần chọn món.'));
+  if (me.head_of.length) { root.append(headBox); drawHead(headBox, me); }
 }
 
 /* ---------- chọn món ---------- */

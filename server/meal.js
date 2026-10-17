@@ -13,6 +13,9 @@ import {
 
 /* ---------------------------- công tắc + quyền ---------------------------- */
 export const mealEnabled = () => getSetting('meal_enabled', '0') === '1';
+// Công tắc "Nhân viên tự chọn món trên app" — mặc định BẬT (như cũ). TẮT = công ty chỉ dùng quy trình trưởng bộ phận báo số → HR duyệt/chốt:
+// app ẩn phần chọn món (chỉ trưởng BP thấy tab Suất ăn để nhập số), API chọn món trả 403, màn hình bếp hiện "Có suất ăn" thay cho tên món.
+export const selfOrderOn = () => getSetting('meal_self_order', '1') !== '0';
 // Người dùng có được quản lý suất ăn (đối chiếu / chốt / thực đơn / cấu hình) không: phân hệ đã bật + admin / tài khoản tổng / có quyền 'meal'
 export function mealAllowed(user) {
   if (!mealEnabled() || !user) return false;
@@ -226,6 +229,7 @@ export function myMealPlan(empId, from, to, now = new Date()) {
 }
 // Chọn (hoặc bỏ chọn khi menuId rỗng) món cho 1 bữa
 export function setMyOrder(empId, workDate, code, menuId, now = new Date()) {
+  if (!selfOrderOn()) throw userError('Công ty không dùng chức năng nhân viên tự chọn món — trưởng bộ phận đăng ký suất ăn cho bộ phận', 403);
   needDate(workDate);
   const shift = needShift(code);
   if (!shift.enabled) throw userError('Ca ăn này đang tắt');
@@ -401,7 +405,7 @@ export function kitchenFeed(sinceId = 0, now = new Date()) {
     events.push({ id: r.id, at: r.punch_at, code: r.code, name: r.full_name, department: r.department, shift: hit.shift.code, shift_name: hit.shift.name, work_date: hit.workDate, dish: o ? o.dish : null, times });
     if (events.length >= 25) break;
   }
-  return { now: now.toISOString(), last_id: rows.length ? rows[0].id : Number(sinceId) || 0, events };
+  return { now: now.toISOString(), last_id: rows.length ? rows[0].id : Number(sinceId) || 0, events, self_order: selfOrderOn() };
 }
 
 export { vnNow };

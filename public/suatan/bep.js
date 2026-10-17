@@ -4,6 +4,7 @@
 const $ = (s) => document.querySelector(s);
 const KEY_LS = 'digiplus_bep_key';
 let key = '', since = 0, first = true, lastShown = 0, soundOn = false, audio = null;
+let selfOrder = true;   // công ty tắt "NV tự chọn món" → không báo "chưa chọn món", chỉ hiện "Có suất ăn"
 
 try {
   // mã đến từ /bep/MÃ (ngắn, dễ gõ) hoặc /bep?key=MÃ; nhớ trên máy rồi gỡ khỏi thanh địa chỉ
@@ -51,13 +52,13 @@ function drawBig(e, review = false) {
   big.innerHTML = `${review ? `<div class="rv">↩ ĐANG XEM LẠI lượt ${hm(e.at)} <button id="live" type="button">Về lượt mới nhất</button></div>` : ''}
     <div class="name">${esc(e.name)}</div>
     <div class="meta">${esc(e.code)}${e.department ? ' · ' + esc(e.department) : ''} · ${esc(e.shift_name)} · ${hm(e.at)}</div>
-    ${e.dish ? `<div class="dish">${esc(e.dish)}</div>` : '<div class="dish none">Chưa chọn món — phát suất mặc định</div>'}
+    ${e.dish ? `<div class="dish">${esc(e.dish)}</div>` : selfOrder ? '<div class="dish none">Chưa chọn món — phát suất mặc định</div>' : '<div class="dish">✔ Có suất ăn</div>'}
     ${e.times > 1 ? `<div class="tag again">⚠ Quẹt lần thứ ${e.times} trong bữa này</div>` : ''}`;
   if (review) $('#live').onclick = backToLive;
   else { big.classList.remove('flash'); void big.offsetWidth; big.classList.add('flash'); }
 }
 function drawList(events) {
-  $('#list').innerHTML = events.map((e) => `<div class="it${e.id === viewing ? ' sel' : ''}" data-id="${e.id}"><span class="t">${hm(e.at)}</span><span class="n">${esc(e.name)}</span><span class="d${e.dish ? '' : ' none'}">${e.dish ? esc(e.dish) : 'chưa chọn món'}</span></div>`).join('');
+  $('#list').innerHTML = events.map((e) => `<div class="it${e.id === viewing ? ' sel' : ''}" data-id="${e.id}"><span class="t">${hm(e.at)}</span><span class="n">${esc(e.name)}</span><span class="d${e.dish || !selfOrder ? '' : ' none'}">${e.dish ? esc(e.dish) : selfOrder ? 'chưa chọn món' : 'suất ăn'}</span></div>`).join('');
 }
 
 // XEM LẠI: bấm 1 lượt bên phải (hoặc phím ↓/↑) → hiện to ở giữa; 10 giây không thao tác thì tự về lượt mới nhất.
@@ -97,6 +98,7 @@ async function poll() {
     const d = await res.json();
     $('#dot').classList.remove('off');
     since = Math.max(since, d.last_id || 0);
+    if (typeof d.self_order === 'boolean') selfOrder = d.self_order;
     if (d.events.length) {
       recent = [...d.events, ...recent].slice(0, 30);   // events: mới nhất trước
       drawList(recent);

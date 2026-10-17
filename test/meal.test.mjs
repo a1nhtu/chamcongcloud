@@ -328,6 +328,36 @@ test('BÁO CÁO theo món + HR chỉnh tay (bắt buộc lý do, lưu vết) + c
   assert.equal((await fetch(`${base}/admin/meal/report.xlsx?from=2026-01-01&to=2026-06-01`, { headers: { Authorization: 'Bearer ' + tok.ADM } })).status, 400);   // quá 62 ngày
 });
 
+test('công tắc "Nhân viên tự chọn món" — mặc định BẬT (như cũ); TẮT: chỉ trưởng BP thấy tab, API chọn món 403, bếp hiện "Có suất ăn"; HR vẫn chọn hộ được', async () => {
+  const F = '2099-04-01';
+  await call('PUT', '/admin/meal/menu', { token: tok.ADM, body: { date: F, shift: 'trua', dishes: ['Cơm gà', 'Phở'] } });
+  const pick = db.prepare("SELECT id FROM meal_menu WHERE work_date=? AND shift='trua' ORDER BY sort_order").get(F).id;
+  // mặc định: không có dòng cài đặt, bật
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM settings WHERE key='meal_self_order'").get().n, 0);
+  assert.equal((await call('GET', '/admin/meal/options', { token: tok.ADM })).body.self_order, true);
+  let c = (await call('GET', '/meal/config', { token: tok.SX1 })).body;
+  assert.equal(c.self_order, true); assert.equal(c.head, false);
+  assert.equal((await call('PUT', '/meal/order', { token: tok.SX1, body: { date: F, shift: 'trua', menu_id: pick } })).status, 200);
+  // quản lý không có quyền suất ăn không đổi được công tắc
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.MGR0, body: { self_order: false } })).status, 403);
+  // TẮT
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.ADM, body: { self_order: false } })).body.self_order, false);
+  c = (await call('GET', '/meal/config', { token: tok.SX1 })).body;
+  assert.equal(c.self_order, false); assert.equal(c.head, false);                      // NV thường → app ẩn tab
+  assert.equal((await call('GET', '/meal/config', { token: tok.TBP1 })).body.head, true);   // trưởng BP vẫn thấy tab
+  assert.equal((await call('GET', '/meal/me', { token: tok.SX1 })).body.self_order, false);
+  const o = await call('PUT', '/meal/order', { token: tok.SX1, body: { date: F, shift: 'trua', menu_id: null } });
+  assert.equal(o.status, 403); assert.match(o.body.error, /trưởng bộ phận/);
+  // trưởng BP vẫn gửi số đăng ký; HR vẫn chọn món hộ
+  assert.equal((await call('PUT', '/meal/dept', { token: tok.TBP1, body: { date: F, shift: 'trua', items: [{ department: 'Sản xuất', count: 7 }] } })).status, 200);
+  assert.equal((await call('PUT', '/admin/meal/order-for', { token: tok.ADM, body: { date: F, shift: 'trua', employee_id: E.SX2, menu_id: pick, reason: 'NV ăn kiêng' } })).status, 200);
+  assert.equal(M.kitchenFeed(0, new Date(Z('05:40'))).self_order, false);
+  // BẬT lại → như cũ
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.ADM, body: { self_order: true } })).body.self_order, true);
+  assert.equal((await call('PUT', '/meal/order', { token: tok.SX1, body: { date: F, shift: 'trua', menu_id: pick } })).status, 200);
+  assert.equal(M.kitchenFeed(0, new Date(Z('05:40'))).self_order, true);
+});
+
 /* ===================== MODULE ĐỘC LẬP ===================== */
 test('mọi thao tác suất ăn KHÔNG làm đổi bảng chấm công / đăng ký làm thêm / nhân viên / ca / lương', () => {
   assert.equal(digest(CORE_TABLES), coreBefore);
