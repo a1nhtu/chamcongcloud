@@ -338,10 +338,12 @@ test('công tắc "Nhân viên tự chọn món" — mặc định BẬT (như c
   let c = (await call('GET', '/meal/config', { token: tok.SX1 })).body;
   assert.equal(c.self_order, true); assert.equal(c.head, false);
   assert.equal((await call('PUT', '/meal/order', { token: tok.SX1, body: { date: F, shift: 'trua', menu_id: pick } })).status, 200);
-  // quản lý không có quyền suất ăn không đổi được công tắc
+  // quản lý không có quyền suất ăn / admin công ty không đổi được công tắc — chỉ tài khoản tổng (Cài đặt › Cấu hình hiển thị)
   assert.equal((await call('PUT', '/admin/meal/options', { token: tok.MGR0, body: { self_order: false } })).status, 403);
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.ADM, body: { self_order: false } })).status, 403);
+  assert.equal(M.selfOrderOn(), true);
   // TẮT
-  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.ADM, body: { self_order: false } })).body.self_order, false);
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.master, body: { self_order: false } })).body.self_order, false);
   c = (await call('GET', '/meal/config', { token: tok.SX1 })).body;
   assert.equal(c.self_order, false); assert.equal(c.head, false);                      // NV thường → app ẩn tab
   assert.equal((await call('GET', '/meal/config', { token: tok.TBP1 })).body.head, true);   // trưởng BP vẫn thấy tab
@@ -353,7 +355,7 @@ test('công tắc "Nhân viên tự chọn món" — mặc định BẬT (như c
   assert.equal((await call('PUT', '/admin/meal/order-for', { token: tok.ADM, body: { date: F, shift: 'trua', employee_id: E.SX2, menu_id: pick, reason: 'NV ăn kiêng' } })).status, 200);
   assert.equal(M.kitchenFeed(0, new Date(Z('05:40'))).self_order, false);
   // BẬT lại → như cũ
-  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.ADM, body: { self_order: true } })).body.self_order, true);
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.master, body: { self_order: true } })).body.self_order, true);
   assert.equal((await call('PUT', '/meal/order', { token: tok.SX1, body: { date: F, shift: 'trua', menu_id: pick } })).status, 200);
   assert.equal(M.kitchenFeed(0, new Date(Z('05:40'))).self_order, true);
 });

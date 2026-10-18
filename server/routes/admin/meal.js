@@ -4,9 +4,11 @@ import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
-  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, selfOrderOn, setMealAdjust, hrSetOrder, mealEmpSearch,
+  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, mealOptions, setMealAdjust, hrSetOrder, mealEmpSearch,
+  createShift, deleteShift, listKitchens, saveKitchen, deleteKitchen, renewKitchenKey, assignKitchen, kitchenDeptMap, kitchenDeptEmployees,
+  hrSetSignup, setMealExtra, signupDay, sendToKitchen, mealRangeSummary, mealNoShow, mealExceptions,
 } from '../../meal.js';
-import { writeMealReportXlsx } from '../../meal-xlsx.js';
+import { writeMealReportXlsx, writeMealRptXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
 
 const who = (req) => req.user.full_name || req.user.username || '';
@@ -30,6 +32,17 @@ export function registerMealRoutes(r) {
     const v = c.value;
     db.prepare('UPDATE meal_shifts SET name = ?, from_time = ?, to_time = ?, mode = ?, enabled = ? WHERE code = ?').run(v.name, v.from_time, v.to_time, v.mode, v.enabled, req.params.code);
     if (v.lock_before_min != null) db.prepare('UPDATE meal_shifts SET lock_before_min = ?, lock_at = ? WHERE code = ?').run(v.lock_before_min, v.lock_at, req.params.code);
+    if (v.open_at != null) db.prepare('UPDATE meal_shifts SET open_at = ? WHERE code = ?').run(v.open_at, req.params.code);
+    res.json({ ok: true, shifts: listShifts() });
+  }));
+  // Thêm bữa ăn mới (VD bữa sáng / bữa phụ) — cùng các ô như sửa bữa
+  r.post('/meal/shifts', wrap('POST /admin/meal/shifts', (req, res) => {
+    const c = checkShiftConfig({ mode: 'punch', enabled: true, ...(req.body || {}) });
+    if (!c.ok) return res.status(400).json({ error: c.error });
+    res.json({ ok: true, shift: createShift(c.value), shifts: listShifts() });
+  }));
+  r.delete('/meal/shifts/:code', wrap('DELETE /admin/meal/shifts', (req, res) => {
+    deleteShift(req.params.code);
     res.json({ ok: true, shifts: listShifts() });
   }));
 
@@ -123,12 +136,52 @@ export function registerMealRoutes(r) {
     } catch (e) { if (!res.headersSent) sendCaughtError(res, 'GET /admin/meal/report.xlsx', e); else res.end(); }
   });
 
-  // ---------- cách đăng ký: công tắc "Nhân viên tự chọn món trên app" (mặc định bật) ----------
-  r.get('/meal/options', wrap('GET /admin/meal/options', (req, res) => res.json({ self_order: selfOrderOn() })));
+  // ---------- cách đăng ký: 3 công tắc (mặc định đều BẬT = như cũ) — CHỈ tài khoản tổng đổi (Cài đặt › Cấu hình hiển thị) ----------
+  r.get('/meal/options', wrap('GET /admin/meal/options', (req, res) => res.json(mealOptions())));
   r.put('/meal/options', wrap('PUT /admin/meal/options', (req, res) => {
-    if (req.body?.self_order != null) setSetting('meal_self_order', req.body.self_order ? '1' : '0');
-    res.json({ ok: true, self_order: selfOrderOn() });
+    if (!req.user.master) return res.status(403).json({ error: 'Chỉ tài khoản tổng đổi được cách đăng ký suất ăn (Cài đặt › Cấu hình hiển thị)' });
+    for (const [k, key] of [['self_order', 'meal_self_order'], ['dish_choice', 'meal_dish_choice'], ['dept_head', 'meal_dept_head']])
+      if (req.body?.[k] != null) setSetting(key, req.body[k] ? '1' : '0');
+    res.json({ ok: true, ...mealOptions() });
   }));
+
+  // ---------- ĐĂNG KÝ ĂN (không chọn món): xem theo ngày, HR đăng ký / huỷ hộ, thêm suất tay, gửi bếp ----------
+  r.get('/meal/signups', wrap('GET /admin/meal/signups', (req, res) => res.json(signupDay(needDate(req.query.date), req.query.shift))));
+  // { date, shift, employee_ids | department, on, reason }
+  r.put('/meal/signup-for', wrap('PUT /admin/meal/signup-for', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, ...hrSetSignup({ workDate: needDate(b.date), code: b.shift, employeeIds: b.employee_ids, department: b.department, on: !!b.on, reason: b.reason, by: who(req) }) });
+  }));
+  r.put('/meal/extra', wrap('PUT /admin/meal/extra', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, ...setMealExtra({ workDate: needDate(b.date), code: b.shift, kitchenId: b.kitchen_id, qty: b.qty, reason: b.reason, by: who(req) }) });
+  }));
+  r.post('/meal/dispatch', wrap('POST /admin/meal/dispatch', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, ...sendToKitchen({ workDate: needDate(b.date), code: b.shift, by: who(req) }) });
+  }));
+
+  // ---------- BẾP: danh mục + máy chấm ăn của bếp + mã màn hình riêng + phân NV vào bếp ----------
+  r.get('/meal/kitchens', wrap('GET /admin/meal/kitchens', (req, res) => res.json({ kitchens: listKitchens(), depts: kitchenDeptMap() })));
+  r.post('/meal/kitchens', wrap('POST /admin/meal/kitchens', (req, res) => res.json({ ok: true, kitchen: saveKitchen({ name: req.body?.name, serials: req.body?.serials }) })));
+  r.put('/meal/kitchens/:id', wrap('PUT /admin/meal/kitchens', (req, res) => res.json({ ok: true, kitchen: saveKitchen({ id: Number(req.params.id) || -1, name: req.body?.name, serials: req.body?.serials }) })));
+  r.delete('/meal/kitchens/:id', wrap('DELETE /admin/meal/kitchens', (req, res) => { deleteKitchen(req.params.id); res.json({ ok: true }); }));
+  r.post('/meal/kitchens/:id/renew', wrap('POST /admin/meal/kitchens/renew', (req, res) => res.json({ ok: true, kitchen: renewKitchenKey(req.params.id) })));
+  r.get('/meal/kitchen-emps', wrap('GET /admin/meal/kitchen-emps', (req, res) => res.json({ rows: kitchenDeptEmployees(req.query.department) })));
+  // { kitchen_id (0 = bỏ), employee_ids | department }
+  r.put('/meal/kitchen-assign', wrap('PUT /admin/meal/kitchen-assign', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, count: assignKitchen({ kitchenId: b.kitchen_id, employeeIds: b.employee_ids, department: b.department }), depts: kitchenDeptMap(), kitchens: listKitchens() });
+  }));
+
+  // ---------- BÁO CÁO theo khoảng ngày: tổng số & giờ đăng ký · báo ăn mà không ăn · ngoại lệ ----------
+  r.get('/meal/rpt/summary', wrap('GET /admin/meal/rpt/summary', (req, res) => res.json(mealRangeSummary(needDate(req.query.from), needDate(req.query.to || req.query.from)))));
+  r.get('/meal/rpt/noshow', wrap('GET /admin/meal/rpt/noshow', (req, res) => res.json(mealNoShow(needDate(req.query.from), needDate(req.query.to || req.query.from)))));
+  r.get('/meal/rpt/except', wrap('GET /admin/meal/rpt/except', (req, res) => res.json(mealExceptions(needDate(req.query.from), needDate(req.query.to || req.query.from)))));
+  r.get('/meal/rpt.xlsx', async (req, res) => {
+    try { await writeMealRptXlsx(res, String(req.query.type || ''), needDate(req.query.from), needDate(req.query.to || req.query.from)); }
+    catch (e) { if (!res.headersSent) sendCaughtError(res, 'GET /admin/meal/rpt.xlsx', e); else res.end(); }
+  });
 
   // ---------- màn hình bếp ----------
   r.get('/meal/kitchen', wrap('GET /admin/meal/kitchen', (req, res) => res.json({ key: kitchenKey(), path: '/bep', ...kitchenBase() })));

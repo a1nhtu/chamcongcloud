@@ -85,6 +85,7 @@ app.get('/api/config', (req, res) => res.json({
   attendance_mode: getSetting('attendance_mode', 'shift'),
   self_shift_enabled: getSetting('self_shift_enabled', '0'),
   self_shift_approve: getSetting('self_shift_approve', '1'),
+  att_enabled: getSetting('att_enabled', '1'),   // Cấu hình hiển thị: tắt = công ty không dùng chấm công (app NV ẩn tab chấm công, chỉ còn Suất ăn)
 }));
 
 // Ảnh selfie + logo công ty. Logo cho phép định dạng SVG (nhúng qua thẻ <img> ở giao

@@ -124,3 +124,21 @@
 button.sa-kpi { font: inherit; text-align: left; cursor: pointer; }
 button.sa-kpi:hover { border-color: var(--sa-navy); }
 @media (max-width: 640px) { .sa-fold-head { flex-wrap: wrap; } .sa-fold-sum { width: 100%; text-align: left; padding-left: 24px; } }
+
+/* ----- đăng ký ăn (không chọn món): Có ăn / Không ăn ----- */
+.sa-day .sa-day-n { display: block; font-style: normal; font-size: 10.5px; color: var(--sa-ok); font-weight: 700; margin-top: 1px; }
+.sa-day.on .sa-day-n { color: #c9f2dc; }
+.sa-meal.sa-meal-on { border-color: var(--sa-ok); box-shadow: 0 0 0 1px var(--sa-ok) inset; }
+.sa-yn { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 6px; }
+.sa-yn button { border: 2px solid var(--sa-line); background: #fff; border-radius: 12px; padding: 13px 8px; font: inherit; font-size: 16px; font-weight: 800; color: var(--sa-mut); cursor: pointer; }
+.sa-yn button.yes.on { background: var(--sa-ok); border-color: var(--sa-ok); color: #fff; }
+.sa-yn button.no.on { background: #eef1f6; border-color: #c5cfdf; color: var(--sa-ink); }
+.sa-yn button:disabled { opacity: .55; cursor: not-allowed; }
+.sa-yn button:not(:disabled):hover { border-color: var(--sa-navy); }
+/* điện thoại: ô tổng số mỗi bữa nằm cùng 1 hàng cho gọn */
+@media (max-width: 640px) {
+  .sa-kpis { gap: 8px; }
+  .sa-kpi { min-width: 0; flex: 1 1 28%; padding: 8px 10px; }
+  .sa-kpi .v { font-size: 24px; }
+  .sa-kpi .sa-pill { font-size: 10.5px; padding: 2px 6px; }
+}

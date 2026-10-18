@@ -26,6 +26,21 @@
     #big .meta { font-size: 28px; color: #5d6e8c; margin: 8px 0 22px; }
     #big .dish { font-size: clamp(36px, 6vw, 84px); font-weight: 900; color: var(--red); line-height: 1.1; }
     #big .dish.none { color: #b9791a; font-size: clamp(28px, 4vw, 54px); }
+    #big .dish.ok { color: #167a4a; }
+    #big .dish.bad { color: #fff; background: var(--red); border-radius: 18px; padding: 6px 26px; }
+    #big .tag.wrong { background: #b9791a; }
+    /* dải TỔNG SỐ SUẤT các bữa sắp tới (chỉ khi nhân viên tự đăng ký trên app) */
+    #board { display: none; gap: 14px; padding: 14px 28px 0; }
+    #board.on { display: flex; flex-wrap: wrap; }
+    .bd { flex: 1 1 280px; background: rgba(255, 255, 255, .08); border-radius: 18px; padding: 10px 18px; display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 14px; border-left: 8px solid var(--mut); }
+    .bd.open { border-left-color: #f0c36b; }
+    .bd.locked { border-left-color: #3ddc84; }
+    .bd .t { font-size: 20px; font-weight: 800; }
+    .bd .s { color: var(--mut); font-size: 15px; grid-column: 1; }
+    .bd .n { grid-row: 1 / span 2; grid-column: 2; font-size: 50px; font-weight: 900; font-variant-numeric: tabular-nums; text-align: right; line-height: 1; }
+    .bd .n small { font-size: 18px; font-weight: 600; color: var(--mut); }
+    .bd .dishes { grid-column: 1 / -1; font-size: 15px; color: #ffd2cc; }
+    .bd .warn { grid-column: 1 / -1; color: #ffb3ad; font-weight: 700; font-size: 15px; }
     #big .tag { margin-top: 18px; display: inline-block; background: var(--navy); color: #fff; font-size: 26px; font-weight: 700; border-radius: 999px; padding: 6px 22px; }
     #big .tag.again { background: var(--red); }
     aside { background: rgba(255, 255, 255, .06); border-radius: 22px; padding: 16px 18px; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
@@ -43,6 +58,7 @@
     .it .n { font-size: 22px; font-weight: 700; }
     .it .d { font-size: 20px; color: #ffb3ad; font-weight: 700; }
     .it .d.none { color: #f0c36b; font-weight: 500; }
+    .it .d.ok { color: #8be0b0; }
     #gate { position: fixed; inset: 0; background: var(--navy-d); display: none; align-items: center; justify-content: center; flex-direction: column; gap: 14px; z-index: 5; }
     #gate input { font-size: 20px; padding: 10px 14px; border-radius: 10px; border: 0; width: min(520px, 90vw); }
     #gate button { font-size: 18px; padding: 10px 24px; border: 0; border-radius: 10px; background: var(--red); color: #fff; font-weight: 700; cursor: pointer; }
@@ -58,6 +74,7 @@
     <span id="dot" title="Kết nối"></span>
     <div id="clock">--:--:--</div>
   </header>
+  <section id="board"></section>
   <main>
     <section id="big"><div class="wait">Đang chờ nhân viên quẹt thẻ…</div></section>
     <aside><h2>Lượt quẹt gần đây <small style="text-transform:none;letter-spacing:0;font-size:14px">— bấm để xem lại</small></h2><div id="list"></div></aside>

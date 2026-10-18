@@ -22,8 +22,9 @@ export async function renderMealTab(root) {
   root.innerHTML = '';
   const orderBox = el('div'), headBox = el('div');
   // công ty tắt "Nhân viên tự chọn món" → bỏ phần chọn món, chỉ còn phần trưởng bộ phận nhập số
-  if (me.self_order !== false) { root.append(orderBox); drawOrders(orderBox, me); }
-  else if (!me.head_of.length) root.append(el('div', { class: 'sa-empty' }, 'Công ty đăng ký suất ăn theo bộ phận — trưởng bộ phận báo số giúp bạn, bạn không cần chọn món.'));
+  // công ty tắt "Có chọn món" → chế độ CHỈ ĐĂNG KÝ ĂN: mỗi bữa 1 cặp nút Có ăn / Không ăn
+  if (me.self_order !== false) { root.append(orderBox); if (me.dish_choice === false) drawSignups(orderBox, me); else drawOrders(orderBox, me); }
+  else if (!me.head_of.length) root.append(el('div', { class: 'sa-empty' }, 'Công ty đăng ký suất ăn theo bộ phận — trưởng bộ phận / HR báo số giúp bạn, bạn không cần đăng ký.'));
   if (me.head_of.length) { root.append(headBox); drawHead(headBox, me); }
 }
 
@@ -70,6 +71,56 @@ async function drawOrders(box, me) {
     }
   }
   redrawStrip(); load();
+}
+
+/* ---------- đăng ký ăn (không chọn món): Có ăn / Không ăn cho từng bữa, 7 ngày tới ---------- */
+// 'YYYY-MM-DD HH:MM' → 'HH:MM' (cùng ngày `day`) hoặc 'HH:MM ngày dd/mm'
+const atTxt = (v, day) => (v ? v.slice(11) + (v.slice(0, 10) === day ? '' : ' ngày ' + dmy(v.slice(0, 10))) : '');
+async function drawSignups(box, me) {
+  const today = me.today || vnToday();
+  let sel = today, days = [];
+  const strip = el('div', { class: 'sa-days' });
+  const list = el('div');
+  box.append(el('div', { class: 'sa-sec', style: 'margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, '📝 Đăng ký ăn', me.kitchen ? el('span', { class: 'sa-pill muted' }, '🍳 ' + me.kitchen) : null),
+    el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'Bấm "Có ăn" cho bữa bạn sẽ ăn — chưa bấm là KHÔNG ăn. Hết giờ khoá muốn đổi thì báo HR.'), strip, list);
+  const drawStrip = () => {
+    strip.innerHTML = '';
+    for (const d of days) {
+      const n = d.shifts.filter((s) => s.registered).length;
+      const b = el('button', { type: 'button', class: 'sa-day' + (d.date === sel ? ' on' : '') }, WD[new Date(d.date + 'T12:00:00Z').getUTCDay()], el('b', {}, d.date.slice(8)), dmy(d.date),
+        el('i', { class: 'sa-day-n' }, n ? `✔ ${n} bữa` : '—'));
+      b.onclick = () => { sel = d.date; drawStrip(); drawDay(); };
+      strip.append(b);
+    }
+  };
+  const drawDay = () => {
+    list.innerHTML = '';
+    const day = days.find((d) => d.date === sel);
+    if (!day || !day.shifts.length) { list.append(el('div', { class: 'sa-empty' }, 'Chưa có bữa ăn nào được bật.')); return; }
+    for (const s of day.shifts) {
+      const when = s.state === 'wait' ? `⏳ Mở đăng ký lúc ${atTxt(s.open, sel)}` : s.state === 'open' ? `🟢 Đăng ký đến ${atTxt(s.deadline, sel)}` : `🔒 Đã khoá lúc ${atTxt(s.deadline, sel)}`;
+      const set = (on) => async () => {
+        if (on === s.registered) return;
+        try { await api('/meal/signup', { method: 'PUT', body: { date: sel, shift: s.code, on } }); toast(on ? `Đã đăng ký ăn ${s.name.toLowerCase()} ${dmy(sel)}` : `Đã huỷ bữa ${s.name.toLowerCase()} ${dmy(sel)}`, 'ok'); load(); }
+        catch (e) { toast(e.message, 'err'); }
+      };
+      const dis = s.editable ? {} : { disabled: '' };
+      const yes = el('button', { type: 'button', class: 'yes' + (s.registered ? ' on' : ''), ...dis }, '✔ Có ăn');
+      const no = el('button', { type: 'button', class: 'no' + (s.registered ? '' : ' on'), ...dis }, '✕ Không ăn');
+      yes.onclick = set(true); no.onclick = set(false);
+      list.append(el('div', { class: 'sa-meal' + (s.registered ? ' sa-meal-on' : '') }, el('h4', {}, 'Bữa ' + s.name.toLowerCase()),
+        el('div', { class: 'when' }, `Ăn khoảng ${s.from_time} → ${s.to_time} · ${when}`),
+        el('div', { class: 'sa-yn' }, yes, no),
+        s.registered && s.set_by ? el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'HR đã đăng ký giúp bạn bữa này.') : null));
+    }
+  };
+  async function load() {
+    try { days = (await api(`/meal/plan?from=${today}&to=${addDays(today, 6)}`)).days; }
+    catch (e) { list.innerHTML = ''; list.append(el('div', { class: 'sa-empty' }, e.message)); return; }
+    drawStrip(); drawDay();
+  }
+  list.append(el('div', { class: 'sa-empty' }, 'Đang tải…'));
+  load();
 }
 
 /* ---------- trưởng bộ phận nhập số ---------- */

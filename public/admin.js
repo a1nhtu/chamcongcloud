@@ -25,7 +25,9 @@ const NAV = [
   ['swap', '🔁', 'Đăng ký làm bù', 'attendance_edit'],
   ['abnormal', '🚨', 'Chấm công bất thường', 'reports'],
   ['meal', '🍱', 'Đối chiếu & chốt suất ăn', 'meal'],
+  ['mealreg', '📝', 'Đăng ký ăn', 'meal'],   // chế độ chỉ đăng ký ăn (không chọn món): danh sách + số lượng từng bữa / bếp, đăng ký hộ, gửi bếp
   ['mealrep', '📋', 'Tổng hợp & điều chỉnh suất ăn', 'meal'],
+  ['mealrpt', '📊', 'Báo cáo suất ăn', 'meal'],
   ['mealmenu', '🍽️', 'Thực đơn các bữa', 'meal'],
   ['mealcfg', '⚙️', 'Cấu hình suất ăn', 'meal'],
   ['mealme', '🥢', 'Suất ăn của tôi', null],   // ai cũng thấy khi phân hệ bật: chọn món + (trưởng bộ phận) nhập số đăng ký
@@ -47,7 +49,7 @@ const NAV_GROUPS = [
   ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision', 'hrtemplates']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
-  ['mealg', 'Suất ăn', ['meal', 'mealrep', 'mealmenu', 'mealcfg', 'mealme']],
+  ['mealg', 'Suất ăn', ['meal', 'mealreg', 'mealrep', 'mealrpt', 'mealmenu', 'mealcfg', 'mealme']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
   ['audit', 'Công ảo', ['audit', 'auditlimits']],
   ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
@@ -61,6 +63,11 @@ const hourlyMode = () => (SETTINGS.any_shift != null ? !SETTINGS.any_shift : SET
 const mixedMode = () => !!(SETTINGS.any_shift && SETTINGS.any_hourly);
 const ATT_MODE_LABEL = { '': 'Theo cài đặt chung của công ty', shift: '🕐 Theo ca làm việc', hourly: '⏱️ Theo giờ (làm bao nhiêu tính bấy nhiêu)' };
 const deviceEnabled = () => SETTINGS.device_enabled === '1';
+// CẤU HÌNH HIỂN THỊ (Cài đặt, chỉ tài khoản tổng): công ty không dùng chấm công (chỉ suất ăn…) → ẩn các menu chấm công / ca / lương / công ảo
+const attOff = () => SETTINGS.att_enabled === '0';
+const ATT_KEYS = new Set(['dashboard', 'shifts', 'assignments', 'shiftreq', 'editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves', 'salary', 'report', 'audit', 'auditlimits', 'devreq', 'offices']);
+// 3 công tắc cách đăng ký suất ăn (mặc định bật = như cũ): self_order · dish_choice · dept_head
+const mealOpt = (k) => SETTINGS['meal_' + k] !== '0';
 // CÔNG ẢO / LƯƠNG ẢO (audit): tài khoản tổng bật tính năng + người dùng có quyền "audit" mới thấy
 // TÀI KHOẢN KIỂM TRA (audit_only): luôn công ảo, không có nút bật/tắt, không thấy chữ "ảo", chỉ xem
 const isInspector = () => !!(ME && ME.audit_only);
@@ -145,7 +152,12 @@ async function afterLogin() {
     && !(key === 'shiftreq' && !selfShiftEnabled())
     && !((key === 'audit' || key === 'auditlimits') && SETTINGS.audit_enabled !== '1')   // công ảo: chỉ hiện khi tài khoản tổng đã bật
     && !(key.startsWith('hr') && SETTINGS.hr_enabled !== '1')   // nhân sự: chỉ hiện khi tài khoản tổng đã bật
-    && !(key.startsWith('meal') && SETTINGS.meal_enabled !== '1'));   // suất ăn: chỉ hiện khi tài khoản tổng đã bật
+    && !(key.startsWith('meal') && SETTINGS.meal_enabled !== '1')   // suất ăn: chỉ hiện khi tài khoản tổng đã bật
+    && !(attOff() && ATT_KEYS.has(key))                                 // công ty không dùng chấm công
+    && !(key === 'meal' && !mealOpt('dept_head'))                       // không dùng trưởng bộ phận báo số → không cần Đối chiếu & chốt
+    && !((key === 'mealrep' || key === 'mealmenu') && !mealOpt('dish_choice'))   // chỉ đăng ký ăn → không thực đơn / tổng hợp theo món
+    && !(key === 'mealreg' && mealOpt('dish_choice'))
+    && !(key === 'mealme' && !mealOpt('self_order') && !mealOpt('dept_head')));
   // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
   _navGrp.clear();
   const visKeys = new Set(visible.map((v) => v[0]));
@@ -198,7 +210,7 @@ async function afterLogin() {
     nav.append(b);
   });
   // Lần đầu khởi tạo: Admin chọn kiểu chấm công + phạm vi
-  if (isAdmin() && SETTINGS.setup_done !== '1') { setupWizard(); return; }
+  if (isAdmin() && SETTINGS.setup_done !== '1' && !attOff()) { setupWizard(); return; }
   // /admin#hrcontract (bấm vào thông báo nhắc hợp đồng) → mở thẳng trang đó nếu có quyền; đọc xong thì xoá #
   // để lần bấm thông báo sau (cửa sổ đang mở) vẫn có sự kiện hashchange
   _navKeys = new Set(visible.map((v) => v[0]));
@@ -264,7 +276,7 @@ function go(key) {
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
   ({ dashboard: pageDashboard, employees: pageEmployees, org: () => pageOrg('dept'), positions: () => pageOrg('pos'), shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
     hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates'),
-    meal: () => mealPage('pageMealBoard'), mealrep: () => mealPage('pageMealReport'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
+    meal: () => mealPage('pageMealBoard'), mealreg: () => mealPage('pageMealReg'), mealrpt: () => mealPage('pageMealRpt'), mealrep: () => mealPage('pageMealReport'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
 }
 // PHÂN HỆ QUẢN LÝ SUẤT ĂN (public/suatan/admin.js) — chỉ nạp khi mở menu Suất ăn (và chỉ có menu khi tài khoản tổng đã bật)
 async function mealPage(fn) {
@@ -6613,6 +6625,61 @@ window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); defe
 const isStandalone = () => window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 
+// CẤU HÌNH HIỂN THỊ — mỗi khách 1 bản cài, tài khoản tổng bật đúng phân hệ khách dùng:
+//   🕐 Chấm công (mặc định bật) · 🍱 Suất ăn (+ 3 công tắc cách đăng ký, mặc định bật = như cũ) · 📇 Nhân sự
+// Người khác (admin công ty) chỉ xem đang bật gì.
+function displayPanel(s) {
+  if (!hasPerm('settings') && !isMaster()) return null;
+  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0' };
+  const mealWay = (o) => !o.self && !o.head ? 'HR tự nhập (không có ai đăng ký trên app)'
+    : [o.self ? (o.dish ? 'NV tự chọn món trên app' : 'NV tự bấm Có ăn / Không ăn trên app (không chọn món)') : null, o.head ? 'trưởng bộ phận báo số' : null].filter(Boolean).join(' + ');
+  const box = el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' }, el('h3', { style: 'margin-top:0' }, 'Cấu hình hiển thị'));
+  if (!isMaster()) {
+    const st = (b) => el('b', { style: `color:${b ? 'var(--ok,#16a34a)' : 'var(--muted)'}` }, b ? 'BẬT' : 'TẮT');
+    box.append(el('div', { style: 'display:flex;flex-direction:column;gap:8px;font-size:14px' },
+      el('div', {}, '🕐 Chấm công: ', st(on.att)),
+      el('div', {}, '🍱 Suất ăn: ', st(on.meal), on.meal ? el('span', { style: 'color:var(--muted)' }, ' — ' + mealWay(on)) : null),
+      el('div', {}, '📇 Nhân sự: ', st(on.hr)),
+      el('div', { class: 'map-hint' }, '🔒 Chỉ tài khoản tổng bật / tắt được các phân hệ này.')));
+    return box;
+  }
+  const cb = (v) => el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.15)', ...(v ? { checked: '' } : {}) });
+  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head) };
+  const row = (chk, title, desc, sub = false) => el('label', { style: `display:flex;gap:10px;align-items:flex-start;cursor:pointer${sub ? '' : ';padding:10px;border:1px solid var(--line,#eee);border-radius:10px'}` },
+    chk, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
+  const way = el('div', { class: 'map-hint', style: 'margin-top:2px' });
+  const sub = el('div', { style: 'margin:-4px 0 0 26px;padding:10px 12px;border-left:3px solid var(--line,#e5e7eb);display:flex;flex-direction:column;gap:9px' },
+    el('div', { style: 'font-size:13px;font-weight:700' }, 'Cách đăng ký suất ăn (mặc định bật cả 3 = như cũ):'),
+    row(c.self, '📱 Nhân viên tự đăng ký trên app', 'Tắt: nhân viên thường không thấy tab Suất ăn; số suất do trưởng bộ phận báo / HR nhập.', true),
+    row(c.dish, '🍽️ Có chọn món', 'Bật: HR nhập thực đơn, nhân viên chọn món từng bữa, màn hình bếp hiện món. Tắt: KHÔNG có thực đơn — nhân viên chỉ bấm "Có ăn / Không ăn"; menu Suất ăn có trang "Đăng ký ăn".', true),
+    row(c.head, '📋 Trưởng bộ phận báo số', 'Bật: trưởng bộ phận nhập số suất của bộ phận, HR đối chiếu & chốt (trang Đối chiếu & chốt). Tắt: ẩn phần này.', true),
+    way);
+  const sync = () => {
+    sub.style.opacity = c.meal.checked ? '' : '.45';
+    for (const k of ['self', 'dish', 'head']) c[k].disabled = !c.meal.checked;
+    way.textContent = '→ ' + mealWay({ self: c.self.checked, dish: c.dish.checked, head: c.head.checked });
+  };
+  for (const k of ['meal', 'self', 'dish', 'head']) c[k].addEventListener('change', sync);
+  sync();
+  const save = el('button', { class: 'btn' }, 'Lưu cấu hình hiển thị');
+  save.onclick = async () => {
+    if (!c.att.checked && !c.meal.checked && !c.hr.checked) return toast('Phải bật ít nhất 1 phân hệ (Chấm công / Suất ăn / Nhân sự)', 'err');
+    try {
+      await api('/admin/settings', { method: 'PUT', body: { att_enabled: c.att.checked, meal_enabled: c.meal.checked, hr_enabled: c.hr.checked,
+        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked } });
+      toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  box.append(el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Bật phân hệ nào thì menu + app nhân viên hiện phân hệ đó. Tắt chỉ ẩn đi — dữ liệu đã nhập vẫn giữ nguyên, bật lại là thấy. 🔒 Chỉ tài khoản tổng thấy khung này.'),
+    el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
+      row(c.att, '🕐 Chấm công', 'Ca, phân ca, tính công, đơn từ, lương, báo cáo, công ảo; app nhân viên có Chấm công / Bảng công / Báo cáo / Đơn từ. Tắt khi khách chỉ dùng suất ăn — máy chấm công vẫn nhận lượt quẹt để đếm suất ăn.'),
+      row(c.meal, '🍱 Suất ăn', 'Đếm suất ăn theo máy chấm ăn, đăng ký ăn / chọn món trên app, màn hình bếp, nhiều bếp, báo cáo suất ăn. Quản lý cần được tích quyền "Quản lý suất ăn".'),
+      sub,
+      row(c.hr, '📇 Nhân sự', 'Hồ sơ nhân sự, hợp đồng lao động, thuyên chuyển / nghỉ việc, mẫu giấy tờ. Quản lý cần được tích quyền "Nhân sự".'),
+      el('div', {}, save)));
+  return box;
+}
+
 async function pageSettings() {
   if (!DEPARTMENTS.length) { try { await loadRefs(); } catch {} }   // cần danh sách phòng ban cho mục đặt kiểu chấm công riêng
   setMain(head('Cài đặt'), loading());
@@ -6676,8 +6743,6 @@ async function pageSettings() {
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}) });
   const tcpDevChk = el('input', { type: 'checkbox', id: 'st-tcpdev', style: 'width:auto', ...(s.tcp_device_enabled === '1' ? { checked: '' } : {}) });
   const auditChk = el('input', { type: 'checkbox', id: 'st-audit', style: 'width:auto', ...(s.audit_enabled === '1' ? { checked: '' } : {}) });
-  const hrChk = el('input', { type: 'checkbox', id: 'st-hr', style: 'width:auto', ...(s.hr_enabled === '1' ? { checked: '' } : {}) });
-  const mealChk = el('input', { type: 'checkbox', id: 'st-meal', style: 'width:auto', ...(s.meal_enabled === '1' ? { checked: '' } : {}) });
   const inclAdminChk = el('input', { type: 'checkbox', id: 'st-incladmin', style: 'width:auto', ...(s.payroll_include_admin === '1' ? { checked: '' } : {}) });
   const lockChk = el('input', { type: 'checkbox', id: 'st-lock', style: 'width:auto', ...(s.device_lock_enabled === '1' ? { checked: '' } : {}) });
   const selfChk = el('input', { type: 'checkbox', id: 'st-self', style: 'width:auto', ...(s.self_shift_enabled === '1' ? { checked: '' } : {}) });
@@ -6694,8 +6759,6 @@ async function pageSettings() {
         body.tcp_device_enabled = tcpDevChk.checked;
         body.phone_enabled = phoneChk.checked;
         body.audit_enabled = auditChk.checked;
-        body.hr_enabled = hrChk.checked;
-        body.meal_enabled = mealChk.checked;
       }
       await api('/admin/settings', { method: 'PUT', body });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
@@ -6717,7 +6780,37 @@ async function pageSettings() {
     el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, mixDept, mixMode, mixBtn));
   const modeRow = (radio, title, desc) => el('label', { style: 'display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--line,#eee);border-radius:10px;cursor:pointer' },
     radio, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
-  const panelMode = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+  // Máy chấm công (ZKTeco) / máy TCP-IP / chấm điện thoại — dùng chung cho khung Kiểu chấm công và khung rút gọn khi TẮT chấm công
+  const devRow =
+      isMaster()
+        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, devChk,
+            el('div', {}, el('b', {}, '📟 Dùng máy chấm công (ZKTeco)'),
+              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Nhận dữ liệu vân tay/khuôn mặt/thẻ đẩy về từ máy. Cấu hình & duyệt máy ở menu “Máy chấm công”.'
+                + (s.use_device_cfg ? ' (Lúc cài đặt chọn: ' + (s.use_device_cfg === '1' ? 'BẬT' : 'TẮT') + ' — đổi ở đây là được, không cần sửa config.txt.)' : ''))))
+        : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.device_enabled === '1' ? '📟 Máy chấm công đang BẬT. ' : '📟 Máy chấm công đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.');
+  const tcpRow =
+      isMaster()
+        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-left:26px' }, tcpDevChk,
+            el('div', {}, el('b', {}, '🔌 Dùng máy chấm công kết nối TCP/IP (cổng 4370)'),
+              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Cho máy đời cũ không có Cloud Server (ADMS): thêm máy theo địa chỉ IP trong mạng LAN, bấm tải nhân viên / dữ liệu chấm công theo khoảng ngày, xem dung lượng, xóa dữ liệu, xóa quản trị. Cần bật "Dùng máy chấm công" ở trên và phần mềm cài trên máy tính Windows cùng mạng với máy.')))
+        : (s.tcp_device_enabled === '1' ? el('div', { style: 'font-size:13px;color:var(--muted);margin-left:26px' }, el('b', { style: 'color:var(--ink)' }, '🔌 Máy kết nối TCP/IP đang BẬT.')) : null);
+  const phoneRow =
+      isMaster()
+        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, phoneChk,
+            el('div', {}, el('b', {}, '📱 Dùng chấm công điện thoại (ảnh + định vị)'),
+              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Tắt nếu công ty chỉ dùng máy chấm công — nhân viên sẽ không thấy nút chấm công trên app điện thoại.'
+                + (s.use_phone_cfg ? ' (Lúc cài đặt chọn: ' + (s.use_phone_cfg === '1' ? 'BẬT' : 'TẮT') + ' — đổi ở đây là được.)' : ''))))
+        : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.phone_enabled !== '0' ? '📱 Chấm điện thoại đang BẬT. ' : '📱 Chấm điện thoại đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.');
+  const dedupRow =
+      el('label', { style: 'display:flex;gap:10px;align-items:center' },
+        el('div', {}, el('b', {}, 'Bỏ qua lần chấm trùng trong '), dedupI, el('b', {}, ' phút'),
+          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Lượt quẹt/chấm của cùng một người cách lượt trước dưới số phút này chỉ tính 1 lần (giờ VÀO lấy lượt đầu, giờ RA lấy lượt cuối của cụm quẹt lặp) — chống bấm 2 lần trên app, quẹt máy liên tiếp, và không để lượt lặp làm lệch các cặp vào/ra. Mặc định 15. Nếu nhân viên có nghỉ giữa giờ ngắn hơn số này (và có quẹt) thì giảm xuống. Đặt 0 = lưu đủ mọi lượt quẹt (khi ghép cặp vào/ra vẫn tự bỏ lượt lặp dưới 5 phút).')));
+  // Công ty TẮT chấm công (Cấu hình hiển thị): chỉ còn phần máy chấm công (máy chấm ăn vẫn đẩy dữ liệu về) + chống quẹt trùng
+  const panelMode = !hasPerm('settings') ? null : attOff() ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, 'Máy chấm công (máy chấm ăn)'),
+    el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
+      el('div', { class: 'map-hint' }, 'Công ty đang TẮT chấm công (Cấu hình hiển thị) — máy chấm công chỉ dùng để quẹt thẻ ăn. Các cài đặt tính công đang ẩn.'),
+      devRow, tcpRow, dedupRow, saveMode)) : el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Kiểu chấm công'),
     el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
       modeRow(modeShift, '🕐 Theo ca làm việc', 'Có ca, tính đi muộn / về sớm / tăng ca, báo cáo đầy đủ. Phù hợp văn phòng, nhà máy.'),
@@ -6736,43 +6829,14 @@ async function pageSettings() {
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: điện thoại đầu tiên nhân viên chấm sẽ được gắn cho tài khoản; đăng nhập máy khác sẽ KHÔNG chấm được (chống mượn tài khoản, chấm hộ). Đổi điện thoại phải admin duyệt ở menu “Duyệt đổi thiết bị”. Ảnh chấm công luôn được đóng dấu giờ + tên + GPS.'))),
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Chống chấm trùng liên tiếp'),
-      el('label', { style: 'display:flex;gap:10px;align-items:center' },
-        el('div', {}, el('b', {}, 'Bỏ qua lần chấm trùng trong '), dedupI, el('b', {}, ' phút'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Lượt quẹt/chấm của cùng một người cách lượt trước dưới số phút này chỉ tính 1 lần (giờ VÀO lấy lượt đầu, giờ RA lấy lượt cuối của cụm quẹt lặp) — chống bấm 2 lần trên app, quẹt máy liên tiếp, và không để lượt lặp làm lệch các cặp vào/ra. Mặc định 15. Nếu nhân viên có nghỉ giữa giờ ngắn hơn số này (và có quẹt) thì giảm xuống. Đặt 0 = lưu đủ mọi lượt quẹt (khi ghép cặp vào/ra vẫn tự bỏ lượt lặp dưới 5 phút).'))),
+      dedupRow,
       el('hr', { style: 'border:none;border-top:1px solid var(--line,#eee);margin:6px 0' }),
       el('h3', { style: 'margin:0;font-size:15px' }, 'Hình thức chấm công'),
-      // Máy chấm công (ZKTeco)
-      isMaster()
-        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, devChk,
-            el('div', {}, el('b', {}, '📟 Dùng máy chấm công (ZKTeco)'),
-              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Nhận dữ liệu vân tay/khuôn mặt/thẻ đẩy về từ máy. Cấu hình & duyệt máy ở menu “Máy chấm công”.'
-                + (s.use_device_cfg ? ' (Lúc cài đặt chọn: ' + (s.use_device_cfg === '1' ? 'BẬT' : 'TẮT') + ' — đổi ở đây là được, không cần sửa config.txt.)' : ''))))
-        : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.device_enabled === '1' ? '📟 Máy chấm công đang BẬT. ' : '📟 Máy chấm công đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.'),
-      // Máy chấm công kết nối trực tiếp TCP/IP (cổng 4370)
-      isMaster()
-        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-left:26px' }, tcpDevChk,
-            el('div', {}, el('b', {}, '🔌 Dùng máy chấm công kết nối TCP/IP (cổng 4370)'),
-              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Cho máy đời cũ không có Cloud Server (ADMS): thêm máy theo địa chỉ IP trong mạng LAN, bấm tải nhân viên / dữ liệu chấm công theo khoảng ngày, xem dung lượng, xóa dữ liệu, xóa quản trị. Cần bật "Dùng máy chấm công" ở trên và phần mềm cài trên máy tính Windows cùng mạng với máy.')))
-        : (s.tcp_device_enabled === '1' ? el('div', { style: 'font-size:13px;color:var(--muted);margin-left:26px' }, el('b', { style: 'color:var(--ink)' }, '🔌 Máy kết nối TCP/IP đang BẬT.')) : null),
-      // Chấm công điện thoại (selfie + GPS)
-      isMaster()
-        ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, phoneChk,
-            el('div', {}, el('b', {}, '📱 Dùng chấm công điện thoại (ảnh + định vị)'),
-              el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Tắt nếu công ty chỉ dùng máy chấm công — nhân viên sẽ không thấy nút chấm công trên app điện thoại.'
-                + (s.use_phone_cfg ? ' (Lúc cài đặt chọn: ' + (s.use_phone_cfg === '1' ? 'BẬT' : 'TẮT') + ' — đổi ở đây là được.)' : ''))))
-        : el('div', { style: 'font-size:13px;color:var(--muted)' }, el('b', { style: 'color:var(--ink)' }, s.phone_enabled !== '0' ? '📱 Chấm điện thoại đang BẬT. ' : '📱 Chấm điện thoại đang TẮT. '), '🔒 Chỉ tài khoản tổng bật/tắt được.'),
+      devRow, tcpRow, phoneRow,
       // Công ảo / lương ảo: CHỈ tài khoản tổng thấy và bật/tắt (tắt thì người khác không biết có tính năng này)
       isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, auditChk,
         el('div', {}, el('b', {}, '🎭 Cho hiển thị công ảo / lương ảo (audit)'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin (và người được cấp quyền "Xem công ảo") thấy nút "🎭 Công ảo" ở Tính công / Báo cáo / Lương và mục cài đặt hạn mức tăng ca. Công thật không thay đổi. Tắt: ẩn hoàn toàn.'))) : null,
-      // Phân hệ Nhân sự: CHỈ tài khoản tổng thấy và bật/tắt
-      isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, hrChk,
-        el('div', {}, el('b', {}, '📇 Bật phân hệ Nhân sự (hồ sơ, hợp đồng lao động, thuyên chuyển / nghỉ việc)'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin thấy nhóm menu "Nhân sự"; Quản lý cần được tích quyền "Nhân sự" ở hồ sơ nhân viên. Tắt: ẩn hoàn toàn, dữ liệu đã nhập vẫn giữ nguyên, bật lại là thấy.'))) : null,
-      // Phân hệ Quản lý suất ăn: CHỈ tài khoản tổng thấy và bật/tắt
-      isMaster() ? el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, mealChk,
-        el('div', {}, el('b', {}, '🍱 Bật phân hệ Quản lý suất ăn (đếm suất ăn 3 ca, đối chiếu chấm công, chọn món, màn hình bếp)'),
-          el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: Admin thấy nhóm menu "Suất ăn"; Quản lý cần được tích quyền "Quản lý suất ăn" ở hồ sơ nhân viên; nhân viên thấy tab Suất ăn trên app. Tắt: ẩn hoàn toàn, chấm công / tính công hoạt động y như cũ, dữ liệu suất ăn đã nhập vẫn giữ.'))) : null,
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer;margin-top:4px' }, inclAdminChk,
         el('div', {}, el('b', {}, '👑 Tính công cho cả tài khoản Admin'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Mặc định người quyền Admin (chủ/quản trị) KHÔNG hiện ở Tính công / Báo cáo / Lương / Phân ca. Bật nếu Admin cũng là người đi làm cần chấm công.'))),
@@ -6784,7 +6848,10 @@ async function pageSettings() {
       el('label', { style: 'display:flex;gap:10px;align-items:flex-start;cursor:pointer' }, apprChk,
         el('div', {}, el('b', {}, 'Yêu cầu quản lý duyệt'),
           el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Bật: ca nhân viên đăng ký phải được duyệt ở menu “Duyệt chọn ca” mới vào lịch. Tắt: đăng ký xong tự áp dụng ngay.'))),
-      saveMode)) : null;
+      saveMode));
+
+  // ----- CẤU HÌNH HIỂN THỊ: bật phân hệ nào thì menu + app nhân viên hiện phân hệ đó (chỉ tài khoản tổng đổi) -----
+  const panelDisplay = displayPanel(s);
 
   // ----- Quy tắc tính công -----
   const wkDays = new Set((s.weekend_days || '7').split(',').map(x => x.trim()).filter(Boolean));
@@ -6839,7 +6906,7 @@ async function pageSettings() {
     catch (e) { toast(e.message, 'err'); }
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại công tất cả'; }
   };
-  const panelCalc = (hasPerm('settings') && !hourlyMode()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
+  const panelCalc = (hasPerm('settings') && !hourlyMode() && !attOff()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Quy tắc tính công'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', {}, el('label', {}, 'Ngày cuối tuần'), el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' }, ...wkBoxes),
@@ -6900,7 +6967,7 @@ async function pageSettings() {
     try { await api('/admin/holidays', { method: 'POST', body: { holiday_date: holDate.value, name: holName.value, kind: holKind.value } }); toast('Đã thêm', 'ok'); holName.value = ''; loadHols(); }
     catch (e) { toast(e.message, 'err'); }
   };
-  const panelHol = (hasPerm('holidays') && !hourlyMode()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
+  const panelHol = (hasPerm('holidays') && !hourlyMode() && !attOff()) ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Ngày lễ'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', { class: 'two-col' }, field('Ngày', holDate), field('Tên', holName)),
@@ -7175,7 +7242,7 @@ async function pageSettings() {
     try { await api('/admin/settings', { method: 'PUT', body: { leave_days_per_year: lvPer.value, leave_seniority_years: lvSenY.value, leave_seniority_add: lvSenA.value, leave_accrual: lvAcc.value, leave_prorate_new: lvPro.checked, leave_carry_max: lvCar.value, leave_carry_until_month: lvCarU.value, leave_allow_over: lvOver.checked } }); toast('Đã lưu cài đặt phép năm', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
-  const panelLeave = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
+  const panelLeave = hasPerm('settings') && !attOff() ? el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, 'Phép năm'),
     el('div', { class: 'lv-form' },
       lvRow('Số ngày phép năm', lvPer, 'ngày / năm', 'Luật: 12 ngày; công việc nặng nhọc 14; đặc biệt nặng nhọc 16.'),
@@ -7187,10 +7254,10 @@ async function pageSettings() {
       el('div', { class: 'map-hint' }, 'Ngày vào làm và mức phép riêng khai ở hồ sơ từng nhân viên (mức riêng chưa gồm thâm niên). Xem số phép từng người ở Đơn từ › Quỹ phép năm. Nghỉ phép năm và Nghỉ có lương được tính lương; Nghỉ không lương thì không.'),
       el('div', {}, lvSave))) : null;
   // ----- Công ảo / lương ảo (audit) — hạn mức tăng ca -----
-  const panelAudit = auditOn() && hasPerm('settings') ? auditPanelEl(s) : null;
-  setMain(head('Cài đặt'), panel1, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelAudit, panelHol, panelBackup, panelUpdate, panel2);
+  const panelAudit = auditOn() && hasPerm('settings') && !attOff() ? auditPanelEl(s) : null;
+  setMain(head('Cài đặt'), panel1, panelDisplay, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelAudit, panelHol, panelBackup, panelUpdate, panel2);
   foldSettings($('#main'));   // mặc định thu gọn mọi khung, bấm tiêu đề / ▶ để mở
-  if (hasPerm('holidays') && !hourlyMode()) loadHols();
+  if (hasPerm('holidays') && !hourlyMode() && !attOff()) loadHols();
   if (hasPerm('backup')) loadBackups();
   loadLic();
   renderInstall();

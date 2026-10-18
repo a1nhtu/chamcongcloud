@@ -128,6 +128,8 @@ export function buildBoard({ mode, depts, punch = {}, ot = {}, reg = {} }) {
 //   registered: tổng số trưởng bộ phận đăng ký (null = chưa bộ phận nào đăng ký)
 // Mỗi món: app + hr + adjust = total (không âm); ate = số người chọn món đó đã quẹt.
 // Dòng mặc định (dish ''): suất trưởng BP đăng ký vượt số người đã chọn món (= người ăn mà không chọn) + điều chỉnh; ate = người quẹt mà không chọn món.
+// Đơn dish '' (người CHỈ đăng ký ăn, không chọn món — chế độ "đăng ký ăn") tính vào dòng mặc định: signed = số người đó
+// (không có đơn dish '' thì y như bản cũ).
 export function buildDishReport({ menu = [], orders = [], adjust = {}, punchers = new Set(), registered = null }) {
   const names = [...menu];
   const seen = new Set(names.map((n) => n.toLocaleLowerCase('vi')));
@@ -137,19 +139,21 @@ export function buildDishReport({ menu = [], orders = [], adjust = {}, punchers 
   }
   const key = (n) => names.find((x) => x.toLocaleLowerCase('vi') === String(n || '').toLocaleLowerCase('vi')) ?? n;
   const rows = new Map(names.map((n) => [n, { dish: n, app: 0, hr: 0, adjust: 0, total: 0, ate: 0 }]));
-  const chosen = new Set();
+  const chosen = new Set(), withDish = new Set();
+  let signed = 0;
   for (const o of orders) {
+    if (!o.dish) { if (!chosen.has(o.employee_id)) { chosen.add(o.employee_id); signed++; } continue; }
     const r = rows.get(key(o.dish)); if (!r) continue;
     if (o.set_by) r.hr++; else r.app++;
     if (punchers.has(o.employee_id)) r.ate++;
-    chosen.add(o.employee_id);
+    chosen.add(o.employee_id); withDish.add(o.employee_id);
   }
   for (const [d, q] of Object.entries(adjust)) if (d) { const r = rows.get(key(d)); if (r) r.adjust += Number(q) || 0; }
   for (const r of rows.values()) r.total = Math.max(0, r.app + r.hr + r.adjust);
-  const base = registered == null ? 0 : Math.max(0, registered - chosen.size);
+  const base = (registered == null ? 0 : Math.max(0, registered - chosen.size)) + signed;
   const defAdj = Number(adjust['']) || 0;
-  let ateDefault = 0; for (const id of punchers) if (!chosen.has(id)) ateDefault++;
-  const def = { dish: '', base, adjust: defAdj, total: Math.max(0, base + defAdj), ate: ateDefault };
+  let ateDefault = 0; for (const id of punchers) if (!withDish.has(id)) ateDefault++;
+  const def = { dish: '', base, ...(signed ? { signed } : {}), adjust: defAdj, total: Math.max(0, base + defAdj), ate: ateDefault };
   const list = [...rows.values()];
   const sum = (f) => list.reduce((s, r) => s + f(r), 0);
   const totalCook = sum((r) => r.total) + def.total;
@@ -195,6 +199,68 @@ export function orderDeadlineVn(workDate, shift) {
 export function canOrderMeal(workDate, shift, now = new Date()) {
   return now.getTime() < orderDeadlineMs(workDate, shift);
 }
+// GIỜ MỞ ĐĂNG KÝ (mốc ms UTC): open_at 'HH:MM' = lần gần nhất giờ đó TRƯỚC hạn khoá (VD khoá 09:00, mở 15:00 → 15:00 hôm trước;
+// khoá 14:00, mở 09:00 → 09:00 cùng ngày). open_at trống = luôn mở (như bản cũ) → -Infinity.
+export function orderOpenMs(workDate, shift) {
+  if (!isHHMM(shift.open_at)) return -Infinity;
+  const dl = orderDeadlineMs(workDate, shift);
+  const dlDay = new Date(dl + VN_MS).toISOString().slice(0, 10);
+  let t = Date.parse(dlDay + 'T00:00:00Z') - VN_MS + hhmmToMin(shift.open_at) * 60000;
+  if (t >= dl) t -= DAY_MS;
+  return t;
+}
+// Giờ mở đăng ký dạng giờ VN 'YYYY-MM-DD HH:MM' ('' = luôn mở)
+export function orderOpenVn(workDate, shift) {
+  const t = orderOpenMs(workDate, shift);
+  return Number.isFinite(t) ? new Date(t + VN_MS).toISOString().slice(0, 16).replace('T', ' ') : '';
+}
+// Trạng thái đăng ký của 1 bữa lúc `now`: 'wait' = chưa tới giờ mở · 'open' = đang nhận đăng ký · 'locked' = đã khoá
+export function orderState(workDate, shift, now = new Date()) {
+  const t = now.getTime();
+  if (t >= orderDeadlineMs(workDate, shift)) return 'locked';
+  return t < orderOpenMs(workDate, shift) ? 'wait' : 'open';
+}
+// Bữa ăn đã KẾT THÚC chưa (qua giờ cuối khung quẹt thẻ) — chỉ bữa đã kết thúc mới tính "đăng ký mà không ăn"
+export const mealEnded = (workDate, shift, now = new Date()) => now.toISOString() > windowBoundsUtc(workDate, shift)[1];
+
+// BÁO CÁO ĐĂNG KÝ ĂN theo BẾP của 1 ngày + 1 bữa (chế độ chỉ đăng ký ăn, không chọn món). input:
+//   orders:    [{ employee_id, set_by, kitchen_id }]  mỗi dòng = 1 người đăng ký ăn (set_by '' = NV tự đăng ký, khác '' = HR đăng ký hộ)
+//   punchers:  Set employee_id đã quẹt máy chấm ăn trong giờ ăn
+//   extra:     { [kitchen_id]: qty }  HR thêm (+) / bớt (−) suất bằng tay
+//   kitchens:  [{ id, name }]  (rỗng = 1 bếp chung)
+//   kitchenOf: (employee_id) => bếp hiện tại của NV (cho người quẹt mà không đăng ký / đơn cũ chưa ghi bếp)
+// Mỗi bếp: app + hr + extra = total (không âm); ate = đã đăng ký và đã quẹt; no_show = đăng ký mà không quẹt; walk_in = quẹt mà không đăng ký.
+// Bếp không còn trong danh mục / NV chưa phân bếp → dòng id 0 "Chưa phân bếp" (chỉ hiện khi có số liệu, hoặc khi không có bếp nào thì là "Bếp chung").
+export function buildSignupReport({ orders = [], punchers = new Set(), extra = {}, kitchens = [], kitchenOf = () => 0 }) {
+  const known = new Set(kitchens.map((k) => k.id));
+  const kid = (v) => (v != null && known.has(Number(v)) ? Number(v) : 0);
+  const rows = new Map(kitchens.map((k) => [k.id, { kitchen_id: k.id, name: k.name, app: 0, hr: 0, extra: 0, total: 0, ate: 0, no_show: 0, walk_in: 0 }]));
+  const row = (id) => {
+    if (!rows.has(id)) rows.set(id, { kitchen_id: id, name: kitchens.length ? 'Chưa phân bếp' : 'Bếp chung', app: 0, hr: 0, extra: 0, total: 0, ate: 0, no_show: 0, walk_in: 0 });
+    return rows.get(id);
+  };
+  if (!kitchens.length) row(0);
+  const signed = new Set();
+  for (const o of orders) {
+    if (signed.has(o.employee_id)) continue;
+    signed.add(o.employee_id);
+    const r = row(kid(o.kitchen_id ?? kitchenOf(o.employee_id)));
+    if (o.set_by) r.hr++; else r.app++;
+    if (punchers.has(o.employee_id)) r.ate++; else r.no_show++;
+  }
+  for (const id of punchers) if (!signed.has(id)) row(kid(kitchenOf(id))).walk_in++;
+  for (const [k, q] of Object.entries(extra)) row(kid(k)).extra += Number(q) || 0;
+  const list = [...rows.values()].sort((a, b) => (a.kitchen_id === 0) - (b.kitchen_id === 0) || 0);
+  for (const r of list) r.total = Math.max(0, r.app + r.hr + r.extra);
+  const sum = (f) => list.reduce((s, r) => s + r[f], 0);
+  return { rows: list, totals: { app: sum('app'), hr: sum('hr'), signed: sum('app') + sum('hr'), extra: sum('extra'), total: sum('total'), ate: sum('ate'), no_show: sum('no_show'), walk_in: sum('walk_in') } };
+}
+
+// Lý do HR chỉnh tay (bắt buộc ≥ 3 ký tự sau khi gom khoảng trắng) → chuỗi đã làm sạch hoặc null
+export function cleanReason(r) {
+  const s = String(r ?? '').replace(/\s+/g, ' ').trim().slice(0, 200);
+  return s.length >= 3 ? s : null;
+}
 
 // Chuẩn hoá danh sách tên món HR nhập (bỏ dòng trống, trùng, cắt độ dài); tối đa 40 món / ca / ngày
 export function cleanDishes(list) {
@@ -228,5 +294,11 @@ export function checkShiftConfig(b) {
     if (!isHHMM(b.lock_at)) return { ok: false, error: 'Giờ khoá chọn món phải dạng HH:MM (VD 14:00)' };
     Object.assign(value, { lock_before_min: 0, lock_at: b.lock_at });
   } else if (b.lock_mode != null) return { ok: false, error: 'Cách khoá chọn món không hợp lệ' };
+  // Giờ mở đăng ký: '' = luôn mở · 'HH:MM' = mở lúc đó (lần gần nhất trước hạn khoá). Không gửi = không đụng.
+  if (b.open_at != null) {
+    const o = String(b.open_at).trim();
+    if (o && !isHHMM(o)) return { ok: false, error: 'Giờ mở đăng ký phải dạng HH:MM (VD 15:00) hoặc để trống = luôn mở' };
+    value.open_at = o;
+  }
   return { ok: true, value };
 }

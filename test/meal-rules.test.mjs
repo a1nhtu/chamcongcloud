@@ -168,3 +168,74 @@ test('parseAdjust: số nguyên −9999…9999, có dấu + được; rỗng = 0
   assert.equal(parseAdjust('+3'), 3); assert.equal(parseAdjust('-2'), -2); assert.equal(parseAdjust(''), 0); assert.equal(parseAdjust(null), 0);
   for (const bad of ['1.5', 'abc', 10000, '--1']) assert.equal(parseAdjust(bad), undefined, String(bad));
 });
+
+/* ===================== ĐĂNG KÝ ĂN (không chọn món) + NHIỀU BẾP ===================== */
+import { orderOpenMs, orderOpenVn, orderState, mealEnded, buildSignupReport, cleanReason } from '../server/meal-rules.js';
+
+test('giờ MỞ đăng ký: lần gần nhất trước hạn khoá; trống = luôn mở (như cũ)', () => {
+  const sh = { ...TRUA, lock_at: '09:00', lock_before_min: 0 };
+  assert.equal(orderOpenMs('2026-10-20', sh), -Infinity);                                   // chưa đặt giờ mở = luôn mở
+  assert.equal(orderOpenVn('2026-10-20', sh), '');
+  assert.equal(orderOpenVn('2026-10-20', { ...sh, open_at: '15:00' }), '2026-10-19 15:00');  // mở muộn hơn giờ khoá → hôm trước
+  assert.equal(orderOpenVn('2026-10-20', { ...sh, open_at: '06:00' }), '2026-10-20 06:00');  // sớm hơn giờ khoá → cùng ngày
+  assert.equal(orderOpenVn('2026-10-20', { ...sh, open_at: '09:00' }), '2026-10-19 09:00');  // trùng giờ khoá → mở trước 24 tiếng
+  // khoá "lúc 20:00" (hôm trước bữa trưa), mở 08:00 → 08:00 hôm trước
+  assert.equal(orderOpenVn('2026-10-20', { ...TRUA, lock_at: '20:00', open_at: '08:00' }), '2026-10-19 08:00');
+  // khoá trước 2 tiếng bữa chiều 17:00 (= 15:00), mở 09:00 cùng ngày
+  assert.equal(orderOpenVn('2026-10-20', { ...CHIEU, lock_before_min: 120, open_at: '09:00' }), '2026-10-20 09:00');
+});
+
+test('orderState: chưa mở → đang mở → đã khoá; không đặt giờ mở thì y như canOrderMeal cũ', () => {
+  const sh = { ...TRUA, lock_at: '09:00', open_at: '15:00' };   // bữa trưa 20/10: mở 15:00 19/10, khoá 09:00 20/10 (VN)
+  assert.equal(orderState('2026-10-20', sh, new Date('2026-10-19T07:59:00Z')), 'wait');      // 14:59 VN 19/10
+  assert.equal(orderState('2026-10-20', sh, new Date('2026-10-19T08:00:00Z')), 'open');      // 15:00
+  assert.equal(orderState('2026-10-20', sh, new Date('2026-10-20T01:59:00Z')), 'open');      // 08:59 VN 20/10
+  assert.equal(orderState('2026-10-20', sh, new Date('2026-10-20T02:00:00Z')), 'locked');    // 09:00
+  for (const t of ['2026-10-01T00:00:00Z', '2026-10-20T03:29:00Z', '2026-10-20T03:30:00Z', '2026-10-21T00:00:00Z']) {
+    const now = new Date(t);
+    assert.equal(orderState('2026-10-20', TRUA, now) === 'open', canOrderMeal('2026-10-20', TRUA, now), t);
+  }
+  assert.equal(mealEnded('2026-10-20', TRUA, new Date('2026-10-20T06:30:00Z')), false);      // 13:30 VN còn trong khung
+  assert.equal(mealEnded('2026-10-20', TRUA, new Date('2026-10-20T06:31:00Z')), true);
+});
+
+test('checkShiftConfig: giờ mở đăng ký (trống = luôn mở; sai dạng → lỗi; không gửi = không đụng)', () => {
+  const base = { name: 'Trưa', from_time: '10:30', to_time: '13:30', mode: 'punch', enabled: true };
+  assert.equal(checkShiftConfig(base).value.open_at, undefined);
+  assert.equal(checkShiftConfig({ ...base, open_at: '' }).value.open_at, '');
+  assert.equal(checkShiftConfig({ ...base, open_at: '15:00' }).value.open_at, '15:00');
+  assert.equal(checkShiftConfig({ ...base, open_at: '25:00' }).ok, false);
+});
+
+test('buildSignupReport: theo bếp — NV tự / HR hộ / thêm tay / đã quẹt / ĐK mà không quẹt / quẹt mà không ĐK', () => {
+  const kitchens = [{ id: 1, name: 'Bếp 1' }, { id: 2, name: 'Bếp 2' }];
+  const kof = new Map([[10, 1], [11, 1], [20, 2], [21, 2], [30, 9]]);   // 30: bếp đã xoá → "Chưa phân bếp"
+  const r = buildSignupReport({
+    orders: [{ employee_id: 10, set_by: '' }, { employee_id: 11, set_by: 'HR' }, { employee_id: 20, set_by: '', kitchen_id: 2 }, { employee_id: 30, set_by: '' }],
+    punchers: new Set([10, 20, 21, 40]), extra: { 2: 3, 0: -1 }, kitchens, kitchenOf: (id) => kof.get(id) ?? 0,
+  });
+  const by = Object.fromEntries(r.rows.map((x) => [x.name, x]));
+  assert.deepEqual(r.rows.map((x) => x.name), ['Bếp 1', 'Bếp 2', 'Chưa phân bếp']);
+  assert.deepEqual({ ...by['Bếp 1'], name: undefined }, { kitchen_id: 1, name: undefined, app: 1, hr: 1, extra: 0, total: 2, ate: 1, no_show: 1, walk_in: 0 });
+  assert.deepEqual([by['Bếp 2'].app, by['Bếp 2'].extra, by['Bếp 2'].total, by['Bếp 2'].ate, by['Bếp 2'].walk_in], [1, 3, 4, 1, 1]);   // 21 quẹt không ĐK
+  assert.deepEqual([by['Chưa phân bếp'].app, by['Chưa phân bếp'].extra, by['Chưa phân bếp'].total, by['Chưa phân bếp'].no_show, by['Chưa phân bếp'].walk_in], [1, -1, 0, 1, 1]);   // 40 quẹt, chưa phân bếp
+  assert.deepEqual(r.totals, { app: 3, hr: 1, signed: 4, extra: 2, total: 6, ate: 2, no_show: 2, walk_in: 2 });
+  // không có bếp nào → 1 dòng "Bếp chung"
+  const one = buildSignupReport({ orders: [{ employee_id: 1, set_by: '' }], punchers: new Set([1]) });
+  assert.deepEqual(one.rows.map((x) => [x.name, x.total, x.ate]), [['Bếp chung', 1, 1]]);
+});
+
+test('buildDishReport: đơn CHỈ đăng ký ăn (món trống) tính vào dòng mặc định; không có đơn đó thì kết quả y hệt bản cũ', () => {
+  const orders = [{ employee_id: 1, dish: 'Cơm gà', set_by: '' }, { employee_id: 2, dish: 'Phở', set_by: 'HR' }];
+  const old = buildDishReport({ menu: ['Cơm gà', 'Phở'], orders, punchers: new Set([1, 3]), registered: 5, adjust: { '': 1 } });
+  assert.deepEqual(old.default, { dish: '', base: 3, adjust: 1, total: 4, ate: 1 });   // không có khoá "signed" — hình dạng như cũ
+  const r = buildDishReport({ menu: ['Cơm gà', 'Phở'], orders: [...orders, { employee_id: 4, dish: '', set_by: '' }], punchers: new Set([1, 3, 4]), registered: null });
+  assert.deepEqual(r.default, { dish: '', base: 1, signed: 1, adjust: 0, total: 1, ate: 2 });
+  assert.equal(r.totals.chosen, 3); assert.equal(r.totals.total, 3);
+});
+
+test('cleanReason: gom khoảng trắng, tối thiểu 3 ký tự', () => {
+  assert.equal(cleanReason('  quên   đăng ký '), 'quên đăng ký');
+  assert.equal(cleanReason('ab'), null);
+  assert.equal(cleanReason(null), null);
+});

@@ -4,8 +4,8 @@ import { Router } from 'express';
 import { authRequired } from '../auth.js';
 import { sendCaughtError, userError } from '../util.js';
 import {
-  mealEnabled, selfOrderOn, mealGate, listShifts, needShift, needDate, loadBoard, saveRegistrations, closingOf, headDeptList,
-  getMenu, myMealPlan, setMyOrder, kitchenKeyOk, kitchenFeed,
+  mealEnabled, selfOrderOn, dishChoiceOn, deptHeadOn, mealGate, listShifts, needShift, needDate, loadBoard, saveRegistrations, closingOf, headDeptList,
+  myMealPlan, setMyOrder, setMySignup, kitchenScope, kitchenFeed, empKitchenId, listKitchens,
 } from '../meal.js';
 import { vnNow, addDaysIso, isIsoDate } from '../meal-rules.js';
 
@@ -30,25 +30,29 @@ const wrap = (name, fn) => (req, res) => { try { fn(req, res); } catch (e) { sen
 r.get('/kitchen/feed', mealGate, wrap('GET /meal/kitchen/feed', (req, res) => {
   const ip = clientIp(req);
   if (tooManyFails(ip)) return res.status(429).json({ error: 'Nhập sai mã quá nhiều lần — thử lại sau vài phút' });
-  if (!kitchenKeyOk(String(req.query.key || ''))) { noteFail(ip); return res.status(401).json({ error: 'Mã màn hình bếp không đúng hoặc đã bị đổi' }); }
+  const scope = kitchenScope(String(req.query.key || ''));   // mã chung (mọi bếp) hoặc mã riêng của 1 bếp
+  if (!scope) { noteFail(ip); return res.status(401).json({ error: 'Mã màn hình bếp không đúng hoặc đã bị đổi' }); }
   res.setHeader('Cache-Control', 'no-store');
-  res.json(kitchenFeed(parseInt(req.query.since, 10) || 0));
+  res.json(kitchenFeed(parseInt(req.query.since, 10) || 0, new Date(), scope));
 }));
 
 r.use(authRequired);
 // App hỏi xem phân hệ có bật không (tắt → ẩn tab Suất ăn). self_order TẮT → tab chỉ hiện cho trưởng bộ phận (head).
+// dish_choice TẮT = chế độ chỉ đăng ký ăn (tab đổi tên "Đăng ký ăn"); dept_head TẮT = không ai là trưởng bộ phận nhập số.
 r.get('/config', (req, res) => {
   const enabled = mealEnabled();
   let head = false;
-  try { head = enabled && !req.user.master && headDeptList(req.user.id).list.length > 0; } catch { /* chưa có bảng suất ăn */ }
-  res.json({ enabled, self_order: selfOrderOn(), head });
+  try { head = enabled && deptHeadOn() && !req.user.master && headDeptList(req.user.id).list.length > 0; } catch { /* chưa có bảng suất ăn */ }
+  res.json({ enabled, self_order: selfOrderOn(), dish_choice: dishChoiceOn(), dept_head: deptHeadOn(), head });
 });
 r.use(mealGate);
 
 // Thông tin của tôi: các ca ăn đang bật + bộ phận tôi làm trưởng
 r.get('/me', wrap('GET /meal/me', (req, res) => {
-  const h = req.user.master ? { roots: [], list: [] } : headDeptList(req.user.id);
-  res.json({ today: vnNow().date, shifts: listShifts({ onlyEnabled: true }), head_of: h.list, self_order: selfOrderOn() });
+  const h = req.user.master || !deptHeadOn() ? { roots: [], list: [] } : headDeptList(req.user.id);
+  const kid = req.user.master ? null : empKitchenId(req.user.id);
+  const kitchen = kid ? listKitchens().find((k) => k.id === kid)?.name || '' : '';
+  res.json({ today: vnNow().date, shifts: listShifts({ onlyEnabled: true }), head_of: h.list, self_order: selfOrderOn(), dish_choice: dishChoiceOn(), kitchen });
 }));
 
 // Thực đơn + món tôi đã chọn trong khoảng ngày (tối đa 14 ngày)
@@ -65,9 +69,16 @@ r.put('/order', wrap('PUT /meal/order', (req, res) => {
   const b = req.body || {};
   res.json({ ok: true, chosen: setMyOrder(req.user.id, needDate(b.date), b.shift, b.menu_id) });
 }));
+// Đăng ký ăn (chế độ không chọn món): { date, shift, on: true = Có ăn / false = Không ăn }
+r.put('/signup', wrap('PUT /meal/signup', (req, res) => {
+  if (req.user.master) throw userError('Tài khoản tổng không đăng ký suất ăn');
+  const b = req.body || {};
+  res.json({ ok: true, ...setMySignup(req.user.id, needDate(b.date), b.shift, !!b.on) });
+}));
 
 // Trưởng bộ phận: số đã đăng ký của các bộ phận mình phụ trách cho 1 ngày + 1 ca
 r.get('/dept', wrap('GET /meal/dept', (req, res) => {
+  if (!deptHeadOn()) return res.status(403).json({ error: 'Công ty không dùng trưởng bộ phận báo số suất ăn' });
   const h = headDeptList(req.user.id);
   if (!h.list.length) return res.json({ departments: [], head_of: [] });
   const date = needDate(req.query.date), shift = needShift(req.query.shift);
@@ -78,6 +89,7 @@ r.get('/dept', wrap('GET /meal/dept', (req, res) => {
   res.json({ date, shift, closed, past: date < vnNow().date, departments: rows, head_of: h.list });
 }));
 r.put('/dept', wrap('PUT /meal/dept', (req, res) => {
+  if (!deptHeadOn()) return res.status(403).json({ error: 'Công ty không dùng trưởng bộ phận báo số suất ăn' });
   const b = req.body || {};
   const h = headDeptList(req.user.id);
   if (!h.list.length) return res.status(403).json({ error: 'Bạn chưa được HR chỉ định làm trưởng bộ phận' });

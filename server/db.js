@@ -920,6 +920,44 @@ function migrateColumns() {
       reason      TEXT NOT NULL DEFAULT ''
     );
     CREATE INDEX IF NOT EXISTS idx_mealadjlog_date ON meal_adjust_log(work_date, shift);`);
+  // ĐĂNG KÝ ĂN (không chọn món) + NHIỀU BẾP. Mỗi dòng meal_orders = 1 người đăng ký ăn bữa đó; dish '' = chỉ đăng ký ăn, không chọn món.
+  //   open_at 'HH:MM' = giờ MỞ đăng ký (lần gần nhất trước hạn khoá; '' = luôn mở như cũ) · custom = bữa HR tự thêm (xoá được)
+  add('meal_shifts', 'open_at', "TEXT NOT NULL DEFAULT ''");
+  add('meal_shifts', 'custom',  'INTEGER NOT NULL DEFAULT 0');
+  add('meal_orders', 'created_at', "TEXT NOT NULL DEFAULT ''");   // giờ đăng ký LẦN ĐẦU (đổi món không đổi giờ này)
+  add('meal_orders', 'kitchen_id', 'INTEGER');                     // bếp của NV lúc đăng ký (HR đổi bếp → đơn từ hôm nay trở đi theo bếp mới)
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meal_kitchens (        -- danh mục BẾP (VD Bếp 1, Bếp 2); không có bếp nào = 1 bếp chung như cũ
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      serials    TEXT NOT NULL DEFAULT '',            -- máy chấm ăn đặt ở bếp này (serial, cách nhau dấu phẩy); '' = không gán máy
+      screen_key TEXT NOT NULL DEFAULT '',            -- mã màn hình bếp RIÊNG của bếp này (/bep/MÃ chỉ hiện người của bếp)
+      sort_order INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE TABLE IF NOT EXISTS meal_emp_kitchen (     -- nhân viên ăn ở bếp nào
+      employee_id INTEGER PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE,
+      kitchen_id  INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS meal_extra (           -- HR THÊM / BỚT SUẤT bằng tay theo bếp (khách, đối tác, NV mới…) — chế độ chỉ đăng ký ăn
+      work_date  TEXT NOT NULL,
+      shift      TEXT NOT NULL,
+      kitchen_id INTEGER NOT NULL DEFAULT 0,          -- 0 = chung / chưa phân bếp
+      qty        INTEGER NOT NULL,
+      note       TEXT NOT NULL DEFAULT '',
+      updated_by TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (work_date, shift, kitchen_id)
+    );
+    CREATE TABLE IF NOT EXISTS meal_dispatch (        -- lần GỬI BẾP gần nhất của 1 bữa: tổng số + số từng bếp (JSON) + giờ gửi đầu / gần nhất
+      work_date  TEXT NOT NULL,
+      shift      TEXT NOT NULL,
+      total      INTEGER NOT NULL DEFAULT 0,
+      detail     TEXT NOT NULL DEFAULT '',            -- JSON { "<kitchen_id>": số suất }
+      first_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_by    TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (work_date, shift)
+    );`);
 
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN

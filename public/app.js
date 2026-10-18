@@ -8,6 +8,7 @@ let currentTab = 'cham';
 let MODE = 'shift';   // 'shift' | 'hourly' (chỉ tính giờ)
 let SELF_SHIFT = false;   // cho nhân viên tự chọn ca
 let SELF_APPROVE = true;  // chọn ca cần admin duyệt
+let ATT_ON = true;        // Cấu hình hiển thị: công ty dùng chấm công (tắt = chỉ dùng suất ăn → app chỉ còn tab Suất ăn)
 
 /* ---------- Cài app vào máy (PWA) — Android: 1 chạm; iPhone: chỉ dẫn (Apple không cho tự cài) ---------- */
 let deferredPrompt = null, installDismissed = false;
@@ -54,6 +55,7 @@ async function init() {
     MODE = c.attendance_mode || 'shift';
     SELF_SHIFT = c.self_shift_enabled === '1';
     SELF_APPROVE = c.self_shift_approve !== '0';
+    ATT_ON = c.att_enabled !== '0';
   } catch {}
   if (getToken()) {
     try { const r = await api('/auth/me'); ME = r.user; showApp(); return; } catch { clearToken(); }
@@ -98,10 +100,18 @@ function showApp() {
   const navChonca = $('#nav-chonca');
   if (navChonca) navChonca.style.display = (SELF_SHIFT && MODE !== 'hourly') ? '' : 'none';
   // Tab "Suất ăn" chỉ hiện khi tài khoản tổng đã bật phân hệ Quản lý suất ăn (tắt → không gọi gì thêm, app y như cũ)
-  // Tắt "Nhân viên tự chọn món" → chỉ trưởng bộ phận thấy tab (để nhập số đăng ký của bộ phận)
-  api('/meal/config').then((m) => { const b = $('#nav-monan'); if (b && m && m.enabled && (m.self_order !== false || m.head)) b.style.display = ''; }).catch(() => {});
+  // Tắt "Nhân viên tự chọn món" → chỉ trưởng bộ phận thấy tab (để nhập số đăng ký của bộ phận); tắt "Có chọn món" → tab tên "Đăng ký ăn"
+  // Công ty TẮT chấm công (Cấu hình hiển thị) → ẩn các tab chấm công, mở thẳng tab Suất ăn
+  if (!ATT_ON) for (const t of ['cham', 'chonca', 'baocao', 'dontu', 'bangcong']) { const b = document.querySelector(`.bottom-nav button[data-tab="${t}"]`); if (b) b.style.display = 'none'; }
+  const mealCfg = api('/meal/config').then((m) => {
+    const b = $('#nav-monan');
+    const show = !!(b && m && m.enabled && (m.self_order !== false || m.head));
+    if (show) { b.style.display = ''; if (m.dish_choice === false && b.lastChild) b.lastChild.textContent = 'Đăng ký ăn'; }
+    return show;
+  }).catch(() => false);
   tickClock(); setInterval(tickClock, 1000);
-  renderTab('cham');
+  if (ATT_ON) renderTab('cham');
+  else mealCfg.then((ok) => { if (ok) renderTab('monan'); else $('#content').innerHTML = '<div class="empty">Công ty chưa bật chức năng nào cho nhân viên trên app.</div>'; });
 }
 function tickClock() { const c = nowClock(); $('#h-clock').textContent = c.time; $('#h-date').textContent = c.date; }
 
