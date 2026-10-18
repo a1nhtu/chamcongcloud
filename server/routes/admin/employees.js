@@ -7,6 +7,7 @@ import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEm
 import { sendCaughtError } from '../../util.js';
 import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin } from '../../device-sync.js';
 import { onEmployeesSaved } from '../../pin-guard.js';
+import { doBackup } from '../../backup.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
@@ -204,10 +205,26 @@ export function registerEmployeeRoutes(r, { need }) {
 
   // XUẤT danh sách nhân viên ra Excel — CÙNG thứ tự cột với file nhập (sửa xong nhập lại bằng "Cập nhật từ Excel").
   // Mật khẩu để trống (cập nhật = giữ nguyên). Lương cơ bản chỉ điền khi người xuất có quyền Lương. Thêm cột Trạng thái ở cuối.
+  // ?dept=<tên bộ phận> → chỉ bộ phận đó + mọi bộ phận con; ?dept=__none__ → NV chưa có bộ phận; không có = cả công ty.
   r.get('/employees/export.xlsx', need('employees'), async (req, res) => {
     const canSalary = hasPerm(req.user, 'salary');
-    const rows = db.prepare(`SELECT e.code, e.full_name, e.department, e.position, e.phone, e.role, e.device_pin, e.username, e.active, s.basic_salary
+    let rows = db.prepare(`SELECT e.code, e.full_name, e.department, e.position, e.phone, e.role, e.device_pin, e.username, e.active, s.basic_salary
       FROM employees e LEFT JOIN salary_configs s ON s.employee_id = e.id ORDER BY e.active DESC, e.department, e.full_name`).all();
+    const deptQ = String(req.query.dept || '').trim();
+    let fileTag = '';
+    if (deptQ) {
+      const names = new Set();
+      if (deptQ === '__none__') { names.add(''); fileTag = 'chua_co_bo_phan_'; }
+      else {
+        names.add(deptQ);
+        const all = db.prepare('SELECT id, name, parent_id FROM departments').all();
+        const walk = (pid, depth) => { if (depth > 20) return; for (const d of all) if (d.parent_id === pid) { names.add(d.name); walk(d.id, depth + 1); } };
+        for (const d of all) if (d.name === deptQ) walk(d.id, 0);
+        fileTag = deptQ.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) + '_';
+        if (fileTag === '_') fileTag = '';
+      }
+      rows = rows.filter((e) => names.has(e.department || ''));
+    }
     const ROLE = { employee: 'Nhân viên', manager: 'Quản lý', admin: 'Admin' };
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('NhanVien');
@@ -224,7 +241,7 @@ export function registerEmployeeRoutes(r, { need }) {
     ws.autoFilter = { from: 'A1', to: 'K1' };
     const d = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-    res.setHeader('Content-Disposition', `attachment; filename="danh_sach_nhan_vien_${d}.xlsx"`);
+    res.setHeader('Content-Disposition', `attachment; filename="danh_sach_nhan_vien_${fileTag}${d}.xlsx"`);
     await wb.xlsx.write(res);
     res.end();
   });
@@ -405,18 +422,44 @@ export function registerEmployeeRoutes(r, { need }) {
   });
   // XÓA CỨNG nhân viên + toàn bộ dữ liệu liên quan (khác Khoá). Lượt quẹt máy thô được GỠ KHỚP
   // (employee_id=NULL) chứ không xoá, để không mất log; NV nếu được tải lại từ máy sẽ tạo mới.
+  const purgeEmp = (id) => {
+    for (const t of ['employee_offices', 'attendance', 'leave_requests', 'daily_shift_assignments', 'shift_assignments', 'shift_requests', 'salary_configs', 'push_subscriptions', 'swap_days'])
+      db.prepare(`DELETE FROM ${t} WHERE employee_id=?`).run(id);
+    // Người xoá từng DUYỆT đơn của NV khác → giữ đơn, chỉ bỏ tên người duyệt (khoá ngoại không cho xoá NV)
+    for (const t of ['leave_requests', 'shift_requests']) db.prepare(`UPDATE ${t} SET reviewed_by=NULL WHERE reviewed_by=?`).run(id);
+    db.prepare('UPDATE device_punches SET employee_id=NULL WHERE employee_id=?').run(id);
+    db.prepare('DELETE FROM employees WHERE id=?').run(id);
+  };
   r.delete('/employees/:id/purge', need('employees'), (req, res) => {
     const emp = db.prepare('SELECT id, role FROM employees WHERE id=?').get(req.params.id);
     if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
     if (req.user && req.user.id != null && Number(req.user.id) === emp.id)
       return res.status(400).json({ error: 'Không thể tự xóa tài khoản đang đăng nhập' });
     try {
-      for (const t of ['employee_offices', 'attendance', 'leave_requests', 'daily_shift_assignments', 'shift_assignments', 'shift_requests', 'salary_configs', 'push_subscriptions'])
-        db.prepare(`DELETE FROM ${t} WHERE employee_id=?`).run(emp.id);
-      db.prepare('UPDATE device_punches SET employee_id=NULL WHERE employee_id=?').run(emp.id);
-      db.prepare('DELETE FROM employees WHERE id=?').run(emp.id);
+      purgeEmp(emp.id);
       res.json({ ok: true });
     } catch (e) { sendCaughtError(res, 'DELETE /admin/employees/:id/purge', e, { status: 400 }); }
+  });
+  // XÓA CỨNG NHIỀU nhân viên 1 lần (tích chọn ở trang Nhân viên): body { ids: [...] }. Cả lô chạy trong 1 transaction.
+  // Bỏ qua: tài khoản đang đăng nhập, tài khoản Admin (khi người xoá không phải admin/tài khoản tổng).
+  r.post('/employees/purge-bulk', need('employees'), (req, res) => {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    const q = db.prepare('SELECT id, role FROM employees WHERE id=?');
+    let deleted = 0, self = false, admins = 0, backup = '';
+    // Xoá từ 2 người trở lên → tự sao lưu CSDL trước (lỡ tay chọn cả công ty vẫn phục hồi được ở Cài đặt › Sao lưu)
+    if (ids.length > 1) { try { backup = doBackup('predelete').name; } catch (e) { console.error('[purge-bulk backup]', e.message); } }
+    db.exec('BEGIN');
+    try {
+      for (const id of ids) {
+        const emp = q.get(id); if (!emp) continue;
+        if (req.user && req.user.id != null && Number(req.user.id) === emp.id) { self = true; continue; }
+        if (!guardUpdateTarget(req.user, emp, {}).ok) { admins++; continue; }
+        purgeEmp(emp.id); deleted++;
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/purge-bulk', e, { status: 400 }); }
+    res.json({ ok: true, deleted, self, admins, backup });
   });
 
   // Số vân tay / khuôn mặt / thẻ / mật mã của 1 NV (theo Số ID máy) — cho tab Sinh trắc

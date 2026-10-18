@@ -573,6 +573,8 @@ function deptOrdered(list = DEPARTMENTS) {
 }
 // Trang Nhân viên: bộ phận đang chọn trên cây ('*' = tất cả), các nhánh đang gọn, ô tìm — giữ khi làm mới/sửa
 let empDeptSel = '*', empSearch = '';
+const EMP_NONE = '\u0000none';                    // khoá cây cho NV chưa có bộ phận
+const empPicked = new Set();                      // id NV đang tích chọn (xoá hàng loạt) — giữ khi đổi bộ phận/tìm kiếm
 let empSort = null;   // { key, dir: 1 tăng | -1 giảm } — null = mặc định: nhóm theo bộ phận
 const empDeptClosed = new Set(); let _empTreeInit = false;   // mặc định THU GỌN mọi bộ phận có cấp con
 // Cột sắp xếp được ở bảng Nhân viên: [khoá, nhãn, gợi ý]
@@ -594,7 +596,7 @@ async function pageEmployees() {
   const canEdit = hasPerm('employees');
   // Thanh nút GỌN: các việc Excel và máy chấm công gom vào 2 menu thả xuống
   const excelMenu = canEdit ? rowMenu([
-    { label: '⬇ Xuất danh sách nhân viên', hint: 'Cùng mẫu cột với file nhập — sửa xong nhập lại được', fn: downloadEmpExport },
+    { label: '⬇ Xuất danh sách nhân viên', hint: 'Xuất bộ phận đang chọn bên trái (chọn "Tất cả nhân viên" = cả công ty) — cùng mẫu cột file nhập', fn: downloadEmpExport },
     { label: '📄 Tải file mẫu', fn: downloadEmpTemplate },
     { label: '⬆ Nhập nhân viên mới từ Excel', fn: () => importEmployees('add') },
     { label: '🔄 Cập nhật nhân viên từ Excel', fn: () => importEmployees('update') },
@@ -615,7 +617,8 @@ async function pageEmployees() {
     const headArgs2 = ['Nhân viên (' + rows.length + ')', refreshBtn, addBtn, excelMenu, devMenu].filter(Boolean);
 
     // ===== Cây BỘ PHẬN bên trái (bấm để lọc) + bảng nhân viên GỌN bên phải, xếp theo bộ phận =====
-    const NONE = '\u0000none';                       // khoá cho NV chưa có bộ phận
+    const NONE = EMP_NONE;                           // khoá cho NV chưa có bộ phận
+    { const ids = new Set(rows.map((e) => e.id)); for (const id of [...empPicked]) if (!ids.has(id)) empPicked.delete(id); }
     const kids = new Map();                          // id bộ phận → các bộ phận con trực tiếp
     for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
     const namesUnder = (d) => [d.name, ...(kids.get(d.id) || []).flatMap(namesUnder)];   // tên bộ phận + mọi cấp con
@@ -639,6 +642,17 @@ async function pageEmployees() {
     const listBox = el('div', { class: 'panel tbl-scroll' });
     const searchI = el('input', { type: 'search', placeholder: '🔍 Tìm mã, tên, tài khoản…', value: empSearch, style: 'max-width:280px' });
     const countLbl = el('span', { style: 'font-size:12.5px;color:var(--muted)' });
+    const bulkBar = el('span', { style: 'display:flex;gap:6px;align-items:center;margin-left:auto' });
+    let allCb = null, visList = [];
+    // Thanh "Đã chọn N" + nút Xoá hàng loạt; ô tích tiêu đề: tích hết / một phần / chưa tích
+    const renderBulk = () => {
+      bulkBar.innerHTML = '';
+      if (allCb) { const n = visList.filter((e) => empPicked.has(e.id)).length; allCb.checked = n > 0 && n === visList.length; allCb.indeterminate = n > 0 && n < visList.length; }
+      if (!empPicked.size) return;
+      const picked = rows.filter((e) => empPicked.has(e.id));
+      const delB = btnSm('🗑 Xóa ' + picked.length + ' nhân viên', () => delEmpBulk(picked)); delB.style.background = '#c0392b'; delB.style.borderColor = '#c0392b';
+      bulkBar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.length), delB, btnSm('Bỏ chọn', () => { empPicked.clear(); renderList(); }, 'ghost'));
+    };
 
     const renderTree = () => {
       tree.innerHTML = '';
@@ -663,7 +677,7 @@ async function pageEmployees() {
       const allow = sel ? new Set(sel.names) : null;
       const q = empSearch.trim().toLowerCase();
       // Cột Số ID máy chấm công: chỉ hiện khi đang dùng máy chấm công (chỉ chấm định vị/điện thoại thì ẩn)
-      const showPin = deviceEnabled(), NCOL = showPin ? 8 : 7;
+      const showPin = deviceEnabled(), NCOL = (showPin ? 8 : 7) + (canEdit ? 1 : 0);
       if (empSort && empSort.key === 'device_pin' && !showPin) empSort = null;
       const list = rows.filter((e) => (!allow || allow.has(e.department || NONE))
         && (!q || [e.code, e.full_name, e.username, e.device_pin, e.position].some((v) => String(v || '').toLowerCase().includes(q))))
@@ -678,6 +692,12 @@ async function pageEmployees() {
       const tbl = el('table', { class: 'data emp-compact' });
       // Tiêu đề cột bấm được: lần 1 thấp → cao, lần 2 cao → thấp
       const hrow = el('tr');
+      visList = list; allCb = null;
+      if (canEdit) {
+        allCb = el('input', { type: 'checkbox', title: 'Chọn / bỏ chọn tất cả nhân viên đang hiện trong bảng' });
+        allCb.onchange = () => { for (const e of list) allCb.checked ? empPicked.add(e.id) : empPicked.delete(e.id); renderList(); };
+        hrow.append(el('th', { style: 'width:30px' }, allCb));
+      }
       for (const [key, label, tip] of EMP_SORT_COLS) {
         if (key === 'device_pin' && !showPin) continue;
         const on = empSort && empSort.key === key;
@@ -701,7 +721,13 @@ async function pageEmployees() {
           btnSm('Sửa', () => empModal(e)),
           e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : btnSm('Mở khoá', () => unlockEmp(e), 'ghost'),
           delBtn) : '';
+        let cb = '';
+        if (canEdit) {
+          cb = el('input', { type: 'checkbox' }); cb.checked = empPicked.has(e.id);
+          cb.onchange = () => { cb.checked ? empPicked.add(e.id) : empPicked.delete(e.id); renderBulk(); };
+        }
         tb.append(el('tr', {},
+          canEdit ? el('td', {}, cb) : '',
           el('td', {}, e.code),
           showPin ? el('td', {}, e.device_pin ? el('b', { style: 'color:#0a7' }, e.device_pin) : el('span', { class: 'muted' }, '—')) : '',
           el('td', {}, el('b', {}, e.full_name),
@@ -717,6 +743,7 @@ async function pageEmployees() {
       if (!list.length) tb.append(el('tr', {}, el('td', { colspan: NCOL }, el('div', { class: 'empty' }, 'Không có nhân viên nào.'))));
       tbl.append(tb);
       listBox.innerHTML = ''; listBox.append(tbl);
+      renderBulk();
     };
     searchI.oninput = () => { empSearch = searchI.value; renderList(); };
     renderTree(); renderList();
@@ -725,20 +752,21 @@ async function pageEmployees() {
     setMain(head(...headArgs2), pinConflictBar(pcCount, pageEmployees),
       el('div', { class: 'emp-wrap' },
         el('div', { class: 'panel emp-side' }, el('div', { class: 'emp-side-h' }, 'Bộ phận'), tree),
-        el('div', { class: 'emp-main' }, el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap' }, searchI, countLbl), listBox)));
+        el('div', { class: 'emp-main' }, el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap' }, searchI, countLbl, bulkBar), listBox)));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
 }
-// Xuất danh sách nhân viên ra Excel (cùng mẫu cột với file nhập)
+// Xuất danh sách nhân viên ra Excel (cùng mẫu cột với file nhập) — theo bộ phận đang chọn trên cây (gồm bộ phận con)
 async function downloadEmpExport() {
+  const dept = empDeptSel === '*' ? '' : empDeptSel === EMP_NONE ? '__none__' : empDeptSel;
   try {
-    const res = await api('/admin/employees/export.xlsx', { raw: true });
+    const res = await api('/admin/employees/export.xlsx' + (dept ? '?dept=' + encodeURIComponent(dept) : ''), { raw: true });
     if (!res.ok) { toast('Không xuất được danh sách', 'err'); return; }
     const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'danh_sach_nhan_vien.xlsx';
     const url = URL.createObjectURL(await res.blob());
     const a = el('a', { href: url, download: name });
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
-    toast('Đã xuất danh sách nhân viên', 'ok');
+    toast('Đã xuất danh sách nhân viên ' + (dept === '__none__' ? '· Chưa có bộ phận' : dept ? '· ' + dept : 'cả công ty'), 'ok');
   } catch { toast('Không xuất được danh sách', 'err'); }
 }
 // Tải file Excel mẫu nhập nhân viên
@@ -1117,6 +1145,19 @@ Vân tay / thẻ / khuôn mặt trên máy bị xoá, dữ liệu công trong ph
   pageEmployees();
 }
 async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }
+// Xoá HẲN nhiều NV đã tích chọn. Từ 5 người trở lên phải gõ đúng số người để xác nhận; server tự sao lưu trước khi xoá.
+async function delEmpBulk(list) {
+  const n = list.length; if (!n) return;
+  const names = list.slice(0, 10).map((e) => `• ${e.full_name} (${e.code})`).join('\n') + (n > 10 ? `\n… và ${n - 10} người khác` : '');
+  if (!confirm(`XÓA HẲN ${n} nhân viên đã chọn?\n\n${names}\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của những người này sẽ bị xóa.\n${n > 1 ? 'Phần mềm tự sao lưu trước khi xoá (phục hồi ở Cài đặt › Sao lưu).' : 'KHÔNG hoàn tác được.'}\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
+  if (n >= 5 && String(prompt(`Gõ số ${n} để xác nhận xoá ${n} nhân viên:`) ?? '').trim() !== String(n)) { toast('Đã huỷ — số xác nhận không khớp', 'err'); return; }
+  try {
+    const r = await api('/admin/employees/purge-bulk', { method: 'POST', body: { ids: list.map((e) => e.id) } });
+    empPicked.clear();
+    toast(`Đã xóa ${r.deleted} nhân viên` + (r.self ? ' · bỏ qua tài khoản đang đăng nhập' : '') + (r.admins ? ` · bỏ qua ${r.admins} tài khoản Admin (không đủ quyền)` : ''), 'ok');
+    pageEmployees();
+  } catch (err) { toast(err.message, 'err'); }
+}
 async function delEmp(e) {
   if (!confirm(`XÓA HẲN nhân viên "${e.full_name}" (${e.code})?\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của người này sẽ bị xóa, KHÔNG hoàn tác được.\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
   try { await api('/admin/employees/' + e.id + '/purge', { method: 'DELETE' }); toast('Đã xóa nhân viên', 'ok'); pageEmployees(); }
