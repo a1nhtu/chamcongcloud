@@ -36,7 +36,7 @@ Phần WebSocket tự viết (không thêm thư viện npm) nên khách cập nh
 Tài liệu: `SDK_MayChamCong/HIK/.../doc/Device Network SDK (Person-Based Access Control)_Developer Guide` (mục E.6, E.164–E.169).
 Không dùng DLL HCNetSDK → chạy được cả bản Windows lẫn bản Linux.
 
-### Máy tự gửi lượt chấm tức thì (từ đợt 2)
+### Máy tự gửi lượt chấm tức thì (từ v1.22.2)
 1. Máy đã duyệt → "⋯ Thêm" → **📡 Cài máy tự gửi lượt chấm về phần mềm** → chọn địa chỉ mà MÁY gọi tới được
    (cùng LAN: IP máy tính cài phần mềm + cổng phần mềm; VPS / tên miền: tên miền + cổng 80; cổng 443 = HTTPS) → **Cài lên máy**.
 2. Phần mềm ghi địa chỉ `http://<máy chủ>:<cổng>/hik/event/<mã bí mật của máy>` vào 1 ô **HTTP Listening** còn trống trên máy
@@ -48,7 +48,7 @@ Không dùng DLL HCNetSDK → chạy được cả bản Windows lẫn bản Lin
 5. Nên giữ "Tự động tải" theo lịch làm dự phòng (máy mất mạng lúc chấm thì tải bù). Tắt công tắc Hikvision → `/hik/event` trả 404 như bản cũ.
    Route đặt TRƯỚC cổng bản quyền (giống `/iclock`). Tài liệu: Person Arming Guide D.3–D.5, E.39–E.41; Person-Based Access Control Guide F.98.
 
-### Đẩy ảnh khuôn mặt xuống máy (từ đợt 2)
+### Đẩy ảnh khuôn mặt xuống máy (từ v1.22.2)
 Trang Máy chấm công → "Đẩy NV xuống máy" → tích **Kèm vân tay / khuôn mặt** → máy Hikvision nhận Số ID + tên rồi tới **ảnh khuôn mặt**.
 Ảnh lấy từ ảnh phần mềm đang có (`device_user_photos` — ảnh người dùng / ảnh mặt các máy ZKTeco… đã gửi về). Chỉ ảnh JPG ≤ 200 KB.
 Gửi `PUT /ISAPI/Intelligent/FDLib/FDSetUp?format=json` (multipart `FaceDataRecord` + `FaceImage`, thư viện `blackFD`, FPID = Số ID; có rồi thì thay),
