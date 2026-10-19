@@ -22,6 +22,7 @@ import shiftRequestRoutes from './routes/shift-requests.js';
 import mealRoutes from './routes/meal.js';
 import { mealStaticGate } from './meal.js';
 import iclockRoutes from './routes/iclock.js';
+import hikEventRoutes from './routes/hik-event.js';
 import { isActivated } from './license.js';
 import { currentVersion } from './update.js';
 import { offload } from './heavy.js';
@@ -51,6 +52,8 @@ const app = express();
 
 // Máy chấm công ZKTeco đẩy dữ liệu (ADMS push) — đặt TRƯỚC express.json + cổng bản quyền
 app.use('/', iclockRoutes);
+// Máy Hikvision tự gửi lượt chấm (HTTP Listening) — cũng TRƯỚC cổng bản quyền; tắt "Dùng máy Hikvision" → 404 như cũ
+app.use('/', hikEventRoutes);
 
 app.use(express.json({ limit: '6mb' }));
 

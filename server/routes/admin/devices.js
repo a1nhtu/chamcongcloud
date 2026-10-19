@@ -11,7 +11,7 @@ import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dr
 import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isFace } from '../../ai-device.js';
 import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
 import { hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
-  hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES } from '../../hik-isapi.js';
+  hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush } from '../../hik-isapi.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -54,6 +54,7 @@ export function registerDeviceRoutes(r, { need }) {
       delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
       d.has_pass = !!d.dev_pass; delete d.dev_pass;      // không lộ mật khẩu máy Hikvision
+      delete d.hik_push_token;                             // mã nhận sự kiện chỉ hiện trong hik_push_url (đã cài lên máy)
       try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
       if (d.conn_type === 'ai') {   // máy AI: mẫu vân tay / khuôn mặt lưu bảng riêng
         d.online = aiOnline(d.serial);
@@ -442,7 +443,7 @@ export function registerDeviceRoutes(r, { need }) {
       if (okPins.length) job = startJob('hik-push', hikDevs.length + ' máy Hikvision', async (prog) => {
         const out = [];
         for (const h of hikDevs) {
-          try { prog(`Đang ghi NV xuống máy ${h.name || h.serial}…`); out.push({ device: h.name || h.serial, ok: true, ...(await hikPushUsers(h, okPins, prog)) }); }
+          try { prog(`Đang ghi NV xuống máy ${h.name || h.serial}…`); out.push({ device: h.name || h.serial, ok: true, ...(await hikPushUsers(h, okPins, prog, { withFace: !!b.with_bio })) }); }
           catch (e) { out.push({ device: h.name || h.serial, ok: false, error: e.message }); }
         }
         return { devices: out };
@@ -593,6 +594,17 @@ export function registerDeviceRoutes(r, { need }) {
       return { devices: out };
     });
     res.json({ ok: true, job: j.id, title: 'Tải dữ liệu chấm công tất cả máy Hikvision' });
+  });
+  // MÁY TỰ GỬI LƯỢT CHẤM: ghi địa chỉ nhận của phần mềm lên máy (HTTP Listening). body { host, port } = địa chỉ máy chủ phần mềm máy gọi tới.
+  r.post('/devices/:id/hik-push', need('devices'), hikOn, async (req, res) => {
+    const d = db.prepare("SELECT * FROM push_devices WHERE id=? AND conn_type='hik'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Hikvision' });
+    if (!d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước (dán key bản quyền nếu được yêu cầu).' });
+    try {
+      const info = await hikInfo(d);   // IP này giờ là MÁY KHÁC → dừng, không cài nhầm
+      if (info.serial && info.serial !== d.serial) return res.status(400).json({ error: `Máy ở ${d.tcp_ip} có Serial ${info.serial}, KHÁC máy đã khai (${d.serial}). Sửa lại IP trước.` });
+      res.json({ ok: true, ...(await hikSetupPush(d, req.body || {})) });
+    } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });
   const HIK_ACTIONS = { info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy' };
   r.post('/devices/:id/hik/:action', need('devices'), hikOn, (req, res) => {
