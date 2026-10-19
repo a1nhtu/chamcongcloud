@@ -27,7 +27,7 @@ cần cài driver ngoài), chạy 1 tiến trình duy nhất, phục vụ cả A
 | `push.js` | Web Push tự cài bằng `node:crypto` (không dùng thư viện `web-push` ngoài) — chuẩn VAPID + mã hoá `aes128gcm`, dùng để báo cho quản lý khi có NV chấm vào/ra. |
 | `backup.js` | Sao lưu/phục hồi: sao lưu riêng file DB (`.db`) hoặc sao lưu toàn bộ gồm DB + ảnh (`.zip`, dùng `tar` của Windows). Phục hồi không áp ngay mà ghi file `<db>.restore`, việc thay thế thật sự xảy ra ở `db.js` lúc khởi động lại app (an toàn vì không sửa DB đang mở). Có `maybeAutoBackup` chạy định kỳ mỗi ngày vào giờ cấu hình. |
 | `audit.js` | Middleware ghi **nhật ký thao tác admin/quản lý**: tự động log mọi POST/PUT/DELETE thành công trên router `/api/admin/*` thành nhãn tiếng Việt dễ đọc (bảng `LABELS`), giấu các field nhạy cảm (mật khẩu, ảnh, token...). Đăng nhập được log riêng qua `logLogin` (gọi từ `routes/auth.js`). |
-| `seed.js` | Tạo dữ liệu khởi tạo lần đầu (chạy 1 lần, đánh dấu bằng setting `seeded`): 1 chi nhánh mẫu, 1 ca hành chính mẫu, tài khoản `admin/admin123` và NV demo `nv001/123456`. |
+| `seed.js` | Tạo dữ liệu khởi tạo lần đầu (chạy 1 lần, đánh dấu bằng setting `seeded`): 1 chi nhánh mẫu, 4 bộ phận (Hành chính, Văn phòng, Kế toán, Quản trị), 4 ca (HC, Sáng, Chiều, Đêm), 2 lịch trình vào ra, 2 lịch trình ca và tài khoản `admin/admin123` (bộ phận Quản trị). Không tạo NV mẫu. |
 | `update.js` | Cơ chế tự cập nhật phần mềm — xem mục 5 bên dưới. **Không được sửa file này trừ khi Anh yêu cầu rõ** (theo CLAUDE.md). |
 
 ### `server/routes/` — các router API

@@ -40,7 +40,8 @@ npm run cert
 | Vai trò | Tài khoản | Mật khẩu |
 |---|---|---|
 | Admin | `admin` | `admin123` |
-| Nhân viên demo | `nv001` | `123456` |
+
+Mới cài có sẵn: bộ phận Hành chính · Văn phòng · Kế toán · Quản trị (admin nằm ở Quản trị); 4 ca (Hành chính, Sáng, Chiều, Đêm); lịch trình vào ra "Giờ đầu - Giờ cuối" (mặc định) và "Tự động - Qua đêm"; lịch trình ca "Hành chính" (HC-Sáng-Chiều) và "Theo ca" (HC-Đêm). Không có nhân viên mẫu.
 
 Đổi port: `PORT=9000 npm start`. Đổi vị trí file DB: đặt biến `DB_PATH`.
 
@@ -53,7 +54,7 @@ npm run cert
    ```
 4. Trên điện thoại, mở trình duyệt (Chrome/Safari) vào `https://<IP-LAN>:8444/`.
 5. Điện thoại báo *"Kết nối không an toàn"* (do chứng chỉ tự ký) → bấm **Nâng cao → Tiếp tục/Truy cập**. (Bình thường vì chứng chỉ tự tạo cho mạng nội bộ.)
-6. Đăng nhập `nv001 / 123456` → bấm **Vào ca** → **cho phép Camera và Vị trí** khi được hỏi.
+6. Thêm 1 nhân viên ở trang Admin (mật khẩu để trống = `123456`), đăng nhập tài khoản đó → bấm **Vào ca** → **cho phép Camera và Vị trí** khi được hỏi.
 
 > Lưu ý: **bắt buộc dùng `https://...:8444`** trên điện thoại. Nếu mở `http://<IP>:8080` thì trình duyệt sẽ **chặn camera/GPS**.
 

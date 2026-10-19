@@ -8,6 +8,7 @@ import { sendCaughtError } from '../../util.js';
 import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin } from '../../device-sync.js';
 import { onEmployeesSaved } from '../../pin-guard.js';
 import { doBackup } from '../../backup.js';
+import { ADMIN_DEPT } from '../../seed.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
@@ -145,6 +146,11 @@ export function registerEmployeeRoutes(r, { need }) {
     }
     const guard = guardRoleAndPermissions(req.user, { role: b.role || 'employee', permissions: b.permissions });
     if (guard.error) return res.status(403).json({ error: guard.error });
+    // Tài khoản Admin để trống bộ phận → xếp vào bộ phận "Quản trị"
+    if (guard.role === 'admin' && !String(b.department || '').trim()) {
+      b.department = ADMIN_DEPT;
+      db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)').run(ADMIN_DEPT);
+    }
     try {
       const info = db.prepare(`INSERT INTO employees
         (code, full_name, department, position, phone, role, username, password_hash, office_id, shift_id, work_schedule_id, permissions, device_pin, active)

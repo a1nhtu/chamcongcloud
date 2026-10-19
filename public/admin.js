@@ -1165,6 +1165,7 @@ async function delEmp(e) {
 }
 
 // Trang "Bộ phận & Chức danh" — khai báo bộ phận CHA-CON + danh mục chức danh
+const _orgClosed = new Set();   // các nút cây Bộ phận đang thu gọn (mặc định mở hết như Wise Eye)
 // view: 'dept' = trang Bộ phận, 'pos' = trang Chức danh (2 mục riêng trong menu Tổ chức)
 async function pageOrg(view = 'dept') {
   const title = view === 'pos' ? 'Chức danh' : 'Bộ phận';
@@ -1174,39 +1175,94 @@ async function pageOrg(view = 'dept') {
   const posPanel = el('div', { class: 'panel', style: 'padding:18px 20px;max-width:760px' });
   setMain(head(title), view === 'pos' ? posPanel : deptPanel);
 
-  // ---------- BỘ PHẬN (cây cha-con) ----------
+  // ---------- BỘ PHẬN (cây cha-con, kiểu Wise Eye: chọn nút rồi bấm Thêm / Sửa tên / Xóa, kéo-thả để đổi bộ phận cha) ----------
+  let company = 'Công ty';
+  try { company = (await api('/config')).company_name || company; } catch {}
+  let sel = 0;   // id bộ phận đang chọn; 0 = gốc (tên công ty)
+  const reload = async (selId) => { DEPARTMENTS = (await api('/admin/departments')).rows; if (selId !== undefined) sel = selId; renderDept(); };
+  const byId = (id) => DEPARTMENTS.find((x) => x.id === id);
+  const isUnder = (id, anc) => { for (let cur = id, n = 0; cur && n < 100; cur = (byId(cur) || {}).parent_id, n++) if (cur === anc) return true; return false; };
+  const askName = (title, hint, val, onOk) => {
+    const nameI = input('org-dname', { value: val || '', placeholder: 'Tên bộ phận' });
+    const ok = el('button', { class: 'btn' }, 'Lưu');
+    ok.onclick = async () => { const name = nameI.value.trim(); if (!name) return toast('Nhập tên bộ phận', 'err'); try { await onOk(name); closeModal(); } catch (e) { toast(e.message, 'err'); } };
+    nameI.addEventListener('keydown', (e) => { if (e.key === 'Enter') ok.click(); });
+    openModal(title, [el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, hint), nameI], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), ok]);
+    setTimeout(() => { nameI.focus(); nameI.select(); }, 30);
+  };
+  const doAdd = () => {
+    const par = byId(sel);
+    askName('Thêm bộ phận', 'Bộ phận mới sẽ nằm trong: ' + (par ? par.name : company + ' (cấp trên cùng)'), '', async (name) => {
+      const r = await api('/admin/departments', { method: 'POST', body: { name, parent_id: par ? par.id : null } });
+      if (par) _orgClosed.delete(par.id);
+      await reload(r.id); toast('Đã thêm bộ phận', 'ok');
+    });
+  };
+  const doRename = () => {
+    const d = byId(sel); if (!d) return toast('Chọn bộ phận cần sửa tên', 'err');
+    deptEditModal(d, () => reload(d.id));
+  };
+  const doDel = async () => {
+    const d = byId(sel); if (!d) return toast('Chọn bộ phận cần xóa', 'err');
+    if (!confirm(`Xóa bộ phận "${d.name}"?`)) return;
+    try {
+      const r = await api('/admin/departments/' + d.id, { method: 'DELETE' });
+      await reload(d.parent_id || 0);
+      toast(r.moved_admins ? `Đã xóa — ${r.moved_admins} tài khoản Admin chuyển sang bộ phận "${r.to}"` : 'Đã xóa', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const doMove = async (id, parentId) => {
+    const d = byId(id); if (!d || (d.parent_id || 0) === parentId) return;
+    if (parentId && (parentId === id || isUnder(parentId, id))) return toast('Không chuyển được vào bộ phận con của chính nó', 'err');
+    try {
+      await api('/admin/departments/' + id, { method: 'PUT', body: { parent_id: parentId || null } });
+      if (parentId) _orgClosed.delete(parentId);
+      await reload(id); toast(`Đã chuyển "${d.name}" vào ${parentId ? '"' + byId(parentId).name + '"' : 'cấp trên cùng'}`, 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  };
+
   const renderDept = () => {
     deptPanel.innerHTML = '';
-    deptPanel.append(el('h3', { style: 'margin:0 0 4px' }, '🏢 Bộ phận'),
-      el('div', { class: 'map-hint', style: 'margin-bottom:12px' }, 'Khai báo bộ phận, có thể lồng bộ phận con vào bộ phận cha. Không xoá được bộ phận còn nhân viên hoặc còn bộ phận con.'));
-    if (!ro) {
-      const nameI = input('org-dname', { placeholder: 'Tên bộ phận mới' });
-      const parentSel = el('select', {}, el('option', { value: '' }, '— Không có (cấp trên cùng) —'),
-        ...deptOrdered().map(d => el('option', { value: d.id }, ' '.repeat(d.depth * 3) + (d.depth ? '↳ ' : '') + d.name)));
-      const addBtn = el('button', { class: 'btn' }, 'Thêm');
-      addBtn.onclick = async () => {
-        const name = nameI.value.trim(); if (!name) return toast('Nhập tên bộ phận', 'err');
-        try { await api('/admin/departments', { method: 'POST', body: { name, parent_id: parentSel.value || null } }); nameI.value = ''; DEPARTMENTS = (await api('/admin/departments')).rows; renderDept(); toast('Đã thêm bộ phận', 'ok'); }
-        catch (e) { toast(e.message, 'err'); }
-      };
-      deptPanel.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px' }, nameI, el('span', { style: 'align-self:center;color:var(--muted);font-size:13px' }, 'thuộc'), parentSel, addBtn));
-    }
-    const tree = deptOrdered();
-    if (!tree.length) { deptPanel.append(el('div', { class: 'map-hint' }, 'Chưa có bộ phận nào.')); return; }
-    const list = el('div', { style: 'margin-top:8px' });
-    const tItems = [];
-    for (const d of tree) {
-      const acts = ro ? '' : el('div', { style: 'display:flex;gap:6px' },
-        btnSm('Sửa', () => deptEditModal(d, renderDept), 'ghost'),
-        btnSm('Xoá', async () => { if (!confirm(`Xoá bộ phận "${d.name}"?`)) return; try { await api('/admin/departments/' + d.id, { method: 'DELETE' }); DEPARTMENTS = (await api('/admin/departments')).rows; renderDept(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); } }, 'ghost'));
-      const rowEl = el('div', { style: 'display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid #f1efec' },
-        el('div', { style: 'flex:1;padding-left:' + (d.depth * 18) + 'px' },
-          d.depth ? el('span', { style: 'color:var(--muted)' }, '↳ ') : '', el('b', {}, d.name)),
-        acts);
-      list.append(rowEl); tItems.push({ key: d.name, depth: d.depth, el: rowEl, at: rowEl.firstChild });
-    }
-    collapseTree(tItems);
-    deptPanel.append(list);
+    deptPanel.style.maxWidth = '1100px'; deptPanel.style.padding = '0';
+    if (sel && !byId(sel)) sel = 0;
+    const tb = el('div', { class: 'org-tb' });
+    if (!ro) tb.append(btnSm('＋ Thêm', doAdd, 'org-tbb'), btnSm('✎ Sửa tên', doRename, 'org-tbb'), btnSm('✖ Xóa', doDel, 'org-tbb'));
+    else tb.append(el('span', { style: 'font-weight:600' }, 'Chỉ xem'));
+    const tree = el('div', { class: 'org-tree', tabindex: '0' });
+    const kids = new Map(); for (const d of DEPARTMENTS) { const k = d.parent_id || 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+    for (const a of kids.values()) a.sort((x, y) => x.name.localeCompare(y.name, 'vi'));
+    let dragId = 0;
+    const node = (d, depth) => {
+      const id = d ? d.id : 0, has = (kids.get(id) || []).length > 0, open = !_orgClosed.has(id);
+      const tg = el('span', { class: 'org-tg' }, has ? (open ? '⊟' : '⊞') : '');
+      if (has) tg.onclick = (e) => { e.stopPropagation(); open ? _orgClosed.add(id) : _orgClosed.delete(id); renderDept(); };
+      const row = el('div', { class: 'org-row' + (sel === id ? ' sel' : ''), style: 'padding-left:' + (6 + depth * 20) + 'px' },
+        tg, el('span', { class: 'org-ic' }, d ? '📁' : '🏢'), el('span', { class: 'org-nm' }, d ? d.name : company),
+        d && d.emp_count ? el('span', { class: 'org-cnt', title: 'Số nhân viên đang thuộc bộ phận này' }, d.emp_count + ' NV') : '');
+      row.onclick = () => { sel = id; tree.querySelectorAll('.org-row.sel').forEach((x) => x.classList.remove('sel')); row.classList.add('sel'); };
+      if (!ro) {
+        if (d) row.ondblclick = () => { sel = id; doRename(); };
+        if (d) { row.draggable = true; row.addEventListener('dragstart', (e) => { dragId = id; e.dataTransfer.effectAllowed = 'move'; e.dataTransfer.setData('text/plain', String(id)); }); }
+        row.addEventListener('dragover', (e) => { if (!dragId || dragId === id || isUnder(id, dragId)) return; e.preventDefault(); row.classList.add('drop'); });
+        row.addEventListener('dragleave', () => row.classList.remove('drop'));
+        row.addEventListener('drop', (e) => { e.preventDefault(); row.classList.remove('drop'); const from = dragId; dragId = 0; if (from) doMove(from, id); });
+        row.addEventListener('dragend', () => { dragId = 0; });
+      }
+      tree.append(row);
+      if (has && open) for (const c of kids.get(id)) node(c, depth + 1);
+    };
+    node(null, 0);
+    tree.addEventListener('keydown', (e) => {
+      if (ro || e.target !== tree) return;
+      if (e.key === 'F2') { e.preventDefault(); doRename(); } else if (e.key === 'Delete') { e.preventDefault(); doDel(); } else if (e.key === 'Insert') { e.preventDefault(); doAdd(); }
+    });
+    const help = el('div', { class: 'org-help' },
+      el('div', {}, '• Cần thêm bộ phận mới: chọn bộ phận cha (hoặc tên công ty để thêm cấp trên cùng) rồi bấm ', el('b', {}, 'Thêm'), '.'),
+      el('div', {}, '• Cần đổi tên bộ phận: chọn bộ phận rồi bấm ', el('b', {}, 'Sửa tên'), ' (hoặc nhấp đúp vào bộ phận).'),
+      el('div', {}, '• Muốn đổi bộ phận cha của một bộ phận: chọn bộ phận đó, nhấp chuột trái và giữ, rê đến bộ phận cần đổi rồi thả. Rê vào tên công ty = đưa lên cấp trên cùng.'),
+      el('div', {}, '• Không xóa được bộ phận còn nhân viên hoặc còn bộ phận con. Bộ phận chỉ còn tài khoản Admin thì Admin tự chuyển sang bộ phận "Quản trị".'),
+      el('div', { style: 'color:var(--muted);font-size:12.5px' }, 'Phím tắt khi đang ở cây: Insert = Thêm · F2 = Sửa tên · Delete = Xóa.'));
+    deptPanel.append(tb, el('div', { class: 'org-body' }, tree, help));
   };
 
   // ---------- CHỨC DANH ----------
@@ -1242,8 +1298,9 @@ async function pageOrg(view = 'dept') {
 // Sửa 1 bộ phận: đổi tên + chọn bộ phận cha (không cho chọn chính nó)
 function deptEditModal(d, after) {
   const nameI = input('de-name', { value: d.name });
+  const under = (id) => { for (let cur = id, n = 0; cur && n < 100; cur = (DEPARTMENTS.find((x) => x.id === cur) || {}).parent_id, n++) if (cur === d.id) return true; return false; };
   const parentSel = el('select', {}, el('option', { value: '' }, '— Không có (cấp trên cùng) —'),
-    ...deptOrdered().filter(x => x.id !== d.id).map(x => el('option', { value: x.id, ...((d.parent_id || '') == x.id ? { selected: '' } : {}) },
+    ...deptOrdered().filter(x => !under(x.id)).map(x => el('option', { value: x.id, ...((d.parent_id || '') == x.id ? { selected: '' } : {}) },
       ' '.repeat(x.depth * 3) + (x.depth ? '↳ ' : '') + x.name)));
   const save = el('button', { class: 'btn' }, 'Lưu');
   save.onclick = async () => {
@@ -1251,10 +1308,13 @@ function deptEditModal(d, after) {
     try { await api('/admin/departments/' + d.id, { method: 'PUT', body: { name, parent_id: parentSel.value || null } }); DEPARTMENTS = (await api('/admin/departments')).rows; closeModal(); after && after(); toast('Đã lưu', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
-  openModal('Sửa bộ phận', [
+  nameI.addEventListener('keydown', (e) => { if (e.key === 'Enter') save.click(); });
+  openModal('Sửa tên bộ phận', [
     el('div', {}, el('label', {}, 'Tên bộ phận'), nameI),
+    el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Nhân viên đang thuộc bộ phận này tự đổi theo tên mới.'),
     el('div', { style: 'margin-top:10px' }, el('label', {}, 'Thuộc bộ phận cha'), parentSel),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), save]);
+  setTimeout(() => { nameI.focus(); nameI.select(); }, 30);
 }
 
 /* ---------- 3) CA LÀM ---------- */

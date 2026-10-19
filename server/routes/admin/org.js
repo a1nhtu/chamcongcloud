@@ -1,6 +1,7 @@
 // Nhóm route DANH MỤC TỔ CHỨC: lịch trình ca, bộ phận, chức danh, chi nhánh/định vị, ca làm.
-import { db, adminAttWhere } from '../../db.js';
+import { db, adminAttWhere, setSetting, weekendNormalDepts } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
+import { ADMIN_DEPT } from '../../seed.js';
 
 // Lưu các tùy chọn tăng ca nâng cao / bù trừ / thiếu giờ ra của ca (trường nào không gửi thì giữ giá trị cũ)
 const SHIFT_EXTRA = {
@@ -148,7 +149,10 @@ export function registerOrgRoutes(r, { need }) {
 
   /* ----------------------------- BỘ PHẬN ----------------------------- */
   r.get('/departments', (req, res) => {
-    res.json({ rows: db.prepare('SELECT id, name, parent_id FROM departments ORDER BY name').all() });
+    // emp_count = số NV đang làm mang đúng tên bộ phận (không gồm bộ phận con) — trang Bộ phận hiện cạnh tên
+    res.json({ rows: db.prepare(`SELECT d.id, d.name, d.parent_id,
+      (SELECT COUNT(*) FROM employees e WHERE e.department = d.name AND e.active = 1) emp_count
+      FROM departments d ORDER BY d.name`).all() });
   });
   r.post('/departments', need('departments'), (req, res) => {
     const name = (req.body?.name || '').trim();
@@ -168,12 +172,30 @@ export function registerOrgRoutes(r, { need }) {
     const d = db.prepare('SELECT * FROM departments WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy' });
     const name = req.body?.name != null ? String(req.body.name).trim() : d.name;
+    if (!name) return res.status(400).json({ error: 'Nhập tên bộ phận' });
     let parent_id = req.body?.parent_id !== undefined ? (req.body.parent_id ? +req.body.parent_id : null) : d.parent_id;
     if (parent_id === +req.params.id) return res.status(400).json({ error: 'Bộ phận không thể là cha của chính nó' });
+    if (parent_id) {
+      // không cho chuyển vào bộ phận con / cháu của chính nó (tạo vòng lặp cha-con)
+      const par = new Map(db.prepare('SELECT id, parent_id FROM departments').all().map((x) => [x.id, x.parent_id]));
+      if (!par.has(parent_id)) return res.status(400).json({ error: 'Bộ phận cha không hợp lệ' });
+      for (let cur = parent_id, n = 0; cur && n < 100; cur = par.get(cur), n++)
+        if (cur === d.id) return res.status(400).json({ error: 'Không chuyển được vào bộ phận con của chính nó' });
+    }
     try {
       // đổi tên bộ phận → cập nhật luôn tên đang lưu ở nhân viên (department lưu theo tên)
-      if (name !== d.name) db.prepare('UPDATE employees SET department=? WHERE department=?').run(name, d.name);
-      db.prepare('UPDATE departments SET name=?, parent_id=? WHERE id=?').run(name, parent_id, d.id);
+      db.exec('BEGIN');
+      try {
+        db.prepare('UPDATE departments SET name=?, parent_id=? WHERE id=?').run(name, parent_id, d.id);
+        if (name !== d.name) {
+          // các nơi khác cũng lưu theo TÊN bộ phận → đổi theo để không mất gán lịch trình / trưởng bộ phận suất ăn…
+          for (const t of ['employees', 'dept_shift_assignments', 'meal_dept_heads', 'meal_registrations'])
+            db.prepare(`UPDATE ${t} SET department=? WHERE department=?`).run(name, d.name);
+          const wn = weekendNormalDepts();
+          if (wn.includes(d.name)) setSetting('weekend_normal_depts', JSON.stringify(wn.map((x) => (x === d.name ? name : x))));
+        }
+        db.exec('COMMIT');
+      } catch (e) { db.exec('ROLLBACK'); throw e; }
       res.json({ ok: true });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Bộ phận đã tồn tại' });
@@ -185,10 +207,22 @@ export function registerOrgRoutes(r, { need }) {
     if (!d) return res.status(404).json({ error: 'Không tìm thấy' });
     const children = db.prepare('SELECT COUNT(*) c FROM departments WHERE parent_id = ?').get(req.params.id).c;
     if (children > 0) return res.status(400).json({ error: `Bộ phận này còn ${children} bộ phận con — xoá con trước` });
-    const used = db.prepare('SELECT COUNT(*) c FROM employees WHERE department = ? AND active = 1').get(d.name).c;
-    if (used > 0) return res.status(400).json({ error: `Còn ${used} nhân viên thuộc bộ phận này` });
-    db.prepare('DELETE FROM departments WHERE id = ?').run(req.params.id);
-    res.json({ ok: true });
+    const used = db.prepare("SELECT COUNT(*) c FROM employees WHERE department = ? AND active = 1 AND role <> 'admin'").get(d.name).c;
+    if (used > 0) return res.status(400).json({ error: `Còn ${used} nhân viên thuộc bộ phận này — chuyển nhân viên sang bộ phận khác trước` });
+    // Chỉ còn tài khoản Admin (VD admin mặc định ở "Ban giám đốc" của bản cũ) → chuyển admin sang bộ phận "Quản trị" rồi xoá
+    const admins = db.prepare("SELECT COUNT(*) c FROM employees WHERE department = ? AND active = 1 AND role = 'admin'").get(d.name).c;
+    if (admins > 0 && d.name === ADMIN_DEPT)
+      return res.status(400).json({ error: `Bộ phận "${ADMIN_DEPT}" đang chứa ${admins} tài khoản Admin — không xoá được` });
+    db.exec('BEGIN');
+    try {
+      if (admins > 0) {
+        db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)').run(ADMIN_DEPT);
+        db.prepare("UPDATE employees SET department = ? WHERE department = ? AND active = 1 AND role = 'admin'").run(ADMIN_DEPT, d.name);
+      }
+      db.prepare('DELETE FROM departments WHERE id = ?').run(req.params.id);
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'DELETE /admin/departments/:id', e); }
+    res.json({ ok: true, moved_admins: admins, to: admins ? ADMIN_DEPT : undefined });
   });
 
   /* -------- Chức danh (danh mục để chọn khi khai báo NV) -------- */
