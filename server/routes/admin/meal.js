@@ -5,7 +5,7 @@ import { sendCaughtError } from '../../util.js';
 import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
   getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, mealOptions, setMealAdjust, hrSetOrder, mealEmpSearch,
-  createShift, deleteShift, listKitchens, saveKitchen, deleteKitchen, renewKitchenKey, assignKitchen, kitchenDeptMap, kitchenDeptEmployees,
+  createShift, deleteShift, listKitchens, saveKitchen, deleteKitchen, renewKitchenKey, assignKitchen, kitchenDeptMap, kitchenDeptEmployees, kitchenAllEmployees,
   hrSetSignup, setMealExtra, signupDay, sendToKitchen, mealRangeSummary, mealNoShow, mealExceptions,
 } from '../../meal.js';
 import { writeMealReportXlsx, writeMealRptXlsx } from '../../meal-xlsx.js';
@@ -125,7 +125,7 @@ export function registerMealRoutes(r) {
   }));
   r.get('/meal/emp-search', wrap('GET /admin/meal/emp-search', (req, res) => {
     needShift(req.query.shift);
-    res.json({ rows: mealEmpSearch(req.query.q, needDate(req.query.date), req.query.shift) });
+    res.json({ rows: mealEmpSearch(req.query.q, needDate(req.query.date), req.query.shift, { all: req.query.all === '1' }) });
   }));
   r.get('/meal/report.xlsx', async (req, res) => {
     try {
@@ -158,7 +158,7 @@ export function registerMealRoutes(r) {
   }));
   r.post('/meal/dispatch', wrap('POST /admin/meal/dispatch', (req, res) => {
     const b = req.body || {};
-    res.json({ ok: true, ...sendToKitchen({ workDate: needDate(b.date), code: b.shift, by: who(req) }) });
+    res.json({ ok: true, ...sendToKitchen({ workDate: needDate(b.date), code: b.shift, by: who(req), preview: !!b.preview }) });
   }));
 
   // ---------- BẾP: danh mục + máy chấm ăn của bếp + mã màn hình riêng + phân NV vào bếp ----------
@@ -167,11 +167,12 @@ export function registerMealRoutes(r) {
   r.put('/meal/kitchens/:id', wrap('PUT /admin/meal/kitchens', (req, res) => res.json({ ok: true, kitchen: saveKitchen({ id: Number(req.params.id) || -1, name: req.body?.name, serials: req.body?.serials }) })));
   r.delete('/meal/kitchens/:id', wrap('DELETE /admin/meal/kitchens', (req, res) => { deleteKitchen(req.params.id); res.json({ ok: true }); }));
   r.post('/meal/kitchens/:id/renew', wrap('POST /admin/meal/kitchens/renew', (req, res) => res.json({ ok: true, kitchen: renewKitchenKey(req.params.id) })));
-  r.get('/meal/kitchen-emps', wrap('GET /admin/meal/kitchen-emps', (req, res) => res.json({ rows: kitchenDeptEmployees(req.query.department) })));
-  // { kitchen_id (0 = bỏ), employee_ids | department }
+  // ?all=1 → mọi NV + danh mục bộ phận (màn Phân nhân viên vào bếp); không có = NV của 1 bộ phận
+  r.get('/meal/kitchen-emps', wrap('GET /admin/meal/kitchen-emps', (req, res) => res.json(req.query.all === '1' ? kitchenAllEmployees() : { rows: kitchenDeptEmployees(req.query.department) })));
+  // { kitchen_id (0 = bỏ), employee_ids, department (gồm con), departments (đúng tên, '' = chưa có bộ phận) }
   r.put('/meal/kitchen-assign', wrap('PUT /admin/meal/kitchen-assign', (req, res) => {
     const b = req.body || {};
-    res.json({ ok: true, count: assignKitchen({ kitchenId: b.kitchen_id, employeeIds: b.employee_ids, department: b.department }), depts: kitchenDeptMap(), kitchens: listKitchens() });
+    res.json({ ok: true, count: assignKitchen({ kitchenId: b.kitchen_id, employeeIds: b.employee_ids, department: b.department, departments: b.departments }), depts: kitchenDeptMap(), kitchens: listKitchens() });
   }));
 
   // ---------- BÁO CÁO theo khoảng ngày: tổng số & giờ đăng ký · báo ăn mà không ăn · ngoại lệ ----------

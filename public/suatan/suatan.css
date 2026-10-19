@@ -99,9 +99,11 @@
 .sa-adj.pos { border-style: solid; border-color: #e0a100; background: #fff7e0; color: var(--sa-warn); }
 .sa-adj.neg { border-style: solid; border-color: var(--sa-navy-2); background: #eaf0fb; color: var(--sa-navy-2); }
 .sa-tbl tr.sa-defrow td { background: #fbfcfe; font-style: italic; }
-.sa-picklist { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 220px; overflow-y: auto; }
-.sa-pick { text-align: left; border: 1px solid var(--sa-line); background: #fff; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13.5px; cursor: pointer; }
+.sa-picklist { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 260px; overflow-y: auto; border: 1px solid var(--sa-line); border-radius: 10px; padding: 6px; background: #fbfcfe; }
+.sa-pick { text-align: left; border: 1px solid var(--sa-line); background: #fff; border-radius: 8px; padding: 7px 10px; font: inherit; font-size: 13.5px; cursor: pointer; flex: none; }
 .sa-pick:hover { border-color: var(--sa-navy); background: var(--sa-soft); }
+.sa-pick.on { border-color: #16a34a; background: #f0fdf4; }
+.sa-pick .sa-tick { margin-right: 6px; font-size: 15px; color: var(--sa-navy); }
 .sa label { display: block; font-size: 12.5px; color: var(--sa-mut); margin: 8px 0 3px; }
 .sa input[type=text], .sa input[type=search], .sa select { width: 100%; }
 /* nút ở chân hộp thoại (nằm ngoài .sa) dùng chung màu suất ăn */

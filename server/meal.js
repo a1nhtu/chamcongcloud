@@ -390,13 +390,14 @@ export function hrSetOrder({ workDate, code, employeeId, menuId, reason, by }) {
 
 // Tìm nhân viên (mã / tên, không phân biệt dấu) để HR chọn món hộ; kèm món NV đang chọn của ngày + ca đó
 const noAccent = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase();
-export function mealEmpSearch(q, workDate, code) {
+// all = true: ô tìm để trống → trả CẢ danh sách NV (bấm vào ô là hiện danh sách, giao diện tự lọc khi gõ)
+export function mealEmpSearch(q, workDate, code, { all = false } = {}) {
   const k = noAccent(q).trim();
-  if (!k) return [];
+  if (!k && !all) return [];
   const cur = new Map(db.prepare('SELECT employee_id, dish, set_by FROM meal_orders WHERE work_date = ? AND shift = ?').all(workDate, code).map((o) => [o.employee_id, o]));
   const km = empKitchenMap();
   return db.prepare(`SELECT id, code, full_name, IFNULL(department, '') department FROM employees WHERE active = 1${adminAttWhere('role')} ORDER BY code`).all()
-    .filter((e) => noAccent(e.code).includes(k) || noAccent(e.full_name).includes(k)).slice(0, 20)
+    .filter((e) => !k || noAccent(e.code).includes(k) || noAccent(e.full_name).includes(k)).slice(0, k ? 20 : Infinity)
     .map((e) => ({ ...e, dish: cur.get(e.id)?.dish || null, set_by: cur.get(e.id)?.set_by || '', registered: cur.has(e.id), kitchen_id: km.get(e.id) ?? null }));
 }
 
@@ -537,27 +538,33 @@ export function renewKitchenKey(id) {
   db.prepare('UPDATE meal_kitchens SET screen_key = ? WHERE id = ?').run(newScreenKey(), k.id);
   return needKitchen(k.id);
 }
-// Danh sách NV (id) theo cả bộ phận (gồm bộ phận con, chỉ NV đang làm) hoặc theo danh sách id gửi lên (chỉ giữ id có thật)
-function pickEmployees(employeeIds, department) {
-  if (department != null && String(department) !== '') {
-    const names = deptWithChildren([String(department)]);
-    return db.prepare(`SELECT id FROM employees WHERE active = 1${adminAttWhere('role')} AND IFNULL(department, '') IN (${names.map(() => '?').join(',')}) ORDER BY code`)
-      .all(...names).map((r) => r.id);
+// Danh sách NV (id) = cả bộ phận `department` (gồm bộ phận con, chỉ NV đang làm)
+//   ∪ các bộ phận trong `departments` (đúng tên, không tự lấy con; '' = chưa có bộ phận) ∪ danh sách id gửi lên (chỉ giữ id có thật)
+function pickEmployees(employeeIds, department, departments) {
+  const out = new Set();
+  const names = department != null && String(department) !== '' ? deptWithChildren([String(department)]) : [];
+  let none = false;
+  for (const d of Array.isArray(departments) ? departments : []) {
+    const s = String(d ?? '').trim();
+    if (!s) none = true; else names.push(s.normalize('NFC'), s.normalize('NFD'));
+  }
+  if (names.length || none) {
+    const cond = [names.length ? `IFNULL(department, '') IN (${names.map(() => '?').join(',')})` : '', none ? `IFNULL(department, '') = ''` : ''].filter(Boolean).join(' OR ');
+    for (const r of db.prepare(`SELECT id FROM employees WHERE active = 1${adminAttWhere('role')} AND (${cond}) ORDER BY code`).all(...names)) out.add(r.id);
   }
   const want = [...new Set((Array.isArray(employeeIds) ? employeeIds : []).map(Number).filter((x) => Number.isInteger(x) && x > 0))];
-  const ok = new Set();
   for (let i = 0; i < want.length; i += 500) {
     const part = want.slice(i, i + 500);
-    for (const r of db.prepare(`SELECT id FROM employees WHERE id IN (${part.map(() => '?').join(',')})`).all(...part)) ok.add(r.id);
+    for (const r of db.prepare(`SELECT id FROM employees WHERE id IN (${part.map(() => '?').join(',')})`).all(...part)) out.add(r.id);
   }
-  return want.filter((x) => ok.has(x));
+  return [...out];
 }
-// Phân NV vào bếp (kitchenId 0 = bỏ phân bếp) theo danh sách hoặc cả bộ phận.
+// Phân NV vào bếp (kitchenId 0 = bỏ phân bếp) theo danh sách người và/hoặc bộ phận.
 // Đơn đăng ký từ HÔM NAY trở đi của những NV này đổi theo bếp mới (ngày đã qua giữ nguyên để báo cáo cũ không đổi).
-export function assignKitchen({ kitchenId, employeeIds, department }) {
+export function assignKitchen({ kitchenId, employeeIds, department, departments }) {
   const kid = Number(kitchenId) || 0;
   if (kid) needKitchen(kid);
-  const ids = pickEmployees(employeeIds, department);
+  const ids = pickEmployees(employeeIds, department, departments);
   if (!ids.length) throw userError('Chưa chọn nhân viên nào');
   const today = vnNow().date;
   db.exec('BEGIN');
@@ -584,6 +591,12 @@ export function kitchenDeptMap() {
 // NV đang làm của 1 bộ phận (không gồm bộ phận con) + bếp đang phân
 export const kitchenDeptEmployees = (department) => db.prepare(`SELECT e.id, e.code, e.full_name, IFNULL(m.kitchen_id, 0) kitchen_id FROM employees e
     LEFT JOIN meal_emp_kitchen m ON m.employee_id = e.id WHERE e.active = 1${adminAttWhere('e.role')} AND IFNULL(e.department, '') = ? ORDER BY e.code`).all(String(department ?? ''));
+// Mọi NV đang làm (bộ phận + bếp đang phân) + danh mục bộ phận cha–con — cho màn "Phân nhân viên vào bếp" kiểu xếp lịch trình ca
+export const kitchenAllEmployees = () => ({
+  rows: db.prepare(`SELECT e.id, e.code, e.full_name, IFNULL(e.department, '') department, IFNULL(m.kitchen_id, 0) kitchen_id FROM employees e
+    LEFT JOIN meal_emp_kitchen m ON m.employee_id = e.id WHERE e.active = 1${adminAttWhere('e.role')} ORDER BY e.code`).all(),
+  departments: db.prepare('SELECT id, name, parent_id FROM departments').all(),
+});
 
 /* ---------------------------- ĐĂNG KÝ ĂN (không chọn món) ---------------------------- */
 // 'YYYY-MM-DD HH:MM' → 'HH:MM ngày dd/mm'
@@ -705,8 +718,8 @@ const dmyTxt = (d) => `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}`;
 // datetime('now') của SQLite (UTC) → 'HH:MM dd/mm' giờ VN
 const stampVn = (s) => { if (!s) return ''; const t = new Date(Date.parse(s.replace(' ', 'T') + 'Z') + 7 * 3600000).toISOString(); return `${t.slice(11, 16)} ${t.slice(8, 10)}/${t.slice(5, 7)}`; };
 // GỬI BẾP: chụp số suất của bữa (tổng + từng bếp) → màn hình bếp hiện "HR đã gửi … lúc …"; trả kèm tin nhắn để HR dán Zalo cho bếp.
-// Gửi lại được (số mới đè số cũ, giữ giờ gửi lần đầu).
-export function sendToKitchen({ workDate, code, by, now = new Date() }) {
+// Gửi lại được (số mới đè số cũ, giữ giờ gửi lần đầu). preview = true: chỉ tính + soạn tin nhắn để HR xem trước, KHÔNG ghi gì.
+export function sendToKitchen({ workDate, code, by, now = new Date(), preview = false }) {
   needDate(workDate);
   const shift = needShift(code);
   const rep = mealSignupReport(workDate, shift, now);
@@ -719,16 +732,20 @@ export function sendToKitchen({ workDate, code, by, now = new Date() }) {
     for (const x of d.rows) if (x.total) dishLines.push(`${x.dish}: ${x.total}`);
     if (d.default.total) dishLines.push(`Không chọn món: ${d.default.total}`);
   }
-  db.prepare(`INSERT INTO meal_dispatch(work_date, shift, total, detail, sent_by) VALUES (?,?,?,?,?)
+  const prev = dispatchOf(workDate, shift.code);   // lần gửi trước (nếu có) — bản xem trước hiện để HR so
+  if (!preview) db.prepare(`INSERT INTO meal_dispatch(work_date, shift, total, detail, sent_by) VALUES (?,?,?,?,?)
     ON CONFLICT(work_date, shift) DO UPDATE SET total = excluded.total, detail = excluded.detail, sent_by = excluded.sent_by, sent_at = datetime('now')`)
     .run(workDate, shift.code, total, JSON.stringify(detail), by || '');
-  const disp = dispatchOf(workDate, shift.code);
+  const disp = preview ? prev : dispatchOf(workDate, shift.code);
+  const kitchenRows = rep.rows.some((r) => r.kitchen_id) ? rep.rows.filter((r) => r.total || r.kitchen_id).map((r) => ({ kitchen_id: r.kitchen_id, name: r.name, total: r.total })) : [];
   const lines = [`BÁO SUẤT ĂN — Bữa ${shift.name.toLowerCase()} ${WD_VN[new Date(workDate + 'T12:00:00Z').getUTCDay()]} ${dmyTxt(workDate)}`];
-  if (rep.rows.some((r) => r.kitchen_id)) for (const r of rep.rows) if (r.total || r.kitchen_id) lines.push(`• ${r.name}: ${r.total} suất`);
+  for (const r of kitchenRows) lines.push(`• ${r.name}: ${r.total} suất`);
   if (dishLines.length) lines.push('Theo món: ' + dishLines.join(' · '));
   lines.push(`TỔNG: ${total} suất`);
-  lines.push(`${rep.state === 'locked' ? 'Đã khoá đăng ký lúc' : 'Số tạm — đăng ký còn mở đến'} ${whenTxt(rep.deadline)} · gửi lúc ${stampVn(disp.sent_at)}${by ? ' (' + by + ')' : ''}`);
-  return { total, detail, sent_at: disp.sent_at, first_at: disp.first_at, message: lines.join('\n') };
+  lines.push(`${rep.state === 'locked' ? 'Đã khoá đăng ký lúc' : 'Số tạm — đăng ký còn mở đến'} ${whenTxt(rep.deadline)} · ${preview ? 'bản xem trước, chưa gửi' : 'gửi lúc ' + stampVn(disp.sent_at) + (by ? ' (' + by + ')' : '')}`);
+  return { preview, total, detail, kitchens: kitchenRows, dishes: dishLines, state: rep.state, deadline: rep.deadline,
+    prev: prev ? { total: prev.total, sent_at: prev.sent_at } : null,
+    sent_at: preview ? null : disp.sent_at, first_at: disp?.first_at || null, message: lines.join('\n') };
 }
 
 /* ---------------------------- BÁO CÁO theo khoảng ngày ---------------------------- */

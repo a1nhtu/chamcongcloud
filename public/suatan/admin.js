@@ -13,6 +13,8 @@ const vnToday = () => new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_C
 const dmy = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '');
 const addDays = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 const nf = (n) => (n == null ? '—' : Number(n).toLocaleString('vi-VN'));
+// bỏ dấu + chữ thường để tìm tên không cần gõ dấu
+const noAcc = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
 const MODE_TXT = {
   punch: 'Đối chiếu LƯỢT CHẤM CÔNG hợp lệ (quẹt ngoài giờ chốt bị loại) với số trưởng bộ phận đăng ký',
   ot: 'KHÔNG đếm chấm công — đối chiếu số ĐĂNG KÝ LÀM THÊM (từ Đăng ký làm thêm) với số trưởng bộ phận đăng ký',
@@ -197,17 +199,240 @@ const isLocalHost = () => /^(localhost|127\.|\[::1\]|10\.|192\.168\.|172\.(1[6-9
 const kitchenUrl = (kit, key) => `${kit.base || (isLocalHost() && kit.domain ? 'https://' + kit.domain : location.origin)}/bep/${String(key).toUpperCase()}`;
 const copyText = async (t) => { try { await navigator.clipboard.writeText(t); toast('Đã sao chép', 'ok'); } catch { toast('Không sao chép được — bôi đen rồi Ctrl+C', 'err'); } };
 
-// GỬI BẾP: chụp số suất của bữa → màn hình bếp hiện "HR đã gửi"; hiện tin nhắn để dán Zalo cho bếp
+// Ô chọn nhân viên trong hộp thoại: BẤM VÀO là hiện cả danh sách (tải 1 lần / bữa), gõ để lọc (không cần dấu).
+// Bấm 1 dòng = chọn / bỏ chọn (onToggle); multi = có nút "Chọn tất cả đang lọc". info(e) = chữ phụ sau tên.
+const PICK_MAX = 400;   // vẽ tối đa ngần này dòng — đông hơn thì gõ để lọc
+function empPicker({ date, getShift, info, isOn, onToggle, onAll = null }) {
+  const q = el('input', { type: 'search', placeholder: 'Bấm để xem danh sách · gõ mã hoặc tên để lọc (không cần dấu)…', autocomplete: 'off' });
+  const list = el('div', { class: 'sa-picklist', style: 'display:none' });
+  let rows = null, loadedFor = '', loading = false, lastK = null;
+  const draw = () => {
+    const k = noAcc(q.value.trim());
+    const hit = rows.filter((e) => !k || noAcc(e.code).includes(k) || noAcc(e.full_name).includes(k));
+    const keep = k === lastK ? list.scrollTop : 0;   // chọn / bỏ chọn → giữ chỗ đang cuộn; gõ lọc mới → về đầu
+    lastK = k;
+    list.innerHTML = '';
+    const top = el('div', { style: 'display:flex;gap:8px;align-items:center;justify-content:space-between' }, el('span', { class: 'sa-hint' }, `${nf(hit.length)} nhân viên${k ? ' khớp' : ''}`));
+    if (onAll && hit.length) {
+      const allOn = hit.every(isOn);
+      const b = el('button', { type: 'button', class: 'sa-btn ghost', style: 'padding:3px 10px;font-size:12.5px' }, allOn ? '☐ Bỏ chọn tất cả' : `☑ Chọn tất cả ${nf(hit.length)} người`);
+      b.onclick = () => { onAll(hit, !allOn); draw(); };
+      top.append(b);
+    }
+    list.append(top);
+    for (const e of hit.slice(0, PICK_MAX)) {
+      const on = isOn(e);
+      const b = el('button', { type: 'button', class: 'sa-pick' + (on ? ' on' : '') }, el('span', { class: 'sa-tick' }, on ? '☑' : '☐'), el('b', {}, `${e.code || ''} ${e.full_name}`), el('span', { class: 'sa-hint' }, ' · ' + info(e)));
+      b.onclick = () => { onToggle(e); draw(); };
+      list.append(b);
+    }
+    if (hit.length > PICK_MAX) list.append(el('div', { class: 'sa-hint' }, `… còn ${nf(hit.length - PICK_MAX)} người — gõ mã / tên để lọc.`));
+    list.scrollTop = keep;
+  };
+  const open = async () => {
+    const sh = getShift();
+    if (rows && loadedFor === sh) { list.style.display = ''; draw(); return; }
+    if (loading) return;
+    loading = true;
+    try { rows = (await api(`/admin/meal/emp-search?date=${date}&shift=${sh}&all=1&q=`)).rows; loadedFor = sh; list.style.display = ''; draw(); }
+    catch (e) { toast(e.message, 'err'); }
+    loading = false;
+  };
+  q.onfocus = open; q.onclick = open; q.oninput = open;
+  return { input: q, list, show: open, redraw: () => { if (rows && list.style.display !== 'none') draw(); }, reload: () => { rows = null; if (list.style.display !== 'none') open(); } };
+}
+
+// GỬI BẾP: bước 1 XEM TRƯỚC số suất (từng bếp, theo món, so với lần gửi trước, tin nhắn) — chưa gửi gì;
+// bước 2 bấm "Gửi bếp" mới chụp số → màn hình bếp hiện "HR đã gửi"; hiện tin nhắn để dán Zalo cho bếp
 async function dispatchDlg(date, shift, onDone) {
-  let r;
-  try { r = await api('/admin/meal/dispatch', { method: 'POST', body: { date, shift } }); } catch (e) { return toast(e.message, 'err'); }
-  const ta = el('textarea', { style: 'width:100%;min-height:160px;font:inherit;font-size:14px;border:1px solid #c5cfdf;border-radius:8px;padding:8px 10px' });
-  ta.value = r.message;
-  const copy = el('button', { class: 'sa-btn', type: 'button' }, '📋 Sao chép tin nhắn');
-  copy.onclick = () => copyText(ta.value);
-  C.openModal('📤 Đã gửi số suất cho bếp', [el('div', { class: 'sa' },
-    el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, `Màn hình bếp đã hiện ${nf(r.total)} suất (gửi lúc ${stamp(r.sent_at)}). Muốn báo thêm qua Zalo thì sao chép tin nhắn dưới đây.`), ta)], [copy]);
-  if (onDone) onDone();
+  let p;
+  try { p = await api('/admin/meal/dispatch', { method: 'POST', body: { date, shift, preview: true } }); } catch (e) { return toast(e.message, 'err'); }
+  const msgBox = (txt) => { const ta = el('textarea', { style: 'width:100%;min-height:150px;font:inherit;font-size:14px;border:1px solid #c5cfdf;border-radius:8px;padding:8px 10px' }); ta.value = txt; return ta; };
+  const when = (v) => (v ? `${v.slice(11, 16)} ngày ${dmy(v.slice(0, 10))}` : '');
+  const tbl = el('table', { class: 'sa-tbl', style: 'margin-bottom:10px' },
+    el('thead', {}, el('tr', {}, el('th', {}, p.kitchens.length ? 'Bếp' : 'Số suất gửi bếp'), el('th', { class: 'num' }, 'Số suất'))),
+    el('tbody', {}, ...p.kitchens.map((k) => el('tr', {}, el('td', {}, k.name), el('td', { class: 'num' }, nf(k.total))))),
+    el('tfoot', {}, el('tr', {}, el('td', {}, 'TỔNG'), el('td', { class: 'num' }, nf(p.total)))));
+  const diff = p.prev ? p.total - p.prev.total : 0;
+  const send = el('button', { class: 'sa-btn red', type: 'button' }, p.prev ? '📤 Gửi bếp lại' : '📤 Gửi bếp');
+  const cancel = el('button', { class: 'sa-btn ghost', type: 'button' }, 'Huỷ');
+  cancel.onclick = () => C.closeModal();
+  send.onclick = async () => {
+    send.disabled = true;
+    let r;
+    try { r = await api('/admin/meal/dispatch', { method: 'POST', body: { date, shift } }); } catch (e) { send.disabled = false; return toast(e.message, 'err'); }
+    const ta = msgBox(r.message);
+    const copy = el('button', { class: 'sa-btn', type: 'button' }, '📋 Sao chép tin nhắn');
+    copy.onclick = () => copyText(ta.value);
+    C.openModal('📤 Đã gửi số suất cho bếp', [el('div', { class: 'sa' },
+      el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, `Màn hình bếp đã hiện ${nf(r.total)} suất (gửi lúc ${stamp(r.sent_at)}). Muốn báo thêm qua Zalo thì sao chép tin nhắn dưới đây.`), ta)], [copy]);
+    if (onDone) onDone();
+  };
+  C.openModal('📤 Xem trước — gửi số suất cho bếp', [el('div', { class: 'sa' },
+    el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'Kiểm tra số dưới đây rồi bấm "Gửi bếp". Chưa bấm thì bếp CHƯA nhận gì.'),
+    tbl,
+    p.dishes.length ? el('div', { style: 'margin-bottom:8px' }, el('b', {}, 'Theo món: '), p.dishes.join(' · ')) : null,
+    el('div', { class: 'sa-hint', style: 'margin-bottom:6px' + (p.state === 'locked' ? '' : ';color:var(--sa-red);font-weight:600') },
+      p.state === 'locked' ? `✔ Đã khoá đăng ký lúc ${when(p.deadline)} — số đã chốt.` : `⚠ Số tạm — đăng ký còn mở đến ${when(p.deadline)}, có thể còn thay đổi.`),
+    p.prev ? el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, `Lần gửi trước: ${nf(p.prev.total)} suất lúc ${stamp(p.prev.sent_at)}` + (diff ? ` → nay ${nf(p.total)} (${diff > 0 ? '+' : ''}${nf(diff)}).` : ' — không đổi.')) : null,
+    el('label', { style: 'display:block;margin-top:8px' }, 'Tin nhắn (dán Zalo cho bếp)'), msgBox(p.message))], [cancel, send]);
+}
+
+/* ===================== PHÂN NHÂN VIÊN VÀO BẾP — bố cục như "xếp lịch trình ca" của chấm công =====================
+ * Trái: cây bộ phận (tick = chọn cả bộ phận; bấm tên = xem người). Giữa: nhân viên (tick từng người / Chọn tất cả).
+ * Kế: "Đã chọn N mục". Phải: chọn 1 bếp → Lưu. Lưu xong ở lại màn này để phân tiếp nhóm khác. startDept: '*' | '!none' | tên bộ phận */
+async function kitchenAssignPage(startDept, onBack) {
+  const title = '👥 Phân nhân viên vào bếp';
+  C.setMain(C.head(title), C.loading());
+  let data, kitchens;
+  const load = async () => { [data, { kitchens }] = await Promise.all([api('/admin/meal/kitchen-emps?all=1'), api('/admin/meal/kitchens')]); };
+  try { await load(); } catch (e) { C.setMain(C.head(title), el('div', { class: 'empty' }, e.message)); return; }
+
+  // cây bộ phận cha–con (gồm cả tên bộ phận chỉ có trong hồ sơ NV)
+  let nodes = [], descOf = () => new Set(), kOf = () => 0;
+  const build = () => {
+    const known = new Set(kitchens.map((k) => k.id));
+    kOf = (e) => (known.has(e.kitchen_id) ? e.kitchen_id : 0);
+    const master = data.departments, ids = new Set(master.map((d) => d.id)), kids = new Map();
+    for (const d of master) { const k = d.parent_id && ids.has(d.parent_id) ? d.parent_id : 0; if (!kids.has(k)) kids.set(k, []); kids.get(k).push(d); }
+    nodes = []; const seen = new Set();
+    const walk = (pid, depth) => { for (const d of (kids.get(pid) || []).sort((a, b) => a.name.localeCompare(b.name, 'vi'))) { if (seen.has(d.id)) continue; seen.add(d.id); nodes.push({ name: d.name, depth }); walk(d.id, depth + 1); } };
+    walk(0, 0);
+    for (const n of [...new Set(data.rows.map((e) => e.department))].filter(Boolean).sort((a, b) => a.localeCompare(b, 'vi'))) if (!nodes.some((o) => o.name === n)) nodes.push({ name: n, depth: 0 });
+    if (data.rows.some((e) => !e.department)) nodes.push({ name: '', depth: 0 });
+    descOf = (name) => { const i = nodes.findIndex((n) => n.name === name); const out = new Set([name]); if (i >= 0 && name) for (let j = i + 1; j < nodes.length && nodes[j].depth > nodes[i].depth; j++) out.add(nodes[j].name); return out; };
+  };
+  build();
+  const kName = (id) => kitchens.find((k) => k.id === id)?.name || '';
+  const lab = (e) => `${e.full_name} (${e.code || ''})`;
+  const deptTxt = (n) => n || '(Chưa có bộ phận)';
+
+  let curDept = startDept === '!none' || startDept === '*' || nodes.some((n) => n.name === startDept) ? startDept : '*';
+  const sel = new Map();   // id NV (số) → nhãn · 'd:<tên bộ phận>' → tên
+  let pickK = null;        // bếp đích (0 = bỏ phân bếp)
+
+  const searchI = el('input', { type: 'search', placeholder: 'Tìm tên hoặc mã nhân viên', style: 'margin-bottom:8px' });
+  const incl = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
+  const treeBox = el('div', { class: 'emp-tree', style: 'padding:0' });
+  const listHead = el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);margin-bottom:6px' });
+  const listBox = el('div', { class: 'as-sel-list' });
+  const selHead = el('b', {}, 'Đã chọn 0 mục');
+  const selBox = el('div', { class: 'as-sel-list' });
+  const kBox = el('div');
+  const saveBtn = el('button', { class: 'btn green', style: 'width:100%;margin-top:12px' }, '💾 Lưu');
+
+  // số người sẽ đổi = NV thuộc các bộ phận đã tick ∪ NV tick lẻ
+  const affected = () => {
+    const ds = new Set([...sel.keys()].filter((k) => typeof k === 'string').map((k) => k.slice(2)));
+    return data.rows.filter((e) => sel.has(e.id) || ds.has(e.department)).length;
+  };
+  const drawSave = () => {
+    const n = affected();
+    saveBtn.textContent = !n ? '💾 Lưu' : pickK == null ? `💾 Lưu — ${n} người (chọn bếp ở trên)` : `💾 Lưu — ${n} người → ${pickK ? kName(pickK) : 'bỏ phân bếp'}`;
+  };
+  const drawSel = () => {
+    selHead.textContent = `Đã chọn ${sel.size} mục`;
+    selBox.innerHTML = '';
+    for (const [k, v] of sel) {
+      const x = el('span', { class: 'as-x', title: 'Bỏ chọn' }, '✕');
+      x.onclick = () => { sel.delete(k); drawAll(); };
+      selBox.append(el('div', { class: 'as-sel-item' }, el('span', {}, typeof k === 'string' ? '📁 ' + deptTxt(v) : '👤 ' + v), x));
+    }
+    if (!sel.size) selBox.append(el('div', { class: 'sa-hint', style: 'padding:10px 4px' }, 'Tick bộ phận ở cây bên trái hoặc tick từng nhân viên.'));
+    drawSave();
+  };
+  const shown = () => {
+    const q = noAcc(searchI.value.trim());
+    if (q) return data.rows.filter((e) => noAcc(e.full_name).includes(q) || noAcc(e.code).includes(q));   // tìm trên toàn công ty
+    if (curDept === '*') return data.rows;
+    if (curDept === '!none') return data.rows.filter((e) => !kOf(e));
+    const set = descOf(curDept);
+    return data.rows.filter((e) => set.has(e.department));
+  };
+  const drawTree = () => {
+    treeBox.innerHTML = '';
+    const q = searchI.value.trim();
+    const special = (key, text, n) => { const d = el('div', { class: 'tn' + (curDept === key && !q ? ' on' : ''), style: 'padding-left:6px;font-weight:700' }, el('span', { class: 'nm' }, text), el('span', { class: 'ct' }, nf(n))); d.onclick = () => { curDept = key; searchI.value = ''; drawAll(); }; return d; };
+    treeBox.append(special('*', '👥 Tất cả nhân viên', data.rows.length));
+    const noneN = data.rows.filter((e) => !kOf(e)).length;
+    if (noneN) treeBox.append(special('!none', '⚠️ Chưa phân bếp', noneN));
+    for (const n of nodes) {
+      const set = descOf(n.name), emps = data.rows.filter((e) => set.has(e.department));
+      const miss = emps.filter((e) => !kOf(e)).length;
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', title: 'Tick = chọn cả bộ phận', ...(sel.has('d:' + n.name) ? { checked: '' } : {}) });
+      cb.onclick = (ev) => ev.stopPropagation();
+      cb.onchange = () => { for (const nm of incl.checked ? set : [n.name]) { if (cb.checked) sel.set('d:' + nm, nm); else sel.delete('d:' + nm); } drawAll(); };
+      // 1 ô số: tổng người; tô đỏ khi còn người chưa phân bếp
+      const row = el('div', { class: 'tn' + (curDept === n.name && !q ? ' on' : ''), style: 'padding-left:' + (6 + n.depth * 14) + 'px;gap:6px', title: deptTxt(n.name) + (miss ? ` — còn ${miss} người chưa phân bếp` : '') },
+        cb, el('span', { class: 'nm' }, '📁 ' + deptTxt(n.name)),
+        el('span', { class: 'ct', ...(miss ? { style: 'background:#fde8e8;color:#b91c1c' } : {}) }, nf(emps.length)));
+      row.onclick = () => { curDept = n.name; searchI.value = ''; drawAll(); };
+      treeBox.append(row);
+    }
+  };
+  const drawList = () => {
+    const list = shown();
+    const all = el('input', { type: 'checkbox', style: 'width:auto', ...(list.length && list.every((e) => sel.has(e.id)) ? { checked: '' } : {}) });
+    all.onchange = () => { for (const e of list) { if (all.checked) sel.set(e.id, lab(e)); else sel.delete(e.id); } drawAll(); };
+    listHead.innerHTML = ''; listHead.append(all, `Chọn tất cả (${nf(list.length)})`);
+    listBox.innerHTML = '';
+    if (!list.length) listBox.append(el('div', { class: 'empty', style: 'padding:14px 4px' }, 'Không có nhân viên.'));
+    for (const e of list) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(sel.has(e.id) ? { checked: '' } : {}) });
+      // tick 1 người: chỉ vẽ lại ô "Chọn tất cả" + cột Đã chọn (không vẽ lại cả danh sách → không nhảy thanh cuộn)
+      cb.onchange = () => { if (cb.checked) sel.set(e.id, lab(e)); else sel.delete(e.id); all.checked = list.every((x) => sel.has(x.id)); drawSel(); };
+      const k = kOf(e);
+      listBox.append(el('label', { class: 'as-sel-item', style: 'justify-content:flex-start;gap:8px;cursor:pointer' }, cb,
+        el('span', { style: 'flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis', title: `${e.full_name} · ${e.code || ''} · ${deptTxt(e.department)}` }, e.full_name, el('span', { style: 'color:#9ca3af;font-size:12px;margin-left:6px' }, e.code || '')),
+        el('span', { class: 'sa-pill ' + (k ? 'muted' : 'red'), style: 'white-space:nowrap' }, k ? kName(k) : 'chưa phân')));
+    }
+  };
+  const drawKitchens = () => {
+    kBox.innerHTML = '';
+    const cnt = new Map(); for (const e of data.rows) { const k = kOf(e); cnt.set(k, (cnt.get(k) || 0) + 1); }
+    for (const k of [...kitchens.map((x) => ({ id: x.id, name: x.name })), { id: 0, name: '— Bỏ phân bếp —' }]) {
+      const rd = el('input', { type: 'radio', name: 'sa-kpick', style: 'width:auto', ...(pickK === k.id ? { checked: '' } : {}) });
+      const row = el('label', { class: 'as-sel-item', style: 'justify-content:flex-start;gap:10px;cursor:pointer;padding:9px 8px;border:1px solid var(--line);margin-bottom:6px' + (pickK === k.id ? ';background:#f0fdf4;border-color:#16a34a' : '') },
+        rd, el('b', { style: 'flex:1' }, k.name), el('span', { class: 'sa-hint' }, k.id ? `${nf(cnt.get(k.id) || 0)} người` : `${nf(cnt.get(0) || 0)} chưa phân`));
+      rd.onchange = () => { pickK = k.id; drawKitchens(); drawSave(); };
+      kBox.append(row);
+    }
+  };
+  const drawAll = () => { drawTree(); drawList(); drawSel(); };
+  searchI.oninput = () => { drawTree(); drawList(); };
+  incl.onchange = drawTree;
+
+  saveBtn.onclick = async () => {
+    if (!sel.size) return toast('Chưa tick bộ phận / nhân viên nào', 'err');
+    if (pickK == null) return toast('Chọn 1 bếp ở bảng bên phải', 'err');
+    const keys = [...sel.keys()];
+    saveBtn.disabled = true;
+    try {
+      const r = await api('/admin/meal/kitchen-assign', { method: 'PUT', body: { kitchen_id: pickK, employee_ids: keys.filter((k) => typeof k === 'number'), departments: keys.filter((k) => typeof k === 'string').map((k) => k.slice(2)) } });
+      toast(`Đã phân ${nf(r.count)} nhân viên → ${pickK ? kName(pickK) : 'chưa phân bếp'}`, 'ok');
+      sel.clear();
+      await load(); build();
+      if (curDept === '!none' && !data.rows.some((e) => !kOf(e))) curDept = '*';
+      drawAll(); drawKitchens();
+    } catch (e) { toast(e.message, 'err'); }
+    saveBtn.disabled = false;
+  };
+
+  const clearBtn = el('span', { class: 'as-x', title: 'Bỏ chọn tất cả', style: 'font-size:15px' }, '🗑');
+  clearBtn.onclick = () => { sel.clear(); drawAll(); };
+  const back = el('button', { class: 'btn sm ghost' }, '‹ Quay lại');
+  back.onclick = onBack;
+  const bar = el('div', { class: 'panel', style: 'padding:10px 16px;display:flex;align-items:center;gap:14px;margin-bottom:14px;flex-wrap:wrap' },
+    back, el('span', { style: 'color:#d1d5db' }, '|'), el('b', {}, 'Phân nhân viên vào bếp'),
+    el('span', { class: 'sa-hint', style: 'flex:1' }, 'Tick bộ phận / nhân viên → chọn bếp bên phải → Lưu. Lưu xong ở lại đây để phân tiếp nhóm khác.'));
+  const right = el('div', { class: 'panel', style: 'padding:16px' }, el('label', { style: 'font-weight:700;display:block;margin-bottom:8px' }, 'Phân vào bếp'), kBox, saveBtn,
+    el('div', { class: 'sa-hint', style: 'margin-top:10px' }, 'Đơn đăng ký ăn từ hôm nay trở đi của những người này chuyển theo bếp mới; ngày đã qua giữ nguyên.'));
+  drawAll(); drawKitchens();
+  // 3 cột trái rộng hơn (tên bộ phận / nhân viên dài), cột chọn bếp gọn bên phải
+  C.setMain(C.head(title), bar, el('div', { class: 'as-add', style: 'grid-template-columns:minmax(0,3fr) minmax(250px,1fr)' }, el('div', { class: 'panel as-add-left' },
+    el('div', { class: 'as-col', style: 'flex:1.25' }, searchI, el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);margin-bottom:8px' }, incl, 'Tick bộ phận gồm cả bộ phận con'), treeBox),
+    el('div', { class: 'as-col', style: 'flex:1.25' }, listHead, listBox),
+    el('div', { class: 'as-col', style: 'flex:0.9' }, el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-bottom:8px' }, selHead, clearBtn), selBox)), right));
 }
 
 /* ===================== CẤU HÌNH ===================== */
@@ -353,46 +578,26 @@ export async function pageMealCfg(ctx) {
       el('label', {}, `Màn hình bếp riêng — mã ${k.screen_key}`), el('div', { class: 'sa-key' }, url),
       el('div', { class: 'sa-actions' }, save, open, cp, renew, del));
   }
-  // bảng bộ phận × bếp: áp cả bộ phận vào 1 bếp, hoặc mở ra đổi từng người
+  // Tổng quan bộ phận × bếp (chỉ xem) + nút mở màn "Phân nhân viên vào bếp" kiểu xếp lịch trình ca; bấm 1 dòng = mở sẵn bộ phận đó
   function assignBox() {
-    const kn = kitchenNamer(kits.kitchens);
-    const kSel = (val) => { const x = el('select', { style: 'width:auto' }, ...kits.kitchens.map((k) => el('option', { value: String(k.id) }, k.name)), el('option', { value: '0' }, '— Bỏ phân bếp —')); if (val != null) x.value = String(val); return x; };
-    const assign = async (body, msg) => {
-      try { const r = await api('/admin/meal/kitchen-assign', { method: 'PUT', body }); kits = { kitchens: r.kitchens, depts: r.depts }; toast(msg(r.count), 'ok'); drawKitchens(); }
-      catch (e) { toast(e.message, 'err'); }
-    };
+    const open = (dept) => kitchenAssignPage(dept, () => { C.setMain(C.head('⚙️ Suất ăn — cấu hình'), main); reloadKits().then(() => kBox.scrollIntoView({ block: 'start' })); });
     const tb = el('tbody');
     for (const d of kits.depts) {
       const none = d.by[0] || 0;
-      const sel = kSel(kits.kitchens[0]?.id);
-      const apply = el('button', { class: 'sa-btn', type: 'button', style: 'padding:6px 12px' }, 'Áp dụng cả bộ phận');
-      apply.onclick = () => {
-        if (!confirm(`Phân TẤT CẢ ${d.total} nhân viên "${d.department || '(chưa có bộ phận)'}" (và bộ phận con) vào ${sel.value === '0' ? '"chưa phân bếp"' : kn(Number(sel.value))}?`)) return;
-        assign({ kitchen_id: Number(sel.value), department: d.department }, (n) => `Đã phân ${n} nhân viên`);
-      };
-      const each = el('button', { class: 'sa-btn ghost', type: 'button', style: 'padding:6px 12px' }, '👤 Từng người');
-      const sub = el('tr', { style: 'display:none' }, el('td', { colspan: String(kits.kitchens.length + 4) }));
-      each.onclick = async () => {
-        if (sub.style.display !== 'none') { sub.style.display = 'none'; return; }
-        sub.style.display = ''; const cell = sub.firstChild; cell.innerHTML = ''; cell.append(C.loading());
-        let rows; try { rows = (await api('/admin/meal/kitchen-emps?department=' + encodeURIComponent(d.department))).rows; } catch (e) { cell.innerHTML = ''; cell.append(el('div', { class: 'sa-hint' }, e.message)); return; }
-        cell.innerHTML = '';
-        cell.append(el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:6px 14px;padding:6px 0' }, ...rows.map((e) => {
-          const s = kSel(e.kitchen_id);
-          s.onchange = () => assign({ kitchen_id: Number(s.value), employee_ids: [e.id] }, () => `${e.code || ''} ${e.full_name} → ${s.value === '0' ? 'chưa phân bếp' : kn(Number(s.value))}`);
-          return el('div', { style: 'display:flex;gap:8px;align-items:center;justify-content:space-between;border-bottom:1px dashed var(--sa-line);padding:3px 0' }, el('span', {}, el('b', {}, e.code || ''), ' ', e.full_name), s);
-        })));
-      };
-      tb.append(el('tr', {}, el('td', { class: 'dept' }, d.department || '(Chưa có bộ phận)'), el('td', { class: 'num' }, nf(d.total)),
+      const tr = el('tr', { style: 'cursor:pointer', title: 'Bấm để phân nhân viên bộ phận này' }, el('td', { class: 'dept' }, d.department || '(Chưa có bộ phận)'), el('td', { class: 'num' }, nf(d.total)),
         ...kits.kitchens.map((k) => el('td', { class: 'num' }, d.by[k.id] ? nf(d.by[k.id]) : '—')),
-        el('td', { class: 'num' }, none ? el('span', { class: 'sa-pill red' }, nf(none)) : '—'),
-        el('td', {}, el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center' }, sel, apply, each))), sub);
+        el('td', { class: 'num' }, none ? el('span', { class: 'sa-pill red' }, nf(none)) : '—'));
+      tr.onclick = () => open(d.department);
+      tb.append(tr);
     }
     const unassigned = kits.depts.reduce((t, d) => t + (d.by[0] || 0), 0);
+    const go = el('button', { class: 'sa-btn', type: 'button' }, '👥 Phân nhân viên vào bếp');
+    go.onclick = () => open(unassigned ? '!none' : '*');
     return el('div', { style: 'margin-top:14px' },
-      el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, unassigned ? `Còn ${nf(unassigned)} nhân viên CHƯA phân bếp (tính vào dòng "Chưa phân bếp" ở báo cáo).` : '✔ Mọi nhân viên đều đã được phân bếp.'),
+      el('div', { style: 'display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px' }, go,
+        el('span', { class: 'sa-hint' }, unassigned ? `Còn ${nf(unassigned)} nhân viên CHƯA phân bếp (tính vào dòng "Chưa phân bếp" ở báo cáo).` : '✔ Mọi nhân viên đều đã được phân bếp.')),
       el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
-        el('thead', {}, el('tr', {}, el('th', {}, 'Bộ phận'), el('th', { class: 'num' }, 'Số NV'), ...kits.kitchens.map((k) => el('th', { class: 'num' }, k.name)), el('th', { class: 'num' }, 'Chưa phân'), el('th', {}, 'Phân vào bếp'))),
+        el('thead', {}, el('tr', {}, el('th', {}, 'Bộ phận'), el('th', { class: 'num' }, 'Số NV'), ...kits.kitchens.map((k) => el('th', { class: 'num' }, k.name)), el('th', { class: 'num' }, 'Chưa phân'))),
         tb)));
   }
   drawKitchens();
@@ -646,33 +851,26 @@ export async function pageMealReg(ctx) {
     const picked = new Map();
     if (preset) picked.set(preset.employee_id, preset);
     const shSel = el('select', {}, ...R.shifts.map((s) => el('option', { value: s.code }, s.name)));
-    shSel.value = shift; shSel.onchange = () => { shift = shSel.value; };
     const modeS = el('select', {}, el('option', { value: 'emp' }, 'Từng người'), el('option', { value: 'dept' }, 'Cả bộ phận (gồm bộ phận con)'));
     const depS = el('select', {}, el('option', { value: '' }, '— Chọn bộ phận —'), ...depts.map((d) => el('option', { value: d }, d)));
-    const q = el('input', { type: 'search', placeholder: 'Gõ mã hoặc tên nhân viên (không cần dấu)…', autocomplete: 'off' });
-    const results = el('div', { class: 'sa-picklist' });
     const chips = el('div', { style: 'margin:6px 0' });
     const drawChips = () => {
       chips.innerHTML = '';
       if (!picked.size) { chips.append(el('span', { class: 'sa-hint' }, 'Chưa chọn nhân viên nào.')); return; }
-      for (const [id, e] of picked) { const x = el('button', { type: 'button', title: 'Bỏ' }, '×'); x.onclick = () => { picked.delete(id); drawChips(); }; chips.append(el('span', { class: 'sa-chip' }, `${e.code || ''} ${e.full_name}`, preset ? null : x)); }
+      chips.append(el('span', { class: 'sa-hint', style: 'margin-right:6px' }, `Đã chọn ${nf(picked.size)}:`));
+      for (const [id, e] of picked) { const x = el('button', { type: 'button', title: 'Bỏ' }, '×'); x.onclick = () => { picked.delete(id); drawChips(); pk.redraw(); }; chips.append(el('span', { class: 'sa-chip' }, `${e.code || ''} ${e.full_name}`, preset ? null : x)); }
     };
-    let timer = 0;
-    const search = async () => {
-      if (!q.value.trim()) { results.innerHTML = ''; return; }
-      try {
-        const r = await api(`/admin/meal/emp-search?date=${R.date}&shift=${shift}&q=${encodeURIComponent(q.value)}`);
-        results.innerHTML = '';
-        if (!r.rows.length) results.append(el('div', { class: 'sa-hint' }, 'Không tìm thấy.'));
-        for (const e of r.rows) {
-          const b = el('button', { type: 'button', class: 'sa-pick' }, el('b', {}, `${e.code || ''} ${e.full_name}`), el('span', { class: 'sa-hint' }, ` · ${e.department || '(chưa có BP)'} · ${e.registered ? 'ĐÃ đăng ký' : 'chưa đăng ký'}`));
-          b.onclick = () => { picked.set(e.id, { employee_id: e.id, code: e.code, full_name: e.full_name }); drawChips(); q.value = ''; results.innerHTML = ''; q.focus(); };
-          results.append(b);
-        }
-      } catch (e) { toast(e.message, 'err'); }
-    };
-    q.oninput = () => { clearTimeout(timer); timer = setTimeout(search, 250); };
-    const empBox = el('div', {}, el('label', {}, 'Nhân viên'), q, results, chips);
+    const setPick = (e, on) => { if (on) picked.set(e.id, { employee_id: e.id, code: e.code, full_name: e.full_name }); else picked.delete(e.id); };
+    const pk = empPicker({
+      date: R.date, getShift: () => shift,
+      info: (e) => `${e.department || '(chưa có BP)'} · ${e.registered ? 'ĐÃ đăng ký' : 'chưa đăng ký'}`,
+      isOn: (e) => picked.has(e.id),
+      onToggle: (e) => { setPick(e, !picked.has(e.id)); drawChips(); },
+      onAll: (list, on) => { for (const e of list) setPick(e, on); drawChips(); },
+    });
+    const q = pk.input;
+    shSel.value = shift; shSel.onchange = () => { shift = shSel.value; pk.reload(); };   // đổi bữa → trạng thái "đã đăng ký" đổi theo
+    const empBox = el('div', {}, el('label', {}, 'Nhân viên'), q, pk.list, chips);
     const depBox = el('div', { style: 'display:none' }, el('label', {}, 'Bộ phận'), depS);
     modeS.onchange = () => { empBox.style.display = modeS.value === 'emp' ? '' : 'none'; depBox.style.display = modeS.value === 'dept' ? '' : 'none'; };
     const why = el('input', { type: 'text', maxlength: '200', placeholder: on ? 'VD: quên đăng ký · điện thoại hỏng · tăng ca đột xuất…' : 'VD: nghỉ đột xuất · đi công tác…' });
@@ -693,7 +891,7 @@ export async function pageMealReg(ctx) {
       el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, on ? 'Dùng khi nhân viên quên đăng ký, điện thoại hỏng, tăng ca đột xuất… Không bị giờ khoá chặn; mỗi người đều được lưu vết.' : 'Huỷ suất của người không ăn (nghỉ đột xuất…). Không bị giờ khoá chặn; mỗi người đều được lưu vết.'),
       el('label', {}, 'Bữa'), shSel, preset ? null : el('label', {}, 'Chọn theo'), preset ? null : modeS, preset ? chips : empBox, preset ? null : depBox,
       el('label', { style: 'display:block;margin-top:8px' }, 'Lý do (bắt buộc)'), why)], [save]);
-    setTimeout(() => (preset ? why : q).focus(), 50);
+    setTimeout(() => { if (preset) why.focus(); else { q.focus(); pk.show(); } }, 50);   // mở hộp là hiện luôn danh sách NV
   }
   load();
 }
@@ -971,9 +1169,14 @@ export async function pageMealReport(ctx) {
     let shift = code || R.shifts[0].code, emp = null, dishId = '';
     const shSel = el('select', {}, ...R.shifts.map((s) => el('option', { value: s.code }, s.name)));
     shSel.value = shift;
-    const q = el('input', { type: 'search', placeholder: 'Gõ mã hoặc tên nhân viên (không cần dấu)…', autocomplete: 'off' });
-    const results = el('div', { class: 'sa-picklist' });
     const picked = el('div', { class: 'sa-hint', style: 'margin:6px 0' }, 'Chưa chọn nhân viên.');
+    const pk = empPicker({
+      date: R.date, getShift: () => shift,
+      info: (e) => `${e.department || '(chưa có BP)'} · ${e.dish ? 'đang chọn: ' + e.dish + (e.set_by ? ' (HR chọn hộ)' : '') : 'chưa chọn món'}`,
+      isOn: (e) => emp?.id === e.id,
+      onToggle: (e) => { emp = emp?.id === e.id ? null : e; picked.textContent = emp ? `✔ ${e.code || ''} ${e.full_name} — ${e.dish ? 'đang chọn ' + e.dish : 'chưa chọn món'}` : 'Chưa chọn nhân viên.'; },
+    });
+    const q = pk.input, results = pk.list;
     const dishBox = el('div', { class: 'sa-dishes' });
     const why = el('input', { type: 'text', maxlength: '200', placeholder: 'VD: quên đăng ký · điện thoại hỏng · không vào được mạng…' });
     const drawDishes = () => {
@@ -986,22 +1189,7 @@ export async function pageMealReport(ctx) {
         dishBox.append(b);
       }
     };
-    let timer = 0;
-    const search = async () => {
-      if (!q.value.trim()) { results.innerHTML = ''; return; }
-      try {
-        const r = await api(`/admin/meal/emp-search?date=${R.date}&shift=${shift}&q=${encodeURIComponent(q.value)}`);
-        results.innerHTML = '';
-        if (!r.rows.length) results.append(el('div', { class: 'sa-hint' }, 'Không tìm thấy.'));
-        for (const e of r.rows) {
-          const b = el('button', { type: 'button', class: 'sa-pick' }, el('b', {}, `${e.code || ''} ${e.full_name}`), el('span', { class: 'sa-hint' }, ` · ${e.department || '(chưa có BP)'} · ${e.dish ? 'đang chọn: ' + e.dish + (e.set_by ? ' (HR chọn hộ)' : '') : 'chưa chọn món'}`));
-          b.onclick = () => { emp = e; picked.textContent = `✔ ${e.code || ''} ${e.full_name} — ${e.dish ? 'đang chọn ' + e.dish : 'chưa chọn món'}`; results.innerHTML = ''; q.value = ''; };
-          results.append(b);
-        }
-      } catch (e) { toast(e.message, 'err'); }
-    };
-    q.oninput = () => { clearTimeout(timer); timer = setTimeout(search, 250); };
-    shSel.onchange = () => { shift = shSel.value; dishId = null; emp = null; picked.textContent = 'Chưa chọn nhân viên.'; drawDishes(); };
+    shSel.onchange = () => { shift = shSel.value; dishId = null; emp = null; picked.textContent = 'Chưa chọn nhân viên.'; drawDishes(); pk.reload(); };
     dishId = null; drawDishes();
     const save = el('button', { class: 'sa-btn', type: 'button' }, '💾 Lưu món cho nhân viên');
     save.onclick = async () => {
@@ -1014,7 +1202,7 @@ export async function pageMealReport(ctx) {
       el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'Dùng khi nhân viên quên đăng ký, điện thoại hỏng / không vào mạng được. Không bị hạn chọn món chặn; màn hình bếp hiện món này khi nhân viên quẹt thẻ. Mỗi lần chọn hộ đều được lưu vết.'),
       el('label', {}, 'Bữa'), shSel, el('label', { style: 'display:block;margin-top:8px' }, 'Nhân viên'), q, results, picked,
       el('label', {}, 'Món'), dishBox, el('label', { style: 'display:block;margin-top:8px' }, 'Lý do (bắt buộc)'), why)], [save]);
-    setTimeout(() => q.focus(), 50);
+    setTimeout(() => { q.focus(); pk.show(); }, 50);   // mở hộp là hiện luôn danh sách NV
   }
 
   function exportDlg() {
