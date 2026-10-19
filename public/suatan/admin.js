@@ -4,6 +4,7 @@ import { api, toast, el } from '/common.js';
 import { renderMealTab } from '/suatan/emp.js';
 
 let C = null;   // { head, setMain, openModal, closeModal, loading, hasPerm, go }
+let _mealShowOff = false;   // trang cấu hình: có hiện cả các bữa đang tắt (bỏ tích "Bật bữa này") không — mặc định ẩn
 const ST = { date: '', shift: '' };   // nhớ ngày + ca đang xem giữa các lần mở trang
 
 function css() {
@@ -464,9 +465,19 @@ export async function pageMealCfg(ctx) {
   const addBtn = el('button', { class: 'sa-btn ghost', type: 'button' }, '+ Thêm bữa ăn');
   const addCard = el('div', { class: 'sa-card', style: 'display:flex;align-items:center;justify-content:center;min-height:120px;border-style:dashed' }, addBtn);
   addBtn.onclick = () => { const c = shiftCard(null); g1.insertBefore(c, addCard); c.querySelector('input')?.focus(); };
+  // Bữa đã bỏ tích "Bật bữa này" → mặc định ẨN cho gọn; nút bên dưới bấm để hiện lại cả những bữa không dùng
+  const offBtn = el('button', { class: 'sa-btn ghost', type: 'button', style: 'margin-bottom:8px' });
+  const drawOff = () => {
+    const off = shifts.shifts.filter((s) => !s.enabled).length;
+    for (const c of g1.querySelectorAll('[data-off]')) c.style.display = c.dataset.off === '1' && !_mealShowOff ? 'none' : '';
+    offBtn.style.display = off ? '' : 'none';
+    offBtn.textContent = _mealShowOff ? `🙈 Ẩn ${off} bữa không dùng` : `👁 Hiện cả ${off} bữa không dùng (đang tắt)`;
+  };
+  offBtn.onclick = () => { _mealShowOff = !_mealShowOff; drawOff(); };
   for (const s of shifts.shifts) g1.append(shiftCard(s));
   g1.append(addCard);
-  main.append(g1);
+  main.append(offBtn, g1);
+  drawOff();
 
   function shiftCard(s0) {
     const isNew = !s0;
@@ -513,15 +524,19 @@ export async function pageMealCfg(ctx) {
         lock_mode: lockS.value, lock_hours: lockH.value, lock_at: lockAt.value, open_at: openI.value };
       try {
         if (isNew) { await api('/admin/meal/shifts', { method: 'POST', body }); toast('Đã thêm ' + nameI.value, 'ok'); pageMealCfg(C); }
-        else { await api('/admin/meal/shifts/' + s.code, { method: 'PUT', body }); toast('Đã lưu ' + nameI.value, 'ok'); }
+        else {
+          await api('/admin/meal/shifts/' + s.code, { method: 'PUT', body });
+          s.enabled = enI.checked ? 1 : 0; card.dataset.off = s.enabled ? '0' : '1'; drawOff();
+          toast('Đã lưu ' + nameI.value + (!s.enabled && !_mealShowOff ? ' — bữa đã tắt nên được ẩn đi' : ''), 'ok');
+        }
       } catch (e) { toast(e.message, 'err'); }
     };
-    const card = el('div', { class: 'sa-card' });
+    const card = el('div', { class: 'sa-card', 'data-off': !isNew && !s.enabled ? '1' : '0' });
     const del = el('button', { class: 'sa-btn ghost', type: 'button', title: isNew ? 'Bỏ bữa đang thêm' : 'Xoá bữa tự thêm (chỉ khi chưa có dữ liệu)' }, isNew ? 'Bỏ' : '🗑 Xoá');
     del.onclick = async () => {
       if (isNew) return card.remove();
       if (!confirm(`Xoá bữa "${s.name}"?`)) return;
-      try { await api('/admin/meal/shifts/' + s.code, { method: 'DELETE' }); card.remove(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); }
+      try { await api('/admin/meal/shifts/' + s.code, { method: 'DELETE' }); card.remove(); shifts.shifts = shifts.shifts.filter((x) => x !== s); drawOff(); toast('Đã xoá', 'ok'); } catch (e) { toast(e.message, 'err'); }
     };
     card.append(...[el('h4', {}, isNew ? 'Bữa mới' : s.name, s.custom && !isNew ? el('span', { class: 'sa-pill muted' }, 'tự thêm') : null),
       el('label', {}, 'Tên bữa'), nameI,

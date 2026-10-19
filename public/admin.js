@@ -651,7 +651,7 @@ async function pageEmployees() {
       if (!empPicked.size) return;
       const picked = rows.filter((e) => empPicked.has(e.id));
       const delB = btnSm('🗑 Xóa ' + picked.length + ' nhân viên', () => delEmpBulk(picked)); delB.style.background = '#c0392b'; delB.style.borderColor = '#c0392b';
-      bulkBar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.length), delB, btnSm('Bỏ chọn', () => { empPicked.clear(); renderList(); }, 'ghost'));
+      bulkBar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.length), btnSm('🏢 Chuyển bộ phận', () => moveDeptBulk(picked)), delB, btnSm('Bỏ chọn', () => { empPicked.clear(); renderList(); }, 'ghost'));
     };
 
     const renderTree = () => {
@@ -1146,6 +1146,31 @@ Vân tay / thẻ / khuôn mặt trên máy bị xoá, dữ liệu công trong ph
 }
 async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }
 // Xoá HẲN nhiều NV đã tích chọn. Từ 5 người trở lên phải gõ đúng số người để xác nhận; server tự sao lưu trước khi xoá.
+// Chuyển bộ phận cho các NV đã tích chọn (1 lần cho cả lô)
+function moveDeptBulk(list) {
+  const n = list.length; if (!n) return;
+  const sel = el('select', {},
+    el('option', { value: '', disabled: '', selected: '' }, '— Chọn bộ phận mới —'),
+    ...deptOrdered().map((d) => el('option', { value: d.name }, '  '.repeat(d.depth) + d.name)),
+    el('option', { value: '__none__' }, '(Bỏ bộ phận — Chưa có bộ phận)'));
+  const names = list.slice(0, 8).map((e) => `${e.full_name} (${e.code})${e.department ? ' · ' + e.department : ''}`);
+  const ok = el('button', { class: 'btn' }, 'Chuyển ' + n + ' nhân viên');
+  ok.onclick = async () => {
+    if (!sel.value) return toast('Chọn bộ phận mới', 'err');
+    const dept = sel.value === '__none__' ? '' : sel.value;
+    ok.disabled = true;
+    try {
+      const r = await api('/admin/employees/move-dept', { method: 'POST', body: { ids: list.map((e) => e.id), department: dept } });
+      empPicked.clear(); closeModal();
+      toast(`Đã chuyển ${r.moved} nhân viên sang "${dept || 'Chưa có bộ phận'}"` + (r.same ? ` · ${r.same} người đã ở bộ phận này` : '') + (r.admins ? ` · bỏ qua ${r.admins} tài khoản Admin (không đủ quyền)` : ''), 'ok');
+      pageEmployees();
+    } catch (err) { ok.disabled = false; toast(err.message, 'err'); }
+  };
+  openModal(`🏢 Chuyển bộ phận cho ${n} nhân viên`, [
+    el('label', {}, 'Bộ phận mới'), sel,
+    el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Nhân viên đã chọn: ', ...names.flatMap((t) => [el('br'), '• ' + t]), n > 8 ? el('span', {}, el('br'), `… và ${n - 8} người khác`) : ''),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), ok]);
+}
 async function delEmpBulk(list) {
   const n = list.length; if (!n) return;
   const names = list.slice(0, 10).map((e) => `• ${e.full_name} (${e.code})`).join('\n') + (n > 10 ? `\n… và ${n - 10} người khác` : '');

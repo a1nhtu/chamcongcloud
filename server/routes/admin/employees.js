@@ -468,6 +468,29 @@ export function registerEmployeeRoutes(r, { need }) {
     res.json({ ok: true, deleted, self, admins, backup });
   });
 
+  // CHUYỂN BỘ PHẬN cho NHIỀU nhân viên 1 lần (tích chọn ở trang Nhân viên): body { ids: [...], department: 'Tên bộ phận' }.
+  // department rỗng = bỏ về "Chưa có bộ phận". Bỏ qua tài khoản Admin khi người sửa không đủ quyền (như sửa từng người).
+  r.post('/employees/move-dept', need('employees'), (req, res) => {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    const dept = String(req.body?.department ?? '').trim();
+    if (dept && !db.prepare('SELECT 1 FROM departments WHERE name=?').get(dept)) return res.status(400).json({ error: `Không có bộ phận "${dept}"` });
+    const q = db.prepare('SELECT id, role, department FROM employees WHERE id=?');
+    const upd = db.prepare('UPDATE employees SET department=? WHERE id=?');
+    let moved = 0, same = 0, admins = 0;
+    db.exec('BEGIN');
+    try {
+      for (const id of ids) {
+        const emp = q.get(id); if (!emp) continue;
+        if (!guardUpdateTarget(req.user, emp, {}).ok) { admins++; continue; }
+        if ((emp.department || '') === dept) { same++; continue; }
+        upd.run(dept, emp.id); moved++;
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/move-dept', e, { status: 400 }); }
+    res.json({ ok: true, moved, same, admins });
+  });
+
   // Số vân tay / khuôn mặt / thẻ / mật mã của 1 NV (theo Số ID máy) — cho tab Sinh trắc
   r.get('/employees/:id/biometrics', need('employees'), (req, res) => {
     const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
