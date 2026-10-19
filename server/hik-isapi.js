@@ -38,12 +38,12 @@ export function digestAuth(ch, user, pass, method, uri, nc = 1) {
   if (ch.opaque) s += `, opaque="${ch.opaque}"`;
   return s;
 }
-function rawReq(dev, method, path, body, auth, timeoutMs) {
+function rawReq(dev, method, path, body, auth, timeoutMs, ctype) {
   return new Promise((resolve, reject) => {
     const https = Number(dev.tcp_port) === 443;
-    const data = body == null ? null : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
+    const data = body == null ? null : Buffer.isBuffer(body) ? body : Buffer.from(typeof body === 'string' ? body : JSON.stringify(body), 'utf8');
     const headers = { Accept: '*/*', Connection: 'close' };
-    if (data) { headers['Content-Type'] = typeof body === 'string' && body.trimStart().startsWith('<') ? 'application/xml' : 'application/json'; headers['Content-Length'] = data.length; }
+    if (data) { headers['Content-Type'] = ctype || (typeof body === 'string' && body.trimStart().startsWith('<') ? 'application/xml' : 'application/json'); headers['Content-Length'] = data.length; }
     if (auth) headers.Authorization = auth;
     const req = (https ? httpsReq : httpReq)({ host: dev.tcp_ip, port: dev.tcp_port || 80, method, path, headers, rejectUnauthorized: false, timeout: timeoutMs }, (res) => {
       const chunks = []; let size = 0;
@@ -58,14 +58,15 @@ function rawReq(dev, method, path, body, auth, timeoutMs) {
   });
 }
 // Gọi 1 lệnh ISAPI. Trả { status, text, json } — json khi máy trả JSON. Lỗi → ném Error (tiếng Việt).
-export async function isapi(dev, method, path, body = null, { timeoutMs = 20000, okStatus = [200] } = {}) {
-  let r = await rawReq(dev, method, path, body, null, timeoutMs);
+// body: object (gửi JSON) | chuỗi (XML / JSON) | Buffer (kèm contentType, VD multipart có ảnh).
+export async function isapi(dev, method, path, body = null, { timeoutMs = 20000, okStatus = [200], contentType = '' } = {}) {
+  let r = await rawReq(dev, method, path, body, null, timeoutMs, contentType);
   if (r.status === 401) {
     const ch = parseChallenge(r.headers['www-authenticate']);
     const user = dev.dev_user || 'admin', pass = dev.dev_pass || '';
     const auth = ch && ch.scheme === 'digest' ? digestAuth(ch, user, pass, method, path)
       : 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64');
-    r = await rawReq(dev, method, path, body, auth, timeoutMs);
+    r = await rawReq(dev, method, path, body, auth, timeoutMs, contentType);
     if (r.status === 401) throw Object.assign(new Error('Sai tài khoản hoặc mật khẩu máy Hikvision (nhập sai nhiều lần máy sẽ tạm khoá đăng nhập ~30 phút).'), { code: 'AUTH' });
   }
   let json = null;
@@ -99,6 +100,13 @@ export function saveHikInfo(id, info) {
 }
 
 /* ---------- tải NHÂN VIÊN ---------- */
+// 1 người trên máy → dòng "USER PIN=..\tName=.." (null = bỏ: Số ID rác, khách visitor, danh sách chặn)
+function userLine(u) {
+  const pin = String(u.employeeNo ?? '').trim();
+  if (!pin || /[\s=\t]/.test(pin) || pin.length > 20) return null;
+  if (u.userType && !['normal', ''].includes(String(u.userType))) return null;
+  return `USER PIN=${pin}\tName=${String(u.name || '').replace(/[\t\r\n]/g, ' ').trim()}`;
+}
 export async function hikUsers(dev, prog = () => {}) {
   const lines = [], searchID = randomUUID();
   let pos = 0, fp = 0, face = 0, card = 0;
@@ -108,11 +116,9 @@ export async function hikUsers(dev, prog = () => {}) {
     const s = r.json?.UserInfoSearch || {};
     const list = Array.isArray(s.UserInfo) ? s.UserInfo : [];
     for (const u of list) {
-      const pin = String(u.employeeNo ?? '').trim();
-      if (!pin || /[\s=\t]/.test(pin) || pin.length > 20) continue;
-      if (u.userType && !['normal', ''].includes(String(u.userType))) continue;   // bỏ khách (visitor) / danh sách chặn
-      const name = String(u.name || '').replace(/[\t\r\n]/g, ' ').trim();
-      lines.push(`USER PIN=${pin}\tName=${name}`);
+      const l = userLine(u);
+      if (!l) continue;
+      lines.push(l);
       fp += +u.numOfFP || 0; face += +u.numOfFace || 0; card += +u.numOfCard || 0;
     }
     pos += list.length;
@@ -201,10 +207,68 @@ export async function hikLogs(dev, from, to, prog = () => {}) {
   return { read: lines.length, added: after - before, events: read, ranged: !!(from && to), unmatched };
 }
 
+/* ---------- ẢNH KHUÔN MẶT xuống máy ----------
+ * Ảnh lấy từ device_user_photos (ảnh người dùng / ảnh mặt các máy khác đã gửi về phần mềm). Máy Hikvision nhận ảnh JPG ≤ 200 KB,
+ * lưu vào thư viện mặt của máy (FDLib loại "blackFD", FPID = Số ID) rồi tự dựng mẫu khuôn mặt cho người đó.
+ * Tài liệu Person-Based Access Control Guide: E.186 FaceDataRecord (thêm), E.190 FDSetUp (thêm hoặc thay), F.6 / F.161. */
+export const HIK_FACE_MAX = 200 * 1024;
+export function hikFacePhoto(pin) {
+  const p = db.prepare('SELECT photo FROM device_user_photos WHERE pin=?').get(String(pin));
+  if (!p || !p.photo) return null;
+  const buf = Buffer.from(p.photo, 'base64');
+  return buf.length > 100 && buf[0] === 0xff && buf[1] === 0xd8 ? buf : null;   // chỉ ảnh JPG
+}
+function multipart(parts) {
+  const b = '----Digiplus' + randomBytes(8).toString('hex');
+  const chunks = [];
+  for (const p of parts) {
+    chunks.push(Buffer.from(`--${b}\r\nContent-Disposition: form-data; name="${p.name}"${p.filename ? `; filename="${p.filename}"` : ''}\r\nContent-Type: ${p.type}\r\nContent-Length: ${p.data.length}\r\n\r\n`), p.data, Buffer.from('\r\n'));
+  }
+  chunks.push(Buffer.from(`--${b}--\r\n`));
+  return { body: Buffer.concat(chunks), type: 'multipart/form-data; boundary=' + b };
+}
+// Thư viện mặt của máy: lấy thư viện "blackFD" đầu tiên; máy không trả danh sách → mặc định FDID 1 (máy chấm công Hikvision)
+async function faceLib(dev) {
+  try {
+    const r = await isapi(dev, 'GET', '/ISAPI/Intelligent/FDLib?format=json');
+    const libs = Array.isArray(r.json?.FDLib) ? r.json.FDLib : [];
+    const l = libs.find((x) => x.faceLibType === 'blackFD' && x.FDID) || libs.find((x) => x.FDID);
+    if (l) return { FDID: String(l.FDID), faceLibType: l.faceLibType || 'blackFD' };
+  } catch (e) { if (e.code !== 'ISAPI') throw e; }
+  return { FDID: '1', faceLibType: 'blackFD' };
+}
+// máy trả HTTP 200 nhưng JSON statusCode ≠ 1 → cũng là lỗi
+const statusOk = (r) => {
+  const j = r.json;
+  if (j && j.statusCode != null && +j.statusCode !== 1) throw Object.assign(new Error(`Máy Hikvision báo lỗi: ${j.subStatusCode || j.statusString || j.errorMsg}`), { code: 'ISAPI' });
+  return r;
+};
+// Ghi ảnh mặt của 1 Số ID (người đó phải có trên máy rồi). false = phần mềm chưa có ảnh JPG của người này.
+// ctx: dùng chung giữa nhiều người cùng 1 máy (nhớ thư viện mặt, khỏi hỏi lại máy).
+export async function hikPushFace(dev, pin, ctx = {}) {
+  const img = hikFacePhoto(pin);
+  if (!img) return false;
+  if (img.length > HIK_FACE_MAX) throw Object.assign(new Error(`ảnh khuôn mặt ${Math.round(img.length / 1024)} KB, máy chỉ nhận ảnh ≤ 200 KB`), { code: 'ISAPI' });
+  ctx.lib = ctx.lib || await faceLib(dev);
+  const name = pmNameFor(pin, true) || db.prepare('SELECT name FROM device_users WHERE pin=?').get(String(pin))?.name || String(pin);
+  const m = multipart([
+    { name: 'FaceDataRecord', type: 'application/json', data: Buffer.from(JSON.stringify({ faceLibType: ctx.lib.faceLibType, FDID: ctx.lib.FDID, FPID: String(pin), name })) },
+    { name: 'FaceImage', filename: 'face.jpg', type: 'image/jpeg', data: img },
+  ]);
+  const opt = { contentType: m.type, timeoutMs: 30000 };
+  try { statusOk(await isapi(dev, 'PUT', '/ISAPI/Intelligent/FDLib/FDSetUp?format=json', m.body, opt)); }   // có ảnh rồi thì thay, chưa có thì thêm
+  catch (e) {
+    if (e.code !== 'ISAPI') throw e;
+    statusOk(await isapi(dev, 'POST', '/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json', m.body, opt));   // máy đời cũ chưa có FDSetUp
+  }
+  return true;
+}
+
 /* ---------- ghi / xoá NHÂN VIÊN trên máy ---------- */
 // Ghi Số ID + tên phần mềm (+ thẻ nếu đã biết) xuống máy. SetUp = có rồi thì sửa, chưa có thì thêm.
-export async function hikPushUsers(dev, pins, prog = () => {}) {
-  let ok = 0; const fail = [];
+// withFace: kèm ảnh khuôn mặt phần mềm đang có (ghi sau khi đã có người trên máy).
+export async function hikPushUsers(dev, pins, prog = () => {}, { withFace = false } = {}) {
+  let ok = 0, faces = 0; const fail = [], faceFail = [], ctx = {};
   for (const p of pins || []) {
     const pin = String(p || '').trim(); if (!pin) continue;
     const u = db.prepare('SELECT name, card FROM device_users WHERE pin=?').get(pin) || {};
@@ -212,6 +276,7 @@ export async function hikPushUsers(dev, pins, prog = () => {}) {
     const body = { UserInfo: { employeeNo: pin, name, userType: 'normal',
       Valid: { enable: true, beginTime: '2020-01-01T00:00:00', endTime: '2037-12-31T23:59:59', timeType: 'local' },
       doorRight: '1', RightPlan: [{ doorNo: 1, planTemplateNo: '1' }] } };
+    let userOk = false;
     try {
       try { await isapi(dev, 'PUT', '/ISAPI/AccessControl/UserInfo/SetUp?format=json', body); }
       catch (e) {   // máy đời cũ chưa có SetUp → thêm mới (Record), trùng thì sửa (Modify)
@@ -224,14 +289,21 @@ export async function hikPushUsers(dev, pins, prog = () => {}) {
         catch (e) { if (e.code !== 'ISAPI') throw e; }   // máy không có đầu đọc thẻ → bỏ qua thẻ
       }
       ingestUserData(dev.serial, 'USER', `USER PIN=${pin}\tName=${name}${u.card && u.card !== '0' ? '\tCard=' + u.card : ''}`);
-      ok++;
+      ok++; userOk = true;
     } catch (e) {
       if (e.code === 'CONN' || e.code === 'AUTH' || e.code === 'TIMEOUT') throw e;
       fail.push(pin + ': ' + e.message);
     }
+    if (withFace && userOk) {   // ảnh mặt ghi SAU khi máy đã có người này
+      try { if (await hikPushFace(dev, pin, ctx)) faces++; }
+      catch (e) {
+        if (e.code === 'CONN' || e.code === 'AUTH' || e.code === 'TIMEOUT') throw e;
+        faceFail.push(pin + ' (ảnh mặt): ' + e.message);
+      }
+    }
     if ((ok + fail.length) % 20 === 0) prog(`Đã ghi ${ok + fail.length} / ${pins.length} nhân viên…`);
   }
-  return { pushed: ok, failed: fail.length, errors: fail.slice(0, 10) };
+  return { pushed: ok, failed: fail.length, faces, face_failed: faceFail.length, errors: [...fail, ...faceFail].slice(0, 10) };
 }
 export async function hikDeleteUsers(dev, pins) {
   const list = [...new Set((pins || []).map((p) => String(p || '').trim()).filter(Boolean))];
@@ -250,6 +322,151 @@ export const hikOpenDoor = (dev) => isapi(dev, 'PUT', '/ISAPI/AccessControl/Remo
 export function hikSetTime(dev) {
   const vn = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 19);
   return isapi(dev, 'PUT', '/ISAPI/System/time', `<?xml version="1.0" encoding="UTF-8"?><Time><timeMode>manual</timeMode><localTime>${vn}+07:00</localTime><timeZone>CST-7:00:00</timeZone></Time>`);
+}
+
+/* ---------- MÁY TỰ GỬI LƯỢT CHẤM TỨC THÌ (HTTP Listening / HTTP host notification) ----------
+ * Phần mềm ghi địa chỉ nhận lên máy (/ISAPI/Event/notification/httpHosts — Person Arming Guide D.3–D.5, E.39–E.41).
+ * Từ đó mỗi sự kiện máy tự POST "EventNotificationAlert" (JSON; kèm ảnh chụp thì multipart/form-data) về
+ * /hik/event/<mã bí mật của máy> (Person-Based Access Control Guide F.98 AccessControllerEvent) — route: server/routes/hik-event.js.
+ * Chỉ nhận lượt XÁC THỰC THÀNH CÔNG (cùng bộ mã với lúc tải lượt chấm), đổ chung đường ingestAttlog → tính công như cũ.
+ * Lượt máy gửi lại / lượt tải theo lịch sau đó tự bỏ (không trùng). */
+export const HIK_EVENT_PATH = '/hik/event';
+const HOST_RE = /^(?:(?:\d{1,3}\.){3}\d{1,3}|localhost|[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+)$/i;
+
+// Tách các khối sự kiện (JSON hoặc XML) trong thân yêu cầu máy gửi; phần ảnh chụp kèm theo thì bỏ.
+export function parseHikAlerts(contentType, buf) {
+  const ct = String(contentType || ''), texts = [];
+  const bm = /boundary="?([^";\s]+)"?/i.exec(ct);
+  if (/multipart/i.test(ct) && bm) {
+    for (const part of buf.toString('latin1').split('--' + bm[1]).slice(1)) {
+      if (part.startsWith('--')) break;                    // dấu kết thúc thân
+      const h = /\r?\n\r?\n/.exec(part);
+      if (h && /image\/|filename=/i.test(part.slice(0, h.index))) continue;   // ảnh chụp lúc quẹt
+      texts.push(Buffer.from(h ? part.slice(h.index + h[0].length) : part, 'latin1').toString('utf8'));
+    }
+  } else texts.push(buf.toString('utf8'));
+  const out = [];
+  for (const t of texts) {
+    const j = t.indexOf('{'), x = t.indexOf('<');
+    if (j >= 0 && (x < 0 || j < x)) {
+      try { const o = JSON.parse(t.slice(j, t.lastIndexOf('}') + 1)); if (o && typeof o === 'object') out.push(o.EventNotificationAlert || o); } catch {}
+    } else if (x >= 0) {   // máy để định dạng XML
+      const ace = (/<AccessControllerEvent>([\s\S]*?)<\/AccessControllerEvent>/.exec(t) || [])[1];
+      out.push({ macAddress: tag(t, 'macAddress'), ipAddress: tag(t, 'ipAddress'), dateTime: tag(t, 'dateTime'), eventType: tag(t, 'eventType'),
+        AccessControllerEvent: ace ? { majorEventType: tag(ace, 'majorEventType'), subEventType: tag(ace, 'subEventType'), employeeNoString: tag(ace, 'employeeNoString') || tag(ace, 'employeeNo'),
+          name: tag(ace, 'name'), attendanceStatus: tag(ace, 'attendanceStatus') } : null });
+    }
+  }
+  return out;
+}
+// 1 sự kiện → dòng ATTLOG (null = không phải lượt xác thực thành công). Giờ = đồng hồ hiển thị trên máy, như lúc tải lượt chấm.
+export function hikAlertLine(a) {
+  const e = a && a.AccessControllerEvent;
+  if (!e || typeof e !== 'object') return null;
+  let t = String(a.dateTime || e.time || '');
+  if (/Z$/i.test(t) && !isNaN(Date.parse(t))) t = new Date(Date.parse(t) + 7 * 3600e3).toISOString().slice(0, 19);   // máy gửi giờ UTC → giờ Việt Nam
+  const pin = String(e.employeeNoString || (e.employeeNo != null ? e.employeeNo : '')).trim();
+  return hikEventLine({ employeeNoString: pin, major: e.majorEventType, minor: e.subEventType, time: t, attendanceStatus: e.attendanceStatus }, true);
+}
+const normMac = (s) => String(s || '').toLowerCase().replace(/[^0-9a-f]/g, '');
+// Máy nào gửi? Địa chỉ có mã → đúng máy giữ mã đó. Không mã (điền tay trên máy, chỉ dùng trong LAN): IP thật của kết nối
+// phải là IP máy đã khai, và MAC trong sự kiện khớp MAC đã đọc từ máy (nếu đã biết).
+function hikPushDevice(token, alerts, remoteIp) {
+  if (token) return db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND hik_push_token<>'' AND hik_push_token=?").get(String(token)) || null;
+  const ip = String(remoteIp || '').replace(/^::ffff:/i, '');
+  const macs = new Set(alerts.map((a) => normMac(a.macAddress)).filter(Boolean));
+  for (const d of db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND tcp_ip=?").all(ip)) {
+    let mac = ''; try { mac = normMac(JSON.parse(d.tcp_info || '{}').mac); } catch {}
+    if (!mac || !macs.size || macs.has(mac)) return d;
+  }
+  return null;
+}
+function addDeviceUsers(serial, lines) {
+  try { guardIncoming(serial, 'USER', lines.join('\n'), { realtime: false }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); }
+  ingestUserData(serial, 'USER', lines.join('\n'));
+}
+// Hỏi máy tên các Số ID lạ (tối đa 30 / lần) → tạo NV nháp (nếu bật "Tự tạo NV") + gán các lượt chấm vừa nhận
+export async function hikFetchUsers(dev, pins) {
+  const r = await isapi(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Search?format=json',
+    { UserInfoSearchCond: { searchID: randomUUID(), searchResultPosition: 0, maxResults: 30, EmployeeNoList: pins.slice(0, 30).map((p) => ({ employeeNo: String(p) })) } });
+  const list = r.json?.UserInfoSearch?.UserInfo;
+  const lines = (Array.isArray(list) ? list : []).map(userLine).filter(Boolean);
+  if (lines.length) addDeviceUsers(dev.serial, lines);
+  return lines.length;
+}
+const askedAt = new Map();   // serial|pin → lúc hỏi máy tên người lạ gần nhất (khỏi hỏi dồn mỗi lượt quẹt)
+// Nhận 1 lần máy gửi. Trả { device: serial | null, added, pending }. device null = không biết máy nào (route trả 404).
+export function hikReceive({ token = '', contentType = '', body, remoteIp = '' } = {}) {
+  const buf = Buffer.isBuffer(body) ? body : Buffer.from(String(body ?? ''), 'utf8');
+  const alerts = parseHikAlerts(contentType, buf);
+  const d = hikPushDevice(token, alerts, remoteIp);
+  if (!d) return { device: null };
+  const now = new Date().toISOString();
+  db.prepare('UPDATE push_devices SET last_seen=?, hik_push_at=? WHERE id=?').run(now, now, d.id);
+  if (!d.active) return { device: d.serial, pending: true, added: 0 };   // chờ duyệt: chưa nhận lượt chấm
+  const lines = [], names = new Map();
+  for (const a of alerts) {
+    const l = hikAlertLine(a);
+    if (!l) continue;
+    lines.push(l);
+    const nm = String(a.AccessControllerEvent.name || '').replace(/[\t\r\n]/g, ' ').trim();
+    if (nm) names.set(l.split('\t')[0], nm);
+  }
+  if (!lines.length) return { device: d.serial, added: 0 };   // nhịp tim / sự kiện cửa / xác thực thất bại
+  const unknown = new Set();
+  const count = () => db.prepare('SELECT COUNT(*) c FROM device_punches WHERE serial=?').get(d.serial).c;
+  const before = count();
+  ingestAttlog(d.serial, lines.join('\n'), { ask: (s, pin) => unknown.add(pin) });
+  const added = count() - before;
+  // Số ID chưa khớp NV: sự kiện kèm tên → tạo NV ngay (như lúc tải NV từ máy); không kèm tên → hỏi máy (chạy nền)
+  const ask = [];
+  for (const pin of unknown) {
+    if (names.has(pin)) addDeviceUsers(d.serial, [`USER PIN=${pin}\tName=${names.get(pin)}`]);
+    else if (Date.now() - (askedAt.get(d.serial + '|' + pin) || 0) > 10 * 60000) { askedAt.set(d.serial + '|' + pin, Date.now()); ask.push(pin); }
+  }
+  if (ask.length) hikFetchUsers(d, ask).catch((e) => console.error('[hik] hỏi tên NV từ máy lỗi:', e.message));
+  return { device: d.serial, added };
+}
+// Các ô địa chỉ nhận đang có trên máy
+function parseHttpHosts(xml) {
+  return [...String(xml || '').matchAll(/<HttpHostNotification\b[^>]*>([\s\S]*?)<\/HttpHostNotification>/g)]
+    .map((m) => ({ id: tag(m[1], 'id'), url: tag(m[1], 'url'), ipAddress: tag(m[1], 'ipAddress'), hostName: tag(m[1], 'hostName'), portNo: tag(m[1], 'portNo'), raw: m[0] }))
+    .filter((h) => h.id);
+}
+// Cài địa chỉ nhận lên máy. host = IP LAN / tên miền của máy chủ phần mềm, port = cổng phần mềm (443 = HTTPS).
+// Ô đã trỏ về phần mềm Digiplus → ghi đè; không thì dùng ô còn trống; hết ô → báo người dùng tự xoá bớt trên máy
+// (KHÔNG tự xoá địa chỉ của phần mềm khác). Xong nhờ máy gửi thử 1 tin.
+export async function hikSetupPush(dev, { host, port } = {}) {
+  host = String(host || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/[/:].*$/, '');
+  const p = parseInt(port, 10);
+  if (!HOST_RE.test(host) || host.length > 100) throw Object.assign(new Error('Địa chỉ máy chủ không hợp lệ (VD 192.168.1.10 hoặc abc.maychamcongcloud.com)'), { code: 'INPUT' });
+  if (!(p > 0 && p < 65536)) throw Object.assign(new Error('Cổng không hợp lệ'), { code: 'INPUT' });
+  let token = db.prepare('SELECT hik_push_token t FROM push_devices WHERE id=?').get(dev.id)?.t || '';
+  if (!token) { token = randomBytes(16).toString('hex'); db.prepare('UPDATE push_devices SET hik_push_token=? WHERE id=?').run(token, dev.id); }
+  const path = `${HIK_EVENT_PATH}/${token}`, https = p === 443, isIp = /^(\d{1,3}\.){3}\d{1,3}$/.test(host);
+  let list;
+  try { list = parseHttpHosts((await isapi(dev, 'GET', '/ISAPI/Event/notification/httpHosts')).text); }
+  catch (e) { if (e.code === 'ISAPI') throw Object.assign(new Error('Máy này không hỗ trợ tự gửi sự kiện qua HTTP (HTTP Listening) — dùng "Tự động tải" theo lịch.'), { code: 'ISAPI' }); throw e; }
+  const free = (h) => !h.hostName && (!h.ipAddress || h.ipAddress === '0.0.0.0');
+  const slot = list.find((h) => h.url.includes(HIK_EVENT_PATH)) || list.find(free) || (list.length ? null : { id: '1' });
+  if (!slot) throw Object.assign(new Error(`Máy đã dùng hết ${list.length} ô địa chỉ nhận cho phần mềm khác (${list.map((h) => (h.hostName || h.ipAddress) + (h.portNo ? ':' + h.portNo : '')).join(', ')}). Vào trang web của máy (Network → Advanced → HTTP Listening) xoá bớt 1 ô rồi bấm lại.`), { code: 'FULL' });
+  const XML = '<?xml version="1.0" encoding="UTF-8"?>';
+  const node = `<HttpHostNotification version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema"><id>${slot.id}</id><url>${path}</url><protocolType>${https ? 'HTTPS' : 'HTTP'}</protocolType>` +
+    `<parameterFormatType>JSON</parameterFormatType><addressingFormatType>${isIp ? 'ipaddress' : 'hostname'}</addressingFormatType>${isIp ? `<ipAddress>${host}</ipAddress>` : `<hostName>${host}</hostName>`}` +
+    `<portNo>${p}</portNo><httpAuthenticationMethod>none</httpAuthenticationMethod></HttpHostNotification>`;
+  const at = '/ISAPI/Event/notification/httpHosts/' + encodeURIComponent(slot.id);
+  try { await isapi(dev, 'PUT', at, XML + node); }
+  catch (e) {   // máy chỉ nhận ghi CẢ danh sách → giữ nguyên các ô khác
+    if (e.code !== 'ISAPI') throw e;
+    const others = list.filter((h) => h.id !== slot.id).map((h) => h.raw);
+    await isapi(dev, 'PUT', '/ISAPI/Event/notification/httpHosts', `${XML}<HttpHostNotificationList version="2.0" xmlns="http://www.isapi.org/ver20/XMLSchema">${[...others, node].join('')}</HttpHostNotificationList>`);
+  }
+  let test = '';   // '' = máy không có lệnh gửi thử
+  try { const t = await isapi(dev, 'POST', at + '/test', XML + node, { timeoutMs: 15000 }); test = tag(t.text, 'errorDescription') || 'ok'; }
+  catch (e) { if (e.code === 'CONN' || e.code === 'AUTH') throw e; test = e.code === 'ISAPI' && e.status === 404 ? '' : e.message; }
+  const url = `${https ? 'https' : 'http'}://${host}${p === (https ? 443 : 80) ? '' : ':' + p}${path}`;
+  db.prepare('UPDATE push_devices SET hik_push_url=? WHERE id=?').run(url, dev.id);
+  return { slot: slot.id, url, test };
 }
 
 /* ---------- TỰ ĐỘNG TẢI THEO LỊCH ----------

@@ -719,6 +719,10 @@ function migrateColumns() {
   // | 'hik' (Hikvision, phần mềm gọi ISAPI vào máy — server/hik-isapi.js; dùng chung tcp_ip/tcp_port/tcp_info/tcp_auto_*)
   add('push_devices', 'dev_user', "TEXT DEFAULT ''");   // tài khoản đăng nhập máy Hikvision
   add('push_devices', 'dev_pass', "TEXT DEFAULT ''");   // mật khẩu đăng nhập máy Hikvision (chỉ máy chủ dùng, không trả ra giao diện)
+  // Máy Hikvision TỰ GỬI lượt chấm về (HTTP Listening): máy POST sự kiện tới /hik/event/<hik_push_token>
+  add('push_devices', 'hik_push_token', "TEXT DEFAULT ''");   // mã bí mật trong địa chỉ nhận (chỉ máy đúng mã mới được nhận lượt chấm)
+  add('push_devices', 'hik_push_url',   "TEXT DEFAULT ''");   // địa chỉ nhận đã cài lên máy (để hiển thị / điền tay)
+  add('push_devices', 'hik_push_at',    "TEXT DEFAULT ''");   // lần gần nhất máy tự gửi sự kiện về
   // Mẫu sinh trắc máy AI (định dạng riêng của hãng → bảng riêng, KHÔNG trộn với mẫu ZKTeco):
   // backupnum 0-9 vân tay · 20-27 khuôn mặt · 30-37 lòng bàn tay · 50 ảnh (base64)
   db.exec(`CREATE TABLE IF NOT EXISTS ai_templates (

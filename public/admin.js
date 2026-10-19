@@ -5605,6 +5605,7 @@ async function pageDevices() {
       renameItem,
       { group: 'Cài đặt máy', label: '🔌 Sửa kết nối (IP / cổng / tài khoản)', fn: () => hikAddModal(m) },
       m.active ? { group: 'Cài đặt máy', label: m.tcp_auto ? '⏱ Tắt tự động tải máy này' : '⏱ Bật tự động tải máy này', fn: async () => { try { await api(`/admin/hik-devices/${m.id}/auto`, { method: 'PUT', body: { on: !m.tcp_auto } }); toast(m.tcp_auto ? 'Đã tắt tự động tải cho máy này' : 'Đã bật tự động tải cho máy này', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null,
+      m.active ? { group: 'Cài đặt máy', hint: 'Mỗi lần chấm, máy gửi ngay lượt chấm về phần mềm (HTTP Listening)', label: m.hik_push_url ? '📡 Máy tự gửi lượt chấm: ĐÃ CÀI (xem / cài lại)' : '📡 Cài máy tự gửi lượt chấm về phần mềm', fn: () => hikPushModal(m, d) } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy chủ', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ máy chủ (múi giờ Việt Nam)?\nKiểm tra đồng hồ máy tính cài phần mềm đúng trước.`)) tcpJob(m, 'set-time', {}, null, 'hik'); } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}, null, 'hik'); } } : null,
       doorItem, keyItem, pauseItem, removeItem,
@@ -5677,6 +5678,7 @@ async function pageDevices() {
     const chips = [
       isTcp ? el('span', { class: 'chip', title: 'Máy kết nối trực tiếp TCP/IP — phần mềm chủ động kết nối khi bấm tải' }, '🔌 TCP/IP') : '',
       isHik ? el('span', { class: 'chip', title: 'Máy Hikvision — phần mềm kết nối vào máy (ISAPI) khi bấm tải / theo lịch tự tải' }, '📷 Hikvision') : '',
+      isHik && m.hik_push_url ? el('span', { class: 'chip g', title: m.hik_push_at ? `Máy tự gửi lượt chấm về ngay lúc chấm — tin gần nhất ${isoToHMS(m.hik_push_at)} ngày ${m.hik_push_at.slice(8, 10)}/${m.hik_push_at.slice(5, 7)}` : 'Đã cài máy tự gửi lượt chấm, chưa nhận tin nào từ máy' }, '📡 tự gửi') : '',
       isAi ? el('span', { class: 'chip', title: 'Máy AI — máy tự kết nối về phần mềm (WebSocket)' }, '🤖 Máy AI') : '',
       direct && m.active && autoMin > 0 ? el('span', { class: 'chip' + (m.tcp_auto ? ' g' : ''), title: m.tcp_auto ? `Tự động tải ${autoMin} phút / lần` : 'Máy này đang TẮT tự động tải (bật ở ⋯ Thêm)' }, m.tcp_auto ? `⏱ tự tải ${autoMin}'` : '⏱ tắt tự tải') : '',
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
@@ -5895,14 +5897,18 @@ async function pushEmpModal(devRows, after) {
     if (!picked.size) return toast('Chưa chọn nhân viên', 'err');
     if (!serials.length) return toast('Chưa chọn máy', 'err');
     if (!confirm(`Đẩy ${picked.size} nhân viên (Số ID + tên${bioChk.checked ? ' + vân tay/khuôn mặt phần mềm đang có' : ''}) xuống ${serials.length} máy?`)) return;
-    try { const r = await api('/admin/devices/push-employees', { method: 'POST', body: { pins: [...picked], serials, with_bio: bioChk.checked } }); toast(r.msg, r.users ? 'ok' : 'err'); if (r.users) { closeModal(); after && after(); } }
+    try {
+      const r = await api('/admin/devices/push-employees', { method: 'POST', body: { pins: [...picked], serials, with_bio: bioChk.checked } });
+      toast(r.msg, r.users || r.job ? 'ok' : 'err');
+      if (r.job) { closeModal(); hikPushJobModal(r.job, bioChk.checked, after); } else if (r.users) { closeModal(); after && after(); }
+    }
     catch (e) { toast(e.message, 'err'); }
   };
   upd();
   openModal('Đẩy nhân viên từ phần mềm xuống máy', [
     el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, 'Ghi Số ID + tên trong phần mềm xuống máy. Sau đó đăng ký vân tay / mặt / thẻ ở 1 máy → tự sang các máy cùng nhóm đồng bộ và về phần mềm.'),
     el('b', {}, 'Máy nhận'), devBox,
-    el('label', { style: 'display:flex;gap:8px;align-items:center;margin:0 0 10px;font-weight:500;color:var(--ink)' }, bioChk, 'Kèm vân tay / khuôn mặt (nếu phần mềm đã có từ máy khác)'),
+    el('label', { style: 'display:flex;gap:8px;align-items:center;margin:0 0 10px;font-weight:500;color:var(--ink)' }, bioChk, 'Kèm vân tay / khuôn mặt (nếu phần mềm đã có từ máy khác)' + (devs.some((m) => m.conn_type === 'hik') ? ' · máy Hikvision: kèm ảnh khuôn mặt' : '')),
     el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px' }, searchI,
       el('label', { style: 'display:flex;align-items:center;gap:6px;margin:0;font-weight:600;color:var(--ink)' }, selAll, 'Chọn tất cả (theo lọc)'), cntLbl),
     box,
@@ -6141,6 +6147,66 @@ function tcpClearModal(m) {
 }
 
 /* ---------- MÁY HIKVISION (phần mềm gọi ISAPI vào máy) ---------- */
+// MÁY TỰ GỬI LƯỢT CHẤM: chọn địa chỉ máy chủ mà MÁY CHẤM CÔNG gọi tới được → phần mềm ghi lên máy (HTTP Listening) + nhờ máy gửi thử
+function hikPushModal(m, d) {
+  const opts = [...(d.domain ? [{ host: d.domain, port: 80, label: d.domain + ' (qua internet)' }] : []),
+    ...(d.server_ips || []).map((ip) => ({ host: ip, port: d.port, label: `${ip}:${d.port} (mạng LAN)` }))];
+  const hostI = el('input', { value: opts[0] ? opts[0].host : '', placeholder: '192.168.1.10', style: 'font-family:monospace' });
+  const portI = el('input', { type: 'number', value: opts[0] ? opts[0].port : (d.port || 8686), style: 'width:100px' });
+  const pick = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px' }, ...opts.map((o) => btnSm(o.label, () => { hostI.value = o.host; portI.value = o.port; }, 'ghost')));
+  const when = (iso) => `${isoToHMS(iso)} ngày ${iso.slice(8, 10)}/${iso.slice(5, 7)}`;
+  const urlB = (u) => el('b', { style: 'font-family:monospace;word-break:break-all' }, u);
+  const out = el('div', { style: 'margin-top:10px' });
+  if (m.hik_push_url) out.append(el('div', { class: 'map-hint', style: 'margin-top:0' }, 'Đang cài: ', urlB(m.hik_push_url), m.hik_push_at ? ` · tin gần nhất từ máy: ${when(m.hik_push_at)}` : ' · chưa nhận tin nào từ máy'));
+  const go = el('button', { class: 'btn' }, m.hik_push_url ? '📡 Cài lại lên máy' : '📡 Cài lên máy');
+  go.onclick = async () => {
+    if (!hostI.value.trim()) return toast('Nhập địa chỉ máy chủ phần mềm', 'err');
+    go.disabled = true; const t = go.textContent; go.textContent = 'Đang cài lên máy…';
+    try {
+      const r = await api(`/admin/devices/${m.id}/hik-push`, { method: 'POST', body: { host: hostI.value.trim(), port: portI.value } });
+      const ok = /^ok$/i.test(r.test);
+      out.innerHTML = '';
+      out.append(el('div', { style: 'font-weight:600;color:#15803d' }, '✅ Đã cài địa chỉ nhận lên máy (ô số ' + r.slot + ')'), el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Địa chỉ: ', urlB(r.url)),
+        el('div', { class: ok || !r.test ? 'map-hint' : 'dv-warn', style: 'margin-top:4px;white-space:normal' }, ok ? '✅ Máy gửi thử về phần mềm: thành công.'
+          : r.test ? '⚠️ Máy gửi thử: ' + r.test + ' — kiểm tra máy chấm công gọi tới được địa chỉ trên (cùng mạng, đúng cổng, tường lửa).'
+          : 'Máy không có lệnh gửi thử — quẹt thử 1 lần rồi bấm "Xem quẹt" để kiểm tra.'));
+      toast('Đã cài máy tự gửi lượt chấm', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+    go.disabled = false; go.textContent = t;
+  };
+  openModal('Máy tự gửi lượt chấm · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint' }, 'Phần mềm ghi địa chỉ nhận lên máy (HTTP Listening). Từ đó mỗi lần nhân viên chấm, máy GỬI NGAY lượt chấm về phần mềm — khỏi chờ tới giờ tự tải. Chọn địa chỉ mà MÁY CHẤM CÔNG gọi tới được: cùng mạng LAN thì chọn IP máy tính cài phần mềm; phần mềm chạy trên VPS / tên miền thì chọn tên miền (cổng 80).'),
+    opts.length ? el('b', {}, 'Chọn nhanh') : '', pick,
+    el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap' },
+      el('div', { style: 'flex:1;min-width:200px' }, el('label', {}, 'IP / tên miền máy chủ phần mềm'), hostI),
+      el('div', {}, el('label', { title: 'Cổng phần mềm. 443 = HTTPS' }, 'Cổng'), portI)),
+    el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Nên để "Tự động tải" theo lịch làm dự phòng: máy mất mạng lúc chấm thì lượt đó được tải bù sau, không bị trùng.'),
+    out,
+  ], [el('button', { class: 'btn ghost', onclick: () => { closeModal(); pageDevices(); } }, 'Đóng'), go]);
+}
+// Tiến độ ghi NV (+ ảnh khuôn mặt) xuống máy Hikvision sau khi bấm "Đẩy NV xuống máy"
+async function hikPushJobModal(job, withFace, after) {
+  const msg = el('div', { style: 'font-size:15px;font-weight:600' }, '⏳ Đang ghi xuống máy Hikvision…');
+  const out = el('div', { style: 'margin-top:12px' });
+  const closeB = el('button', { class: 'btn', disabled: '' }, 'Đóng');
+  closeB.onclick = () => { closeModal(); after && after(); };
+  openModal('Ghi nhân viên xuống máy Hikvision', [msg, out], [closeB]);
+  for (;;) {
+    await new Promise((ok) => setTimeout(ok, 1000));
+    let j; try { j = await api('/admin/devices/tcp-jobs/' + job); } catch (e) { msg.textContent = '❌ ' + e.message; closeB.disabled = false; return; }
+    if (j.state === 'run') { msg.textContent = '⏳ ' + j.msg; continue; }
+    closeB.disabled = false;
+    if (j.state === 'err') { msg.textContent = '❌ ' + j.msg; msg.style.color = '#c0392b'; return; }
+    msg.textContent = '✅ Đã xong'; msg.style.color = '#15803d';
+    for (const x of (j.result && j.result.devices) || []) {
+      out.append(el('div', { style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px dashed var(--line,#eee)' }, el('b', {}, x.device),
+        el('span', {}, x.ok ? `Ghi ${x.pushed} NV${withFace ? ` · ${x.faces || 0} ảnh khuôn mặt` : ''}${x.failed || x.face_failed ? ` · lỗi ${(x.failed || 0) + (x.face_failed || 0)}` : ''}` : '❌ ' + x.error)));
+      for (const er of x.errors || []) out.append(el('div', { class: 'dv-warn', style: 'margin-top:4px;white-space:normal' }, er));
+    }
+    if (withFace) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Ảnh khuôn mặt lấy từ ảnh phần mềm đã có (ảnh máy khác gửi về). NV chưa có ảnh thì chỉ ghi Số ID + tên — đăng ký mặt trực tiếp trên máy.'));
+    return;
+  }
+}
 // Thêm máy (m = null) / sửa kết nối (m = máy)
 function hikAddModal(m) {
   const nameI = el('input', { placeholder: 'VD Máy cổng chính', value: m ? (m.name || '') : '' });
