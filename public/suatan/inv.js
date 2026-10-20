@@ -11,6 +11,7 @@ const WD = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 const wdmy = (s) => `${WD[new Date(s + 'T12:00:00Z').getUTCDay()]} ${dmy(s)}`;
 const nf = (n) => (n == null ? '—' : Number(n).toLocaleString('vi-VN'));
 const qf = (n) => (n == null ? '—' : Number(n).toLocaleString('vi-VN', { maximumFractionDigits: 3 }));
+const vq = (n) => String(n).replace('.', ',');   // số lượng điền sẵn vào ô nhập: dấu phẩy thập phân
 const money = (n) => (n == null ? '—' : Number(Math.round(n)).toLocaleString('vi-VN') + ' đ');
 const noAcc = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
 // datetime('now') của SQLite (UTC) → 'HH:MM dd/mm' giờ VN
@@ -154,7 +155,7 @@ async function cookDlg(m, done) {
   const addRow = (id, isExtra = false) => {
     const i = ingOf(id);
     const sel = isExtra ? ingSelect(id) : null;
-    const inp = el('input', { type: 'text', inputmode: 'decimal', class: 'sa-in', value: id && cur.has(id) ? String(cur.get(id)) : id && need.has(id) ? String(need.get(id)) : '' });
+    const inp = el('input', { type: 'text', inputmode: 'decimal', class: 'sa-in', value: id && cur.has(id) ? vq(cur.get(id)) : id && need.has(id) ? vq(need.get(id)) : '' });
     const unit = el('td', {}, i?.unit || ''), stock = el('td', { class: 'num' }, i ? qf(i.stock) : '');
     if (sel) sel.onchange = () => { const x = ingOf(sel.value); unit.textContent = x?.unit || ''; stock.textContent = x ? qf(x.stock) : ''; };
     const rm = btn('✕', () => { tr.remove(); rows.splice(rows.indexOf(r), 1); });
@@ -347,7 +348,7 @@ async function docDlg(kind, doc, done) {
   const addRow = (l) => {
     const sel = kind === 'count' ? null : ingSelect(l?.ingredient_id ?? null);
     const i0 = ingOf(l?.ingredient_id);
-    const inp = el('input', { type: 'text', inputmode: 'decimal', class: 'sa-in', value: kind === 'count' ? (l?.counted != null ? String(l.counted) : '') : l ? String(l.qty) : '' });
+    const inp = el('input', { type: 'text', inputmode: 'decimal', class: 'sa-in', value: kind === 'count' ? (l?.counted != null ? vq(l.counted) : '') : l ? vq(l.qty) : '' });
     const price = kind === 'in' ? el('input', { type: 'text', inputmode: 'decimal', class: 'sa-in', style: 'width:110px', value: l ? String(l.price) : '' }) : null;
     const unit = el('td', {}, i0?.unit || ''), stock = el('td', { class: 'num' }, i0 ? qf(i0.stock) : ''), val = el('td', { class: 'num' }), diff = el('td', { class: 'num' });
     const r = { get id() { return sel ? Number(sel.value) || null : l.ingredient_id; }, inp, price, val, diff };
