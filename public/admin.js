@@ -29,6 +29,7 @@ const NAV = [
   ['mealrep', '📋', 'Tổng hợp & điều chỉnh suất ăn', 'meal'],
   ['mealrpt', '📊', 'Báo cáo suất ăn', 'meal'],
   ['mealmenu', '🍽️', 'Thực đơn các bữa', 'meal'],
+  ['mealinv', '🥕', 'Nguyên liệu & kho bếp', 'meal'],   // định lượng nguyên liệu + tồn kho — công tắc riêng meal_ingredient (mặc định tắt)
   ['mealcfg', '⚙️', 'Cấu hình suất ăn', 'meal'],
   ['mealme', '🥢', 'Suất ăn của tôi', null],   // ai cũng thấy khi phân hệ bật: chọn món + (trưởng bộ phận) nhập số đăng ký
   ['offices', '📍', 'Chi nhánh', 'offices'],
@@ -49,7 +50,7 @@ const NAV_GROUPS = [
   ['hr', 'Nhân sự', ['hrprofile', 'hrcontract', 'hrdecision', 'hrtemplates']],
   ['shift', 'Ca & phân ca', ['shifts', 'assignments', 'shiftreq']],
   ['att', 'Chấm công', ['editatt', 'fixtime', 'otreg', 'swap', 'abnormal', 'leaves']],
-  ['mealg', 'Suất ăn', ['meal', 'mealreg', 'mealrep', 'mealrpt', 'mealmenu', 'mealcfg', 'mealme']],
+  ['mealg', 'Suất ăn', ['meal', 'mealreg', 'mealrep', 'mealrpt', 'mealmenu', 'mealinv', 'mealcfg', 'mealme']],
   ['pay', 'Lương & báo cáo', ['salary', 'report']],
   ['audit', 'Công ảo', ['audit', 'auditlimits']],
   ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
@@ -157,6 +158,7 @@ async function afterLogin() {
     && !(key === 'meal' && !mealOpt('dept_head'))                       // không dùng trưởng bộ phận báo số → không cần Đối chiếu & chốt
     && !((key === 'mealrep' || key === 'mealmenu') && !mealOpt('dish_choice'))   // chỉ đăng ký ăn → không thực đơn / tổng hợp theo món
     && !(key === 'mealreg' && mealOpt('dish_choice'))
+    && !(key === 'mealinv' && SETTINGS.meal_ingredient !== '1')            // định lượng nguyên liệu: chỉ khi tài khoản tổng bật
     && !(key === 'mealme' && !mealOpt('self_order') && !mealOpt('dept_head')));
   // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
   _navGrp.clear();
@@ -276,7 +278,7 @@ function go(key) {
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
   ({ dashboard: pageDashboard, employees: pageEmployees, org: () => pageOrg('dept'), positions: () => pageOrg('pos'), shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
     hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates'),
-    meal: () => mealPage('pageMealBoard'), mealreg: () => mealPage('pageMealReg'), mealrpt: () => mealPage('pageMealRpt'), mealrep: () => mealPage('pageMealReport'), mealmenu: () => mealPage('pageMealMenu'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
+    meal: () => mealPage('pageMealBoard'), mealreg: () => mealPage('pageMealReg'), mealrpt: () => mealPage('pageMealRpt'), mealrep: () => mealPage('pageMealReport'), mealmenu: () => mealPage('pageMealMenu'), mealinv: () => mealPage('pageMealInv'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
 }
 // PHÂN HỆ QUẢN LÝ SUẤT ĂN (public/suatan/admin.js) — chỉ nạp khi mở menu Suất ăn (và chỉ có menu khi tài khoản tổng đã bật)
 async function mealPage(fn) {
@@ -6943,7 +6945,7 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 // Người khác (admin công ty) chỉ xem đang bật gì.
 function displayPanel(s) {
   if (!hasPerm('settings') && !isMaster()) return null;
-  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0' };
+  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1' };
   const mealWay = (o) => !o.self && !o.head ? 'HR tự nhập (không có ai đăng ký trên app)'
     : [o.self ? (o.dish ? 'NV tự chọn món trên app' : 'NV tự bấm Có ăn / Không ăn trên app (không chọn món)') : null, o.head ? 'trưởng bộ phận báo số' : null].filter(Boolean).join(' + ');
   const box = el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' }, el('h3', { style: 'margin-top:0' }, 'Cấu hình hiển thị'));
@@ -6952,12 +6954,13 @@ function displayPanel(s) {
     box.append(el('div', { style: 'display:flex;flex-direction:column;gap:8px;font-size:14px' },
       el('div', {}, '🕐 Chấm công: ', st(on.att)),
       el('div', {}, '🍱 Suất ăn: ', st(on.meal), on.meal ? el('span', { style: 'color:var(--muted)' }, ' — ' + mealWay(on)) : null),
+      on.meal ? el('div', { style: 'margin-left:22px' }, '🥕 Định lượng nguyên liệu & kho bếp: ', st(on.inv)) : null,
       el('div', {}, '📇 Nhân sự: ', st(on.hr)),
       el('div', { class: 'map-hint' }, '🔒 Chỉ tài khoản tổng bật / tắt được các phân hệ này.')));
     return box;
   }
   const cb = (v) => el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.15)', ...(v ? { checked: '' } : {}) });
-  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head) };
+  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head), inv: cb(on.inv) };
   const row = (chk, title, desc, sub = false) => el('label', { style: `display:flex;gap:10px;align-items:flex-start;cursor:pointer${sub ? '' : ';padding:10px;border:1px solid var(--line,#eee);border-radius:10px'}` },
     chk, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
   const way = el('div', { class: 'map-hint', style: 'margin-top:2px' });
@@ -6966,10 +6969,12 @@ function displayPanel(s) {
     row(c.self, '📱 Nhân viên tự đăng ký trên app', 'Tắt: nhân viên thường không thấy tab Suất ăn; số suất do trưởng bộ phận báo / HR nhập.', true),
     row(c.dish, '🍽️ Có chọn món', 'Bật: HR nhập thực đơn, nhân viên chọn món từng bữa, màn hình bếp hiện món. Tắt: KHÔNG có thực đơn — nhân viên chỉ bấm "Có ăn / Không ăn"; menu Suất ăn có trang "Đăng ký ăn".', true),
     row(c.head, '📋 Trưởng bộ phận báo số', 'Bật: trưởng bộ phận nhập số suất của bộ phận, HR đối chiếu & chốt (trang Đối chiếu & chốt). Tắt: ẩn phần này.', true),
-    way);
+    way,
+    el('div', { style: 'font-size:13px;font-weight:700;margin-top:4px' }, 'Thêm (mặc định tắt):'),
+    row(c.inv, '🥕 Định lượng nguyên liệu & kho bếp', 'Danh mục nguyên liệu, định lượng 1 suất cho từng món, tính nguyên liệu cần nấu theo số suất, nhập / xuất / kiểm kê kho, cảnh báo sắp hết, báo cáo chi phí nguyên liệu mỗi suất. Tắt: menu ẩn, dữ liệu kho giữ nguyên.', true));
   const sync = () => {
     sub.style.opacity = c.meal.checked ? '' : '.45';
-    for (const k of ['self', 'dish', 'head']) c[k].disabled = !c.meal.checked;
+    for (const k of ['self', 'dish', 'head', 'inv']) c[k].disabled = !c.meal.checked;
     way.textContent = '→ ' + mealWay({ self: c.self.checked, dish: c.dish.checked, head: c.head.checked });
   };
   for (const k of ['meal', 'self', 'dish', 'head']) c[k].addEventListener('change', sync);
@@ -6979,7 +6984,7 @@ function displayPanel(s) {
     if (!c.att.checked && !c.meal.checked && !c.hr.checked) return toast('Phải bật ít nhất 1 phân hệ (Chấm công / Suất ăn / Nhân sự)', 'err');
     try {
       await api('/admin/settings', { method: 'PUT', body: { att_enabled: c.att.checked, meal_enabled: c.meal.checked, hr_enabled: c.hr.checked,
-        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked } });
+        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked } });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
   };

@@ -1249,3 +1249,6 @@ export function pageMealMe(ctx) {
   C.setMain(C.head('🍱 Suất ăn của tôi'), main);
   renderMealTab(main);
 }
+
+/* ===================== ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (file riêng, chỉ có menu khi bật công tắc meal_ingredient) ===================== */
+export { pageMealInv } from '/suatan/inv.js';

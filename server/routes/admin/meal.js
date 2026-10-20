@@ -10,6 +10,7 @@ import {
 } from '../../meal.js';
 import { writeMealReportXlsx, writeMealRptXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
+import { registerMealInvRoutes } from './meal-inv.js';
 
 const who = (req) => req.user.full_name || req.user.username || '';
 // Chạy 1 handler, lỗi nghiệp vụ (userError) trả nguyên văn, lỗi khác che lại
@@ -185,6 +186,9 @@ export function registerMealRoutes(r) {
   });
 
   // ---------- màn hình bếp ----------
+  // ---------- ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (công tắc riêng meal_ingredient, mặc định TẮT) ----------
+  registerMealInvRoutes(r);
+
   r.get('/meal/kitchen', wrap('GET /admin/meal/kitchen', (req, res) => res.json({ key: kitchenKey(), path: '/bep', ...kitchenBase() })));
   r.post('/meal/kitchen/renew', wrap('POST /admin/meal/kitchen/renew', (req, res) => res.json({ key: kitchenKey({ renew: true }), path: '/bep', ...kitchenBase() })));
   // Tên miền in trên liên kết bếp (VD https://app.maychamcongcloud.com) — để trống = theo địa chỉ HR đang mở

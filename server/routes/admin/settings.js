@@ -51,6 +51,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       // CẤU HÌNH HIỂN THỊ (chỉ tài khoản tổng đổi): chấm công (mặc định bật) + 3 công tắc cách đăng ký suất ăn (mặc định bật = như cũ)
       att_enabled: getSetting('att_enabled', '1'),
       meal_self_order: getSetting('meal_self_order', '1'), meal_dish_choice: getSetting('meal_dish_choice', '1'), meal_dept_head: getSetting('meal_dept_head', '1'),
+      meal_ingredient: getSetting('meal_ingredient', '0'),   // Định lượng nguyên liệu + kho bếp (mặc định TẮT)
       ...(auditAllowed(req.user) && !req.forceVirt ? {
         audit_ot_day_min: getSetting('audit_ot_day_min', '0'), audit_ot_week_h: getSetting('audit_ot_week_h', '0'),
         audit_ot_month_h: getSetting('audit_ot_month_h', '0'), audit_ot_year_h: getSetting('audit_ot_year_h', '0'),
@@ -138,7 +139,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.audit_enabled != null) setSetting('audit_enabled', b.audit_enabled ? '1' : '0');
       if (b.hr_enabled != null) setSetting('hr_enabled', b.hr_enabled ? '1' : '0');
       if (b.meal_enabled != null) setSetting('meal_enabled', b.meal_enabled ? '1' : '0');
-      for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head']) if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
+      for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head', 'meal_ingredient']) if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
     }
     // Hạn mức công ảo: người được xem công ảo mới chỉnh được
     if (auditAllowed(req.user)) {

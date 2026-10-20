@@ -976,6 +976,53 @@ function migrateColumns() {
       sent_by    TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (work_date, shift)
     );`);
+  // ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (server/meal-inv.js) — bảng RIÊNG; công tắc `meal_ingredient` mặc định TẮT (thiếu = '0').
+  // Chỉ ĐỌC số suất của phân hệ suất ăn, không ghi vào bảng suất ăn / chấm công.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meal_ingredients (     -- danh mục NGUYÊN LIỆU: đơn vị kho, đơn giá (= giá nhập gần nhất), mức tồn tối thiểu để cảnh báo
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      name       TEXT NOT NULL,
+      unit       TEXT NOT NULL,                       -- kg | lít | quả | gói …
+      price      REAL NOT NULL DEFAULT 0,             -- đồng / 1 đơn vị
+      min_stock  REAL NOT NULL DEFAULT 0,
+      note       TEXT NOT NULL DEFAULT '',
+      active     INTEGER NOT NULL DEFAULT 1,          -- 0 = ngừng dùng (ẩn khỏi chọn mới, giữ lịch sử)
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS meal_recipes (         -- ĐỊNH LƯỢNG 1 SUẤT: món (theo tên, mọi ngày) hoặc suất chung của 1 bữa (dish_key '')
+      dish_key      TEXT NOT NULL,                    -- tên món chữ thường ('' = suất chung không chọn món)
+      shift         TEXT NOT NULL DEFAULT '',         -- '' với món có tên · mã bữa với suất chung
+      dish          TEXT NOT NULL DEFAULT '',         -- tên món như HR gõ (để hiện)
+      ingredient_id INTEGER NOT NULL REFERENCES meal_ingredients(id) ON DELETE CASCADE,
+      qty           REAL NOT NULL,                    -- theo ĐƠN VỊ KHO của nguyên liệu (0.15 kg = 150 g)
+      PRIMARY KEY (dish_key, shift, ingredient_id)
+    );
+    CREATE TABLE IF NOT EXISTS meal_stock_docs (      -- PHIẾU KHO: nhập (in) · xuất (out) · kiểm kê (count)
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind       TEXT NOT NULL,
+      doc_date   TEXT NOT NULL,                       -- 'YYYY-MM-DD'
+      shift      TEXT NOT NULL DEFAULT '',            -- phiếu xuất cho bữa nào ('' = xuất khác: hư hỏng, dùng chung…)
+      kitchen_id INTEGER NOT NULL DEFAULT 0,          -- bếp nhận (0 = chung)
+      source     TEXT NOT NULL DEFAULT '',            -- 'cook' = xuất theo nhu cầu nấu của bữa
+      supplier   TEXT NOT NULL DEFAULT '',
+      note       TEXT NOT NULL DEFAULT '',
+      created_by TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mealsdoc_date ON meal_stock_docs(doc_date, kind);
+    CREATE TABLE IF NOT EXISTS meal_stock_lines (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      doc_id        INTEGER NOT NULL REFERENCES meal_stock_docs(id) ON DELETE CASCADE,
+      ingredient_id INTEGER NOT NULL,
+      qty           REAL NOT NULL,                    -- nhập / xuất: số lượng (≥ 0) · kiểm kê: chênh lệch = counted − book (±)
+      price         REAL NOT NULL DEFAULT 0,          -- nhập: giá nhập · xuất: giá vốn lúc xuất
+      need          REAL,                             -- xuất theo nhu cầu: số máy tính (để thấy HR sửa bao nhiêu)
+      counted       REAL,                             -- kiểm kê: số đếm thực tế
+      book          REAL                              -- kiểm kê: số sổ sách lúc kiểm
+    );
+    CREATE INDEX IF NOT EXISTS idx_mealsline_ing ON meal_stock_lines(ingredient_id);
+    CREATE INDEX IF NOT EXISTS idx_mealsline_doc ON meal_stock_lines(doc_id);`);
 
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN

@@ -144,3 +144,27 @@ button.sa-kpi:hover { border-color: var(--sa-navy); }
   .sa-kpi .v { font-size: 24px; }
   .sa-kpi .sa-pill { font-size: 10.5px; padding: 2px 6px; }
 }
+
+/* ----- ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (inv.js) ----- */
+.sa-tabs { flex-wrap: wrap; margin-bottom: 12px; }
+.sa-kpi .v { overflow-wrap: anywhere; }
+.sa-h { color: var(--sa-navy); font-size: 15px; margin: 18px 0 8px; }
+.sa-meal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 8px; }
+.sa-meal-head .sa-btn { margin-left: auto; padding: 6px 14px; font-size: 13px; }
+.sa-chips { margin-bottom: 8px; }
+.sa-chip.bad { background: #fdecea; border-color: #f3c3bf; color: #8c1f17; }
+.sa-tbl tr.sa-row-red td { background: #fff5f4; }
+.sa-tbl tr.sa-row-warn td { background: #fffaf0; }
+.sa-tbl tr.sa-row-off td { color: var(--sa-mut); }
+.sa-tbl td .sa-btn { padding: 4px 10px; font-size: 12.5px; }
+.sa-tbl select.sa-ing-sel { min-width: 190px; padding: 6px 8px; border: 1px solid #c5cfdf; border-radius: 8px; }
+.sa-recipe { display: grid; grid-template-columns: minmax(240px, 340px) 1fr; gap: 14px; align-items: start; }
+.sa-dish-list { display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow: auto; }
+.sa-dish { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; text-align: left; border: 1px solid var(--sa-line); background: #fff; border-radius: 10px; padding: 8px 10px; cursor: pointer; font: inherit; font-size: 13.5px; }
+.sa-dish .n { font-weight: 700; color: var(--sa-ink); flex: 1 1 100%; }
+.sa-dish:hover { border-color: var(--sa-navy-2); }
+.sa-dish.on { border-color: var(--sa-navy); box-shadow: inset 4px 0 0 var(--sa-navy); background: var(--sa-soft); }
+.sa-chk { display: inline-flex; gap: 6px; align-items: center; margin: 0; font-size: 14px; color: inherit; cursor: pointer; }
+.sa-form label { display: block; font-size: 12.5px; color: var(--sa-mut); margin: 10px 0 3px; }
+.sa-form input[type=text] { width: 100%; }
+@media (max-width: 760px) { .sa-recipe { grid-template-columns: 1fr; } .sa-meal-head .sa-btn { margin-left: 0; } }
