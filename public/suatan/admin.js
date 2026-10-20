@@ -20,6 +20,28 @@ const MODE_TXT = {
   punch: 'Đối chiếu LƯỢT CHẤM CÔNG hợp lệ (quẹt ngoài giờ chốt bị loại) với số trưởng bộ phận đăng ký',
   ot: 'KHÔNG đếm chấm công — đối chiếu số ĐĂNG KÝ LÀM THÊM (từ Đăng ký làm thêm) với số trưởng bộ phận đăng ký',
 };
+// Ô GIỜ 24h (thay <input type="time"> — trình duyệt tiếng Việt hiện SA/CH 12 giờ, khó điền). Gõ 1030 / 10:30 / 930 / 9 → 10:30 / 09:30 / 09:00;
+// gõ đủ 4 số tự chèn dấu ':'; rời ô thì chuẩn hoá HH:MM (sai → viền đỏ, class 'bad'). .value luôn là 'HH:MM' hoặc '' như ô time cũ.
+function time24(value, attrs = {}) {
+  const i = el('input', { type: 'text', inputmode: 'numeric', maxlength: '5', placeholder: 'VD 10:30', autocomplete: 'off', class: 'sa-time', value: value || '', ...attrs });
+  i.addEventListener('input', () => {
+    const d = i.value.replace(/\D/g, '').slice(0, 4);
+    if (!i.value.includes(':') && d.length === 4) i.value = d.slice(0, 2) + ':' + d.slice(2);
+  });
+  i.addEventListener('blur', () => {
+    const before = i.value, d = before.replace(/\D/g, '');
+    let h, m;
+    if (!d) i.value = '';
+    else {
+      if (before.includes(':')) [h, m] = before.split(':').map((x) => Number(x.replace(/\D/g, '') || 0));
+      else if (d.length <= 2) { h = Number(d); m = 0; } else { h = Number(d.slice(0, -2)); m = Number(d.slice(-2)); }
+      if (h < 24 && m < 60) i.value = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    }
+    i.classList.toggle('bad', !!i.value && !/^([01]\d|2[0-3]):[0-5]\d$/.test(i.value));
+    if (i.value !== before) i.dispatchEvent(new Event('input'));
+  });
+  return i;
+}
 const hhmm = (iso) => new Date(iso).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false, timeZone: 'Asia/Ho_Chi_Minh' });
 
 /* ===================== ĐỐI CHIẾU & CHỐT ===================== */
@@ -483,18 +505,18 @@ export async function pageMealCfg(ctx) {
     const isNew = !s0;
     const s = s0 || { code: '', name: '', from_time: '06:00', to_time: '08:00', mode: 'punch', enabled: 1, lock_before_min: 60, lock_at: '', open_at: '', custom: 1 };
     const nameI = el('input', { type: 'text', value: s.name, maxlength: '40', placeholder: 'VD: Bữa sáng' });
-    const fromI = el('input', { type: 'time', value: s.from_time });
-    const toI = el('input', { type: 'time', value: s.to_time });
+    const fromI = time24(s.from_time);
+    const toI = time24(s.to_time);
     const modeS = el('select', {}, el('option', { value: 'punch' }, 'Đếm lượt chấm công'), el('option', { value: 'ot' }, 'Đối chiếu đăng ký làm thêm (không đếm chấm công)'));
     modeS.value = s.mode;
     const enI = el('input', { type: 'checkbox', style: 'width:auto', ...(s.enabled ? { checked: '' } : {}) });
     // giờ mở + hạn khoá (server/meal-rules.js orderOpenMs / orderDeadlineMs)
-    const openI = el('input', { type: 'time', value: s.open_at || '', style: 'flex:1' });
+    const openI = time24(s.open_at, { style: 'flex:1', placeholder: 'trống = luôn mở' });
     const openClr = el('button', { class: 'sa-btn ghost', type: 'button', style: 'padding:6px 10px;white-space:nowrap' }, 'Luôn mở');
     const lockS = el('select', {}, el('option', { value: 'start' }, 'Khi bắt đầu giờ ăn'), el('option', { value: 'before' }, 'Trước giờ ăn … tiếng'), el('option', { value: 'at' }, 'Lúc giờ cố định'));
     lockS.value = s.lock_at ? 'at' : s.lock_before_min > 0 ? 'before' : 'start';
     const lockH = el('input', { type: 'number', min: '0.5', max: '48', step: '0.5', value: s.lock_before_min > 0 ? String(s.lock_before_min / 60) : '2', style: 'width:90px' });
-    const lockAt = el('input', { type: 'time', value: s.lock_at || '' });
+    const lockAt = time24(s.lock_at, { style: 'width:110px;flex:0 0 auto' });
     const lockHint = el('div', { class: 'sa-hint', style: 'margin-top:6px;font-weight:600' });
     const lockBox = el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:6px' });
     const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
@@ -520,6 +542,7 @@ export async function pageMealCfg(ctx) {
     drawLock();
     const save = el('button', { class: 'sa-btn', type: 'button' }, isNew ? '💾 Thêm bữa' : '💾 Lưu bữa');
     save.onclick = async () => {
+      if ([fromI, toI, openI, lockAt].some((x) => x.classList.contains('bad'))) return toast('Giờ nhập chưa đúng — gõ dạng 24 giờ, VD 10:30 hoặc 23:00', 'err');
       const body = { name: nameI.value, from_time: fromI.value, to_time: toI.value, mode: opt.dept_head ? modeS.value : s.mode, enabled: enI.checked,
         lock_mode: lockS.value, lock_hours: lockH.value, lock_at: lockAt.value, open_at: openI.value };
       try {
