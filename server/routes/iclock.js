@@ -4,7 +4,8 @@
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
 import { guardIncoming } from '../pin-guard.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog } from '../device-sync.js';
+import { vnDateStr } from '../util.js';
 
 const r = Router();
 // CHỈ parse text cho các route POST của máy (KHÔNG dùng r.use để tránh nuốt body /api)
@@ -13,11 +14,20 @@ const textParser = text({ type: () => true, limit: '12mb' });
 const nowIso = () => new Date().toISOString();
 const enabled = () => getSetting('device_enabled', '0') === '1';
 
+// Máy NỐI LẠI sau quãng mất liên lạc (mất mạng / máy chủ tắt) quá GAP_MS: máy KHÔNG tự gửi bù lượt quẹt trong quãng đó
+// (mốc ATTLOGStamp của máy thật kẹt 9999 từ lúc chờ duyệt → máy chỉ gửi lượt mới) → tự ra lệnh tải lại log
+// từ NGÀY mất liên lạc tới hôm nay (tối đa 31 ngày). Lượt đã có thì bỏ qua (UNIQUE serial+pin+punch_at).
+const GAP_MS = 5 * 60000;
 function seenDevice(serial, ip) {
   if (!serial) return;
-  const d = db.prepare('SELECT id FROM push_devices WHERE serial=?').get(serial);
+  const d = db.prepare('SELECT id, active, last_seen FROM push_devices WHERE serial=?').get(serial);
   if (d) db.prepare('UPDATE push_devices SET last_ip=?, last_seen=? WHERE id=?').run(ip || '', nowIso(), d.id);
   else db.prepare('INSERT INTO push_devices(serial, name, active, last_ip, last_seen) VALUES(?,?,0,?,?)').run(serial, '', ip || '', nowIso());
+  const lastMs = d && d.last_seen ? Date.parse(d.last_seen) : NaN;
+  if (d && d.active === 1 && enabled() && Date.now() - lastMs > GAP_MS) {
+    const from = vnDateStr(new Date(Math.max(lastMs, Date.now() - 31 * 86400e3)));
+    try { queryDeviceAttlog(serial, from, vnDateStr()); } catch (e) { console.error('[device] tải bù log lỗi:', e.message); }
+  }
 }
 function isActive(serial) {
   const d = db.prepare('SELECT active FROM push_devices WHERE serial=?').get(serial);
