@@ -3654,6 +3654,12 @@ async function reviewShiftReq(r, action) {
 const money = (n) => (Number(n) || 0).toLocaleString('vi-VN');
 let _salTab = 'config';
 async function pageSalary() {
+  // TIỀN LƯƠNG NÂNG CAO (public/payroll.js) — tài khoản tổng bật thì trang Lương dùng giao diện mới; tắt = y như cũ
+  if (SETTINGS.pay_pro === '1' && !isInspector() && !_virt) {
+    setMain(loading());
+    try { const m = await import('/payroll.js'); return m.pagePayPro({ head, setMain, openModal, closeModal, loading, hasPerm, go }); }
+    catch (e) { setMain(el('div', { class: 'empty' }, 'Không tải được phân hệ Tiền lương: ' + e.message)); return; }
+  }
   const cfgBtn = el('button', { class: 'btn sm ' + (_salTab === 'config' ? '' : 'ghost') }, '⚙ Cấu hình lương');
   const payBtn = el('button', { class: 'btn sm ' + (_salTab === 'payroll' ? '' : 'ghost') }, '📄 Bảng lương / Phiếu lương');
   cfgBtn.onclick = () => { _salTab = 'config'; pageSalary(); };
@@ -6945,7 +6951,7 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 // Người khác (admin công ty) chỉ xem đang bật gì.
 function displayPanel(s) {
   if (!hasPerm('settings') && !isMaster()) return null;
-  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1' };
+  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1', pay: s.pay_pro === '1' };
   const mealWay = (o) => !o.self && !o.head ? 'HR tự nhập (không có ai đăng ký trên app)'
     : [o.self ? (o.dish ? 'NV tự chọn món trên app' : 'NV tự bấm Có ăn / Không ăn trên app (không chọn món)') : null, o.head ? 'trưởng bộ phận báo số' : null].filter(Boolean).join(' + ');
   const box = el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' }, el('h3', { style: 'margin-top:0' }, 'Cấu hình hiển thị'));
@@ -6956,11 +6962,12 @@ function displayPanel(s) {
       el('div', {}, '🍱 Suất ăn: ', st(on.meal), on.meal ? el('span', { style: 'color:var(--muted)' }, ' — ' + mealWay(on)) : null),
       on.meal ? el('div', { style: 'margin-left:22px' }, '🥕 Định lượng nguyên liệu & kho bếp: ', st(on.inv)) : null,
       el('div', {}, '📇 Nhân sự: ', st(on.hr)),
+      el('div', {}, '💰 Tiền lương nâng cao: ', st(on.pay)),
       el('div', { class: 'map-hint' }, '🔒 Chỉ tài khoản tổng bật / tắt được các phân hệ này.')));
     return box;
   }
   const cb = (v) => el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.15)', ...(v ? { checked: '' } : {}) });
-  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head), inv: cb(on.inv) };
+  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head), inv: cb(on.inv), pay: cb(on.pay) };
   const row = (chk, title, desc, sub = false) => el('label', { style: `display:flex;gap:10px;align-items:flex-start;cursor:pointer${sub ? '' : ';padding:10px;border:1px solid var(--line,#eee);border-radius:10px'}` },
     chk, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
   const way = el('div', { class: 'map-hint', style: 'margin-top:2px' });
@@ -6984,7 +6991,7 @@ function displayPanel(s) {
     if (!c.att.checked && !c.meal.checked && !c.hr.checked) return toast('Phải bật ít nhất 1 phân hệ (Chấm công / Suất ăn / Nhân sự)', 'err');
     try {
       await api('/admin/settings', { method: 'PUT', body: { att_enabled: c.att.checked, meal_enabled: c.meal.checked, hr_enabled: c.hr.checked,
-        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked } });
+        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked, pay_pro: c.pay.checked } });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
   };
@@ -6994,6 +7001,7 @@ function displayPanel(s) {
       row(c.meal, '🍱 Suất ăn', 'Đếm suất ăn theo máy chấm ăn, đăng ký ăn / chọn món trên app, màn hình bếp, nhiều bếp, báo cáo suất ăn. Quản lý cần được tích quyền "Quản lý suất ăn".'),
       sub,
       row(c.hr, '📇 Nhân sự', 'Hồ sơ nhân sự, hợp đồng lao động, thuyên chuyển / nghỉ việc, mẫu giấy tờ. Quản lý cần được tích quyền "Nhân sự".'),
+      row(c.pay, '💰 Tiền lương nâng cao (kiểu AMIS)', 'Mặc định TẮT. Bật: trang Lương có bảo hiểm (BHXH/BHYT/BHTN), thuế TNCN, thành phần lương (phụ cấp, thưởng, khấu trừ, công thức), dữ liệu theo kỳ, tạm ứng, mẫu bảng lương, bảng lương chốt / duyệt / khoá, file chuyển khoản, báo cáo + quyết toán thuế, phiếu lương trên app. Tắt: trang Lương y như cũ (dữ liệu lương nâng cao giữ nguyên). Chỉ hiện khi bật Chấm công.'),
       el('div', {}, save)));
   return box;
 }

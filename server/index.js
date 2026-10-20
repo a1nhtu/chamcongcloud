@@ -20,6 +20,7 @@ import reportRoutes from './routes/reports.js';
 import licenseRoutes from './routes/license.js';
 import shiftRequestRoutes from './routes/shift-requests.js';
 import mealRoutes from './routes/meal.js';
+import payRoutes from './routes/pay.js';
 import { mealStaticGate } from './meal.js';
 import iclockRoutes from './routes/iclock.js';
 import hikEventRoutes from './routes/hik-event.js';
@@ -80,12 +81,15 @@ app.use('/api/auth', authRoutes);
 app.use('/api/attendance', attendanceRoutes);
 app.use('/api/leaves', leaveRoutes);
 // Các yêu cầu ĐỌC nặng (lưới tính công, bảng lương, phân ca, báo cáo, xuất Excel) chạy ở luồng phụ → máy chủ không "đứng" khi có người chạy báo cáo
-app.use('/api/admin', offload([/^\/attendance\/grid$/, /^\/payroll$/, /^\/assignments$/, /^\/abnormal(\.xlsx)?$/, /^\/ot-reg$/]));
+app.use('/api/admin', offload([/^\/attendance\/grid$/, /^\/payroll$/, /^\/assignments$/, /^\/abnormal(\.xlsx)?$/, /^\/ot-reg$/,
+  /^\/pay\/sheets\/\d+\/(export|bank)\.xlsx$/, /^\/pay\/reports\/[a-z]+(\.xlsx)?$/],
+  [/^\/pay\/sheets\/\d+\/compute$/]));   // tiền lương nâng cao: tính lại bảng lương nháp (không thân, làm lại được) ở luồng phụ
 app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$/]));
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/shift-requests', shiftRequestRoutes);
 app.use('/api/meal', mealRoutes);   // quản lý suất ăn — công tắc meal_enabled (tắt: 403)
+app.use('/api/pay', payRoutes);     // phiếu lương của nhân viên trên app — công tắc pay_pro + pay_app_slip (tắt: 403)
 app.get('/api/config', (req, res) => res.json({
   company_name: getSetting('company_name', 'Digiplus'),
   attendance_mode: getSetting('attendance_mode', 'shift'),

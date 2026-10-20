@@ -123,6 +123,7 @@ export const PERMISSIONS = [
   ['devices',         'Máy chấm công'],
   ['door_open',       'Mở cửa từ xa (kiểm soát cửa)'],
   ['salary',          'Bảng lương'],
+  ['pay_approve',     'Duyệt / chốt / mở khoá bảng lương (Tiền lương nâng cao)'],
   ['audit',           'Xem công ảo / lương ảo (audit)'],
   ['meal',            'Quản lý suất ăn (đối chiếu, chốt số, thực đơn, cấu hình)'],
   ['holidays',        'Ngày lễ'],

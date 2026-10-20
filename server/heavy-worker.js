@@ -7,8 +7,10 @@ try {
   const [{ default: adminRoutes }, { default: reportRoutes }] = await Promise.all([import('./routes/admin.js'), import('./routes/reports.js')]);
   const app = express();
   app.disable('x-powered-by');
-  // phòng hờ: luồng phụ không bao giờ nhận thao tác ghi
-  app.use((req, res, next) => (req.method === 'GET' ? next() : res.status(405).json({ error: 'Luồng phụ chỉ đọc' })));
+  // phòng hờ: luồng phụ không nhận thao tác ghi — TRỪ "tính lại bảng lương nháp" (tiền lương nâng cao): việc nặng, chỉ ghi bảng
+  // pay_sheet_rows của chính bảng nháp đó, làm lại nhiều lần cùng kết quả (SQLite WAL + busy_timeout cho 2 luồng ghi nối tiếp)
+  const POST_OK = /^\/api\/admin\/pay\/sheets\/\d+\/compute$/;
+  app.use((req, res, next) => (req.method === 'GET' || (req.method === 'POST' && POST_OK.test(req.path)) ? next() : res.status(405).json({ error: 'Luồng phụ chỉ đọc' })));
   app.use('/api/admin', adminRoutes);
   app.use('/api/reports', reportRoutes);
   app.use((err, req, res, next) => { console.error('[heavy-worker]', err); if (!res.headersSent) res.status(500).json({ error: err.message || 'Lỗi máy chủ' }); });

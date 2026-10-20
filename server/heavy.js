@@ -38,12 +38,17 @@ async function pick() {
   return slot.ready;
 }
 
-// Middleware: chuyển tiếp GET khớp `patterns` (so với req.path sau tiền tố mount) sang luồng phụ
-export function offload(patterns) {
+// Middleware: chuyển tiếp GET khớp `patterns` (so với req.path sau tiền tố mount) sang luồng phụ.
+// postPatterns: POST KHÔNG thân (tính lại được nhiều lần cho cùng kết quả, VD tính lại bảng lương nháp) cũng chuyển sang luồng phụ.
+export function offload(patterns, postPatterns = []) {
   return (req, res, next) => {
-    if (OFF || !isMainThread || broken >= 6 || req.method !== 'GET' || !patterns.some((re) => re.test(req.path))) return next();
+    const isGet = req.method === 'GET' && patterns.some((re) => re.test(req.path));
+    const isPost = req.method === 'POST' && postPatterns.some((re) => re.test(req.path));
+    if (OFF || !isMainThread || broken >= 6 || !(isGet || isPost)) return next();
     pick().then((slot) => {
-      const p = http.request({ host: '127.0.0.1', port: slot.port, path: req.originalUrl, method: 'GET', headers: { ...req.headers, connection: 'close' } }, (r) => {
+      const headers = { ...req.headers, connection: 'close' };
+      if (isPost) { delete headers['content-length']; delete headers['transfer-encoding']; delete headers['content-type']; }
+      const p = http.request({ host: '127.0.0.1', port: slot.port, path: req.originalUrl, method: req.method, headers }, (r) => {
         res.writeHead(r.statusCode, r.headers);
         r.pipe(res);
       });

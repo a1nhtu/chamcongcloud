@@ -20,6 +20,7 @@ import { registerHrRoutes } from './admin/hr.js';
 import { registerHrDocRoutes } from './admin/hr-docs.js';
 import { registerHrImportRoutes } from './admin/hr-import.js';
 import { registerMealRoutes } from './admin/meal.js';
+import { registerPayProRoutes } from './admin/payroll-pro.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
@@ -48,6 +49,7 @@ registerSwapRoutes(r, { need });         // đăng ký làm bù (hoán đổi ng
 registerHrRoutes(r, { need });           // nhân sự: hồ sơ, hợp đồng, thuyên chuyển / nghỉ việc
 registerHrDocRoutes(r, { need });        // nhân sự: mẫu Word + in hợp đồng / phụ lục / quyết định
 registerHrImportRoutes(r, { need });     // nhân sự: nhập hồ sơ / hợp đồng từ Excel
+registerPayProRoutes(r, { need });       // tiền lương nâng cao (BH, thuế, thành phần, bảng lương chốt/khoá) — sau công tắc pay_pro
 registerMealRoutes(r);                   // quản lý suất ăn (HR): đối chiếu 3 ca, chốt số, thực đơn — sau công tắc meal_enabled
 
 export default r;

@@ -1024,6 +1024,121 @@ function migrateColumns() {
     CREATE INDEX IF NOT EXISTS idx_mealsline_ing ON meal_stock_lines(ingredient_id);
     CREATE INDEX IF NOT EXISTS idx_mealsline_doc ON meal_stock_lines(doc_id);`);
 
+  // TIỀN LƯƠNG NÂNG CAO (server/payroll-pro.js) — bảng RIÊNG; công tắc `pay_pro` mặc định TẮT (thiếu = '0', chỉ tài khoản tổng bật).
+  // Tắt: bảng lương cũ (salary_configs + payroll-calc.js) chạy y như trước, không đọc bảng nào dưới đây.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS pay_profiles (          -- hồ sơ lương bổ sung của NV (bảo hiểm, thuế, ngân hàng)
+      employee_id  INTEGER PRIMARY KEY REFERENCES employees(id) ON DELETE CASCADE,
+      ins_on       INTEGER NOT NULL DEFAULT 1,         -- 1 = có đóng BHXH/BHYT/BHTN
+      ins_salary   REAL NOT NULL DEFAULT 0,            -- lương đóng BH (0 = tự tính: lương cơ bản + khoản có tick "tính vào lương đóng BH")
+      union_on     INTEGER NOT NULL DEFAULT 0,         -- 1 = đoàn viên (trừ đoàn phí 1%)
+      tax_mode     TEXT NOT NULL DEFAULT 'progressive',-- progressive (lũy tiến) | flat10 (khấu trừ 10%) | none (không tính)
+      dependents   INTEGER NOT NULL DEFAULT 0,         -- số người phụ thuộc đã đăng ký
+      bank_name    TEXT NOT NULL DEFAULT '',
+      bank_account TEXT NOT NULL DEFAULT '',
+      bank_holder  TEXT NOT NULL DEFAULT '',
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS pay_components (        -- THÀNH PHẦN LƯƠNG (phụ cấp, thưởng, khấu trừ, công thức…)
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      code         TEXT NOT NULL UNIQUE,               -- MÃ_IN_HOA dùng trong công thức
+      name         TEXT NOT NULL,
+      grp          TEXT NOT NULL DEFAULT 'Khác',
+      kind         TEXT NOT NULL DEFAULT 'income',     -- income | deduct | info
+      value_type   TEXT NOT NULL DEFAULT 'fixed',      -- fixed | prorate | per_unit | input | formula
+      amount       REAL NOT NULL DEFAULT 0,            -- số tiền mặc định (fixed / prorate / per_unit)
+      formula      TEXT NOT NULL DEFAULT '',
+      taxable      INTEGER NOT NULL DEFAULT 1,
+      tax_free_cap REAL NOT NULL DEFAULT 0,            -- phần được miễn thuế tối đa / tháng (VD ăn giữa ca)
+      ins_include  INTEGER NOT NULL DEFAULT 0,         -- 1 = cộng vào lương đóng BH (khi lương đóng BH để tự tính)
+      show         INTEGER NOT NULL DEFAULT 1,         -- hiện trên phiếu lương
+      show_zero    INTEGER NOT NULL DEFAULT 0,
+      apply_all    INTEGER NOT NULL DEFAULT 1,         -- 1 = mọi NV (trừ NV bị loại riêng) · 0 = chỉ NV được gán
+      depts        TEXT NOT NULL DEFAULT '',           -- JSON danh sách bộ phận áp dụng ('' = tất cả)
+      active       INTEGER NOT NULL DEFAULT 1,
+      sort         INTEGER NOT NULL DEFAULT 0,
+      note         TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS pay_emp_components (    -- gán / số tiền riêng của 1 NV cho 1 thành phần
+      employee_id  INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      component_id INTEGER NOT NULL REFERENCES pay_components(id) ON DELETE CASCADE,
+      amount       REAL,                               -- NULL = theo số tiền mặc định của thành phần
+      excluded     INTEGER NOT NULL DEFAULT 0,         -- 1 = NV này không được hưởng / không bị trừ khoản này
+      PRIMARY KEY (employee_id, component_id)
+    );
+    CREATE TABLE IF NOT EXISTS pay_period_items (      -- DỮ LIỆU THEO KỲ: số tiền nhập tay cho 1 NV × 1 thành phần × 1 tháng lương
+      period       TEXT NOT NULL,                      -- 'YYYY-MM'
+      employee_id  INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      component_id INTEGER NOT NULL REFERENCES pay_components(id) ON DELETE CASCADE,
+      amount       REAL NOT NULL DEFAULT 0,
+      note         TEXT NOT NULL DEFAULT '',
+      updated_by   TEXT NOT NULL DEFAULT '',
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (period, employee_id, component_id)
+    );
+    CREATE TABLE IF NOT EXISTS pay_advances (          -- TẠM ỨNG: trừ vào bảng lương của tháng period
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id  INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      period       TEXT NOT NULL,
+      adv_date     TEXT NOT NULL DEFAULT '',
+      amount       REAL NOT NULL DEFAULT 0,
+      note         TEXT NOT NULL DEFAULT '',
+      created_by   TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_payadv_period ON pay_advances(period, employee_id);
+    CREATE TABLE IF NOT EXISTS pay_templates (         -- MẪU BẢNG LƯƠNG: bộ phận áp dụng + thành phần + cột hiển thị
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT NOT NULL,
+      depts        TEXT NOT NULL DEFAULT '',           -- JSON danh sách bộ phận ('' = tất cả)
+      comp_ids     TEXT NOT NULL DEFAULT '',           -- JSON id thành phần được tính ('' = mọi thành phần đang dùng)
+      columns      TEXT NOT NULL DEFAULT '',           -- JSON [{key,label}] thứ tự cột ('' = mặc định)
+      active       INTEGER NOT NULL DEFAULT 1,
+      note         TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS pay_sheets (            -- BẢNG LƯƠNG đã lưu (nháp → chờ duyệt → đã chốt/khoá)
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      period       TEXT NOT NULL,
+      name         TEXT NOT NULL,
+      template_id  INTEGER,
+      depts        TEXT NOT NULL DEFAULT '',
+      from_date    TEXT NOT NULL DEFAULT '',
+      to_date      TEXT NOT NULL DEFAULT '',
+      status       TEXT NOT NULL DEFAULT 'draft',      -- draft | pending | locked
+      params       TEXT NOT NULL DEFAULT '',           -- thông số lúc tính (JSON) — khoá rồi thì giữ nguyên
+      totals       TEXT NOT NULL DEFAULT '',
+      columns      TEXT NOT NULL DEFAULT '',
+      published    INTEGER NOT NULL DEFAULT 0,         -- 1 = NV xem được phiếu lương trên app
+      note         TEXT NOT NULL DEFAULT '',
+      created_by   TEXT NOT NULL DEFAULT '',
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      computed_at  TEXT NOT NULL DEFAULT '',
+      sent_by      TEXT NOT NULL DEFAULT '', sent_at TEXT NOT NULL DEFAULT '',
+      locked_by    TEXT NOT NULL DEFAULT '', locked_at TEXT NOT NULL DEFAULT '',
+      reject_note  TEXT NOT NULL DEFAULT ''
+    );
+    CREATE INDEX IF NOT EXISTS idx_paysheet_period ON pay_sheets(period);
+    CREATE TABLE IF NOT EXISTS pay_sheet_rows (
+      sheet_id     INTEGER NOT NULL REFERENCES pay_sheets(id) ON DELETE CASCADE,
+      employee_id  INTEGER NOT NULL,
+      code         TEXT NOT NULL DEFAULT '',
+      full_name    TEXT NOT NULL DEFAULT '',
+      department   TEXT NOT NULL DEFAULT '',
+      position     TEXT NOT NULL DEFAULT '',
+      data         TEXT NOT NULL DEFAULT '',           -- JSON {base, slip}
+      net          REAL NOT NULL DEFAULT 0,
+      paid         INTEGER NOT NULL DEFAULT 0,
+      paid_at      TEXT NOT NULL DEFAULT '',
+      seen_at      TEXT NOT NULL DEFAULT '',
+      feedback     TEXT NOT NULL DEFAULT '',
+      feedback_at  TEXT NOT NULL DEFAULT '',
+      feedback_reply TEXT NOT NULL DEFAULT '',
+      PRIMARY KEY (sheet_id, employee_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_paysheetrow_emp ON pay_sheet_rows(employee_id);`);
+
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN
   if (getSetting('weekend_work_as_ot') == null) setSetting('weekend_work_as_ot', '1');   // đi làm ngày cuối tuần = tăng ca (8 giờ = 1 công)

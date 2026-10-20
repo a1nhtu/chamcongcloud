@@ -77,7 +77,8 @@ export function registerEmployeeRoutes(r, { need }) {
   // quyền "công ảo" chỉ hiện khi tài khoản tổng đã bật tính năng (tắt thì không ai thấy tính năng này tồn tại)
   r.get('/perm-catalog', (req, res) => res.json({ permissions: PERMISSIONS.filter(([k]) => (k !== 'audit' || getSetting('audit_enabled', '0') === '1')
     && (k !== 'hr' || getSetting('hr_enabled', '0') === '1')
-    && (k !== 'meal' || getSetting('meal_enabled', '0') === '1')) }));   // Nhân sự / Suất ăn: chỉ hiện khi tài khoản tổng đã bật phân hệ
+    && (k !== 'meal' || getSetting('meal_enabled', '0') === '1')
+    && (k !== 'pay_approve' || getSetting('pay_pro', '0') === '1')) }));   // Nhân sự / Suất ăn: chỉ hiện khi tài khoản tổng đã bật phân hệ
 
   // Đặt KIỂU CHẤM CÔNG hàng loạt: { mode: ''|'shift'|'hourly', department? | ids? } (không gửi phạm vi = tất cả NV)
   r.post('/employees/att-mode', need('employees'), (req, res) => {

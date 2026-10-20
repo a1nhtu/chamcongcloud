@@ -109,6 +109,8 @@ function showApp() {
     if (show) { b.style.display = ''; if (m.dish_choice === false && b.lastChild) b.lastChild.textContent = 'Đăng ký ăn'; }
     return show;
   }).catch(() => false);
+  // Tab "Lương" (phiếu lương) chỉ hiện khi bật Tiền lương nâng cao + cho NV xem phiếu trên app (tắt → không hiện, app như cũ)
+  api('/pay/config').then((p) => { if (p && p.enabled && $('#nav-luong')) $('#nav-luong').style.display = ''; }).catch(() => {});
   tickClock(); setInterval(tickClock, 1000);
   if (ATT_ON) renderTab('cham');
   else mealCfg.then((ok) => { if (ok) renderTab('monan'); else $('#content').innerHTML = '<div class="empty">Công ty chưa bật chức năng nào cho nhân viên trên app.</div>'; });
@@ -121,7 +123,7 @@ document.querySelectorAll('.bottom-nav button').forEach((b) =>
 function renderTab(tab) {
   currentTab = tab;
   document.querySelectorAll('.bottom-nav button').forEach((b) => b.classList.toggle('active', b.dataset.tab === tab));
-  const map = { cham: renderCham, chonca: renderChonca, monan: renderMonan, baocao: renderBaocao, dontu: renderDontu, bangcong: renderBangcong };
+  const map = { cham: renderCham, chonca: renderChonca, monan: renderMonan, baocao: renderBaocao, dontu: renderDontu, bangcong: renderBangcong, luong: renderLuong };
   (map[tab] || renderCham)();
 }
 
@@ -652,6 +654,62 @@ function showDay(d, detailEl) {
     )));
 }
 function row2(k, v) { return el('tr', {}, el('td', { style: 'color:var(--muted)' }, k), el('td', { style: 'text-align:right;font-weight:600' }, v)); }
+
+/* ---------------- Tab LƯƠNG (phiếu lương của tôi — Tiền lương nâng cao) ---------------- */
+const vnd = (n) => Math.round(+n || 0).toLocaleString('vi-VN');
+const mmyy = (p) => `${p.slice(5)}/${p.slice(0, 4)}`;
+async function renderLuong() {
+  const c = $('#content'); c.innerHTML = '<div class="empty">Đang tải…</div>';
+  let rows;
+  try { rows = (await api('/pay/slips')).rows; } catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  c.innerHTML = '';
+  if (!rows.length) { c.append(el('div', { class: 'empty' }, 'Chưa có phiếu lương nào. Công ty gửi phiếu lương sau khi chốt bảng lương.')); return; }
+  for (const s of rows) {
+    const card = el('div', { class: 'card', style: 'display:flex;align-items:center;gap:10px;cursor:pointer' },
+      el('div', { style: 'flex:1' }, el('div', { style: 'font-weight:800' }, `Tháng ${mmyy(s.period)}`), el('div', { style: 'font-size:12px;color:var(--muted)' }, s.name)),
+      el('div', { style: 'text-align:right' }, el('div', { style: 'font-size:12px;color:var(--muted)' }, 'Thực lĩnh'), el('div', { style: 'font-weight:900;font-size:17px' }, vnd(s.net) + ' đ')),
+      s.seen_at ? null : el('span', { class: 'pill', style: 'background:#fee2e2;color:#b91c1c' }, 'Mới'));
+    card.onclick = () => showSlip(s.id);
+    c.append(card);
+  }
+}
+async function showSlip(id) {
+  const c = $('#content'); c.innerHTML = '<div class="empty">Đang tải…</div>';
+  let d;
+  try { d = await api('/pay/slips/' + id); } catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  const sl = d.slip || {}, b = d.base || {}, ins = sl.ins || {};
+  const lines = (sl.lines || []).filter((l) => l.show !== 0);
+  const tr = (k, v, bold) => el('tr', bold ? { style: 'font-weight:800' } : {}, el('td', { style: bold ? '' : 'color:var(--muted)' }, k), el('td', { style: 'text-align:right;white-space:nowrap' }, v));
+  const sec = (t) => el('tr', {}, el('td', { colspan: 2, style: 'padding-top:10px;font-weight:800;color:var(--brand)' }, t));
+  const back = el('button', { class: 'btn sm ghost' }, '← Danh sách');
+  back.onclick = renderLuong;
+  const fb = el('textarea', { rows: 3, placeholder: 'Thắc mắc về phiếu lương? Ghi vào đây để gửi phòng nhân sự / kế toán…', style: 'width:100%' }, d.feedback || '');
+  const send = el('button', { class: 'btn' }, d.feedback ? 'Gửi lại phản hồi' : 'Gửi phản hồi');
+  send.onclick = async () => { try { await api(`/pay/slips/${id}/feedback`, { method: 'POST', body: { text: fb.value } }); toast('Đã gửi phản hồi', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+  c.innerHTML = '';
+  c.append(el('div', { style: 'margin-bottom:8px' }, back),
+    el('div', { class: 'card' },
+      el('div', { style: 'text-align:center;font-weight:900;font-size:17px' }, 'PHIẾU LƯƠNG THÁNG ' + mmyy(d.period)),
+      el('div', { style: 'text-align:center;font-size:12px;color:var(--muted);margin-bottom:6px' }, `${d.company || ''} · ${d.full_name} (${d.code})`),
+      el('table', { class: 'tbl' }, el('tbody', {},
+        b.hourly ? tr('Tổng giờ làm', (b.totalHours || 0) + ' giờ') : tr('Số công', String(b.workUnits || 0)),
+        !b.hourly && b.paidLeaveDays ? tr('Nghỉ có lương', b.paidLeaveDays + ' ngày') : null,
+        b.otHoursTotal ? tr('Giờ tăng ca', b.otHoursTotal + ' giờ') : null,
+        sec('Thu nhập'),
+        ...lines.filter((l) => l.kind === 'income').map((l) => tr(l.name, vnd(l.amount))),
+        tr('Tổng thu nhập', vnd(sl.income), true),
+        sec('Các khoản trừ'),
+        ins.emp_total ? tr('Bảo hiểm (BHXH, BHYT, BHTN)', vnd(ins.emp_total)) : null,
+        ins.union_fee ? tr('Đoàn phí công đoàn', vnd(ins.union_fee)) : null,
+        sl.tax ? tr('Thuế TNCN', vnd(sl.tax)) : null,
+        ...lines.filter((l) => l.kind === 'deduct').map((l) => tr(l.name, vnd(l.amount))),
+        sl.advance ? tr('Tạm ứng', vnd(sl.advance)) : null,
+        tr('Tổng khấu trừ', vnd(sl.total_deduct), true))),
+      el('div', { style: 'display:flex;justify-content:space-between;margin-top:10px;padding:10px 12px;background:#eef2ff;border-radius:10px;font-weight:900;font-size:18px' }, el('span', {}, 'THỰC LĨNH'), el('span', {}, vnd(sl.net) + ' đ'))),
+    el('div', { class: 'card' }, el('div', { style: 'font-weight:700;margin-bottom:6px' }, '💬 Phản hồi'),
+      d.feedback_reply ? el('div', { style: 'background:#ecfdf5;color:#065f46;padding:8px;border-radius:8px;margin-bottom:8px;font-size:14px' }, '↪ Trả lời: ' + d.feedback_reply) : null,
+      fb, el('div', { style: 'margin-top:6px' }, send)));
+}
 
 /* PWA service worker */
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
