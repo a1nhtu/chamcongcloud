@@ -1,10 +1,9 @@
 // Nhóm route CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / Ronald Jack Pro) — xem server/legacy-import.js.
-// Bước 1: chọn file (.mdb trên máy chủ, hoặc tải file lên) → đọc + trả bản XEM TRƯỚC (giữ dữ liệu đã đọc 30 phút theo mã token).
+// Bước 1: chọn phần mềm (On39 / Ronald Jack) + tải file .mdb lên → đọc + trả bản XEM TRƯỚC (giữ dữ liệu đã đọc 30 phút theo mã token).
 // Bước 2: chọn phần cần chuyển + khoảng ngày → chạy NỀN (job), giao diện hỏi tiến độ tới khi xong.
 import express from 'express';
-import { existsSync, statSync, readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { readLegacy, summarize, applyLegacy, LEGACY_PATHS } from '../../legacy-import.js';
+import { readLegacy, summarize, applyLegacy } from '../../legacy-import.js';
 
 const cache = new Map();   // token → { data, summary, at }
 const jobs = new Map();    // id → { state: run|done|err, pct, msg, result }
@@ -18,32 +17,13 @@ function keep(data) {
   cache.set(token, { data, summary, at: Date.now() });
   return { token, summary };
 }
-const isMdb = (p) => /\.(mdb|accdb)$/i.test(p || '');
 
 export function registerLegacyImportRoutes(r, { need }) {
-  // File dữ liệu của phần mềm cũ có sẵn trên máy chủ (cài chung máy) — chỗ cài mặc định
-  r.get('/legacy/detect', need('devices'), (req, res) => {
-    const files = [];
-    for (const p of LEGACY_PATHS) {
-      try { if (existsSync(p)) { const s = statSync(p); files.push({ path: p, size: s.size, mtime: s.mtime.toISOString(), kind: /RJData/i.test(p) ? 'rj' : 'on39' }); } } catch {}
-    }
-    res.json({ files });
-  });
-
-  // Đọc file theo đường dẫn trên máy chủ: body { path, password }
-  r.post('/legacy/parse-path', need('devices'), (req, res) => {
-    const p = String(req.body?.path || '').trim().replace(/^"|"$/g, '');
-    if (!isMdb(p)) return res.status(400).json({ error: 'Đường dẫn phải là file .mdb (VD C:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb)' });
-    if (!existsSync(p)) return res.status(400).json({ error: 'Không thấy file trên máy chủ: ' + p });
-    try { res.json({ ok: true, ...keep(readLegacy(readFileSync(p), String(req.body?.password || ''))) }); }
-    catch (e) { res.status(400).json({ error: e.message }); }
-  });
-
-  // Tải file lên (máy chủ là VPS / khác máy với phần mềm cũ): thân yêu cầu = nội dung file; ?password=
+  // Tải file lên: thân yêu cầu = nội dung file; ?kind=on39|rj (phần mềm đã chọn) &password=
   r.post('/legacy/parse-upload', need('devices'), express.raw({ type: () => true, limit: '1024mb' }), (req, res) => {
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length < 4096) return res.status(400).json({ error: 'File rỗng hoặc không đọc được' });
-    try { res.json({ ok: true, ...keep(readLegacy(buf, String(req.query.password || ''))) }); }
+    try { res.json({ ok: true, ...keep(readLegacy(buf, String(req.query.password || ''), String(req.query.kind || ''))) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
 

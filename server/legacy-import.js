@@ -13,15 +13,6 @@ import { defaultPasswordHash } from './auth.js';
 
 export const LEGACY_LABEL = { on39: 'Wise Eye On39', rj: 'Ronald Jack Pro' };
 
-// Chỗ cài mặc định của 2 phần mềm (máy chủ Digiplus cài chung máy với phần mềm cũ thì bấm chọn luôn, khỏi tải file lên)
-export const LEGACY_PATHS = [
-  'C:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb',
-  'C:\\Program Files (x86)\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb',
-  'C:\\Program Files\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb',
-  'C:\\Program Files (x86)\\RonaldJackVN\\Ronald Jack Pro\\Data\\RJData.mdb',
-  'C:\\Program Files\\RonaldJackVN\\Ronald Jack Pro\\Data\\RJData.mdb',
-];
-
 /* ------------------------------ đọc file ------------------------------ */
 // mdb-reader trả ngày giờ Access thành Date "UTC" mang đúng giờ đồng hồ ghi trong file (= giờ VN) → lấy thẳng các số
 const okDate = (d) => d instanceof Date && !isNaN(d) && d.getUTCFullYear() > 1900;
@@ -146,8 +137,11 @@ export function normalizeRj(table) {
     machines: mach.map((m) => ({ serial: serialOf.get(m.IDMCC), name: str(m.TenMCC) })) };
 }
 
-export function readLegacy(buf, password = '') {
+// expect: 'on39' | 'rj' = phần mềm người dùng đã chọn → file của phần mềm kia thì báo chọn lại (không đọc nhầm)
+export function readLegacy(buf, password = '', expect = '') {
   const { kind, table } = openMdb(buf, password);
+  if (expect && LEGACY_LABEL[expect] && expect !== kind)
+    throw new Error(`File này là dữ liệu ${LEGACY_LABEL[kind]}, không phải ${LEGACY_LABEL[expect]} — chọn lại đúng phần mềm hoặc đúng file`);
   return kind === 'on39' ? normalizeOn39(table) : normalizeRj(table);
 }
 

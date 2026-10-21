@@ -75,7 +75,6 @@ const LABELS = {
   'DELETE /devices/:id': 'Xóa máy chấm công khỏi danh sách',
   'POST /devices/rebuild': 'Dựng lại ngày công từ máy',
   'POST /devices/import-usb': 'Nhập dữ liệu chấm công từ USB',
-  'POST /legacy/parse-path': 'Chuyển dữ liệu phần mềm cũ: đọc file .mdb',
   'POST /legacy/parse-upload': 'Chuyển dữ liệu phần mềm cũ: tải file .mdb lên',
   'POST /legacy/apply': 'Chuyển dữ liệu từ Wise Eye On39 / Ronald Jack Pro',
   'POST /devices/:id/query-users': 'Tải nhân viên từ máy',

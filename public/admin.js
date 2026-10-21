@@ -6362,50 +6362,63 @@ function usbImportModal() {
 }
 
 // CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / Ronald Jack Pro, file .mdb): bộ phận + nhân viên + lượt chấm.
-// Bước 1 chọn file (có sẵn trên máy chủ / gõ đường dẫn / tải lên) → bước 2 xem trước + chọn phần cần chuyển → bước 3 chạy nền, hiện tiến độ.
+// Bước 1 chọn phần mềm cũ (On39 có mật khẩu file / Ronald Jack không) + chọn file .mdb → bước 2 xem trước + chọn phần cần chuyển → bước 3 chạy nền, hiện tiến độ.
 function legacyImportModal() {
-  const pass = el('input', { type: 'text', placeholder: 'Để trống nếu không có', autocomplete: 'off', style: 'margin:0;max-width:220px' });
+  const SOFT = {
+    on39: { name: 'Wise Eye On39', path: 'C:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb', pass: '12112009' },
+    rj: { name: 'Ronald Jack Pro', path: 'C:\\Program Files (x86)\\RonaldJackVN\\Ronald Jack Pro\\Data\\RJData.mdb', pass: '' },
+  };
+  let kind = '';
   const status = el('div', { class: 'map-hint', style: 'min-height:18px;margin:10px 0 0' });
   const box = el('div');
   const busy = (msg) => { status.textContent = msg; status.style.color = ''; };
   const fail = (msg) => { status.textContent = '⚠ ' + msg; status.style.color = '#b91c1c'; };
-  const parsed = (r) => (r.ok ? preview(r) : fail(r.error || 'Không đọc được file'));
-  const readPath = async (path) => {
-    if (!path) return fail('Chưa có đường dẫn file');
-    busy('Đang đọc file ' + path + ' …');
-    try { parsed(await api('/admin/legacy/parse-path', { method: 'POST', body: { path, password: pass.value.trim() } })); } catch (e) { fail(e.message); }
-  };
+  const pass = el('input', { type: 'text', autocomplete: 'off', style: 'margin:0;max-width:200px' });
   const upload = async (file) => {
     if (!file) return;
-    if (!/\.(mdb|accdb)$/i.test(file.name)) return fail('Chọn file .mdb của phần mềm cũ');
-    busy(`Đang tải lên ${file.name} (${fmtSize(file.size)}) và đọc dữ liệu…`);
+    if (!/\.(mdb|accdb)$/i.test(file.name)) return fail('Chọn file .mdb của ' + SOFT[kind].name);
+    busy(`Đang đọc ${file.name} (${fmtSize(file.size)})…`);
     try {
-      const res = await fetch('/api/admin/legacy/parse-upload?password=' + encodeURIComponent(pass.value.trim()), {
+      const q = `?kind=${kind}&password=${encodeURIComponent(kind === 'on39' ? pass.value.trim() : '')}`;
+      const res = await fetch('/api/admin/legacy/parse-upload' + q, {
         method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'X-Device-Id': deviceId(), 'Content-Type': 'application/octet-stream' }, body: file });
-      parsed(await res.json().catch(() => ({ error: 'Máy chủ trả lỗi ' + res.status })));
+      const r = await res.json().catch(() => ({ error: 'Máy chủ trả lỗi ' + res.status }));
+      if (r.ok) preview(r); else fail(r.error || 'Không đọc được file');
     } catch (e) { fail(e.message); }
+    finally { fileI.value = ''; }   // chọn lại đúng file đó vẫn đọc lại được
   };
-  const pathI = el('input', { type: 'text', placeholder: 'VD D:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb', style: 'margin:0;flex:1;min-width:240px' });
-  const fileI = el('input', { type: 'file', accept: '.mdb,.accdb', style: 'display:block;margin-top:6px' });
+  const fileI = el('input', { type: 'file', accept: '.mdb,.accdb', style: 'display:none' });
   fileI.onchange = () => upload(fileI.files[0]);
-  const found = el('div', { class: 'map-hint', style: 'margin:6px 0 0' }, 'Đang tìm trên máy chủ…');
-  const sec = (title, ...kids) => el('div', { style: 'margin:14px 0 0;padding-top:10px;border-top:1px solid #f0efec' }, el('div', { style: 'font-weight:700' }, title), ...kids);
+  const pickBtn = el('button', { class: 'btn' }, '📂 Chọn file .mdb…');
+  pickBtn.onclick = () => fileI.click();
+  const where = el('div', { class: 'map-hint', style: 'margin:4px 0 0' });
+  const passRow = el('div', { style: 'display:flex;gap:8px;align-items:center;margin:10px 0 0;flex-wrap:wrap' }, el('span', {}, 'Mật khẩu file Access:'), pass);
+  const fileSec = el('div', { style: 'display:none;margin:14px 0 0;padding-top:10px;border-top:1px solid #f0efec' },
+    el('div', { style: 'font-weight:700' }, '2) Chọn file dữ liệu'), where, passRow, el('div', { style: 'margin-top:12px' }, pickBtn, fileI));
+  // 2 ô chọn phần mềm: bấm ô nào thì hiện đúng chỗ để file + mật khẩu của phần mềm đó
+  const cards = {};
+  const choose = (k) => {
+    kind = k; status.textContent = '';
+    for (const [kk, c] of Object.entries(cards)) { c.style.borderColor = kk === k ? 'var(--brand, #ea580c)' : '#e5e7eb'; c.style.background = kk === k ? '#fff7ed' : '#fff'; }
+    where.replaceChildren('File dữ liệu thường nằm ở: ', el('code', { style: 'font-size:12px' }, SOFT[k].path),
+      k === 'on39' ? ' (bản dùng SQL Server thì không có file .mdb)' : '');
+    pass.value = SOFT[k].pass;
+    passRow.style.display = k === 'on39' ? 'flex' : 'none';
+    fileSec.style.display = '';
+    pickBtn.textContent = '📂 Chọn file .mdb của ' + SOFT[k].name + '…';
+  };
+  for (const [k, s] of Object.entries(SOFT)) {
+    cards[k] = el('button', { type: 'button', style: 'flex:1;min-width:180px;padding:14px;border:2px solid #e5e7eb;border-radius:12px;background:#fff;color:inherit;cursor:pointer;text-align:left' },
+      el('div', { style: 'font-weight:700;font-size:15px' }, s.name), el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, k === 'on39' ? 'File có mật khẩu' : 'File không có mật khẩu'));
+    cards[k].onclick = () => choose(k);
+  }
   const step1 = [
-    el('div', { class: 'map-hint' }, 'Lấy BỘ PHẬN + NHÂN VIÊN + DỮ LIỆU CHẤM CÔNG từ phần mềm Wise Eye On39 hoặc Ronald Jack Pro sang Digiplus. Phần mềm cũ không bị thay đổi gì. Nhập lại nhiều lần cũng không bị trùng.'),
-    sec('1) File dữ liệu có sẵn trên máy này', found,
-      el('div', { style: 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap' }, pathI, btnSm('Đọc file', () => readPath(pathI.value.trim().replace(/^"|"$/g, '')), 'ghost'))),
-    sec('2) Hoặc tải file .mdb lên', el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, 'Chép file từ máy cài phần mềm cũ: On39 ở C:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb · Ronald Jack ở C:\\Program Files (x86)\\RonaldJackVN\\Ronald Jack Pro\\Data\\RJData.mdb'), fileI),
-    el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap' }, el('span', {}, 'Mật khẩu file Access:'), pass,
-      el('span', { class: 'map-hint', style: 'margin:0' }, 'On39 thường là 12112009, Ronald Jack không có')),
+    el('div', { class: 'map-hint' }, 'Lấy BỘ PHẬN + NHÂN VIÊN + DỮ LIỆU CHẤM CÔNG từ phần mềm cũ sang Digiplus. Phần mềm cũ không bị thay đổi gì. Nhập lại nhiều lần cũng không bị trùng.'),
+    el('div', { style: 'margin:14px 0 0;font-weight:700' }, '1) Chọn phần mềm đang dùng'),
+    el('div', { style: 'display:flex;gap:10px;margin-top:8px;flex-wrap:wrap' }, cards.on39, cards.rj),
+    fileSec,
   ];
   box.append(...step1);
-  api('/admin/legacy/detect').then((r) => {
-    found.innerHTML = '';
-    if (!r.files.length) return found.append('Không thấy file ở chỗ cài mặc định — gõ đường dẫn bên dưới hoặc tải file lên.');
-    for (const f of r.files) found.append(el('div', { style: 'display:flex;gap:10px;align-items:center;margin:4px 0;flex-wrap:wrap' },
-      el('b', {}, f.kind === 'rj' ? 'Ronald Jack Pro' : 'Wise Eye On39'), el('code', { style: 'font-size:12px' }, f.path),
-      el('span', {}, `${fmtSize(f.size)} · sửa ${new Date(f.mtime).toLocaleDateString('vi')}`), btnSm('Đọc file này', () => readPath(f.path))));
-  }).catch(() => { found.textContent = 'Không dò được — gõ đường dẫn hoặc tải file lên.'; });
   openModal('Chuyển dữ liệu từ Wise Eye On39 / Ronald Jack Pro', [box, status], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 
   // Bước 2: XEM TRƯỚC + chọn phần cần chuyển
