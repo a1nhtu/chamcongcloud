@@ -21,6 +21,7 @@ import { registerHrDocRoutes } from './admin/hr-docs.js';
 import { registerHrImportRoutes } from './admin/hr-import.js';
 import { registerMealRoutes } from './admin/meal.js';
 import { registerPayProRoutes } from './admin/payroll-pro.js';
+import { registerLegacyImportRoutes } from './admin/legacy-import.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
@@ -41,6 +42,7 @@ registerAssignmentRoutes(r, { need });   // phân ca (ngày/khoảng/Excel)
 registerAttendanceRoutes(r, { need });   // tính lại công, lưới, sửa giờ, xoá khoảng
 registerBackupRoutes(r, { need });       // sao lưu / phục hồi
 registerDeviceRoutes(r, { need });       // máy chấm công
+registerLegacyImportRoutes(r, { need }); // chuyển dữ liệu từ Wise Eye On39 / Ronald Jack Pro (.mdb)
 registerPushRoutes(r);                   // thông báo đẩy
 registerLogRoutes(r, { need, adminOnly });          // nhật ký thao tác
 registerAuditLimitRoutes(r, { need });   // công ảo: tăng ca tối đa / ngày 3 mức

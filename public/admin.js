@@ -1,5 +1,5 @@
 import {
-  api, getToken, setToken, clearToken, toast, $, el,
+  api, getToken, setToken, clearToken, toast, $, el, deviceId,
   isoToHM, isoToHMS, humanMinutes, humanDistance, todayMonth, ensureLicensed,
 } from '/common.js';
 
@@ -5778,6 +5778,8 @@ async function pageDevices() {
   resyncBtn.className = 'btn';   // nút chính (không phải kiểu mờ)
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
   usbBtn.onclick = usbImportModal;
+  const legacyBtn = el('button', { class: 'btn', title: 'Lấy bộ phận + nhân viên + dữ liệu chấm công từ Wise Eye On39 / Ronald Jack Pro (file .mdb)' }, '⇄ Chuyển từ On39 / Ronald Jack');
+  legacyBtn.onclick = legacyImportModal;
   const delAllBtn = el('button', { class: 'btn ghost', title: 'Xoá nhân viên nghỉ việc trên tất cả máy chấm công 1 lần' }, '🗑 Xóa NV trên tất cả máy');
   delAllBtn.onclick = () => deleteUsersAllModal(pageDevices);
   const tcpBtn = d.tcp_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy TCP/IP') : null;
@@ -5809,7 +5811,7 @@ async function pageDevices() {
     return on.length ? '— Bật: ' + on.join(' · ') : '— Đang tắt hết';
   }, true);
   foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
-  setMain(head('Máy chấm công', tcpBtn, hikBtn, usbBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', tcpBtn, hikBtn, usbBtn, legacyBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
 // Thanh vàng "Số ID nghi trùng" (null nếu không có)
@@ -6357,6 +6359,118 @@ function usbImportModal() {
       el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, 'File danh sách NV: mỗi dòng "Số ID [tab/phẩy] Tên nhân viên".'),
       usrFile),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+}
+
+// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / Ronald Jack Pro, file .mdb): bộ phận + nhân viên + lượt chấm.
+// Bước 1 chọn file (có sẵn trên máy chủ / gõ đường dẫn / tải lên) → bước 2 xem trước + chọn phần cần chuyển → bước 3 chạy nền, hiện tiến độ.
+function legacyImportModal() {
+  const pass = el('input', { type: 'text', placeholder: 'Để trống nếu không có', autocomplete: 'off', style: 'margin:0;max-width:220px' });
+  const status = el('div', { class: 'map-hint', style: 'min-height:18px;margin:10px 0 0' });
+  const box = el('div');
+  const busy = (msg) => { status.textContent = msg; status.style.color = ''; };
+  const fail = (msg) => { status.textContent = '⚠ ' + msg; status.style.color = '#b91c1c'; };
+  const parsed = (r) => (r.ok ? preview(r) : fail(r.error || 'Không đọc được file'));
+  const readPath = async (path) => {
+    if (!path) return fail('Chưa có đường dẫn file');
+    busy('Đang đọc file ' + path + ' …');
+    try { parsed(await api('/admin/legacy/parse-path', { method: 'POST', body: { path, password: pass.value.trim() } })); } catch (e) { fail(e.message); }
+  };
+  const upload = async (file) => {
+    if (!file) return;
+    if (!/\.(mdb|accdb)$/i.test(file.name)) return fail('Chọn file .mdb của phần mềm cũ');
+    busy(`Đang tải lên ${file.name} (${fmtSize(file.size)}) và đọc dữ liệu…`);
+    try {
+      const res = await fetch('/api/admin/legacy/parse-upload?password=' + encodeURIComponent(pass.value.trim()), {
+        method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'X-Device-Id': deviceId(), 'Content-Type': 'application/octet-stream' }, body: file });
+      parsed(await res.json().catch(() => ({ error: 'Máy chủ trả lỗi ' + res.status })));
+    } catch (e) { fail(e.message); }
+  };
+  const pathI = el('input', { type: 'text', placeholder: 'VD D:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb', style: 'margin:0;flex:1;min-width:240px' });
+  const fileI = el('input', { type: 'file', accept: '.mdb,.accdb', style: 'display:block;margin-top:6px' });
+  fileI.onchange = () => upload(fileI.files[0]);
+  const found = el('div', { class: 'map-hint', style: 'margin:6px 0 0' }, 'Đang tìm trên máy chủ…');
+  const sec = (title, ...kids) => el('div', { style: 'margin:14px 0 0;padding-top:10px;border-top:1px solid #f0efec' }, el('div', { style: 'font-weight:700' }, title), ...kids);
+  const step1 = [
+    el('div', { class: 'map-hint' }, 'Lấy BỘ PHẬN + NHÂN VIÊN + DỮ LIỆU CHẤM CÔNG từ phần mềm Wise Eye On39 hoặc Ronald Jack Pro sang Digiplus. Phần mềm cũ không bị thay đổi gì. Nhập lại nhiều lần cũng không bị trùng.'),
+    sec('1) File dữ liệu có sẵn trên máy này', found,
+      el('div', { style: 'display:flex;gap:8px;margin-top:8px;flex-wrap:wrap' }, pathI, btnSm('Đọc file', () => readPath(pathI.value.trim().replace(/^"|"$/g, '')), 'ghost'))),
+    sec('2) Hoặc tải file .mdb lên', el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, 'Chép file từ máy cài phần mềm cũ: On39 ở C:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb · Ronald Jack ở C:\\Program Files (x86)\\RonaldJackVN\\Ronald Jack Pro\\Data\\RJData.mdb'), fileI),
+    el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:14px;flex-wrap:wrap' }, el('span', {}, 'Mật khẩu file Access:'), pass,
+      el('span', { class: 'map-hint', style: 'margin:0' }, 'On39 thường là 12112009, Ronald Jack không có')),
+  ];
+  box.append(...step1);
+  api('/admin/legacy/detect').then((r) => {
+    found.innerHTML = '';
+    if (!r.files.length) return found.append('Không thấy file ở chỗ cài mặc định — gõ đường dẫn bên dưới hoặc tải file lên.');
+    for (const f of r.files) found.append(el('div', { style: 'display:flex;gap:10px;align-items:center;margin:4px 0;flex-wrap:wrap' },
+      el('b', {}, f.kind === 'rj' ? 'Ronald Jack Pro' : 'Wise Eye On39'), el('code', { style: 'font-size:12px' }, f.path),
+      el('span', {}, `${fmtSize(f.size)} · sửa ${new Date(f.mtime).toLocaleDateString('vi')}`), btnSm('Đọc file này', () => readPath(f.path))));
+  }).catch(() => { found.textContent = 'Không dò được — gõ đường dẫn hoặc tải file lên.'; });
+  openModal('Chuyển dữ liệu từ Wise Eye On39 / Ronald Jack Pro', [box, status], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+
+  // Bước 2: XEM TRƯỚC + chọn phần cần chuyển
+  function preview({ token, summary: s }) {
+    status.textContent = '';
+    const chk = (on, label, hint) => {
+      const c = el('input', { type: 'checkbox', style: 'width:auto;margin:3px 0 0;flex:none', ...(on ? { checked: '' } : {}) });
+      return [c, el('label', { style: 'display:flex;gap:10px;align-items:flex-start;margin:10px 0;cursor:pointer;font-weight:400' }, c,
+        el('div', { style: 'flex:1' }, el('b', {}, label), hint ? el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, hint) : ''))];
+    };
+    const [cD, lD] = chk(s.depts > 0, `Bộ phận: ${s.depts} (${s.depts_new} chưa có trong Digiplus)`, s.dept_names.join(' · ') || 'Phần mềm cũ chưa khai báo bộ phận');
+    const [cE, lE] = chk(s.emps > 0, `Nhân viên: ${s.emps} (${s.emps_new} NV mới · ${s.emps_existing} đã có)`,
+      'NV đã có khớp theo Số ID máy (hoặc mã NV) → chỉ điền ô đang trống, không tạo trùng. NV mới mật khẩu app mặc định 123456.' + (s.emps_no_dept ? ` ${s.emps_no_dept} NV chưa có bộ phận.` : ''));
+    const dmy = (d) => d.split('-').reverse().join('/');
+    const [cP, lP] = chk(s.punches > 0, `Dữ liệu chấm công: ${s.punches.toLocaleString('vi')} lượt` + (s.first_date ? ` (từ ${dmy(s.first_date)} đến ${dmy(s.last_date)})` : ''),
+      'Lượt trùng tự bỏ qua; công các ngày được tính lại theo ca đang cài ở Digiplus.');
+    const [cO, lO] = chk(false, 'Ghi đè thông tin NV đã có', 'Lấy tên, bộ phận, chức danh, SĐT, ngày vào làm theo phần mềm cũ (mặc định chỉ điền ô trống).');
+    const fromI = el('input', { type: 'date', value: s.first_date, style: 'margin:0;width:auto' }), toI = el('input', { type: 'date', value: s.last_date, style: 'margin:0;width:auto' });
+    const range = el('div', { style: 'display:flex;gap:8px;align-items:center;margin:0 0 6px 24px;flex-wrap:wrap;font-size:13px' }, el('span', {}, 'Chỉ lấy từ ngày'), fromI, el('span', {}, 'đến'), toI);
+    cP.onchange = () => { range.style.display = cP.checked ? 'flex' : 'none'; };
+    cP.onchange();
+    const go = el('button', { class: 'btn' }, '⇄ Chuyển dữ liệu');
+    go.onclick = async () => {
+      if (!cD.checked && !cE.checked && !cP.checked) return toast('Chưa chọn phần nào để chuyển', 'err');
+      if (cP.checked && fromI.value && toI.value && toI.value < fromI.value) return toast('Khoảng ngày không hợp lệ', 'err');
+      go.disabled = true;
+      try {
+        const r = await api('/admin/legacy/apply', { method: 'POST', body: { token, depts: cD.checked, emps: cE.checked, punches: cP.checked, overwrite: cO.checked, from: fromI.value, to: toI.value } });
+        run(r.job);
+      } catch (e) { go.disabled = false; toast(e.message, 'err'); }
+    };
+    const back = btnSm('← Chọn file khác', () => { box.innerHTML = ''; box.append(...step1); $('#modal .m-foot').replaceChildren(el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')); }, 'ghost');
+    box.innerHTML = '';
+    box.append(
+      el('div', { class: 'panel', style: 'padding:10px 14px;margin:0 0 10px;background:#f8fafc' },
+        el('div', {}, el('b', {}, s.label), s.company ? ' · ' + s.company : ''),
+        s.machines.length ? el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Máy chấm công: ' + s.machines.map((m) => `${m.name || 'Máy'} (${m.serial})`).join(' · ')) : ''),
+      lD, lE, lP, range, lO, back);
+    $('#modal .m-foot').replaceChildren(el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go);
+  }
+
+  // Bước 3: chạy nền — hỏi tiến độ tới khi xong
+  function run(job) {
+    const bar = el('div', { class: 'xp-bar' }, el('i', {}));
+    const pct = el('b', {}, '0%'), msg = el('div', { class: 'map-hint', style: 'margin:0' }, 'Bắt đầu…');
+    box.innerHTML = '';
+    box.append(el('div', { style: 'display:flex;justify-content:space-between;gap:10px' }, el('span', {}, 'Đang chuyển dữ liệu — đóng hộp này máy chủ vẫn chạy tiếp'), pct), bar, msg);
+    $('#modal .m-foot').replaceChildren(el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'));
+    const t0 = Date.now();
+    const poll = async () => {
+      let j;
+      try { j = await api('/admin/legacy/job/' + job); } catch (e) { msg.textContent = e.message; return setTimeout(poll, 1500); }
+      bar.firstChild.style.width = j.pct + '%'; pct.textContent = j.pct + '%';
+      msg.textContent = `${j.msg} · ${Math.round((Date.now() - t0) / 1000)} giây`;
+      if (j.state === 'run') return setTimeout(poll, 700);
+      if (j.state === 'err') { msg.textContent = '⚠ Lỗi: ' + j.msg; msg.style.color = '#b91c1c'; return; }
+      const x = j.result;
+      const line = `Đã chuyển từ ${x.label}: ${x.depts_created} bộ phận mới · ${x.emps_created} NV mới, ${x.emps_updated} NV cập nhật`
+        + (x.emps_linked ? `, ${x.emps_linked} NV gắn Số ID` : '') + ` · ${x.punches_new.toLocaleString('vi')} lượt chấm mới / ${x.punches_read.toLocaleString('vi')} lượt đọc được`;
+      box.append(el('div', { class: 'panel', style: 'padding:10px 14px;margin:12px 0 0;border-color:#86efac;background:#f0fdf4' }, '✅ ' + line,
+        el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Kiểm tra lại ở trang Nhân viên (bộ phận, Số ID) và Tính công. Nhớ khai báo ca / lịch trình cho NV mới để tính công đúng.')));
+      toast('Chuyển dữ liệu xong', 'ok');
+    };
+    poll();
+  }
 }
 
 // Xóa dữ liệu trên máy chấm công (gửi lệnh ADMS) + xóa chấm công trong phần mềm theo ngày
