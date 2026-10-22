@@ -4,7 +4,7 @@
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
 import { guardIncoming } from '../pin-guard.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries } from '../device-sync.js';
 import { vnDateStr } from '../util.js';
 
 const r = Router();
@@ -143,6 +143,7 @@ function handleGetRequest(req, res) {
   const sn = req.query.SN || req.query.sn || '';
   seenDevice(sn, clientIp(req));
   if (enabled() && isActive(sn)) {
+    try { resendLostAttlogQueries(sn); } catch (e) { console.error('[device] gửi lại lệnh tải log lỗi:', e.message); }
     try { const cmd = nextCommand(sn); if (cmd) return res.type('text/plain').send(cmd); }
     catch (e) { console.error('[device] getrequest lỗi:', e.message); }
   }

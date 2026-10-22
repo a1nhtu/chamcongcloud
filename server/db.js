@@ -738,6 +738,7 @@ function migrateColumns() {
   add('push_device_commands', 'bio_type', 'INTEGER');
   add('push_device_commands', 'idx',      'INTEGER');
   add('push_device_commands', 'mkind',    "TEXT DEFAULT ''");   // 'user' | 'bio' | 'photo' (mirror khi ack OK)
+  add('push_device_commands', 'resend',   'INTEGER DEFAULT 0'); // số lần đã gửi lại lệnh tải log máy không báo nhận
   // Index khớp NV theo Số ID máy
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_emp_device_pin ON employees(device_pin)'); } catch {}
 

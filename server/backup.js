@@ -128,7 +128,8 @@ export function maybeAutoBackup() {
   if (getSetting('backup_enabled', '1') !== '1') return;
   const hour = parseInt(getSetting('backup_hour', '2'), 10);
   const p = vnParts();
-  if (p.hour !== hour) return;
+  // Từ giờ hẹn trở đi trong ngày (không chỉ đúng giờ hẹn): máy tính văn phòng NGỦ lúc 2h sáng thì thức dậy sao lưu bù
+  if (p.hour < hour) return;
   if (getSetting('backup_last_date', '') === p.date) return; // đã backup hôm nay
   try {
     doBackup('auto');

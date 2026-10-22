@@ -193,7 +193,7 @@ export function storeTemplates(serial, table, rawBody) {
 // Xếp 1 lệnh xuống máy đích (chống trùng: bỏ qua nếu đã có lệnh y hệt đang chờ gửi).
 // meta = { pin, bio_type, idx, mkind } → để khi máy XÁC NHẬN (ack OK) mới cộng số đếm (mirror).
 export function queueCmd(serial, content, meta = {}) {
-  const dup = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND content=? AND trans_time IS NULL").get(serial, content);
+  const dup = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND content=? AND trans_time IS NULL AND response_at IS NULL").get(serial, content);
   if (dup) return;
   db.prepare('INSERT INTO push_device_commands(serial,content,pin,bio_type,idx,mkind) VALUES(?,?,?,?,?,?)')
     .run(serial, content, meta.pin ?? null, meta.bio_type ?? null, meta.idx ?? null, meta.mkind ?? null);
@@ -252,6 +252,14 @@ export function queryDeviceAttlog(serial, from, to) {
   const end = `${to} 23:59:59`;
   queueCmd(serial, `DATA QUERY ATTLOG StartTime=${start}\tEndTime=${end}`);
   return 1;
+}
+// Lệnh tải log ĐÃ GỬI mà máy KHÔNG báo kết quả quá 5 phút (máy tính vừa ngủ dậy / mạng chập: lệnh lạc giữa đường,
+// máy không chạy) → đưa về hàng chờ gửi lại, tối đa 3 lần. Không gửi lại thì lượt quẹt lúc mất liên lạc mất luôn.
+// Lượt máy gửi trùng không sao (UNIQUE serial+pin+punch_at). Chỉ xét lệnh trong 1 ngày gần đây.
+export function resendLostAttlogQueries(serial) {
+  return db.prepare(`UPDATE push_device_commands SET trans_time=NULL, resend=resend+1
+    WHERE serial=? AND content LIKE 'DATA QUERY ATTLOG%' AND response_at IS NULL AND resend < 3
+      AND trans_time < datetime('now','-5 minutes') AND trans_time > datetime('now','-1 day')`).run(serial).changes;
 }
 // Kéo (tải) danh sách nhân viên + vân tay/khuôn mặt TỪ MÁY về phần mềm.
 // Gửi lệnh ADMS DATA QUERY để máy đẩy toàn bộ USERINFO + FINGERTMP + BIODATA lên;
@@ -512,7 +520,8 @@ export function resyncNow(force = false) {
 
 // /getrequest: lấy lệnh kế tiếp cho máy (đánh dấu đã gửi). Trả 'C:<id>:<content>' hoặc ''.
 export function nextCommand(serial) {
-  const cmd = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL ORDER BY id LIMIT 1').get(serial);
+  // response_at IS NULL: lệnh chờ gửi lại mà máy báo kết quả muộn (đã chạy) thì thôi không gửi nữa
+  const cmd = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL ORDER BY id LIMIT 1').get(serial);
   if (!cmd) return '';
   db.prepare("UPDATE push_device_commands SET trans_time=datetime('now') WHERE id=?").run(cmd.id);
   return `C:${cmd.id}:${cmd.content}`;
