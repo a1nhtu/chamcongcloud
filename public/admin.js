@@ -5657,6 +5657,7 @@ async function pageDevices() {
     const keyItem = hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null;
     const doorItem = hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null;
     const pauseItem = m.active ? { group: 'Xóa / tạm dừng', label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null;
+    const schedItem = hasPerm('devices') ? { group: 'Cài đặt máy', hint: 'Máy dùng lâu dễ đơ — phần mềm tự khởi động lại máy theo giờ hẹn', label: '⏰ Hẹn giờ khởi động lại' + (m.reboot_sched ? ': ' + rebootSchedLabel(m.reboot_sched) : ''), fn: () => rebootSchedModal(m, d.rows) } : null;
     const removeItem = { danger: true, group: 'Xóa / tạm dừng', label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách? (Dữ liệu trên máy chấm công không bị ảnh hưởng)')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } };
     const moreBtn = isHik ? rowMenu([   // máy Hikvision: phần mềm kết nối vào máy (giống TCP/IP)
       { group: 'Dữ liệu từ máy', label: '📊 Thông tin & dung lượng máy', fn: () => tcpJob(m, 'info', {}, pageDevices, 'hik') },
@@ -5668,7 +5669,7 @@ async function pageDevices() {
       m.active ? { group: 'Cài đặt máy', hint: 'Mỗi lần chấm, máy gửi ngay lượt chấm về phần mềm (HTTP Listening)', label: m.hik_push_url ? '📡 Máy tự gửi lượt chấm: ĐÃ CÀI (xem / cài lại)' : '📡 Cài máy tự gửi lượt chấm về phần mềm', fn: () => hikPushModal(m, d) } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy chủ', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ máy chủ (múi giờ Việt Nam)?\nKiểm tra đồng hồ máy tính cài phần mềm đúng trước.`)) tcpJob(m, 'set-time', {}, null, 'hik'); } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}, null, 'hik'); } } : null,
-      doorItem, keyItem, pauseItem, removeItem,
+      schedItem, doorItem, keyItem, pauseItem, removeItem,
     ]) : isAi ? rowMenu([   // máy AI: gửi lệnh, máy làm khi đang kết nối
       m.active ? { group: 'Dữ liệu từ máy', label: '📊 Đọc thông tin máy', fn: () => aiCall(m, 'info') } : null,
       m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên + vân tay / khuôn mặt từ máy', fn: () => aiCall(m, 'users', {}, `Tải danh sách nhân viên + vân tay / khuôn mặt TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy gửi dần lên; chờ chút rồi bấm Làm mới.`) } : null,
@@ -5678,7 +5679,7 @@ async function pageDevices() {
       { group: 'Cài đặt máy', hint: 'Bật: NV mới khai trên phần mềm tự đẩy xuống máy này (khi bật Tự động đẩy NV)', label: (m.recv_new ?? 1) ? '📥 Nhận NV mới từ phần mềm: BẬT' : '📥 Nhận NV mới từ phần mềm: TẮT', fn: async () => {
         try { await putDev({ recv_new: !(m.recv_new ?? 1) }); toast((m.recv_new ?? 1) ? 'Máy này sẽ KHÔNG nhận NV mới từ phần mềm' : 'Máy này sẽ nhận NV mới từ phần mềm', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => aiCall(m, 'restart', {}, `Khởi động lại máy "${m.name || m.serial}"?`) } : null,
-      doorItem, keyItem,
+      schedItem, doorItem, keyItem,
       m.active ? { group: 'Bản quyền & quản trị', label: '👤 Xóa quyền quản trị', fn: () => aiCall(m, 'clear-admins', {}, `Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy).`) } : null,
       m.active ? { group: 'Xóa / tạm dừng', label: '🗑 Xóa dữ liệu trên máy', fn: () => aiClearModal(m) } : null,
       pauseItem, removeItem,
@@ -5691,6 +5692,7 @@ async function pageDevices() {
       m.active ? { group: 'Cài đặt máy', label: m.tcp_auto ? '⏱ Tắt tự động tải máy này' : '⏱ Bật tự động tải máy này', fn: async () => { try { await api(`/admin/tcp-devices/${m.id}/auto`, { method: 'PUT', body: { on: !m.tcp_auto } }); toast(m.tcp_auto ? 'Đã tắt tự động tải cho máy này' : 'Đã bật tự động tải cho máy này', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy tính', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ của máy tính cài phần mềm?\nKiểm tra đồng hồ máy tính đúng trước.`)) tcpJob(m, 'set-time', {}); } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}); } } : null,
+      schedItem,
       hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
       m.active ? { group: 'Bản quyền & quản trị', label: '👤 Xóa quyền quản trị', fn: () => { if (confirm(`Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy).`)) tcpJob(m, 'clear-admins', {}, pageDevices); } } : null,
       m.active ? { group: 'Xóa / tạm dừng', label: '🗑 Xóa dữ liệu trên máy', fn: () => tcpClearModal(m) } : null,
@@ -5711,6 +5713,7 @@ async function pageDevices() {
         try { await putDev({ pin_range: v.trim() }); toast(v.trim() ? 'Đã đặt dải Số ID ' + v.trim() : 'Đã bỏ dải Số ID', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
       false && { group: 'Cài đặt máy', hint: 'Ghép log kiểu IDM: máy số lẻ = VÀO, máy chẵn = RA', label: '🔢 Số máy (ghép log)', fn: async () => { const n = prompt('Số máy (quy tắc ghép log IDM: máy số LẺ = chấm VÀO, máy CHẴN = chấm RA).\n0 = không dùng:', m.machine_number || 0); if (n != null) { await putDev({ machine_number: parseInt(n, 10) || 0 }); toast('Đã đặt số máy', 'ok'); pageDevices(); } } },
       hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null,
+      schedItem,
       hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
       (hasPerm('devices') && m.key_ok) ? { group: 'Bản quyền & quản trị', label: '🔑 Gỡ key bản quyền máy', fn: async () => { if (confirm('Gỡ key bản quyền khỏi máy này?')) { await api('/admin/devices/' + m.id + '/key', { method: 'DELETE' }); toast('Đã gỡ key', 'ok'); pageDevices(); } } } : null,
       // Hạ quản trị trên máy về nhân viên (vd quản trị được đồng bộ từ cơ sở khác → không ai ở đây vào được menu máy)
@@ -5744,6 +5747,7 @@ async function pageDevices() {
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
       m.pin_range ? el('span', { class: 'chip', title: 'Dải Số ID của máy' }, '🔢 ' + m.pin_range) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
+      m.reboot_sched ? el('span', { class: 'chip', title: 'Tự khởi động lại theo giờ hẹn' + (m.reboot_note ? ' — lần gần nhất: ' + m.reboot_note : '') }, '⏰ ' + rebootSchedLabel(m.reboot_sched)) : '',
     ].filter(Boolean);
     const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';
     tb.append(el('tr', { class: online || direct ? '' : 'off' },
@@ -6148,6 +6152,51 @@ function tcpInfoBox(i) {
       kv('Serial', i.serial), kv('Quản trị trên máy', i.admins >= 0 ? i.admins : ''), kv('Giờ trên máy', i.time), kv('Firmware', i.firmware), kv('Nền tảng', i.platform), kv('Model', i.model), kv('MAC', i.mac), kv('Thuật toán vân tay', i.fp_version ? 'ZKFinger ' + i.fp_version : '')));
 }
 function tcpInfoModal(m) { tcpJob(m, 'info', {}, pageDevices); }
+// Lịch khởi động lại 'HH:MM|0123456' (0 = CN) → "03:00 hằng ngày" / "03:00 T2, CN" (giống schedLabel ở server/reboot-schedule.js)
+const DAY_VI = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+function rebootSchedLabel(s) {
+  const m = /^(\d{2}:\d{2})\|([0-6]+)$/.exec(s || '');
+  if (!m) return '';
+  const ds = [...new Set(m[2].split('').map(Number))];
+  return m[1] + ' ' + (ds.length === 7 ? 'hằng ngày' : [...ds.filter((x) => x).sort(), ...ds.filter((x) => !x)].map((x) => DAY_VI[x]).join(', '));
+}
+// Hẹn giờ khởi động lại máy: Tắt / Hằng ngày / Theo thứ trong tuần (+ áp cho tất cả máy)
+function rebootSchedModal(m, rows) {
+  const cur = /^(\d{2}:\d{2})\|([0-6]+)$/.exec(m.reboot_sched || '');
+  const curDays = cur ? cur[2].split('').map(Number) : [0];
+  const mode = el('select', { style: 'width:auto' },
+    el('option', { value: 'off' }, 'Tắt'), el('option', { value: 'daily' }, 'Hằng ngày'), el('option', { value: 'weekly' }, 'Theo thứ trong tuần'));
+  mode.value = !cur ? 'off' : curDays.length === 7 ? 'daily' : 'weekly';
+  const time = el('input', { type: 'time', value: cur ? cur[1] : '03:00', style: 'width:auto' });
+  const dayBoxes = [1, 2, 3, 4, 5, 6, 0].map((x) => {
+    const c = el('input', { type: 'checkbox', value: x, ...(curDays.includes(x) ? { checked: '' } : {}) });
+    return { x, c, lb: el('label', { style: 'display:inline-flex;align-items:center;gap:4px;margin:0 10px 6px 0;font-weight:500' }, c, DAY_VI[x]) };
+  });
+  const daysRow = el('div', { style: 'margin-top:4px' }, ...dayBoxes.map((b) => b.lb));
+  const timeRow = el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:10px' }, el('span', {}, 'Lúc'), time);
+  const allC = el('input', { type: 'checkbox' });
+  const others = (rows || []).length - 1;
+  const refresh = () => { timeRow.style.display = mode.value === 'off' ? 'none' : 'flex'; daysRow.style.display = mode.value === 'weekly' ? '' : 'none'; };
+  mode.onchange = refresh; refresh();
+  const save = el('button', { class: 'btn' }, 'Lưu');
+  save.onclick = async () => {
+    const days = dayBoxes.filter((b) => b.c.checked).map((b) => b.x);
+    save.disabled = true;
+    try {
+      const r = await api(`/admin/devices/${m.id}/reboot-schedule`, { method: 'PUT', body: { mode: mode.value, time: time.value, days, all: allC.checked } });
+      toast(r.sched ? `Đã hẹn khởi động lại ${r.label}${r.count > 1 ? ` cho ${r.count} máy` : ''}` : `Đã tắt hẹn giờ khởi động lại${r.count > 1 ? ` cho ${r.count} máy` : ''}`, 'ok');
+      closeModal(); pageDevices();
+    } catch (e) { toast(e.message, 'err'); save.disabled = false; }
+  };
+  openModal('⏰ Hẹn giờ khởi động lại · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint', style: 'margin-top:0' }, 'Máy chạy lâu ngày dễ đơ — khởi động lại định kỳ cho máy chạy ổn định. Máy khởi động lại mất khoảng 1 phút, trong lúc đó không chấm được → nên chọn giờ đêm / ngoài giờ làm.'),
+    el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:12px' }, el('b', {}, 'Khởi động lại'), mode),
+    timeRow, daysRow,
+    others > 0 ? el('label', { style: 'display:flex;align-items:center;gap:6px;margin-top:12px;font-weight:500' }, allC, `Áp dụng cho tất cả ${others + 1} máy`) : '',
+    m.reboot_note ? el('div', { style: 'font-size:12.5px;margin-top:10px;color:var(--muted)' }, 'Lần gần nhất: ' + m.reboot_note) : '',
+    el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Phần mềm gửi lệnh khởi động lại đúng giờ hẹn, nên máy tính cài phần mềm phải đang BẬT lúc đó (bản chạy trên VPS / máy chủ luôn bật). Máy tính tắt / ngủ qua giờ hẹn thì bỏ lượt hôm đó, KHÔNG khởi động lại bù giữa giờ làm.'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+}
 // Tìm máy chấm công trong mạng LAN (dò cổng 4370) → xem máy đang trỏ Cloud Server về đâu → 1 bấm trỏ về tên miền phần mềm này (máy tự khởi động lại)
 function lanScanModal() {
   const box = el('div', {}, loading());

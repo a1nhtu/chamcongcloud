@@ -6,6 +6,7 @@ import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
   scanLan, tcpServerInfo, tcpSetServer } from '../../zk-tcp.js';
+import { buildSched, schedLabel } from '../../reboot-schedule.js';
 import { setSetting } from '../../db.js';
 import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, guardOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
 // Máy hãng khác (công tắc riêng, mặc định tắt): máy AI tự nối về qua WebSocket · máy Hikvision phần mềm gọi ISAPI vào máy
@@ -138,6 +139,22 @@ export function registerDeviceRoutes(r, { need }) {
     if (!d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước rồi mới đồng bộ giờ được.' });
     rebootDevice(d.serial);
     res.json({ ok: true, msg: 'Đã gửi lệnh. Máy sẽ khởi động lại (khoảng 30 giây) rồi tự lấy giờ theo máy chủ.' });
+  });
+  // Hẹn giờ khởi động lại máy (server/reboot-schedule.js). body { mode: 'off'|'daily'|'weekly', time: 'HH:MM', days: [0..6], all }
+  // all = áp cho mọi máy trong danh sách. Lưu lại thì xoá mốc "đã khởi động lại hôm nay" → giờ mới trong hôm nay vẫn chạy.
+  r.put('/devices/:id/reboot-schedule', need('devices'), (req, res) => {
+    const b = req.body || {};
+    const d = db.prepare('SELECT id FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    let sched = '';
+    if (b.mode !== 'off') {
+      sched = buildSched(b.time, b.mode === 'daily' ? [0, 1, 2, 3, 4, 5, 6] : b.days);
+      if (!sched) return res.status(400).json({ error: b.mode === 'weekly' && !(b.days || []).length ? 'Chọn ít nhất 1 thứ trong tuần.' : 'Giờ không hợp lệ (VD 03:00).' });
+    }
+    const q = db.prepare("UPDATE push_devices SET reboot_sched=?, reboot_last='' WHERE id=?");
+    const ids = b.all ? db.prepare('SELECT id FROM push_devices').all().map((x) => x.id) : [d.id];
+    for (const id of ids) q.run(sched, id);
+    res.json({ ok: true, sched, label: schedLabel(sched), count: ids.length });
   });
   // Xem giờ trên máy: xếp lệnh đọc đồng hồ; giao diện tự hỏi lại /devices tới khi clock_at >= since
   r.post('/devices/:id/read-clock', need('devices'), (req, res) => {

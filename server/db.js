@@ -723,6 +723,10 @@ function migrateColumns() {
   add('push_devices', 'hik_push_token', "TEXT DEFAULT ''");   // mã bí mật trong địa chỉ nhận (chỉ máy đúng mã mới được nhận lượt chấm)
   add('push_devices', 'hik_push_url',   "TEXT DEFAULT ''");   // địa chỉ nhận đã cài lên máy (để hiển thị / điền tay)
   add('push_devices', 'hik_push_at',    "TEXT DEFAULT ''");   // lần gần nhất máy tự gửi sự kiện về
+  // Hẹn giờ khởi động lại máy (server/reboot-schedule.js): 'HH:MM|<thứ>' (0 = CN … 6 = T7; đủ 7 = hằng ngày), '' = tắt
+  add('push_devices', 'reboot_sched', "TEXT DEFAULT ''");
+  add('push_devices', 'reboot_last',  "TEXT DEFAULT ''");   // ngày (giờ VN) đã khởi động lại theo lịch — mỗi ngày tối đa 1 lần
+  add('push_devices', 'reboot_note',  "TEXT DEFAULT ''");   // kết quả lần gần nhất (hiện ở giao diện)
   // Mẫu sinh trắc máy AI (định dạng riêng của hãng → bảng riêng, KHÔNG trộn với mẫu ZKTeco):
   // backupnum 0-9 vân tay · 20-27 khuôn mặt · 30-37 lòng bàn tay · 50 ảnh (base64)
   db.exec(`CREATE TABLE IF NOT EXISTS ai_templates (
