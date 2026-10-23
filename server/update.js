@@ -8,7 +8,7 @@ import {
 } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getSetting } from './db.js';
+import { getSetting, setSetting } from './db.js';
 import { doBackup } from './backup.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -100,20 +100,26 @@ export async function checkUpdate() {
   return { current, latest, hasUpdate: cmpVer(latest, current) > 0, repo, branch };
 }
 
+// Tiến độ cập nhật cho thanh % trên giao diện (GET /admin/update/status).
+// state: idle · run (tải / giải nén / chuẩn bị / sao lưu) · restart (đang thay code + khởi động lại — máy chủ sắp tắt) · error
+let progress = { state: 'idle', pct: 0, step: '' };
+const report = (pct, step) => { progress = { ...progress, state: 'run', pct: Math.round(pct), step }; };
+export const updateStatus = () => progress;
+
 // Sinh nội dung CapNhat.bat (khởi động lại app với code mới). Toàn bộ dùng đường dẫn tuyệt đối.
-function buildBat({ appDir, staged, prev, workRoot, config, vbsPath }) {
+// Bat chạy trong cửa sổ console ẨN (qua CapNhat.vbs) → các lệnh con dùng chung cửa sổ ẩn đó, không bật cửa sổ đen nào.
+// Chờ bằng ping thay cho timeout (timeout đứng đợi phím, người dùng phải bấm Ctrl+C).
+function buildBat({ appDir, staged, prev, workRoot, config, vbsPath, runVbs }) {
   return `@echo off
 chcp 65001 >nul
-title Digiplus - Dang cap nhat phan mem
 cd /d "${INSTALL_ROOT}"
 rem --- Doc PORT tu config.txt (can cho ca buoc kill dung cong + khoi dong lai) ---
 set "PORT=8686"
 if exist "${config}" for /f "usebackq tokens=1,* delims==" %%a in ("${config}") do set "%%a=%%b"
-echo Dang cap nhat phan mem, vui long doi (khong tat may)...
-timeout /t 3 /nobreak >nul
+ping -n 4 127.0.0.1 >nul
 rem --- Dung app cu: CHI kill tien trinh Node dang giu dung PORT (khong dung Node khac) ---
 for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
-timeout /t 2 /nobreak >nul
+ping -n 3 127.0.0.1 >nul
 rem --- Sao luu ban dang chay de co the khoi phuc ---
 robocopy "${appDir}\\server" "${prev}\\server" /MIR /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
 robocopy "${appDir}\\public" "${prev}\\public" /MIR /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
@@ -127,6 +133,7 @@ rem --- Khoi dong lai app AN (qua VBS, khong hien cua so den) ---
 wscript "${vbsPath}"
 rem --- Don dep + tu xoa an toan ---
 rmdir /s /q "${workRoot}" >nul 2>&1
+del "${runVbs}" >nul 2>&1
 (goto) 2>nul & del "%~f0"
 `;
 }
@@ -152,30 +159,50 @@ function swapInPlaceLinux({ staged, prev }) {
   }
 }
 
-// Thực hiện cập nhật: tải zip → giải nén → chuẩn bị → khởi động lại
-export async function applyUpdate() {
+// Bắt đầu cập nhật: kiểm tra xong là trả lời ngay, phần tải + cài chạy nền và báo tiến độ qua updateStatus().
+export async function startUpdate() {
+  if (progress.state === 'run' || progress.state === 'restart')
+    return { ok: true, started: true, running: true, current: progress.current, latest: progress.latest };
   const info = await checkUpdate();
   if (!info.hasUpdate) return { ok: false, reason: 'latest', ...info };
   if (!isPackaged())
     throw new Error('Cập nhật tự động chỉ chạy trên bản cài cho khách (có runtime\\node.exe). Trên máy dev hãy dùng git pull.');
+  progress = { state: 'run', pct: 2, step: 'Đang chuẩn bị…', current: info.current, latest: info.latest };
+  applyUpdate(info).catch((e) => { progress = { ...progress, state: 'error', error: e.message }; });
+  return { ok: true, started: true, current: info.current, latest: info.latest };
+}
 
+// Thực hiện cập nhật: tải zip → giải nén → chuẩn bị → khởi động lại
+async function applyUpdate(info) {
   const { repo, branch } = info;
   const workRoot = join(INSTALL_ROOT, '_update');
   rmSync(workRoot, { recursive: true, force: true });
   mkdirSync(workRoot, { recursive: true });
 
-  // 1) Tải zip nhánh
+  // 1) Tải zip nhánh (5 → 60%). GitHub không báo dung lượng (chunked) → ước theo lần tải trước, lần đầu ~7 MB.
   const zipPath = join(workRoot, 'repo.zip');
   const durl = `https://codeload.github.com/${repo}/zip/refs/heads/${branch}`;
+  report(4, 'Đang kết nối máy chủ cập nhật…');
   let res;
   try { res = await fetch(durl, { headers: { 'User-Agent': 'Digiplus-Updater' } }); }
   catch { throw new Error('Không tải được bản mới (kiểm tra Internet).'); }
   if (!res.ok) throw new Error('Tải bản mới lỗi ' + res.status);
-  const buf = Buffer.from(await res.arrayBuffer());
+  const total = Number(res.headers.get('content-length')) || Number(getSetting('update_zip_size', '0')) || 7e6;
+  const chunks = [];
+  let got = 0;
+  try {
+    for await (const c of res.body) {
+      chunks.push(c); got += c.length;
+      report(5 + 55 * Math.min(got / total, 0.97), `Đang tải bản ${info.latest}… ${(got / 1048576).toFixed(1)} MB`);
+    }
+  } catch { throw new Error('Mất kết nối khi đang tải bản mới — bấm Cập nhật lại.'); }
+  const buf = Buffer.concat(chunks);
   if (buf.length < 1000) throw new Error('File tải về rỗng/hỏng.');
   writeFileSync(zipPath, buf);
+  try { setSetting('update_zip_size', String(buf.length)); } catch {}
 
   // 2) Giải nén (Windows 10+ có tar bsdtar giải được zip; dự phòng PowerShell)
+  report(62, 'Đang giải nén…');
   const exDir = join(workRoot, 'x');
   mkdirSync(exDir, { recursive: true });
   let extracted = false;
@@ -203,6 +230,7 @@ export async function applyUpdate() {
     throw new Error('Bản tải về không đúng cấu trúc (thiếu server/index.js). Kiểm tra repo.');
 
   // 4) Chuẩn bị các phần sẽ chép đè
+  report(72, 'Đang chuẩn bị bản mới…');
   const staged = join(workRoot, 'staged');
   mkdirSync(staged, { recursive: true });
   cpSync(join(src, 'server'), join(staged, 'server'), { recursive: true });
@@ -212,18 +240,26 @@ export async function applyUpdate() {
     cpSync(join(src, 'node_modules'), join(staged, 'node_modules'), { recursive: true });
 
   // 5) Sao lưu CSDL trước khi cập nhật (an toàn)
+  report(80, 'Đang sao lưu dữ liệu…');
   try { doBackup('preupdate'); } catch {}
 
   // 6-Linux) Chép đè ngay trong tiến trình này (Linux cho thay file đang chạy) rồi thoát → systemd tự bật lại bằng code mới
   if (!IS_WIN) {
+    report(88, 'Đang cài bản mới…');
     swapInPlaceLinux({ staged, prev: join(INSTALL_ROOT, '_prev') });
     rmSync(workRoot, { recursive: true, force: true });
-    setTimeout(() => process.exit(0), 1500);   // đợi trả kết quả về trình duyệt rồi mới thoát
-    return { ok: true, restarting: true, current: info.current, latest: info.latest };
+    progress = { ...progress, state: 'restart', pct: 92, step: 'Đang khởi động lại phần mềm…' };
+    setTimeout(() => process.exit(0), 1500);   // đợi giao diện kịp đọc trạng thái rồi mới thoát
+    return;
   }
 
-  // 6) Ghi CapNhat.bat và chạy nền → app tự khởi động lại với code mới
+  // 6) Ghi CapNhat.bat + CapNhat.vbs rồi chạy ẨN → app tự khởi động lại với code mới.
+  //    KHÔNG chạy thẳng cmd.exe detached: tiến trình detached không có console nên mỗi lệnh con
+  //    (powershell, robocopy, taskkill…) lại tự bật 1 cửa sổ đen riêng.
+  report(88, 'Đang cài bản mới…');
   const vbsPath = writeHiddenLauncher();
+  const batPath = join(INSTALL_ROOT, 'CapNhat.bat');
+  const runVbs = join(INSTALL_ROOT, 'CapNhat.vbs');
   const bat = buildBat({
     appDir: APP_DIR,
     staged,
@@ -231,13 +267,13 @@ export async function applyUpdate() {
     workRoot,
     config: join(INSTALL_ROOT, 'config.txt'),
     vbsPath,
+    runVbs,
   });
-  const batPath = join(INSTALL_ROOT, 'CapNhat.bat');
   writeFileSync(batPath, bat, 'latin1');
-  const child = spawn('cmd.exe', ['/c', batPath], {
+  writeFileSync(runVbs, 'Set sh = CreateObject("WScript.Shell")\r\n' + `sh.Run "cmd /c """"${batPath}""""", 0, False\r\n`, 'latin1');
+  progress = { ...progress, state: 'restart', pct: 90, step: 'Đang cài bản mới & khởi động lại phần mềm…' };
+  const child = spawn('wscript.exe', ['//B', '//Nologo', runVbs], {
     detached: true, stdio: 'ignore', windowsHide: true, cwd: INSTALL_ROOT,
   });
   child.unref();
-
-  return { ok: true, restarting: true, current: info.current, latest: info.latest };
 }

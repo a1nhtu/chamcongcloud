@@ -1,7 +1,7 @@
 // Nhóm route CÀI ĐẶT hệ thống + logo thương hiệu + cập nhật phần mềm.
 import { db, getSetting, setSetting, attModeMix } from '../../db.js';
 import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
-import { checkUpdate, applyUpdate, currentVersion, updateConfig } from '../../update.js';
+import { checkUpdate, startUpdate, updateStatus, currentVersion, updateConfig } from '../../update.js';
 import { auditAllowed } from '../../virtual-att.js';
 
 export function registerSettingsRoutes(r, { need, adminOnly }) {
@@ -192,9 +192,10 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     try { res.json(await checkUpdate()); }
     catch (e) { res.status(400).json({ error: e.message, current: currentVersion() }); }
   });
-  // Tải & áp dụng bản mới rồi khởi động lại (chỉ admin)
+  // Bắt đầu tải & áp dụng bản mới (chạy nền, tự khởi động lại) — tiến độ xem ở /update/status (chỉ admin)
   r.post('/update/apply', adminOnly, async (req, res) => {
-    try { res.json(await applyUpdate()); }
+    try { res.json(await startUpdate()); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
+  r.get('/update/status', adminOnly, (req, res) => res.json(updateStatus()));
 }
