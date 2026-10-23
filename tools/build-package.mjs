@@ -103,6 +103,17 @@ echo.
 set "PORT=8686"
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
 echo Dang cai dat va tao tu dong chay khi mo may (cong %PORT%)...
+rem --- Tuong lua Windows: cho may cham cong / dien thoai trong mang noi bo goi vao (cong %PORT% + HTTPS) ---
+rem  Luat theo CHINH node.exe cua thu muc nay: Windows khong hien hop thoai hoi nua; xoa truoc luat CHAN cu
+rem  (bam Huy o hop thoai do se tao luat chan, ma luat chan luon thang luat cho phep). Khach khac tren may khong anh huong.
+net session >nul 2>&1
+if %errorlevel%==0 (
+  netsh advfirewall firewall delete rule name=all program="%~dp0runtime\\node.exe" >nul 2>&1
+  netsh advfirewall firewall add rule name="Digiplus ChamCong %PORT%" dir=in action=allow program="%~dp0runtime\\node.exe" profile=any enable=yes >nul 2>&1
+  echo   + Da mo tuong lua cho phan mem - may cham cong trong mang noi bo ket noi duoc.
+) else (
+  echo   * Chua co quyen Admin nen chua mo tuong lua - may cham cong dat theo IP noi bo co the bi chan.
+)
 if defined NOAUTO goto startapp
 powershell -NoProfile -Command "$w=New-Object -ComObject WScript.Shell; $s=$w.CreateShortcut([Environment]::GetFolderPath('Startup')+'\\DigiplusChamCong-%PORT%.lnk'); $s.TargetPath='%~dp0start-hidden.vbs'; $s.WorkingDirectory='%~dp0'; $s.Save()"
 net session >nul 2>&1
@@ -150,6 +161,7 @@ echo Dang go cai dat instance cong %PORT% (KHONG dung khach khac tren may/VPS)..
 del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" 2>nul
 schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
 schtasks /Delete /TN "Digiplus-%PORT%-logon" /F >nul 2>&1
+netsh advfirewall firewall delete rule name=all program="%~dp0runtime\\node.exe" >nul 2>&1
 for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
 rem Dung cloudflared cua CHINH thu muc nay (khach khac tren cung may khong bi dung)
 set "CF_EXE=%~dp0cloudflared.exe"
