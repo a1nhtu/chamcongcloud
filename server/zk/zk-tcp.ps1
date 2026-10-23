@@ -129,6 +129,27 @@ try {
     'set-time' {        # đặt giờ máy = giờ máy tính đang chạy phần mềm
       [void]$z.SetDeviceTime($m); [void]$z.RefreshData($m); Done ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))
     }
+    'svr' {             # đọc cài đặt máy chủ đẩy dữ liệu (Cloud Server / ADMS) + nhận dạng máy — chỉ đọc
+      $s = ''; if ($z.GetSerialNumber($m, [ref]$s)) { Out "I`tserial`t$(Clean $s)" }
+      $s = ''; if ($z.GetSysOption($m, '~DeviceName', [ref]$s)) { Out "I`tmodel`t$(Clean $s)" }
+      $s = ''; if ($z.GetFirmwareVersion($m, [ref]$s)) { Out "I`tfirmware`t$(Clean $s)" }
+      foreach ($p in @(@('svr_fun', 'IclockSvrFun'), @('svr_mode', 'WebServerURLModel'), @('svr_url', 'ICLOCKSVRURL'), @('svr_port', 'IclockSvrPort'))) {
+        $s = ''; if ($z.GetSysOption($m, $p[1], [ref]$s)) { Out "I`t$($p[0])`t$(Clean $s)" }
+      }
+      Done 'svr'
+    }
+    'set-svr' {         # trỏ máy về tên miền $From (bật Cloud Server theo tên miền) rồi khởi động lại máy để nối lại; $To = cổng cần đặt (rỗng = giữ)
+      [void]$z.SetSysOption($m, 'IclockSvrFun', '1')
+      [void]$z.SetSysOption($m, 'WebServerURLModel', '1')
+      [void]$z.SetSysOption($m, 'ICLOCKSVRURL', $From)
+      if ($To) { [void]$z.SetSysOption($m, 'IclockSvrPort', $To) }
+      # nhiều firmware trả false dù đã ghi → xét bằng cách đọc lại
+      $s = ''; [void]$z.GetSysOption($m, 'ICLOCKSVRURL', [ref]$s)
+      if ((Clean $s) -ne $From) { $z.Disconnect(); Fail 'SETSVR' "Máy không nhận cài đặt máy chủ (đọc lại được: '$(Clean $s)'). Đặt tay trên máy: Menu → Comm → Cloud Server." }
+      Out "I`tsvr_url`t$(Clean $s)"
+      $s = ''; if ($z.GetSysOption($m, 'IclockSvrPort', [ref]$s)) { Out "I`tsvr_port`t$(Clean $s)" }
+      [void]$z.RestartDevice($m); Out "OK`tset-svr"; exit 0
+    }
     'restart' { [void]$z.RestartDevice($m); Out "OK`trestart"; exit 0 }
     default { $z.Disconnect(); Fail 'BADACTION' "Thao tác không hỗ trợ: $Action" }
   }

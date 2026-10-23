@@ -79,6 +79,37 @@ export function saveInfo(id, info) {
   db.prepare('UPDATE push_devices SET tcp_info=?, last_seen=?, last_ip=tcp_ip WHERE id=?').run(JSON.stringify(info), info.read_at, id);
 }
 
+/* ---------- tìm máy trong mạng LAN + trỏ máy Push về tên miền (ghi qua SDK cổng 4370) ---------- */
+// Dò cổng 4370 cả lớp mạng /24 của từng IP LAN máy tính: chỉ mở/đóng kết nối TCP (chưa gọi SDK) → ~1-2 giây / lớp mạng.
+// ZK_SCAN_HOSTS="ip[:cổng],…" thay danh sách dò (chỉ dùng khi kiểm thử). Trả [{ ip, port }].
+export async function scanLan(ips, port = 4370, ms = 800) {
+  const hosts = process.env.ZK_SCAN_HOSTS
+    ? process.env.ZK_SCAN_HOSTS.split(',').map((h) => h.trim()).filter(Boolean).map((h) => ({ ip: h.split(':')[0], port: +h.split(':')[1] || port }))
+    : [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.')))].flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port })));
+  const found = [];
+  for (let i = 0; i < hosts.length; i += 128) {
+    const part = hosts.slice(i, i + 128);
+    const ok = await Promise.all(part.map((h) => tcpProbe(h.ip, h.port, ms)));
+    part.forEach((h, j) => { if (ok[j]) found.push(h); });
+  }
+  return found;
+}
+const kvOf = (out) => (k, c) => { if (k === 'I' && c[0]) out[c[0]] = c[1] || ''; };
+// Đọc cài đặt Cloud Server trong máy: { serial, model, firmware, svr_fun, svr_mode (1 = tên miền), svr_url, svr_port }
+export async function tcpServerInfo(c) {
+  const info = {};
+  await zkRun(c, 'svr', { timeoutMs: 60000 }, kvOf(info));
+  return info;
+}
+// Cổng Cloudflare nhận (HTTP + HTTPS). Máy để cổng khác (VD mặc định 8081) mà firmware lại dùng cổng đó với tên miền → không về được.
+const CF_PORTS = new Set(['80', '8080', '8880', '2052', '2082', '2086', '2095', '443', '2053', '2083', '2087', '2096', '8443']);
+// Trỏ máy về tên miền rồi khởi động lại máy. port = cổng đang lưu trong máy (đọc trước): ngoài danh sách Cloudflare → đổi về 80.
+export async function tcpSetServer(c, domain, port = '') {
+  const info = {};
+  await zkRun(c, 'set-svr', { from: domain, to: port && !CF_PORTS.has(String(port)) ? '80' : '', timeoutMs: 60000 }, kvOf(info));
+  return info;
+}
+
 // Tải NHÂN VIÊN từ máy về phần mềm (tên, quyền, thẻ) → tự tạo / cập nhật NV như máy Push
 export async function tcpUsers(dev, prog = () => {}) {
   const lines = [];

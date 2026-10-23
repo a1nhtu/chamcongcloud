@@ -4,7 +4,8 @@ import { db, getSetting } from '../../db.js';
 import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
-import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES } from '../../zk-tcp.js';
+import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
+  scanLan, tcpServerInfo, tcpSetServer } from '../../zk-tcp.js';
 import { setSetting } from '../../db.js';
 import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, guardOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
 // Máy hãng khác (công tắc riêng, mặc định tắt): máy AI tự nối về qua WebSocket · máy Hikvision phần mềm gọi ISAPI vào máy
@@ -18,8 +19,8 @@ function deviceKeyOk(dev) {
   return !!(dev && dev.dev_key && verifyDeviceKey(dev.dev_key, dev.serial).valid);
 }
 
-// IP LAN thật của máy chủ (để điền vào máy chấm công). Adapter ảo xếp cuối.
-function lanIPs() {
+// IP LAN thật của máy chủ (để điền vào máy chấm công). Adapter ảo xếp cuối; onlyReal = bỏ hẳn adapter ảo (dò mạng LAN).
+function lanIPs(onlyReal = false) {
   const real = [], virt = [];
   const isVirtual = (name) => /vethernet|virtual|vmware|virtualbox|hyper-?v|wsl|loopback|default switch|docker|tap-|tailscale|zerotier|bluetooth|npcap/i.test(name);
   for (const [name, list] of Object.entries(networkInterfaces())) {
@@ -30,7 +31,7 @@ function lanIPs() {
   }
   const rank = (ip) => (ip.startsWith('192.168.') ? 0 : ip.startsWith('10.') ? 1 : 2);
   real.sort((a, b) => rank(a) - rank(b));
-  return [...real, ...virt];
+  return onlyReal ? real : [...real, ...virt];
 }
 
 // Tên miền của bản cài có tunnel (config.txt: CUSTOMER + TUNNEL_TOKEN) — để hướng dẫn điền vào máy ở chi nhánh khác.
@@ -268,6 +269,42 @@ export function registerDeviceRoutes(r, { need }) {
       const d = db.prepare('SELECT id, serial, active FROM push_devices WHERE serial=?').get(info.serial);
       saveInfo(d.id, info);
       res.json({ ok: true, id: d.id, serial: d.serial, active: !!d.active, existed: !!old, info });
+    } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
+  });
+  /* -------- TÌM MÁY TRONG MẠNG LAN + TRỎ MÁY PUSH VỀ TÊN MIỀN (khỏi gõ tay Cloud Server trên máy) --------
+     Không cần bật chế độ TCP/IP: chỉ mượn SDK cổng 4370 để đọc / ghi cài đặt máy chủ, máy vẫn chạy kiểu Push. */
+  const winOnly = (req, res, next) => (process.platform === 'win32' || process.env.ZK_SCAN_HOSTS ? next()
+    : res.status(400).json({ error: 'Tìm máy trong mạng LAN chỉ chạy khi phần mềm cài trên máy tính Windows cùng mạng với máy chấm công.' }));
+  const isLan = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip);
+  r.post('/devices/lan-scan', need('devices'), winOnly, async (req, res) => {
+    try {
+      const domain = tunnelDomain(), ips = lanIPs(true);
+      const found = await scanLan(ips);
+      const rows = [];
+      for (const h of found) {   // SDK: TUẦN TỰ từng máy
+        const row = { ip: h.ip, port: h.port };
+        try {
+          Object.assign(row, await tcpServerInfo({ tcp_ip: h.ip, tcp_port: h.port, tcp_key: 0 }));
+          row.points_here = !!domain && row.svr_fun === '1' && row.svr_mode === '1' && (row.svr_url || '').toLowerCase() === domain;
+          const k = row.serial && db.prepare('SELECT id, name, active, last_seen FROM push_devices WHERE serial=?').get(row.serial);
+          if (k) row.known = { id: k.id, name: k.name, active: !!k.active, last_seen: k.last_seen };
+        } catch (e) { row.error = e.message; row.code = e.code || ''; }
+        rows.push(row);
+      }
+      res.json({ domain, nets: [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.') + '.x'))], enabled: getSetting('device_enabled', '0') === '1', rows });
+    } catch (e) { sendCaughtError(res, 'POST /admin/devices/lan-scan', e); }
+  });
+  r.post('/devices/lan-point', need('devices'), winOnly, async (req, res) => {
+    const domain = tunnelDomain();
+    if (!domain) return res.status(400).json({ error: 'Bản cài này chưa có tên miền (bản LAN) — trên máy chấm công điền IP + Port theo "Cách A".' });
+    const c = connOf(req.body || {});
+    if (c.error) return res.status(400).json({ error: c.error });
+    if (!isLan(c.tcp_ip)) return res.status(400).json({ error: 'Chỉ trỏ được máy chấm công trong mạng nội bộ (192.168.x · 10.x · 172.16–31.x).' });
+    try {
+      if (!(await tcpProbe(c.tcp_ip, c.tcp_port))) return res.status(400).json({ error: `Không thấy máy ở ${c.tcp_ip}:${c.tcp_port} — máy đã tắt hoặc đổi IP, bấm Tìm lại.` });
+      const before = await tcpServerInfo(c);
+      const info = await tcpSetServer(c, domain, before.svr_port);
+      res.json({ ok: true, domain, serial: before.serial || '', before, info });
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });
   // Sửa IP / cổng / mật mã kết nối

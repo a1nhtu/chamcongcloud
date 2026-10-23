@@ -5543,7 +5543,8 @@ async function pageDevices() {
         el('b', {}, 'Cách B · Qua Internet / chi nhánh khác'),
         el('div', { style: 'margin-top:6px' }, 'Tên miền: ', domVal, ' ', domCopy, ' · Port: ', el('b', {}, '443')),
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy cần có Internet'),
-        domNote),
+        domNote,
+        d.tcp_supported && d.domain ? el('div', { style: 'margin-top:8px' }, btnSm('🔍 Khỏi gõ tay: tìm máy trong LAN & tự trỏ về', lanScanModal, 'ghost')) : ''),
       // Máy AI: giao thức WebSocket (ws://, không mã hoá) — vào CÙNG cổng web; qua tên miền thì cổng 80
       d.ai_enabled ? el('div', { class: 'dev-tg' },
         el('b', {}, 'Máy AI (khuôn mặt / vân tay)'),
@@ -5786,6 +5787,8 @@ async function pageDevices() {
   if (tcpBtn) tcpBtn.onclick = () => tcpAddModal(null);
   const hikBtn = d.hik_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy Hikvision') : null;
   if (hikBtn) hikBtn.onclick = () => hikAddModal(null);
+  const lanBtn = d.tcp_supported ? el('button', { class: 'btn', title: 'Dò máy chấm công trong mạng LAN và tự trỏ Cloud Server về tên miền phần mềm này' }, '🔍 Tìm máy trong LAN') : null;
+  if (lanBtn) lanBtn.onclick = lanScanModal;
   // Thanh TỰ ĐỘNG TẢI máy TCP/IP (kind 'tcp') / Hikvision (kind 'hik'): chọn chu kỳ (lưu ngay) + nút tải ngay tất cả
   const autoBarOf = (kind, label, minutes, choices) => {
     const sel = el('select', { style: 'width:auto;margin:0' }, ...(choices || [0]).map((n) => el('option', { value: n, ...(n === minutes ? { selected: '' } : {}) }, !n ? 'Tắt (chỉ tải khi bấm)' : n < 60 ? `${n} phút / lần` : `${n / 60} giờ / lần`)));
@@ -5811,7 +5814,7 @@ async function pageDevices() {
     return on.length ? '— Bật: ' + on.join(' · ') : '— Đang tắt hết';
   }, true);
   foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
-  setMain(head('Máy chấm công', tcpBtn, hikBtn, usbBtn, legacyBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', lanBtn, tcpBtn, hikBtn, usbBtn, legacyBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
 // Thanh vàng "Số ID nghi trùng" (null nếu không có)
@@ -6119,6 +6122,65 @@ function tcpInfoBox(i) {
       kv('Serial', i.serial), kv('Quản trị trên máy', i.admins >= 0 ? i.admins : ''), kv('Giờ trên máy', i.time), kv('Firmware', i.firmware), kv('Nền tảng', i.platform), kv('Model', i.model), kv('MAC', i.mac), kv('Thuật toán vân tay', i.fp_version ? 'ZKFinger ' + i.fp_version : '')));
 }
 function tcpInfoModal(m) { tcpJob(m, 'info', {}, pageDevices); }
+// Tìm máy chấm công trong mạng LAN (dò cổng 4370) → xem máy đang trỏ Cloud Server về đâu → 1 bấm trỏ về tên miền phần mềm này (máy tự khởi động lại)
+function lanScanModal() {
+  const box = el('div', {}, loading());
+  const again = el('button', { class: 'btn ghost' }, '🔄 Tìm lại');
+  const warn = (t) => el('div', { style: 'margin:8px 0;padding:8px 12px;border-radius:8px;background:#fff7e0;color:#7a4b00;font-size:13px' }, t);
+  let changed = false;
+  const close = () => { closeModal(); if (changed) pageDevices(); };
+  const svrText = (x) => x.error ? '' : x.svr_fun !== '1' ? 'Chưa bật Cloud Server'
+    : x.svr_mode === '1' ? 'Tên miền: ' + (x.svr_url || '(trống)') : 'Theo IP' + (x.svr_url ? ': ' + x.svr_url : '') + (x.svr_port ? ' · cổng ' + x.svr_port : '');
+  const point = async (x, r, cell) => {
+    let key = '';
+    if (String(x.code || '').startsWith('CONNECT')) {   // không đọc được bằng mật mã 0 → máy có đặt Comm Key
+      key = prompt(`Máy ${x.ip} không cho kết nối — có thể máy đặt mật mã kết nối (Menu → Comm → PC Connection → Comm Key).\nNhập mật mã:`, '');
+      if (key == null) return;
+    }
+    if (!confirm(`Trỏ máy ${x.model || ''} ${x.serial || x.ip} về ${r.domain}?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Nếu máy đang gửi dữ liệu cho phần mềm khác thì sẽ chuyển sang gửi về phần mềm này.`)) return;
+    cell.innerHTML = ''; cell.append(el('span', { class: 'muted' }, 'Đang ghi vào máy…'));
+    try {
+      const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key } });
+      changed = true;
+      cell.innerHTML = ''; cell.append(el('span', { class: 'pill ok' }, '✓ Đã trỏ — máy đang khởi động lại'));
+      toast(`Đã trỏ máy ${o.serial || x.ip} về ${o.domain}. Khoảng 1 phút sau máy hiện ở danh sách (Chờ duyệt).`, 'ok');
+    } catch (e) { cell.innerHTML = ''; cell.append(el('span', { style: 'color:#b91c1c' }, '❌ ' + e.message)); toast(e.message, 'err'); }
+  };
+  const render = (r) => {
+    box.innerHTML = '';
+    box.append(el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Đã dò mạng ${r.nets.join(', ') || '(không thấy mạng LAN)'} · cổng 4370.`));
+    box.append(r.domain ? el('div', { style: 'font-size:13.5px;margin-bottom:6px' }, 'Tên miền của phần mềm này: ', el('b', { style: 'font-family:monospace;color:var(--brand-ink,#c0392b)' }, r.domain))
+      : warn('Bản cài này chưa có tên miền (bản LAN) — chỉ xem được máy, chưa trỏ tự động được. Trên máy chấm công điền IP + Port theo "Cách A".'));
+    if (!r.enabled) box.append(warn('Phần mềm đang TẮT dùng máy chấm công — máy trỏ về sẽ chưa hiện. Liên hệ Digiplus để bật.'));
+    if (!r.rows.length) return box.append(warn('Không thấy máy chấm công nào trong mạng. Kiểm tra máy đã bật, cắm dây mạng / Wi-Fi CÙNG mạng với máy tính này, rồi bấm Tìm lại.'));
+    const tbl = el('table', { class: 'data' });
+    tbl.innerHTML = '<thead><tr><th>Máy</th><th>Đang gửi dữ liệu về</th></tr></thead>';
+    const tb = el('tbody');
+    for (const x of r.rows) {
+      const act = el('div', { style: 'margin-top:6px' });
+      if (x.points_here) act.append(el('span', { class: 'pill ok' }, x.known ? (x.known.active ? '✓ Đang dùng' : '✓ Đã về · Chờ duyệt') : '✓ Đã trỏ về đây'));
+      if (r.domain && !x.points_here) act.append(btnSm('➜ Trỏ về phần mềm này', () => point(x, r, act)));
+      else if (r.domain && x.points_here && !x.known) act.append(' ', btnSm('Trỏ lại', () => point(x, r, act), 'ghost'));
+      const mono = (t) => el('div', { class: 'muted', style: 'font-size:12px;font-family:monospace' }, t);
+      tb.append(el('tr', {},
+        el('td', {}, el('b', {}, x.model || 'Máy chấm công'), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip)),
+        el('td', { style: 'font-size:13px' }, x.error ? el('span', { style: 'color:#b45309' }, '⚠️ Không đọc được: ' + x.error) : svrText(x), act)));
+    }
+    tbl.append(tb);
+    box.append(el('div', { class: 'tbl-scroll' }, tbl),
+      el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Phần mềm ghi vào máy: bật Cloud Server theo tên miền (IclockSvrFun = 1, WebServerURLModel = 1, ICLOCKSVRURL = tên miền) rồi khởi động lại máy.'));
+  };
+  const run = async () => {
+    again.disabled = true;
+    box.innerHTML = ''; box.append(el('div', { class: 'map-hint' }, 'Đang dò máy chấm công trong mạng LAN… khoảng 5–30 giây.'), loading());
+    try { render(await api('/admin/devices/lan-scan', { method: 'POST' })); }
+    catch (e) { box.innerHTML = ''; box.append(warn('❌ ' + e.message)); }
+    again.disabled = false;
+  };
+  again.onclick = run;
+  openModal('🔍 Tìm máy chấm công trong mạng LAN', [box], [el('button', { class: 'btn ghost', onclick: close }, 'Đóng'), again]);
+  run();
+}
 // Thêm máy (m = null) / sửa kết nối (m = máy)
 function tcpAddModal(m) {
   const nameI = el('input', { placeholder: 'VD Máy cổng chính', value: m ? (m.name || '') : '' });
