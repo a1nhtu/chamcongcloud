@@ -6909,6 +6909,21 @@ const REPORT_GROUPS = [
   ]],
 ];
 
+// MẪU THEO GIỜ: không có công / trễ sớm / tăng ca → ẩn báo cáo chỉ toàn những thứ đó (máy chủ cũng bỏ các cột đó ở báo cáo còn lại)
+const REPORT_HOURLY_HIDE = ['late', 'ot', 'symbol', 'horizontal', 'empsheetlate', 'audit3', 'audit3day'];
+// Tên + mô tả thẻ khi xem mẫu theo giờ
+const REPORT_HOURLY_TEXT = {
+  attendance: ['Bản ghi chấm công', 'Tất cả lần chấm: giờ vào/ra, tổng giờ, vị trí'],
+  detaillist: ['Chi tiết chấm công (danh sách)', 'Danh sách mỗi NV × mỗi ngày: giờ vào/ra, tổng giờ'],
+  empsheet: ['Bảng chi tiết từng nhân viên (in A4)', 'Mỗi nhân viên 1 trang A4: tổng giờ, số ngày làm, vắng + chi tiết từng ngày + dòng tổng giờ + chỗ ký tên. Bấm Xuất Excel để in'],
+  detailmulti: ['Chi tiết chấm công (nhiều lần vào/ra)', 'Mỗi NV × mỗi ngày: Giờ vào 1 → Giờ ra 4 theo từng lần chấm, tổng giờ'],
+  workhours: ['Giờ làm theo ngày', 'Ma trận giờ vào/ra + giờ làm mỗi ngày'],
+  track6: ['Bảng theo dõi chấm công (4 lần quẹt)', 'Mỗi nhân viên 5 dòng × từng ngày: Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ làm, kèm tổng giờ, nghỉ từng loại'],
+  hourstat: ['Bảng thống kê chấm công (giờ)', 'Ma trận ngày × NV theo SỐ GIỜ mỗi ngày + tổng giờ, vắng, nghỉ từng loại'],
+  daytime: ['Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận) + tổng giờ'],
+  summary: ['Tổng hợp nhân viên', 'Tổng giờ, vắng, nghỉ mỗi NV'],
+};
+
 // KHUNG THU GỌN được: nút tam giác ▼/▶ cạnh tiêu đề; gọn = chỉ còn 1 dòng tiêu đề + tóm tắt (nhường chỗ cho lưới chính).
 // Nhớ trạng thái trên máy theo `key`. summary(): chữ tóm tắt hiện khi đang gọn.
 function foldPanel(panel, key, title, summary, defFolded = false) {
@@ -7121,8 +7136,10 @@ async function pageReport() {
     formSel.onchange = () => { _rpForm = formSel.value; hub(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; };
     const wrap = el('div', {});
     wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
-    for (const [gname, cards] of REPORT_GROUPS) {
-      const list = cards.filter(([v]) => (formSel.value !== 'hourly' || !['late', 'ot', 'symbol'].includes(v)) && (auditOn() || !v.startsWith('audit3')));
+    const H = formSel.value === 'hourly';
+    for (const [gname, cards0] of REPORT_GROUPS) {
+      const cards = H ? cards0.map((c) => (REPORT_HOURLY_TEXT[c[0]] ? [c[0], c[1], ...REPORT_HOURLY_TEXT[c[0]]] : c)) : cards0;
+      const list = cards.filter(([v]) => (!H || !REPORT_HOURLY_HIDE.includes(v)) && (auditOn() || !v.startsWith('audit3')));
       if (!list.length) continue;
       wrap.append(el('div', { style: 'font-weight:800;color:var(--ink);margin:18px 0 10px;font-size:15px' }, gname));
       const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px' });
