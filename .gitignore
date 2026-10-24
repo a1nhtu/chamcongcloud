@@ -60,3 +60,6 @@ dist-setup/
 # Bo cai Linux (dong goi ra / binary tai ve)
 dist-linux/
 tools/cloudflared-linux-amd64
+
+# biên dịch lúc build bộ cài từ tools/installer/MoPhanMem.cs
+tools/installer/MoPhanMem.exe

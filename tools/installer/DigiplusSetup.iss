@@ -24,6 +24,11 @@
 #ifndef OutDir
   #define OutDir "..\..\dist-setup"
 #endif
+; MoPhanMem.exe (mở trang quản lý vào trình duyệt khách đang mở sẵn) — biên dịch từ MoPhanMem.cs bằng csc của .NET Framework 4 có sẵn trong Windows
+#define Csc GetEnv("WINDIR") + "\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
+#if Exec(Csc, '-nologo -target:winexe -optimize -win32icon:"' + SourcePath + 'digiplus.ico" -out:"' + SourcePath + 'MoPhanMem.exe" "' + SourcePath + 'MoPhanMem.cs"', SourcePath, 1, SW_HIDE) != 0
+  #error Không biên dịch được MoPhanMem.cs (cần .NET Framework 4)
+#endif
 #define ApiUrl "https://huongdan.maychamcongcloud.com/api/tao-domain"
 #define ListUrl "https://huongdan.maychamcongcloud.com/api/ds-khach"
 
@@ -87,14 +92,21 @@ StatusRunProgram=Đang hoàn tất cài đặt...
 Source: "{#Src}\config.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "{#Src}\*"; DestDir: "{app}"; Excludes: "config.txt"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "digiplus.ico"; DestDir: "{app}"; Flags: ignoreversion
-Source: "MoTrinhDuyet.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "MoPhanMem.exe"; DestDir: "{app}"; Flags: ignoreversion
 ; SDK ZKTeco (zkemkeeper 6.3.1.37, 32-bit) cho máy chấm công kết nối trực tiếp TCP/IP — để riêng trong thư mục cài,
 ; KHÔNG chép vào thư mục Windows (không đụng SDK của phần mềm chấm công khác đang có trên máy)
 Source: "zksdk\*.dll"; DestDir: "{app}\zksdk"; Flags: ignoreversion
 
+[Icons]
+; Lối tắt Desktop: mở trang quản lý vào trình duyệt khách đang mở sẵn (MoPhanMem.exe), không ép trình duyệt mặc định
+Name: "{autodesktop}\{code:ShortcutBase}"; Filename: "{app}\MoPhanMem.exe"; Parameters: "{code:AdminUrl}"; WorkingDir: "{app}"; IconFilename: "{app}\digiplus.ico"; Comment: "Mở trang quản lý Digiplus Chấm Công"
+
 [InstallDelete]
 Type: files; Name: "{autodesktop}\Digiplus Cham Cong.url"
 Type: files; Name: "{autodesktop}\Digiplus Cham Cong {code:InstNum}.url"
+; lối tắt kiểu cũ (.url — luôn mở trình duyệt mặc định), nay thay bằng .lnk ở [Icons]
+Type: files; Name: "{autodesktop}\{code:ShortcutName}"
+Type: files; Name: "{app}\MoTrinhDuyet.ps1"
 
 [Run]
 ; Đăng ký SDK zkemkeeper (COM 32-bit) — CHỈ khi máy chưa có SDK nào (máy đã cài Wise Eye / Ronald Jack… thì giữ nguyên SDK đang có)
@@ -102,7 +114,7 @@ Filename: "{syswow64}\regsvr32.exe"; Parameters: "/s ""{app}\zksdk\zkemkeeper.dl
 ; Đăng ký tự bật khi mở máy + khởi động phần mềm + chờ phần mềm sẵn sàng (CaiDat.bat chế độ im lặng)
 Filename: "{app}\CaiDat.bat"; Parameters: "silent{code:AutoParam}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Đang khởi động phần mềm (lần đầu có thể mất khoảng 1 phút)..."
 ; Mở trang quản lý vào trình duyệt khách ĐANG MỞ SẴN (Chrome / Cốc Cốc…), không mở trình duyệt mặc định khác — chạy dưới quyền người dùng, ẩn cửa sổ
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\MoTrinhDuyet.ps1"" ""{code:AdminUrl}"""; Description: "Mở trang quản lý Digiplus Chấm Công"; Flags: postinstall runhidden nowait skipifsilent runasoriginaluser
+Filename: "{app}\MoPhanMem.exe"; Parameters: """{code:AdminUrl}"""; Description: "Mở trang quản lý Digiplus Chấm Công"; Flags: postinstall nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
 ; Gỡ đăng ký SDK chỉ khi chính bản này đã đăng ký (đường dẫn đăng ký nằm trong thư mục cài)
@@ -189,7 +201,7 @@ begin
 end;
 
 { Tên lối tắt ngoài Desktop: bản đầu tiên "Digiplus Chấm Công"; bản cài thêm kèm tên khách hoặc cổng để phân biệt }
-function ShortcutName(Param: String): String;
+function ShortcutBase(Param: String): String;
 var Cust, Port: String;
 begin
   Result := 'Digiplus Chấm Công';
@@ -200,7 +212,12 @@ begin
     else if Port <> '' then Result := Result + ' - cổng ' + Port
     else Result := Result + ' ' + Instance;
   end;
-  Result := Result + '.url';
+end;
+
+{ Tên lối tắt .url kiểu cũ (để xoá khi cài đè / gỡ) }
+function ShortcutName(Param: String): String;
+begin
+  Result := ShortcutBase('') + '.url';
 end;
 
 { Tên hiện trong danh sách gỡ cài đặt: kèm tên khách hoặc cổng để phân biệt các bản }
@@ -830,11 +847,3 @@ begin
   end;
 end;
 
-procedure CurStepChanged(CurStep: TSetupStep);
-begin
-  if CurStep = ssPostInstall then
-    { Lối tắt ngoài Desktop mở trang quản lý }
-    SaveStringToFile(ExpandConstant('{autodesktop}\') + ShortcutName(''),
-      '[InternetShortcut]' + #13#10 + 'URL=http://localhost:' + CurrentPort + '/admin' + #13#10 +
-      'IconFile=' + ExpandConstant('{app}\digiplus.ico') + #13#10 + 'IconIndex=0' + #13#10, False);
-end;
