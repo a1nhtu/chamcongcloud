@@ -717,6 +717,7 @@ function migrateColumns() {
   add('push_devices', 'tcp_auto_users', 'INTEGER NOT NULL DEFAULT -1');
   // Máy HÃNG KHÁC (công tắc riêng, mặc định TẮT): conn_type 'ai' (máy AI tự nối WebSocket về — server/ai-ws.js)
   // | 'hik' (Hikvision, phần mềm gọi ISAPI vào máy — server/hik-isapi.js; dùng chung tcp_ip/tcp_port/tcp_info/tcp_auto_*)
+  // | 'union' (Union / Virdi tự nối về cổng 9870 qua SDK UCS — server/union.js; Serial = UNION-<Terminal ID>, dùng chung tcp_info/tcp_sync_at)
   add('push_devices', 'dev_user', "TEXT DEFAULT ''");   // tài khoản đăng nhập máy Hikvision
   add('push_devices', 'dev_pass', "TEXT DEFAULT ''");   // mật khẩu đăng nhập máy Hikvision (chỉ máy chủ dùng, không trả ra giao diện)
   // Máy Hikvision TỰ GỬI lượt chấm về (HTTP Listening): máy POST sự kiện tới /hik/event/<hik_push_token>

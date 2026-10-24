@@ -36,6 +36,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       tcp_device_enabled: getSetting('tcp_device_enabled', '0'), // dùng máy chấm công kết nối trực tiếp TCP/IP (cổng 4370)
       ai_device_enabled: getSetting('ai_device_enabled', '0'),   // dùng máy AI (máy tự nối về qua WebSocket)
       hik_device_enabled: getSetting('hik_device_enabled', '0'), // dùng máy Hikvision (phần mềm gọi ISAPI vào máy)
+      union_device_enabled: getSetting('union_device_enabled', '0'), // dùng máy Union / Virdi (máy tự nối về cổng union_port)
+      union_port: getSetting('union_port', '9870'),
       phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)
       // Giá trị bộ cài (config.txt) đặt sẵn lúc cài — chỉ để hiện gợi ý; tài khoản tổng vẫn đổi được trên web
       use_device_cfg: ['0', '1'].includes(process.env.USE_DEVICE) ? process.env.USE_DEVICE : '',
@@ -125,10 +127,17 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.geofence_enforce != null) setSetting('geofence_enforce', b.geofence_enforce ? '1' : '0');
     if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');
     if (b.hourly_merge_rule != null) setSetting('hourly_merge_rule', b.hourly_merge_rule === 'pairs' ? 'pairs' : 'filo');
+    // Máy TCP/IP + máy Union: admin cũng bật/tắt được (vẫn cần tài khoản tổng bật "Dùng máy chấm công")
+    if (b.tcp_device_enabled != null) setSetting('tcp_device_enabled', b.tcp_device_enabled ? '1' : '0');
+    if (b.union_device_enabled != null) setSetting('union_device_enabled', b.union_device_enabled ? '1' : '0');
+    if (b.union_port != null) {
+      const v = parseInt(b.union_port, 10);
+      if (!(v > 0 && v < 65536)) return res.status(400).json({ error: 'Cổng nhận máy Union không hợp lệ (mặc định 9870)' });
+      setSetting('union_port', String(v));
+    }
     // Bật/tắt tính năng MÁY CHẤM CÔNG: CHỈ tài khoản tổng mới đổi được
     if (req.user.master) {
       if (b.device_enabled != null) setSetting('device_enabled', b.device_enabled ? '1' : '0');
-      if (b.tcp_device_enabled != null) setSetting('tcp_device_enabled', b.tcp_device_enabled ? '1' : '0');
       if (b.ai_device_enabled != null) setSetting('ai_device_enabled', b.ai_device_enabled ? '1' : '0');
       if (b.hik_device_enabled != null) setSetting('hik_device_enabled', b.hik_device_enabled ? '1' : '0');
       if (b.phone_enabled != null) setSetting('phone_enabled', b.phone_enabled ? '1' : '0');

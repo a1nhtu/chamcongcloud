@@ -8,6 +8,7 @@ import { rmSync } from 'node:fs';
 const DBP = join(tmpdir(), `dgp-xoa-nv-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
 process.env.DB_PATH = DBP;
+process.env.UNION_BRIDGE = 'node ' + new URL('../tools/sim-union.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1');   // bật công tắc Union trong test → cầu nối giả, không mở cổng thật
 
 let db, S;
 const routes = {};
@@ -108,15 +109,16 @@ test('mở khoá lại → đồng bộ bình thường như cũ', async () => {
   assert.ok(pending('SN_A', '5').some((c) => c.startsWith('DATA UPDATE')));
 });
 
-test('admin (quyền Máy chấm công) bật/tắt được công tắc vận hành, KHÔNG đổi được Dùng máy chấm công / key / TCP', async () => {
+test('admin (quyền Máy chấm công) bật/tắt được công tắc vận hành + máy TCP/IP + máy Union, KHÔNG đổi được Dùng máy chấm công / key', async () => {
   const { getSetting, setSetting } = await import('../server/db.js');
   setSetting('device_enabled', '1'); setSetting('device_key_required', '1');
   await call('PUT /device-options', { device_pin_guard: false, device_auto_push_emp: false, device_autocreate: false, device_name_ascii: false,
-    device_enabled: false, device_key_required: false, tcp_device_enabled: true });
+    device_enabled: false, device_key_required: false, tcp_device_enabled: true, union_device_enabled: true });
   assert.equal(getSetting('device_pin_guard', '1'), '0'); assert.equal(getSetting('device_auto_push_emp', '1'), '0');
   assert.equal(getSetting('device_autocreate', '1'), '0'); assert.equal(getSetting('device_name_ascii', '1'), '0');
   assert.equal(getSetting('device_enabled', '0'), '1'); assert.equal(getSetting('device_key_required', '0'), '1');
-  assert.equal(getSetting('tcp_device_enabled', '0'), '0');
+  assert.equal(getSetting('tcp_device_enabled', '0'), '1'); assert.equal(getSetting('union_device_enabled', '0'), '1');
+  setSetting('union_device_enabled', '0'); (await import('../server/union.js')).syncUnion();   // không để cầu nối Union chạy trong lúc test
 });
 
 test('thêm NV: để trống tài khoản = mã NV, để trống mật khẩu = 123456; trùng tài khoản → báo rõ', async () => {

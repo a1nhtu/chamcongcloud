@@ -14,6 +14,7 @@ import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isF
 import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
 import { hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
   hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush } from '../../hik-isapi.js';
+import { unionEnabled, unionPort, unionStatus, unionOnline, unionInfo, unionUsers, unionLogs, unionSimple, unionDeleteUsers, unionClearUsers, syncUnion } from '../../union.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -65,16 +66,23 @@ export function registerDeviceRoutes(r, { need }) {
         d.face_count = bns.filter(isFace).length;
         d.emp_count = db.prepare('SELECT COUNT(*) c FROM (SELECT pin FROM device_users_serial WHERE serial=? UNION SELECT pin FROM ai_templates WHERE serial=?)').get(d.serial, d.serial).c;
       }
+      if (d.conn_type === 'union') d.online = unionOnline(d.serial);   // máy Union: đang giữ kết nối về cổng nhận máy
     }
     res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32',
-      ai_enabled: aiEnabled(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+      ai_enabled: aiEnabled(), union_enabled: unionEnabled(), union_port: unionPort(), union_status: unionStatus(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
-  // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được.
-  // (Dùng máy chấm công / Bắt buộc key / Máy TCP/IP vẫn CHỈ tài khoản tổng — đổi ở PUT /settings.)
+  // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được (kể cả máy TCP/IP, máy Union).
+  // (Dùng máy chấm công / Bắt buộc key / máy AI / Hikvision vẫn CHỈ tài khoản tổng — đổi ở PUT /settings.)
   r.put('/device-options', need('devices'), (req, res) => {
     const b = req.body || {};
-    for (const k of ['device_autocreate', 'device_pin_guard', 'device_name_ascii', 'device_auto_push_emp'])
+    if (b.union_port != null && b.union_port !== '') {
+      const v = parseInt(b.union_port, 10);
+      if (!(v > 0 && v < 65536)) return res.status(400).json({ error: 'Cổng nhận máy Union không hợp lệ (mặc định 9870)' });
+      setSetting('union_port', String(v));
+    }
+    for (const k of ['device_autocreate', 'device_pin_guard', 'device_name_ascii', 'device_auto_push_emp', 'tcp_device_enabled', 'union_device_enabled'])
       if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
+    syncUnion();   // mở / đóng cổng nhận máy Union ngay
     res.json({ ok: true });
   });
   // Lấy lại IP mạng LAN hiện tại (bấm "Refresh mạng" sau khi đổi mạng) để điền vào máy chấm công
@@ -196,6 +204,10 @@ export function registerDeviceRoutes(r, { need }) {
     if (d.conn_type === 'hik') {   // Hikvision: phần mềm gọi thẳng vào máy
       if (!hikEnabled()) return res.status(400).json({ error: 'Chưa bật "Dùng máy Hikvision".' });
       return hikOpenDoor(d).then(() => res.json({ ok: true, msg: 'Đã mở cửa.' }), (e) => res.status(400).json({ error: e.message }));
+    }
+    if (d.conn_type === 'union') {
+      if (!unionEnabled()) return res.status(400).json({ error: 'Chưa bật "Dùng máy Union".' });
+      return unionSimple(d, 'opendoor').then(() => res.json({ ok: true, msg: 'Đã mở cửa.' }), (e) => res.status(400).json({ error: e.message }));
     }
     if (d.conn_type === 'ai') { aiAction(d.serial, 'open-door'); aiPoke(d.serial); }
     else openDoor(d.serial);
@@ -454,6 +466,11 @@ export function registerDeviceRoutes(r, { need }) {
       const j = startJob('hik-delete-users', dev.name || serial, async () => { const r2 = await hikDeleteUsers(dev, pins); dropConflicts(serial, pins); return r2; });
       return res.json({ ok: true, job: j.id, count: pins.length, msg: `Đang xoá ${pins.length} nhân viên trên máy…` });
     }
+    if (dev.conn_type === 'union') {   // Union: xoá thẳng trên máy đang kết nối (chạy nền)
+      if (!unionEnabled()) return res.status(400).json({ error: 'Chưa bật "Dùng máy Union".' });
+      const j = startJob('union-delete-users', dev.name || serial, async (prog) => { const r2 = await unionDeleteUsers(dev, pins, prog); dropConflicts(serial, pins); return r2; });
+      return res.json({ ok: true, job: j.id, count: pins.length, msg: `Đang xoá ${pins.length} nhân viên trên máy…` });
+    }
     const n = dev.conn_type === 'ai' ? aiDeleteUsers(serial, pins) : deleteDeviceUsers(serial, pins);
     if (dev.conn_type === 'ai') aiPoke(serial);
     dropConflicts(serial, pins);
@@ -536,6 +553,7 @@ export function registerDeviceRoutes(r, { need }) {
     const tcpAll = devs.filter((d) => d.conn_type === 'tcp');
     let tcp = tcpAll;
     const hik = devs.filter((d) => d.conn_type === 'hik');
+    const uni = devs.filter((d) => d.conn_type === 'union');
     for (const d of push) {
       if (d.conn_type === 'ai') { aiDeleteUsers(d.serial, pins); aiPoke(d.serial); } else deleteDeviceUsers(d.serial, pins);
       dropConflicts(d.serial, pins);
@@ -543,15 +561,16 @@ export function registerDeviceRoutes(r, { need }) {
     let job = null, tcpNote = '';
     if (tcp.length && !tcpEnabled()) { tcpNote = `${tcp.length} máy TCP/IP chưa xoá được vì đang tắt "Dùng máy chấm công kết nối TCP/IP".`; tcp = []; }
     if (hik.length && !hikEnabled()) { tcpNote += (tcpNote ? ' ' : '') + `${hik.length} máy Hikvision chưa xoá được vì đang tắt "Dùng máy Hikvision".`; }
-    const direct = [...tcp, ...(hikEnabled() ? hik : [])];   // máy phần mềm phải kết nối vào để xoá (chạy nền, tuần tự)
+    if (uni.length && !unionEnabled()) { tcpNote += (tcpNote ? ' ' : '') + `${uni.length} máy Union chưa xoá được vì đang tắt "Dùng máy Union".`; }
+    const direct = [...tcp, ...(hikEnabled() ? hik : []), ...(unionEnabled() ? uni : [])];   // máy phần mềm phải ra lệnh trực tiếp (chạy nền, tuần tự)
     if (direct.length) {
       job = startJob('delete-users-all', direct.length + ' máy kết nối trực tiếp', async (prog) => {
         const out = [];
         for (const d of direct) {
           const name = d.name || d.serial;
           prog(`Đang xoá trên máy ${name}…`);
-          if (d.conn_type === 'hik') {
-            try { const r3 = await hikDeleteUsers(d, pins); dropConflicts(d.serial, pins); out.push({ device: name, ok: true, deleted: r3.deleted }); }
+          if (d.conn_type === 'hik' || d.conn_type === 'union') {
+            try { const r3 = await (d.conn_type === 'hik' ? hikDeleteUsers(d, pins) : unionDeleteUsers(d, pins)); dropConflicts(d.serial, pins); out.push({ device: name, ok: true, deleted: r3.deleted }); }
             catch (e) { out.push({ device: name, ok: false, error: e.message }); }
             continue;
           }
@@ -572,7 +591,7 @@ export function registerDeviceRoutes(r, { need }) {
     const ph = pins.map(() => '?').join(',');
     const idle = db.prepare(`SELECT DISTINCT COALESCE(NULLIF(d.name,''), d.serial) AS n FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
       WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins).map((x) => x.n);
-    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), job, tcpNote, idle });
+    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), direct: direct.map((d) => d.name || d.serial), job, tcpNote, idle });
   });
 
   /* -------- MÁY AI (tự nối về qua WebSocket — server/ai-ws.js): thao tác = xếp lệnh, máy nhận khi đang kết nối -------- */
@@ -589,6 +608,37 @@ export function registerDeviceRoutes(r, { need }) {
     aiPoke(d.serial);
     const online = aiOnline(d.serial);
     res.json({ ok: true, online, msg: `${AI_ACTIONS[action]}: đã gửi lệnh.` + (online ? ' Máy đang kết nối — chờ ít giây rồi bấm Làm mới.' : ' Máy đang OFFLINE — máy sẽ nhận lệnh khi kết nối lại.') });
+  });
+
+  /* -------- MÁY UNION / VIRDI (máy tự nối về cổng 9870 — server/union.js): thao tác chạy nền, giao diện hỏi tiến độ -------- */
+  const unionOn = (req, res, next) => (unionEnabled() ? next() : res.status(400).json({ error: 'Chưa bật "Dùng máy Union" (trang Máy chấm công → Tính năng máy chấm công).' }));
+  const UNION_ACTIONS = {
+    info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'new-logs': 'Tải lượt chấm mới', restart: 'Khởi động lại máy',
+    'clear-users': 'Xóa toàn bộ nhân viên trên máy',
+  };
+  r.post('/devices/:id/union/:action', need('devices'), unionOn, (req, res) => {
+    const d = db.prepare("SELECT * FROM push_devices WHERE id=? AND conn_type='union'").get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Union' });
+    const action = req.params.action, b = req.body || {};
+    if (!UNION_ACTIONS[action]) return res.status(400).json({ error: 'Thao tác không hỗ trợ' });
+    if (action !== 'info' && !d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước.' });
+    if (!unionOnline(d.serial)) return res.status(400).json({ error: `Máy đang mất kết nối — kiểm tra máy đã bật, Server IP trên máy = IP máy tính cài phần mềm, cổng ${unionPort()}.` });
+    const from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10);
+    if (action === 'logs' && (from || to) && (!ISO.test(from) || !ISO.test(to) || to < from)) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
+    const j = startJob('union-' + action, d.name || d.serial, async (prog) => {
+      if (action === 'info') { prog('Đang đọc thông tin máy…'); return { info: await unionInfo(d) }; }
+      if (action === 'users') { prog('Đang đọc nhân viên từ máy…'); return await unionUsers(d, prog); }
+      if (action === 'logs' || action === 'new-logs') {
+        prog('Đang đọc nhân viên từ máy…');
+        const u = await unionUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
+        prog('Đang đọc dữ liệu chấm công từ máy…');
+        return { ...(await unionLogs(d, from, to, prog, action === 'new-logs')), users: u.read, from, to };
+      }
+      if (action === 'restart') { await unionSimple(d, 'reboot'); return { note: ['restart'] }; }
+      if (action === 'clear-users') { await unionClearUsers(d); return { info: await unionInfo(d).catch(() => null) }; }
+      return {};
+    });
+    res.json({ ok: true, job: j.id, title: UNION_ACTIONS[action] });
   });
 
   /* -------- MÁY HIKVISION (phần mềm gọi ISAPI vào máy — server/hik-isapi.js) -------- */

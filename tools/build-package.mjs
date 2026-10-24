@@ -110,6 +110,9 @@ net session >nul 2>&1
 if %errorlevel%==0 (
   netsh advfirewall firewall delete rule name=all program="%~dp0runtime\\node.exe" >nul 2>&1
   netsh advfirewall firewall add rule name="Digiplus ChamCong %PORT%" dir=in action=allow program="%~dp0runtime\\node.exe" profile=any enable=yes >nul 2>&1
+  rem May Union / Virdi tu ket noi ve cong 9870 (cau noi SDK la chuong trinh rieng, khong nam trong luat cua node.exe)
+  netsh advfirewall firewall delete rule name="Digiplus Union 9870" >nul 2>&1
+  netsh advfirewall firewall add rule name="Digiplus Union 9870" dir=in action=allow protocol=TCP localport=9870 profile=any >nul 2>&1
   echo   + Da mo tuong lua cho phan mem - may cham cong trong mang noi bo ket noi duoc.
 ) else (
   echo   * Chua co quyen Admin nen chua mo tuong lua - may cham cong dat theo IP noi bo co the bi chan.
@@ -162,6 +165,7 @@ del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamC
 schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
 schtasks /Delete /TN "Digiplus-%PORT%-logon" /F >nul 2>&1
 netsh advfirewall firewall delete rule name=all program="%~dp0runtime\\node.exe" >nul 2>&1
+netsh advfirewall firewall delete rule name="Digiplus Union 9870" >nul 2>&1
 for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
 rem Dung cloudflared cua CHINH thu muc nay (khach khac tren cung may khong bi dung)
 set "CF_EXE=%~dp0cloudflared.exe"

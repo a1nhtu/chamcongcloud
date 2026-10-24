@@ -7,6 +7,7 @@
 import { db, getSetting } from './db.js';
 import { queueCmd } from './device-sync.js';
 import { tcpEnabled, tcpProbe, zkRun } from './zk-tcp.js';
+import { unionEnabled, unionSimple } from './union.js';
 import { aiEnabled, aiAction } from './ai-device.js';
 import { hikEnabled, hikRestart } from './hik-isapi.js';
 
@@ -45,6 +46,11 @@ async function rebootNow(d, utc) {
   if (d.conn_type === 'hik') {
     if (!hikEnabled()) throw new Error('chưa bật máy Hikvision');
     await hikRestart(d);
+    return 'đã khởi động lại';
+  }
+  if (d.conn_type === 'union') {
+    if (!unionEnabled()) throw new Error('chưa bật máy Union');
+    await unionSimple(d, 'reboot');
     return 'đã khởi động lại';
   }
   if (d.conn_type === 'ai') {
