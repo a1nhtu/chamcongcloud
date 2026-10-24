@@ -133,7 +133,7 @@ try {
       $s = ''; if ($z.GetSerialNumber($m, [ref]$s)) { Out "I`tserial`t$(Clean $s)" }
       $s = ''; if ($z.GetSysOption($m, '~DeviceName', [ref]$s)) { Out "I`tmodel`t$(Clean $s)" }
       $s = ''; if ($z.GetFirmwareVersion($m, [ref]$s)) { Out "I`tfirmware`t$(Clean $s)" }
-      foreach ($p in @(@('svr_fun', 'IclockSvrFun'), @('svr_mode', 'WebServerURLModel'), @('svr_url', 'ICLOCKSVRURL'), @('svr_port', 'IclockSvrPort'))) {
+      foreach ($p in @(@('svr_fun', 'IclockSvrFun'), @('svr_mode', 'WebServerURLModel'), @('svr_url', 'ICLOCKSVRURL'), @('svr_port', 'IclockSvrPort'), @('svr_ssl', 'IISSupportSSL'))) {
         $s = ''; if ($z.GetSysOption($m, $p[1], [ref]$s)) { Out "I`t$($p[0])`t$(Clean $s)" }
       }
       Done 'svr'
@@ -142,6 +142,18 @@ try {
       [void]$z.SetSysOption($m, 'IclockSvrFun', '1')
       [void]$z.SetSysOption($m, 'WebServerURLModel', '1')
       [void]$z.SetSysOption($m, 'ICLOCKSVRURL', $From)
+      # Máy CÓ mục HTTPS (IISSupportSSL đọc được) → bật lên, phòng ai đó đã tắt; cổng chưa phải cổng HTTPS của Cloudflare → 443
+      # (bật SSL mà cổng 80 thì máy nói HTTPS vào cổng HTTP, không về được). Máy không có mục này → giữ như cũ (HTTP).
+      $s = ''
+      if ($z.GetSysOption($m, 'IISSupportSSL', [ref]$s)) {
+        [void]$z.SetSysOption($m, 'IISSupportSSL', '1')
+        $s = ''; [void]$z.GetSysOption($m, 'IISSupportSSL', [ref]$s)
+        if ((Clean $s) -eq '1') {
+          $cur = ''; [void]$z.GetSysOption($m, 'IclockSvrPort', [ref]$cur)
+          if (@('443', '2053', '2083', '2087', '2096', '8443') -notcontains (Clean $cur)) { $To = '443' } else { $To = '' }
+        }
+        Out "I`tsvr_ssl`t$(Clean $s)"
+      }
       if ($To) { [void]$z.SetSysOption($m, 'IclockSvrPort', $To) }
       # nhiều firmware trả false dù đã ghi → xét bằng cách đọc lại
       $s = ''; [void]$z.GetSysOption($m, 'ICLOCKSVRURL', [ref]$s)

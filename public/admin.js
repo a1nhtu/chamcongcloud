@@ -6308,7 +6308,7 @@ function lanScanModal() {
   let changed = false;
   const close = () => { closeModal(); if (changed) pageDevices(); };
   const svrText = (x) => x.error ? '' : x.svr_fun !== '1' ? 'Chưa bật Cloud Server'
-    : x.svr_mode === '1' ? 'Tên miền: ' + (x.svr_url || '(trống)') : 'Theo IP' + (x.svr_url ? ': ' + x.svr_url : '') + (x.svr_port ? ' · cổng ' + x.svr_port : '');
+    : x.svr_mode === '1' ? 'Tên miền: ' + (x.svr_url || '(trống)') + (x.svr_port ? ' · cổng ' + x.svr_port : '') + (x.svr_ssl === '1' ? ' · HTTPS' : x.svr_ssl === '0' ? ' · HTTPS tắt' : '') : 'Theo IP' + (x.svr_url ? ': ' + x.svr_url : '') + (x.svr_port ? ' · cổng ' + x.svr_port : '');
   const point = async (x, r, cell) => {
     let key = '';
     if (String(x.code || '').startsWith('CONNECT')) {   // không đọc được bằng mật mã 0 → máy có đặt Comm Key
@@ -6346,7 +6346,7 @@ function lanScanModal() {
     }
     tbl.append(tb);
     box.append(el('div', { class: 'tbl-scroll' }, tbl),
-      el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Phần mềm ghi vào máy: bật Cloud Server theo tên miền (IclockSvrFun = 1, WebServerURLModel = 1, ICLOCKSVRURL = tên miền) rồi khởi động lại máy.'));
+      el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Phần mềm ghi vào máy: bật Cloud Server theo tên miền (IclockSvrFun = 1, WebServerURLModel = 1, ICLOCKSVRURL = tên miền; máy có mục HTTPS thì bật IISSupportSSL = 1 + cổng 443) rồi khởi động lại máy.'));
   };
   const run = async () => {
     again.disabled = true;
