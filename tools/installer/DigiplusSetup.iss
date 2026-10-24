@@ -87,6 +87,7 @@ StatusRunProgram=Đang hoàn tất cài đặt...
 Source: "{#Src}\config.txt"; DestDir: "{app}"; Flags: onlyifdoesntexist
 Source: "{#Src}\*"; DestDir: "{app}"; Excludes: "config.txt"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "digiplus.ico"; DestDir: "{app}"; Flags: ignoreversion
+Source: "MoTrinhDuyet.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; SDK ZKTeco (zkemkeeper 6.3.1.37, 32-bit) cho máy chấm công kết nối trực tiếp TCP/IP — để riêng trong thư mục cài,
 ; KHÔNG chép vào thư mục Windows (không đụng SDK của phần mềm chấm công khác đang có trên máy)
 Source: "zksdk\*.dll"; DestDir: "{app}\zksdk"; Flags: ignoreversion
@@ -100,7 +101,8 @@ Type: files; Name: "{autodesktop}\Digiplus Cham Cong {code:InstNum}.url"
 Filename: "{syswow64}\regsvr32.exe"; Parameters: "/s ""{app}\zksdk\zkemkeeper.dll"""; Check: NeedZkSdk; Flags: runhidden waituntilterminated; StatusMsg: "Đang đăng ký SDK máy chấm công (TCP/IP)..."
 ; Đăng ký tự bật khi mở máy + khởi động phần mềm + chờ phần mềm sẵn sàng (CaiDat.bat chế độ im lặng)
 Filename: "{app}\CaiDat.bat"; Parameters: "silent{code:AutoParam}"; WorkingDir: "{app}"; Flags: runhidden waituntilterminated; StatusMsg: "Đang khởi động phần mềm (lần đầu có thể mất khoảng 1 phút)..."
-Filename: "{code:AdminUrl}"; Description: "Mở trang quản lý Digiplus Chấm Công"; Flags: postinstall shellexec nowait skipifsilent
+; Mở trang quản lý vào trình duyệt khách ĐANG MỞ SẴN (Chrome / Cốc Cốc…), không mở trình duyệt mặc định khác — chạy dưới quyền người dùng, ẩn cửa sổ
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ""{app}\MoTrinhDuyet.ps1"" ""{code:AdminUrl}"""; Description: "Mở trang quản lý Digiplus Chấm Công"; Flags: postinstall runhidden nowait skipifsilent runasoriginaluser
 
 [UninstallRun]
 ; Gỡ đăng ký SDK chỉ khi chính bản này đã đăng ký (đường dẫn đăng ký nằm trong thư mục cài)
