@@ -6337,8 +6337,14 @@ function lanScanModal() {
     for (const x of r.rows) {
       const act = el('div', { style: 'margin-top:6px' });
       if (x.points_here) act.append(el('span', { class: 'pill ok' }, x.known ? (x.known.active ? '✓ Đang dùng' : '✓ Đã về · Chờ duyệt') : '✓ Đã trỏ về đây'));
+      // trỏ đúng tên miền mà HTTPS lệch cổng (bật HTTPS + cổng HTTP, hoặc tắt HTTPS + cổng HTTPS) → máy không về được
+      const httpsPort = ['443', '2053', '2083', '2087', '2096', '8443'].includes(String(x.svr_port || ''));
+      const mismatch = x.points_here && x.svr_port && ((x.svr_ssl === '1' && !httpsPort) || (x.svr_ssl === '0' && httpsPort));
+      const offline = x.known && (!x.known.last_seen || Date.now() - Date.parse(x.known.last_seen) > 3 * 60000);
+      if (mismatch) act.append(warn(`HTTPS ${x.svr_ssl === '1' ? 'đang BẬT' : 'đang TẮT'} nhưng cổng máy là ${x.svr_port} → máy không về được. Bấm "Trỏ lại" để sửa.`));
+      else if (x.points_here && offline) act.append(warn('Máy trỏ đúng tên miền nhưng mấy phút nay không về phần mềm. Bấm "Trỏ lại" để ghi lại cài đặt.'));
       if (r.domain && !x.points_here) act.append(btnSm('➜ Trỏ về phần mềm này', () => point(x, r, act)));
-      else if (r.domain && x.points_here && !x.known) act.append(' ', btnSm('Trỏ lại', () => point(x, r, act), 'ghost'));
+      else if (r.domain && x.points_here && (!x.known || mismatch || offline)) act.append(' ', btnSm('Trỏ lại', () => point(x, r, act), 'ghost'));
       const mono = (t) => el('div', { class: 'muted', style: 'font-size:12px;font-family:monospace' }, t);
       tb.append(el('tr', {},
         el('td', {}, el('b', {}, x.model || 'Máy chấm công'), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip)),
