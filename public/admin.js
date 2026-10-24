@@ -493,7 +493,8 @@ async function renderDashboard(showLoading) {
     let extraTh = '';
     for (let i = 2; i <= np; i++) extraTh += `<th>Vào ${i}</th><th>Ra ${i}</th>`;
     const tbl = el('table', { class: 'data' });
-    tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vào${n1}</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vị trí</th><th>Ra${n1}</th>${extraTh}<th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
+    // Vị trí + Muộn đứng trước để các lần chấm (Vào / Ra) nằm liền nhau
+    tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vị trí</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vào${n1}</th><th>Ra${n1}</th>${extraTh}<th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
     const tb = el('tbody');
     tbl.append(tb);
     // Phân trang: chọn số dòng/trang, giữ nguyên trang đang xem khi tự cập nhật mỗi 20 giây
@@ -555,9 +556,9 @@ function rowToday(r, np = 1) {
     el('td', {}, photoCell(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
-    el('td', {}, (pairs[0][0] || '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
-    ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
     el('td', {}, r.check_in_outside ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m)) : el('span', { class: 'pill ok' }, 'Trong VP')),
+    ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
+    el('td', {}, (pairs[0][0] || '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
     el('td', {}, outCell(pairs[0])),
     ...extra,
     el('td', {}, photoCell(r.check_out_photo)),
