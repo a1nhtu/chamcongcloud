@@ -1,6 +1,6 @@
 // Nhóm route CẤU HÌNH LƯƠNG + bảng lương + ngày lễ.
 import { db, getSetting, adminAttWhere } from '../../db.js';
-import { computePayrollTable, companyOtRates } from '../../payroll-calc.js';
+import { computePayrollTable, companyOtRates, bulkSetSalary } from '../../payroll-calc.js';
 import { auditAllowed, virtLevel } from '../../virtual-att.js';
 import { sendCaughtError } from '../../util.js';
 
@@ -35,6 +35,12 @@ export function registerPayrollRoutes(r, { need }) {
       .run(eid, +b.basic_salary || 0, b.daily_rate ? +b.daily_rate : null, +b.working_days_per_month || 26,
         +b.ot_rate_weekday || def.ot_rate_weekday, +b.ot_rate_weekend || def.ot_rate_weekend, +b.ot_rate_holiday || def.ot_rate_holiday, +b.allowance || 0, +b.hourly_rate || 0);
     res.json({ ok: true });
+  });
+  // Sửa lương hàng loạt theo bộ phận (rỗng = tất cả NV) — chỉ ghi đè các ô gửi lên
+  r.post('/salary/bulk', need('salary'), (req, res) => {
+    const b = req.body || {};
+    try { res.json({ ok: true, count: bulkSetSalary({ dept: b.dept || '', fields: b.fields || {} }) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   // Bảng lương tính sẵn cho 1 tháng (kèm chi tiết từng NV để in phiếu lương)

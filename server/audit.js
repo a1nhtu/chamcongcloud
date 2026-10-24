@@ -33,6 +33,7 @@ const LABELS = {
   'POST /branding': 'Đổi logo / thương hiệu',
   'POST /update/apply': 'Cập nhật phần mềm',
   'PUT /salary/:empId': 'Sửa cấu hình lương',
+  'POST /salary/bulk': 'Sửa lương hàng loạt',
   'POST /holidays': 'Thêm ngày lễ',
   'DELETE /holidays/:id': 'Xóa ngày lễ',
   'POST /swap-days': 'Đăng ký làm bù',

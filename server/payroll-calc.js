@@ -34,6 +34,44 @@ export function getSalaryConfig(employeeId) {
   return db.prepare('SELECT * FROM salary_configs WHERE employee_id = ?').get(employeeId) || { employee_id: employeeId, ...DEFAULT_CFG, ...companyOtRates() };
 }
 
+// SỬA LƯƠNG HÀNG LOẠT: đặt các ô trong `fields` cho mọi NV đang làm của bộ phận `dept` (gồm bộ phận con; rỗng = tất cả).
+// Chỉ ghi đè ô có trong `fields`; ô khác giữ nguyên cấu hình cũ (NV chưa có cấu hình → mặc định như getSalaryConfig).
+// daily_rate = null nghĩa là "tự tính" (lương CB ÷ ngày công chuẩn). Trả về số NV đã cập nhật.
+const BULK_KEYS = ['basic_salary', 'daily_rate', 'working_days_per_month', 'ot_rate_weekday', 'ot_rate_weekend', 'ot_rate_holiday', 'allowance', 'hourly_rate'];
+export function bulkSetSalary({ dept = '', fields = {} } = {}) {
+  const set = {};
+  for (const k of BULK_KEYS) {
+    if (!(k in fields)) continue;
+    const v = fields[k];
+    if (k === 'daily_rate') { set[k] = v === null || v === '' || !(+v > 0) ? null : +v; continue; }
+    const n = +v;
+    if (!Number.isFinite(n) || n < 0) throw new Error('Giá trị không hợp lệ: ' + k);
+    if (k === 'working_days_per_month' && !(n >= 1 && n <= 31)) throw new Error('Ngày công chuẩn phải từ 1 đến 31');
+    if (k.startsWith('ot_rate_') && !(n > 0)) throw new Error('Hệ số tăng ca phải lớn hơn 0');
+    set[k] = n;
+  }
+  if (!Object.keys(set).length) throw new Error('Chưa chọn ô nào để sửa');
+  const depts = deptWithChildren(dept ? [dept] : []);
+  const emps = db.prepare(`SELECT id FROM employees WHERE active = 1${adminAttWhere('role')}` + (depts.length ? ` AND department IN (${depts.map(() => '?').join(',')})` : '')).all(...depts);
+  const up = db.prepare(`INSERT INTO salary_configs
+      (employee_id, basic_salary, daily_rate, working_days_per_month, ot_rate_weekday, ot_rate_weekend, ot_rate_holiday, allowance, hourly_rate, updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))
+    ON CONFLICT(employee_id) DO UPDATE SET
+      basic_salary=excluded.basic_salary, daily_rate=excluded.daily_rate, working_days_per_month=excluded.working_days_per_month,
+      ot_rate_weekday=excluded.ot_rate_weekday, ot_rate_weekend=excluded.ot_rate_weekend, ot_rate_holiday=excluded.ot_rate_holiday,
+      allowance=excluded.allowance, hourly_rate=excluded.hourly_rate, updated_at=datetime('now')`);
+  db.exec('BEGIN');
+  try {
+    for (const { id } of emps) {
+      const c = { ...getSalaryConfig(id), ...set };
+      up.run(id, c.basic_salary || 0, c.daily_rate || null, c.working_days_per_month || 26,
+        c.ot_rate_weekday, c.ot_rate_weekend, c.ot_rate_holiday, c.allowance || 0, c.hourly_rate || 0);
+    }
+    db.exec('COMMIT');
+  } catch (e) { db.exec('ROLLBACK'); throw e; }
+  return emps.length;
+}
+
 // Tính lương 1 nhân viên trong kỳ [from,to]. opts.virt = LƯƠNG ẢO (tăng ca theo công ảo); opts.vmap = map công ảo nạp sẵn
 export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   const cfg = getSalaryConfig(employeeId);

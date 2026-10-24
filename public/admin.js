@@ -3686,15 +3686,17 @@ async function pageSalary() {
     try { const m = await import('/payroll.js'); return m.pagePayPro({ head, setMain, openModal, closeModal, loading, hasPerm, go }); }
     catch (e) { setMain(el('div', { class: 'empty' }, 'Không tải được phân hệ Tiền lương: ' + e.message)); return; }
   }
-  const cfgBtn = el('button', { class: 'btn sm ' + (_salTab === 'config' ? '' : 'ghost') }, '⚙ Cấu hình lương');
-  const payBtn = el('button', { class: 'btn sm ' + (_salTab === 'payroll' ? '' : 'ghost') }, '📄 Bảng lương / Phiếu lương');
-  cfgBtn.onclick = () => { _salTab = 'config'; pageSalary(); };
-  payBtn.onclick = () => { _salTab = 'payroll'; pageSalary(); };
-  const tabs = [cfgBtn, payBtn];
+  // 2 THẺ (không phải nút bấm): thẻ đang chọn gạch chân màu cam, bấm lại thẻ đang chọn thì không làm gì
+  const tabBtn = (key, label) => {
+    const b = el('button', { type: 'button', class: 'tab-btn' + (_salTab === key ? ' on' : '') }, label);
+    b.onclick = () => { if (_salTab === key) return; _salTab = key; pageSalary(); };
+    return b;
+  };
+  const tabs = el('div', { class: 'tab-bar', style: 'margin-bottom:12px' }, tabBtn('config', '⚙ Cấu hình lương từng nhân viên'), tabBtn('payroll', '📄 Bảng lương / Phiếu lương'));
   if (_salTab === 'payroll') return salaryPayrollView(tabs);
-  setMain(head('Lương', ...tabs), loading());
+  setMain(head('Lương'), tabs, loading());
   let data;
-  try { data = await api('/admin/salary'); } catch (e) { setMain(head('Lương', ...tabs), el('div', { class: 'empty' }, e.message)); return; }
+  try { data = await api('/admin/salary'); } catch (e) { setMain(head('Lương'), tabs, el('div', { class: 'empty' }, e.message)); return; }
   const tbl = el('table', { class: 'data' });
   const canEdit = hasPerm('salary');
   const tb = el('tbody');
@@ -3732,7 +3734,53 @@ async function pageSalary() {
   const hint = el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, hourlyMode()
     ? 'Chế độ tính công theo giờ: Lương = Tổng giờ làm × đơn giá 1 giờ + phụ cấp.'
     : 'Lương = Số công × đơn giá ngày + OT (giờ × đơn giá giờ × hệ số) + nghỉ phép có lương + phụ cấp. Đơn giá giờ = đơn giá ngày ÷ 8.');
-  setMain(head('Lương', cfgBtn, payBtn), hint, el('div', { class: 'panel tbl-scroll' }, tbl));
+  const howTo = canEdit ? el('div', { style: 'margin-bottom:8px;padding:9px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:13.5px' },
+    '👉 Cài lương cho 1 người: bấm ', el('b', {}, 'Sửa'), ' ở cuối dòng nhân viên đó. Cài cho cả bộ phận (hoặc tất cả) một lần: bấm ', el('b', {}, '✎ Sửa hàng loạt'), ' ở góc trên.') : null;
+  const bulkBtn = canEdit ? el('button', { class: 'btn sm', onclick: () => salaryBulkModal() }, '✎ Sửa hàng loạt') : null;
+  setMain(head('Lương', bulkBtn), tabs, howTo, hint, el('div', { class: 'panel tbl-scroll' }, tbl));
+}
+
+// SỬA LƯƠNG HÀNG LOẠT: chọn bộ phận (kèm bộ phận con) hoặc tất cả, tích ô nào thì ghi đè ô đó, ô không tích giữ nguyên
+async function salaryBulkModal() {
+  const deptSel = el('select', { id: 'sb-dept' }, el('option', { value: '' }, '-- Tất cả nhân viên --'));
+  try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
+  const row = (key, label, inp) => {
+    const chk = el('input', { type: 'checkbox', 'data-k': key });
+    inp.disabled = true; chk.onchange = () => { inp.disabled = !chk.checked; if (chk.checked) inp.focus(); };
+    return el('label', { style: 'display:grid;grid-template-columns:22px 1fr 160px;gap:8px;align-items:center;padding:5px 0' }, chk, el('span', {}, label), inp);
+  };
+  const num = (id, v, extra = {}) => el('input', { id, type: 'number', min: 0, value: v, ...extra });
+  const rows = hourlyMode() ? [
+    row('hourly_rate', 'Đơn giá 1 giờ (VNĐ)', num('sb-hourly_rate', 0)),
+    row('allowance', 'Phụ cấp cố định / tháng (VNĐ)', num('sb-allowance', 0)),
+  ] : [
+    row('basic_salary', 'Lương cơ bản / tháng (VNĐ)', num('sb-basic_salary', 0)),
+    row('daily_rate', 'Đơn giá 1 ngày công (để trống = tự tính)', num('sb-daily_rate', '')),
+    row('working_days_per_month', 'Ngày công chuẩn / tháng', num('sb-working_days_per_month', 26, { min: 1, max: 31 })),
+    row('ot_rate_weekday', 'Hệ số OT ngày thường', num('sb-ot_rate_weekday', 1.5, { step: '0.1' })),
+    row('ot_rate_weekend', 'Hệ số OT cuối tuần', num('sb-ot_rate_weekend', 2, { step: '0.1' })),
+    row('ot_rate_holiday', 'Hệ số OT ngày lễ', num('sb-ot_rate_holiday', 3, { step: '0.1' })),
+    row('allowance', 'Phụ cấp cố định / tháng (VNĐ)', num('sb-allowance', 0)),
+  ];
+  const body = [
+    field('Áp dụng cho', deptSel),
+    el('div', { class: 'map-hint' }, 'Chọn bộ phận thì áp cho cả bộ phận con. Tích ô nào thì ô đó được ghi đè cho mọi người; ô không tích giữ nguyên như cũ.'),
+    el('div', {}, ...rows),
+  ];
+  const save = el('button', { class: 'btn' }, 'Áp dụng');
+  save.onclick = async () => {
+    const fields = {};
+    for (const c of document.querySelectorAll('#modal input[data-k]:checked')) {
+      const k = c.dataset.k, v = $('#sb-' + k).value;
+      fields[k] = k === 'daily_rate' ? (v ? +v : null) : +v;
+    }
+    if (!Object.keys(fields).length) return toast('Tích ít nhất 1 ô cần sửa', 'err');
+    const who = deptSel.value ? `bộ phận "${deptSel.value}" (kèm bộ phận con)` : 'TẤT CẢ nhân viên';
+    if (!confirm(`Ghi đè ${Object.keys(fields).length} ô lương cho ${who}?`)) return;
+    try { const r = await api('/admin/salary/bulk', { method: 'POST', body: { dept: deptSel.value, fields } }); toast(`Đã cập nhật ${r.count} nhân viên`, 'ok'); closeModal(); pageSalary(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  openModal('Sửa lương hàng loạt', body, [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
 
 /* ---------- Bảng lương + Phiếu lương ---------- */
@@ -3741,8 +3789,7 @@ async function salaryPayrollView(tabs) {
   const deptSel = el('select', {}, el('option', { value: '' }, '-- Tất cả phòng ban --'));
   const wrap = el('div', {}, loading());
   const vt = virtToggle(() => load());
-  const head2 = () => head('Lương', ...tabs, monthI, deptSel, vt);
-  setMain(head2(), wrap);
+  setMain(head('Lương', monthI, deptSel, vt), tabs, wrap);
   try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
 
   const load = async () => {
