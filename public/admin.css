@@ -383,6 +383,14 @@ input.rp-dim:hover, input.rp-dim:focus { opacity: .8; }
 #nav-toggle:hover { background: #343b4d; color: #fff; }
 #nav-toggle .nt-o, body.nav-mini #nav-toggle .nt-c { display: none; }
 body.nav-mini #nav-toggle .nt-o { display: inline; }
+/* hàng nút đầu menu: « (thu menu) + Thu gọn hết / Mở hết các nhóm */
+#nav-tools { display: flex; gap: 6px; margin: 8px 10px 0; }
+#nav-tools #nav-toggle { margin: 0; flex: 0 0 44px; }
+#nav-fold { flex: 1; min-width: 0; background: #2a3040; color: #cfd3db; border: 0; border-radius: 8px; padding: 6px 8px; font-size: 12.5px; font-weight: 700; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#nav-fold:hover { background: #343b4d; color: #fff; }
+body.nav-mini #nav-fold { display: none !important; }
+body.nav-mini #nav-tools { justify-content: center; }
+@media (max-width: 780px) { #nav-tools { display: none; } }
 @media (min-width: 781px) {
 body.nav-mini .layout { grid-template-columns: 64px 1fr; }
 body.nav-mini .sidebar .brand { font-size: 0; padding: 14px 6px; }

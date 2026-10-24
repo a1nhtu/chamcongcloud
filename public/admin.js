@@ -55,7 +55,21 @@ const NAV_GROUPS = [
   ['audit', 'Công ảo', ['audit', 'auditlimits']],
   ['sys', 'Thiết bị & hệ thống', ['devices', 'devreq', 'logs', 'settings']],
 ];
-const _navGrp = new Map();   // id nhóm → { open(o, save), has(key) }
+const _navGrp = new Map();   // id nhóm → { open(o, save), isOpen(), has(key) }
+const _navSubs = [];         // menu con (Ca làm, Phân ca) → { isOpen(), setOpen(o) }
+const navAnyOpen = () => [..._navGrp.values()].some((g) => g.isOpen()) || _navSubs.some((s) => s.isOpen());
+// nút "Thu gọn hết / Mở hết": đóng (hoặc mở) mọi nhóm + menu con; nhóm thì nhớ trên máy như khi bấm từng nhóm
+function navFoldAll(open) {
+  for (const g of _navGrp.values()) g.open(open, true);
+  for (const s of _navSubs) s.setOpen(open);
+}
+function navFoldSync() {
+  const b = $('#nav-fold'); if (!b) return;
+  const any = navAnyOpen();
+  b.style.display = _navGrp.size || _navSubs.length ? '' : 'none';
+  b.textContent = any ? '⊟ Thu gọn hết' : '⊞ Mở hết';
+  b.title = any ? 'Thu gọn tất cả các nhóm menu' : 'Mở tất cả các nhóm menu';
+}
 const isMaster = () => ME?.role === 'master';                 // tài khoản tổng (Anh)
 const isAdmin = () => ME?.role === 'admin' || isMaster();     // master có mọi quyền admin
 const hasPerm = (key) => isAdmin() || (ME?.permissions || []).includes(key);
@@ -142,7 +156,10 @@ async function afterLogin() {
   if (!$('#nav-toggle')) {
     const tg = el('button', { id: 'nav-toggle', type: 'button', title: 'Thu gọn / mở rộng menu' }, el('span', { class: 'nt-c' }, '«'), el('span', { class: 'nt-o' }, '»'));
     tg.onclick = () => setMini(!document.body.classList.contains('nav-mini'));
-    $('#side-brand').after(tg);
+    // nút cạnh «: thu gọn hết / mở hết các nhóm menu + menu con (Ca làm, Phân ca)
+    const fold = el('button', { id: 'nav-fold', type: 'button' });
+    fold.onclick = () => navFoldAll(!navAnyOpen());
+    $('#side-brand').after(el('div', { id: 'nav-tools' }, tg, fold));
   }
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
   const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'positions', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
@@ -161,7 +178,7 @@ async function afterLogin() {
     && !(key === 'mealinv' && SETTINGS.meal_ingredient !== '1')            // định lượng nguyên liệu: chỉ khi tài khoản tổng bật
     && !(key === 'mealme' && !mealOpt('self_order') && !mealOpt('dept_head')));
   // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
-  _navGrp.clear();
+  _navGrp.clear(); _navSubs.length = 0;
   const visKeys = new Set(visible.map((v) => v[0]));
   const boxOf = new Map();   // key mục → nơi gắn nút (thân nhóm hoặc nav)
   const made = new Set();
@@ -173,11 +190,11 @@ async function afterLogin() {
     const arrow = el('span', { class: 'nav-arrow' }, '▸');
     const h = el('button', { type: 'button', class: 'nav-grp-h', title: 'Xổ / thu nhóm ' + glabel }, el('span', { class: 'nav-lb' }, glabel), el('span', { style: 'flex:1' }), arrow);
     const body = el('div', { class: 'nav-grp-body' });
-    const set = (o, save) => { open = o; body.classList.toggle('shut', !o); arrow.textContent = o ? '▾' : '▸'; h.classList.toggle('open', o); if (save) { try { localStorage.setItem('navGrp_' + gid, o ? '1' : '0'); } catch {} } };
+    const set = (o, save) => { open = o; body.classList.toggle('shut', !o); arrow.textContent = o ? '▾' : '▸'; h.classList.toggle('open', o); if (save) { try { localStorage.setItem('navGrp_' + gid, o ? '1' : '0'); } catch {} } navFoldSync(); };
     h.addEventListener('click', () => set(!open, true));
     set(open, false);
     nav.append(h, body);
-    _navGrp.set(gid, { open: set, has: (k) => keys.includes(k), head: h });
+    _navGrp.set(gid, { open: set, isOpen: () => open, has: (k) => keys.includes(k), head: h });
     for (const k of keys) boxOf.set(k, body);
   };
   visible.forEach(([key, ic, label]) => {
@@ -197,7 +214,8 @@ async function afterLogin() {
       const arrow = el('span', { class: 'nav-arrow', title: 'Mở / thu menu con' }, SUB.isOpen() ? '▾' : '▸');
       b.append(el('span', { style: 'flex:1' }), arrow);
       const subBox = el('div', { class: 'nav-sub', id: SUB.id, style: SUB.isOpen() ? '' : 'display:none' });
-      const setOpen = (o) => { SUB.setOpen(o); arrow.textContent = o ? '▾' : '▸'; subBox.style.display = o ? '' : 'none'; };
+      const setOpen = (o) => { SUB.setOpen(o); arrow.textContent = o ? '▾' : '▸'; subBox.style.display = o ? '' : 'none'; navFoldSync(); };
+      _navSubs.push({ isOpen: SUB.isOpen, setOpen });
       arrow.addEventListener('click', (ev) => { ev.stopPropagation(); setOpen(!SUB.isOpen()); });
       b.addEventListener('click', () => { if (!SUB.isOpen()) setOpen(true); else if (b.classList.contains('active')) { setOpen(false); return; } go(key); });
       for (const [tab, sublabel] of SUB.tabs) {
@@ -211,6 +229,7 @@ async function afterLogin() {
     b.addEventListener('click', () => go(key));
     nav.append(b);
   });
+  navFoldSync();
   // Lần đầu khởi tạo: Admin chọn kiểu chấm công + phạm vi
   if (isAdmin() && SETTINGS.setup_done !== '1' && !attOff()) { setupWizard(); return; }
   // /admin#hrcontract (bấm vào thông báo nhắc hợp đồng) → mở thẳng trang đó nếu có quyền; đọc xong thì xoá #
