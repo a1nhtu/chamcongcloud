@@ -515,6 +515,23 @@ input[type=checkbox].sw.sm:checked::after { left: 17px; }
 @media (max-width: 700px) { .dev-st-grid { grid-template-columns: 1fr; } }
 input[type=checkbox].sw:disabled { opacity: .45; cursor: not-allowed; }
 .dev-tg.locked { background: #fafafa; }
+/* Khung Tính năng máy chấm công: 3 nhóm (Chung · Loại máy · Nhân viên & đồng bộ), mỗi công tắc 1 dòng gọn */
+.dfx-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 10px 24px; }
+.dfx-group { min-width: 0; }
+.dfx-gt { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding: 2px 0 6px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
+.dfx-item { padding: 7px 0; border-bottom: 1px dashed var(--line); }
+.dfx-item:last-child { border-bottom: 0; }
+.dfx-row { display: flex; gap: 10px; align-items: center; margin: 0; cursor: pointer; }
+.dfx-item.locked .dfx-row { cursor: not-allowed; }
+.dfx-item.locked .dfx-txt b { color: var(--muted); }
+.dfx-txt { min-width: 0; display: flex; flex-direction: column; line-height: 1.3; }
+.dfx-txt b { color: var(--ink); font-size: 14px; }
+.dfx-lock { margin-left: 5px; font-size: 11px; }
+.dfx-hint { font-size: 12px; color: var(--muted); font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dfx-extra { padding: 6px 0 0 52px; }
+.dfx-sub { display: flex; gap: 8px; align-items: center; margin: 0; font-size: 12.5px; font-weight: 500; color: var(--ink); white-space: nowrap; }
+.dfx-sub input[type=number] { width: 84px !important; margin: 0; padding: 4px 8px; }
+@media (max-width: 640px) { .dfx-hint { white-space: normal; } }
 /* Khung thu gọn trong form (Thêm/Sửa nhân viên…) */
 .f-sec { border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; }
 .f-sec-h { display: flex; gap: 8px; align-items: center; width: 100%; padding: 10px 12px; background: none; border: 0; cursor: pointer; text-align: left; font: inherit; color: var(--ink); }

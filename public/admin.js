@@ -5529,16 +5529,18 @@ async function pageLogs() {
   load();
 }
 
-// 1 ô công tắc trong lưới cài đặt máy chấm công: công tắc gạt + tiêu đề + mô tả (+ phần phụ)
-// chk.disabled = khoá (chỉ tài khoản tổng đổi được) → hiện 🔒
-function devToggle(chk, title, desc, extra) {
+// 1 dòng công tắc gọn trong khung Tính năng máy chấm công: công tắc + tên + 1 dòng gợi ý ngắn (đầy đủ ở tooltip)
+// chk.disabled = khoá (chỉ tài khoản tổng đổi được) → hiện 🔒. extra = phần phụ (VD ô cổng) chỉ hiện khi công tắc BẬT.
+function devToggle(chk, title, hint, full, extra) {
   const locked = chk.disabled;
-  return el('div', { class: 'dev-tg' + (locked ? ' locked' : '') },
-    el('label', { style: 'display:flex;gap:10px;align-items:flex-start;margin:0;cursor:' + (locked ? 'not-allowed' : 'pointer') }, chk,
-      el('div', {}, el('b', { style: 'color:var(--ink)' }, title, locked ? el('span', { title: 'Chỉ tài khoản tổng (Digiplus) đổi được', style: 'margin-left:6px;font-size:12px' }, '🔒') : ''),
-        el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400;margin-top:2px;line-height:1.45' }, desc))),
-    extra ? el('div', { style: 'padding-left:52px' }, extra) : '');
+  const sub = extra ? el('div', { class: 'dfx-extra' }, extra) : null;
+  if (sub) { const show = () => { sub.style.display = chk.checked ? '' : 'none'; }; chk.addEventListener('change', show); show(); }
+  return el('div', { class: 'dfx-item' + (locked ? ' locked' : ''), title: full + (locked ? ' — 🔒 Chỉ tài khoản tổng (Digiplus) đổi được' : '') },
+    el('label', { class: 'dfx-row' }, chk,
+      el('div', { class: 'dfx-txt' }, el('b', {}, title, locked ? el('span', { class: 'dfx-lock' }, '🔒') : ''), el('span', { class: 'dfx-hint' }, hint))),
+    sub);
 }
+const devGroup = (title, ...items) => el('div', { class: 'dfx-group' }, el('div', { class: 'dfx-gt' }, title), ...items);
 /* ---------- MÁY CHẤM CÔNG (ZKTeco ADMS push) ---------- */
 async function pageDevices() {
   setMain(head('Máy chấm công'), loading());
@@ -5577,18 +5579,21 @@ async function pageDevices() {
   };
   const togglePanel = hasPerm('devices')
     ? el('div', { class: 'panel', style: 'padding:16px 18px;margin-bottom:14px;max-width:1100px' },
-        el('div', { class: 'dev-tg-grid' },
-          devToggle(enChk, 'Dùng máy chấm công (kết nối máy ZKTeco)', 'Nhận dữ liệu chấm công máy tự đẩy về. Tắt = chỉ chấm bằng điện thoại (dùng song song được).'),
-          devToggle(autoChk, 'Tự tạo nhân viên khi đăng ký vân tay trên máy', 'Số ID mới đăng ký trên máy → tự tạo NV nháp (Số ID + tên máy gửi), admin bổ sung sau. Tắt: chờ admin gán tay.'),
-          devToggle(keyReqChk, 'Bắt buộc KEY bản quyền theo máy', 'Máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không ảnh hưởng.'),
-          devToggle(tcpChk, 'Dùng máy kết nối TCP/IP (cổng 4370)', 'Thêm máy theo IP trong LAN — phần mềm chủ động tải NV, tải chấm công, xoá dữ liệu. Cho máy đời cũ không có ADMS; cần cài trên máy tính Windows cùng mạng.'),
-          devToggle(aiChk, 'Dùng máy AI (máy tự kết nối về)', 'Máy khuôn mặt / vân tay dòng "AI": trên máy điền IP / tên miền + cổng của phần mềm, máy tự kết nối về (chạy được cả qua Internet, khỏi mở port modem). Đồng bộ NV + vân tay / khuôn mặt giữa các máy AI cùng nhóm.'),
-          devToggle(unionChk, 'Dùng máy Union (Virdi)', 'Máy Union / Virdi tự kết nối về phần mềm: trên máy đặt Server IP = IP máy tính cài phần mềm + cổng bên dưới. Nhận lượt chấm ngay khi chấm, tải NV / chấm công, xoá NV trên máy. Cần cài trên máy tính Windows cùng mạng LAN với máy.',
-            el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, 'Cổng nhận máy', unionPortI, el('span', { class: 'muted', style: 'font-weight:400' }, 'mặc định 9870'))),
-          devToggle(hikChk, 'Dùng máy Hikvision', 'Thêm máy theo IP + tài khoản đăng nhập máy — phần mềm kết nối vào máy để tải NV, tải chấm công (tự tải theo lịch), ghi / xoá NV trên máy. Phần mềm phải cùng mạng LAN với máy (hoặc máy được mở port).'),
-          devToggle(guardChk, 'Cảnh báo trùng Số ID giữa các máy', 'Máy đăng ký người mới vào Số ID đã có chủ → cảnh báo, tạm dừng đồng bộ và GIỮ lượt quẹt tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (tự cấp Số ID mới, giữ nguyên vân tay/thẻ).'),
-          devToggle(autoPushChk, 'Đồng bộ nhân viên từ phần mềm xuống máy', 'Khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy; máy luôn dùng tên trong phần mềm. Vân tay / mặt / thẻ đăng ký ở 1 máy tự sang máy cùng nhóm + về phần mềm.',
-            el('label', { style: 'display:flex;gap:8px;align-items:center;margin:8px 0 0;font-size:13px;font-weight:500;color:var(--ink)' }, asciiChk, 'Ghi tên KHÔNG DẤU — tối đa 24 ký tự'))),
+        el('div', { class: 'dfx-grid' },
+          devGroup('Chung',
+            devToggle(enChk, 'Dùng máy chấm công', 'Tắt = chỉ chấm bằng điện thoại', 'Nhận dữ liệu chấm công máy tự đẩy về (ZKTeco ADMS). Tắt = chỉ chấm bằng điện thoại (dùng song song được).'),
+            devToggle(keyReqChk, 'Bắt buộc KEY theo máy', 'Có key Digiplus mới duyệt được máy', 'Máy phải có key Digiplus cấp (theo Serial) mới DUYỆT được — máy khách tự mua nơi khác không chạy. Máy đang chạy không ảnh hưởng.')),
+          devGroup('Loại máy',
+            devToggle(tcpChk, 'TCP/IP (ZKTeco đời cũ)', 'Thêm máy theo IP · cổng 4370', 'Thêm máy theo IP trong LAN — phần mềm chủ động tải NV, tải chấm công, xoá dữ liệu. Cho máy đời cũ không có ADMS; cần cài trên máy tính Windows cùng mạng.'),
+            devToggle(unionChk, 'Union (Virdi)', 'Máy tự kết nối về · Windows, cùng LAN', 'Máy Union / Virdi tự kết nối về phần mềm: trên máy đặt Server IP = IP máy tính cài phần mềm + cổng nhận máy. Nhận lượt chấm ngay khi chấm, tải NV / chấm công, xoá NV trên máy. Cần cài trên máy tính Windows cùng mạng LAN với máy.',
+              el('label', { class: 'dfx-sub' }, 'Cổng nhận máy', unionPortI, el('span', { class: 'muted' }, 'mặc định 9870'))),
+            devToggle(aiChk, 'Máy AI', 'Máy tự kết nối về · chạy qua Internet', 'Máy khuôn mặt / vân tay dòng "AI": trên máy điền IP / tên miền + cổng của phần mềm, máy tự kết nối về (chạy được cả qua Internet, khỏi mở port modem). Đồng bộ NV + vân tay / khuôn mặt giữa các máy AI cùng nhóm.'),
+            devToggle(hikChk, 'Hikvision', 'Thêm máy theo IP + tài khoản máy', 'Thêm máy theo IP + tài khoản đăng nhập máy — phần mềm kết nối vào máy để tải NV, tải chấm công (tự tải theo lịch), ghi / xoá NV trên máy. Phần mềm phải cùng mạng LAN với máy (hoặc máy được mở port).')),
+          devGroup('Nhân viên & đồng bộ',
+            devToggle(autoChk, 'Tự tạo NV từ máy', 'Số ID mới trên máy → NV nháp', 'Số ID mới đăng ký trên máy → tự tạo NV nháp (Số ID + tên máy gửi), admin bổ sung sau. Tắt: chờ admin gán tay.'),
+            devToggle(guardChk, 'Cảnh báo trùng Số ID', 'Giữ lượt quẹt tới khi xử lý', 'Máy đăng ký người mới vào Số ID đã có chủ → cảnh báo, tạm dừng đồng bộ và GIỮ lượt quẹt tới khi xử lý: "Cùng 1 người" hoặc "Người khác" (tự cấp Số ID mới, giữ nguyên vân tay/thẻ).'),
+            devToggle(autoPushChk, 'Đồng bộ NV xuống máy', 'Khai / sửa NV → tự đẩy xuống máy', 'Khai / sửa / nhập Excel NV có Số ID → tự đẩy Số ID + tên xuống máy; máy luôn dùng tên trong phần mềm. Vân tay / mặt / thẻ đăng ký ở 1 máy tự sang máy cùng nhóm + về phần mềm.',
+              el('label', { class: 'dfx-sub' }, asciiChk, 'Ghi tên không dấu (tối đa 24 ký tự)')))),
         el('div', { style: 'margin-top:14px;display:flex;gap:12px;align-items:center;flex-wrap:wrap' }, saveEn,
           isMaster() ? '' : el('span', { class: 'map-hint', style: 'margin:0' }, '🔒 = chỉ tài khoản tổng (Digiplus) đổi được')))
     : el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
