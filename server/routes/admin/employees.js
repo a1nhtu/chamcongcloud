@@ -427,6 +427,32 @@ export function registerEmployeeRoutes(r, { need }) {
     }
     res.json({ ok: true, locked, self });
   });
+  // KHOÁ / MỞ KHOÁ NHIỀU nhân viên 1 lần (tích chọn ở trang Nhân viên): body { ids: [...], lock: true|false }.
+  // Bỏ qua: tài khoản đang đăng nhập (không tự khoá mình), tài khoản Admin khi người sửa không đủ quyền.
+  r.post('/employees/lock-bulk', need('employees'), (req, res) => {
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    const lock = req.body?.lock !== false;
+    const q = db.prepare('SELECT id, role, active FROM employees WHERE id=?');
+    const upd = db.prepare('UPDATE employees SET active=? WHERE id=?');
+    let changed = 0, same = 0, admins = 0, self = false, overLimit = 0;
+    // Mở khoá hàng loạt không được vượt số NV của bản quyền (giống Thêm nhân viên)
+    const max = lock ? 0 : licenseState().maxEmp || 0;
+    let active = max ? db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1 AND role != 'admin'").get().c : 0;
+    db.exec('BEGIN');
+    try {
+      for (const id of ids) {
+        const emp = q.get(id); if (!emp) continue;
+        if (lock && req.user && req.user.id != null && Number(req.user.id) === emp.id) { self = true; continue; }
+        if (!guardUpdateTarget(req.user, emp, {}).ok) { admins++; continue; }
+        if (!!emp.active === !lock) { same++; continue; }
+        if (max && emp.role !== 'admin') { if (active >= max) { overLimit++; continue; } active++; }
+        upd.run(lock ? 0 : 1, emp.id); changed++;
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/lock-bulk', e, { status: 400 }); }
+    res.json({ ok: true, changed, same, admins, self, overLimit, max });
+  });
   // XÓA CỨNG nhân viên + toàn bộ dữ liệu liên quan (khác Khoá). Lượt quẹt máy thô được GỠ KHỚP
   // (employee_id=NULL) chứ không xoá, để không mất log; NV nếu được tải lại từ máy sẽ tạo mới.
   const purgeEmp = (id) => {

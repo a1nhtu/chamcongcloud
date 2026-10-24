@@ -1464,8 +1464,17 @@ r.get('/attendance', (req, res) => {
     raw = applyVirtual(raw, virtualOt([...new Set(raw.map((a) => a.employee_id))], day || month + '-01', day || month + '-31', true, virtLevel(req.query, req))).map((a) => ({ ...a, manual: 0 }));
     marks.clear();
   }
+  // Tổng quan 1 ngày: NV chấm hơn 2 lần → kèm đủ các lần chấm (punches_hm) để hiện Vào 1 · Ra 1 · Vào 2 …
+  // Mỗi dòng công chỉ nhận lượt chấm nằm trong khoảng vào–ra của chính nó (ngày nhiều ca không bị lặp lượt)
+  const timesOf = day && !req.forceVirt ? dayTimesLoader(day, day, new Set(raw.map((a) => a.employee_id))) : null;
+  const punchesHM = (a) => {
+    if (!timesOf || !a.check_in_at) return undefined;
+    const end = a.check_out_at || a.check_in_at;
+    const ts = timesOf(a.employee_id, a.work_date).filter((t) => t >= a.check_in_at && t <= end);
+    return ts.length > 2 ? ts.map(isoToVnHM) : undefined;
+  };
   const rows = raw.map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
-    check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at) }));
+    check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: punchesHM(a) }));
   res.json({ month, rows });
 });
 

@@ -487,8 +487,13 @@ async function renderDashboard(showLoading) {
         today.filter(r => r.check_in_outside).map(r => person(r, 'Ngoài ' + humanDistance(r.check_in_distance_m))))),
       mcard('red', d.pendingLeaves, 'Đơn chờ duyệt', () => go('leaves')),
     );
+    // Có NV chấm hơn 2 lần → mỗi lần chấm 1 cột: Vào 1 · Ra 1 · Vào 2 · Ra 2 … (số cột theo người chấm nhiều nhất trong ngày)
+    const np = today.reduce((m, r) => Math.max(m, Math.ceil((r.punches_hm || []).length / 2)), 1);
+    const n1 = np > 1 ? ' 1' : '';
+    let extraTh = '';
+    for (let i = 2; i <= np; i++) extraTh += `<th>Vào ${i}</th><th>Ra ${i}</th>`;
     const tbl = el('table', { class: 'data' });
-    tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vào</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vị trí</th><th>Ra</th><th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
+    tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vào${n1}</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vị trí</th><th>Ra${n1}</th>${extraTh}<th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
     const tb = el('tbody');
     tbl.append(tb);
     // Phân trang: chọn số dòng/trang, giữ nguyên trang đang xem khi tự cập nhật mỗi 20 giây
@@ -501,8 +506,8 @@ async function renderDashboard(showLoading) {
       dashPage = Math.min(Math.max(1, dashPage), pages);
       const from = (dashPage - 1) * size, part = today.slice(from, from + size);
       tb.innerHTML = '';
-      if (!today.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 8 : 9 }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
-      for (const r of part) tb.append(rowToday(r));
+      if (!today.length) tb.append(el('tr', {}, el('td', { colspan: (hourly ? 8 : 9) + 2 * (np - 1) }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
+      for (const r of part) tb.append(rowToday(r, np));
       const prev = el('button', { class: 'btn ghost sm', ...(dashPage <= 1 ? { disabled: '' } : {}), onclick: () => { dashPage--; renderPage(); } }, '‹ Trước');
       const next = el('button', { class: 'btn ghost sm', ...(dashPage >= pages ? { disabled: '' } : {}), onclick: () => { dashPage++; renderPage(); } }, 'Sau ›');
       pager.innerHTML = '';
@@ -539,15 +544,22 @@ function dashListModal(title, people) {
   }
   openModal(`${title} (${people.length})`, [body], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
-function rowToday(r) {
+// np: số cặp vào/ra đang hiện trên bảng (NV chấm hơn 2 lần trong ngày → thêm cột Vào 2 · Ra 2 …)
+function rowToday(r, np = 1) {
+  const ps = r.punches_hm || [];
+  const pairs = ps.length > 2 ? Array.from({ length: Math.ceil(ps.length / 2) }, (_, i) => [ps[2 * i], ps[2 * i + 1]]) : [[r.check_in_hm, r.check_out_hm]];
+  const outCell = (p) => p[1] || el('span', { class: 'pill muted' }, 'chưa ra');
+  const extra = [];
+  for (let i = 1; i < np; i++) { const p = pairs[i]; extra.push(el('td', {}, p ? p[0] : ''), el('td', {}, p ? outCell(p) : '')); }
   return el('tr', {},
     el('td', {}, photoCell(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
-    el('td', {}, (r.check_in_hm || '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
+    el('td', {}, (pairs[0][0] || '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
     ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
     el('td', {}, r.check_in_outside ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m)) : el('span', { class: 'pill ok' }, 'Trong VP')),
-    el('td', {}, r.check_out_hm || el('span', { class: 'pill muted' }, 'chưa ra')),
+    el('td', {}, outCell(pairs[0])),
+    ...extra,
     el('td', {}, photoCell(r.check_out_photo)),
     el('td', {}, humanMinutes(r.work_minutes)),
   );
@@ -698,7 +710,11 @@ async function pageEmployees() {
       if (!empPicked.size) return;
       const picked = rows.filter((e) => empPicked.has(e.id));
       const delB = btnSm('🗑 Xóa ' + picked.length + ' nhân viên', () => delEmpBulk(picked)); delB.style.background = '#c0392b'; delB.style.borderColor = '#c0392b';
-      bulkBar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.length), btnSm('🏢 Chuyển bộ phận', () => moveDeptBulk(picked)), delB, btnSm('Bỏ chọn', () => { empPicked.clear(); renderList(); }, 'ghost'));
+      const nOn = picked.filter((e) => e.active).length, nOff = picked.length - nOn;
+      bulkBar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.length), btnSm('🏢 Chuyển bộ phận', () => moveDeptBulk(picked)),
+        ...(nOn ? [btnSm('🔒 Khoá ' + nOn + ' nhân viên', () => lockEmpBulk(picked, true), 'ghost')] : []),
+        ...(nOff ? [btnSm('🔓 Mở khoá ' + nOff, () => lockEmpBulk(picked, false), 'ghost')] : []),
+        delB, btnSm('Bỏ chọn', () => { empPicked.clear(); renderList(); }, 'ghost'));
     };
 
     const renderTree = () => {
@@ -1189,6 +1205,29 @@ Vân tay / thẻ / khuôn mặt trên máy bị xoá, dữ liệu công trong ph
       toast(`Đã gửi lệnh xoá trên ${r.push.length + r.tcp.length} máy` + (r.tcpNote ? ' — ' + r.tcpNote : ''), r.tcpNote ? 'err' : 'ok'); }
     catch (err) { toast(err.message, 'err'); }
   }
+  pageEmployees();
+}
+// Khoá / mở khoá NHIỀU NV đã tích chọn (1 lần cho cả lô). Khoá xong: NV có Số ID máy → hỏi xoá luôn trên tất cả máy (như khoá từng người)
+async function lockEmpBulk(list, lock) {
+  const todo = list.filter((e) => !!e.active === lock);
+  if (!todo.length) return;
+  const names = todo.slice(0, 5).map((e) => e.full_name).join(', ') + (todo.length > 5 ? ` … và ${todo.length - 5} người nữa` : '');
+  if (!confirm(`${lock ? 'Khoá' : 'Mở khoá'} ${todo.length} nhân viên?\n\n${names}`)) return;
+  try {
+    const r = await api('/admin/employees/lock-bulk', { method: 'POST', body: { ids: todo.map((e) => e.id), lock } });
+    const skip = [r.self ? 'bỏ qua tài khoản đang đăng nhập' : '', r.admins ? `bỏ qua ${r.admins} tài khoản Admin` : '',
+      r.overLimit ? `${r.overLimit} người chưa mở được vì bản quyền giới hạn ${r.max} nhân viên` : ''].filter(Boolean).join(', ');
+    toast(`Đã ${lock ? 'khoá' : 'mở khoá'} ${r.changed} nhân viên` + (skip ? ' (' + skip + ')' : ''), 'ok');
+    empPicked.clear();
+    const pins = lock ? todo.map((e) => e.device_pin).filter(Boolean) : [];
+    if (pins.length && hasPerm('devices') && deviceEnabled() && confirm(`Đã khoá. Xoá luôn ${pins.length} người có Số ID máy trên TẤT CẢ máy chấm công?
+
+Vân tay / thẻ / khuôn mặt trên máy bị xoá, dữ liệu công trong phần mềm giữ nguyên.`)) {
+      try { const d = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins } });
+        toast(`Đã gửi lệnh xoá trên ${d.push.length + d.tcp.length} máy` + (d.tcpNote ? ' — ' + d.tcpNote : ''), d.tcpNote ? 'err' : 'ok'); }
+      catch (err) { toast(err.message, 'err'); }
+    }
+  } catch (err) { toast(err.message, 'err'); }
   pageEmployees();
 }
 async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }

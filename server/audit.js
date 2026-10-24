@@ -89,6 +89,7 @@ const LABELS = {
   'POST /devices/push-employees': 'Đẩy nhân viên từ phần mềm xuống máy chấm công',
   'PUT /device-options': 'Bật/tắt tuỳ chọn máy chấm công (tự tạo NV, cảnh báo trùng Số ID, đồng bộ NV xuống máy)',
   'POST /employees/lock-by-pins': 'Khoá nhân viên hàng loạt (sau khi xóa trên máy)',
+  'POST /employees/lock-bulk': 'Khoá / mở khoá nhân viên hàng loạt',
   'PUT /hr/settings': 'Nhân sự: đổi số ngày cảnh báo hết hạn HĐ',
   'PUT /hr/profiles/:id': 'Nhân sự: sửa hồ sơ',
   'POST /hr/profiles/:id/family': 'Nhân sự: thêm người thân',
