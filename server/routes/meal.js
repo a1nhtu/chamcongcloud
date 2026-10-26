@@ -4,7 +4,7 @@ import { Router } from 'express';
 import { authRequired } from '../auth.js';
 import { sendCaughtError, userError } from '../util.js';
 import {
-  mealEnabled, selfOrderOn, dishChoiceOn, deptHeadOn, mealGate, listShifts, needShift, needDate, loadBoard, saveRegistrations, closingOf, headDeptList,
+  mealEnabled, selfOrderOn, dishChoiceOn, deptHeadOn, machineSignupOn, mealGate, listShifts, needShift, needDate, loadBoard, saveRegistrations, closingOf, headDeptList,
   myMealPlan, setMyOrder, setMySignup, kitchenScope, kitchenFeed, empKitchenId, listKitchens,
 } from '../meal.js';
 import { vnNow, addDaysIso, isIsoDate } from '../meal-rules.js';
@@ -43,7 +43,7 @@ r.get('/config', (req, res) => {
   const enabled = mealEnabled();
   let head = false;
   try { head = enabled && deptHeadOn() && !req.user.master && headDeptList(req.user.id).list.length > 0; } catch { /* chưa có bảng suất ăn */ }
-  res.json({ enabled, self_order: selfOrderOn(), dish_choice: dishChoiceOn(), dept_head: deptHeadOn(), head });
+  res.json({ enabled, self_order: selfOrderOn(), dish_choice: dishChoiceOn(), dept_head: deptHeadOn(), machine_signup: enabled && machineSignupOn(), head });
 });
 r.use(mealGate);
 
@@ -52,7 +52,7 @@ r.get('/me', wrap('GET /meal/me', (req, res) => {
   const h = req.user.master || !deptHeadOn() ? { roots: [], list: [] } : headDeptList(req.user.id);
   const kid = req.user.master ? null : empKitchenId(req.user.id);
   const kitchen = kid ? listKitchens().find((k) => k.id === kid)?.name || '' : '';
-  res.json({ today: vnNow().date, shifts: listShifts({ onlyEnabled: true }), head_of: h.list, self_order: selfOrderOn(), dish_choice: dishChoiceOn(), kitchen });
+  res.json({ today: vnNow().date, shifts: listShifts({ onlyEnabled: true }), head_of: h.list, self_order: selfOrderOn(), dish_choice: dishChoiceOn(), machine_signup: machineSignupOn(), kitchen });
 }));
 
 // Thực đơn + món tôi đã chọn trong khoảng ngày (tối đa 14 ngày)

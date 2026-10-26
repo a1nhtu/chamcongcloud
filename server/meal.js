@@ -9,7 +9,7 @@ import { userError } from './util.js';
 import {
   DEFAULT_MEAL_SHIFTS, NON_MACHINE_SERIALS, windowBoundsUtc, countValidPunches, buildBoard, shiftForPunch, vnNow,
   isIsoDate, parseCount, cleanDishes, canOrderMeal, orderDeadlineVn, addDaysIso, inWindow, buildDishReport, parseAdjust,
-  orderOpenVn, orderState, mealEnded, buildSignupReport, cleanReason,
+  orderOpenVn, orderState, mealEnded, buildSignupReport, cleanReason, signupShiftForPunch, orderOpenMs, orderDeadlineMs, isHHMM,
 } from './meal-rules.js';
 
 /* ---------------------------- công tắc + quyền ---------------------------- */
@@ -21,7 +21,12 @@ export const selfOrderOn = () => getSetting('meal_self_order', '1') !== '0';
 export const dishChoiceOn = () => getSetting('meal_dish_choice', '1') !== '0';
 // Công tắc "Trưởng bộ phận báo số" — mặc định BẬT (như cũ). TẮT = ẩn trang Đối chiếu & chốt + phần trưởng BP nhập số trên app.
 export const deptHeadOn = () => getSetting('meal_dept_head', '1') !== '0';
-export const mealOptions = () => ({ self_order: selfOrderOn(), dish_choice: dishChoiceOn(), dept_head: deptHeadOn() });
+// Công tắc "Báo cơm bằng quẹt máy chấm công" — mặc định TẮT (như cũ). Chỉ có ở chế độ chỉ đăng ký ăn (không chọn món).
+// Ghép với meal_self_order thành 3 cách: chỉ app · chỉ máy · cả app cả máy. Quẹt trong [giờ mở, giờ khoá) của bữa = báo ăn bữa đó.
+export const machineSignupOn = () => getSetting('meal_machine_signup', '0') === '1' && !dishChoiceOn();
+// Có đăng ký ăn theo từng người (app và / hoặc quẹt máy) → màn hình bếp có ô số suất
+export const perPersonOn = () => selfOrderOn() || machineSignupOn();
+export const mealOptions = () => ({ self_order: selfOrderOn(), dish_choice: dishChoiceOn(), dept_head: deptHeadOn(), machine_signup: machineSignupOn() });
 // Người dùng có được quản lý suất ăn (đối chiếu / chốt / thực đơn / cấu hình) không: phân hệ đã bật + admin / tài khoản tổng / có quyền 'meal'
 export function mealAllowed(user) {
   if (!mealEnabled() || !user) return false;
@@ -234,9 +239,10 @@ export function copyMenu(fromDate, toDate, code = null) {
 
 // Món NV đã chọn + thực đơn cho các ngày [from, to] (app nhân viên)
 export function myMealPlan(empId, from, to, now = new Date()) {
+  syncMachineSignups(from, to);
   const shifts = listShifts({ onlyEnabled: true });
   const days = [];
-  const orders = new Map(db.prepare('SELECT work_date, shift, menu_id, dish, set_by FROM meal_orders WHERE employee_id = ? AND work_date >= ? AND work_date <= ?').all(empId, from, to)
+  const orders = new Map(db.prepare('SELECT work_date, shift, menu_id, dish, set_by, source FROM meal_orders WHERE employee_id = ? AND work_date >= ? AND work_date <= ?').all(empId, from, to)
     .map((o) => [o.work_date + '|' + o.shift, o]));
   const menu = new Map();
   for (const r of db.prepare('SELECT id, work_date, shift, name FROM meal_menu WHERE work_date >= ? AND work_date <= ? ORDER BY sort_order, id').all(from, to)) {
@@ -250,7 +256,7 @@ export function myMealPlan(empId, from, to, now = new Date()) {
         const state = orderState(d, s, now);
         return { code: s.code, name: s.name, from_time: s.from_time, to_time: s.to_time, dishes: menu.get(d + '|' + s.code) || [],
           chosen: o ? { menu_id: o.menu_id, dish: o.dish } : null, editable: state === 'open', deadline: orderDeadlineVn(d, s),
-          open: orderOpenVn(d, s), state, registered: !!o, set_by: o ? o.set_by : '' };
+          open: orderOpenVn(d, s), state, registered: !!o, set_by: o ? o.set_by : '', source: o ? o.source : '' };
       }),
     });
   }
@@ -394,6 +400,7 @@ const noAccent = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '')
 export function mealEmpSearch(q, workDate, code, { all = false } = {}) {
   const k = noAccent(q).trim();
   if (!k && !all) return [];
+  if (isIsoDate(workDate)) syncMachineSignups(workDate, workDate);
   const cur = new Map(db.prepare('SELECT employee_id, dish, set_by FROM meal_orders WHERE work_date = ? AND shift = ?').all(workDate, code).map((o) => [o.employee_id, o]));
   const km = empKitchenMap();
   return db.prepare(`SELECT id, code, full_name, IFNULL(department, '') department FROM employees WHERE active = 1${adminAttWhere('role')} ORDER BY code`).all()
@@ -432,6 +439,7 @@ export const kitchenKeyOk = (given) => kitchenScope(given) != null;
 // Màn hình của 1 bếp: bếp có gán máy → chỉ lượt quẹt ở máy đó; chưa gán máy → chỉ người được phân vào bếp đó.
 // Quẹt ở máy của bếp A mà NV thuộc bếp B → wrong_kitchen (màn hình cảnh báo).
 export function kitchenFeed(sinceId = 0, now = new Date(), scope = { kitchen: null }) {
+  if (machineSignupOn()) { const today = vnNow(now).date; syncMachineSignups(addDaysIso(today, -1), addDaysIso(today, 1)); }
   const shifts = listShifts({ onlyEnabled: true });
   const since = new Date(now.getTime() - 3 * 3600000).toISOString();
   const notIn = NON_MACHINE_SERIALS.map(() => '?').join(',');
@@ -462,14 +470,15 @@ export function kitchenFeed(sinceId = 0, now = new Date(), scope = { kitchen: nu
       dish: o ? o.dish : null, registered: !!o, times, kitchen_name: empK ? kName.get(empK) || '' : '', wrong_kitchen: !!(empK && machK && empK !== machK) });
     if (events.length >= 25) break;
   }
-  return { now: now.toISOString(), last_id: rows.length ? rows[0].id : Number(sinceId) || 0, events, self_order: selfOrderOn(), dish_choice: dishChoiceOn(),
+  return { now: now.toISOString(), last_id: rows.length ? rows[0].id : Number(sinceId) || 0, events, self_order: perPersonOn(), dish_choice: dishChoiceOn(),
     kitchen: kit ? { id: kit.id, name: kit.name } : null, board: kitchenBoard(scope, now) };
 }
 
 // SỐ SUẤT CHO BẾP (ô trên đầu màn hình bếp): tối đa 3 bữa sắp tới / đang ăn — tổng phải nấu của bếp này (hoặc mọi bếp),
 // trạng thái đăng ký (đang mở / đã khoá lúc…), số HR đã "Gửi bếp" + giờ gửi. Chỉ khi NV tự đăng ký trên app (tắt = như cũ, không có ô này).
 export function kitchenBoard(scope = { kitchen: null }, now = new Date()) {
-  if (!selfOrderOn()) return [];
+  if (!perPersonOn()) return [];
+  if (machineSignupOn()) { const t = vnNow(now).date; syncMachineSignups(addDaysIso(t, -1), addDaysIso(t, 1)); }
   const kid = scope?.kitchen ? scope.kitchen.id : null;
   const shifts = listShifts({ onlyEnabled: true });
   const today = vnNow(now).date, nowIso = now.toISOString();
@@ -602,8 +611,68 @@ export const kitchenAllEmployees = () => ({
 // 'YYYY-MM-DD HH:MM' → 'HH:MM ngày dd/mm'
 const whenTxt = (v) => (v ? `${v.slice(11)} ngày ${v.slice(8, 10)}/${v.slice(5, 7)}` : '');
 const orderRow = (empId, d, code) => db.prepare('SELECT * FROM meal_orders WHERE employee_id = ? AND work_date = ? AND shift = ?').get(empId, d, code);
-const insSignup = (empId, d, code, by) => db.prepare(`INSERT INTO meal_orders(employee_id, work_date, shift, menu_id, dish, set_by, kitchen_id, created_at, updated_at)
-  VALUES (?,?,?,NULL,'',?,?,datetime('now'),datetime('now')) ON CONFLICT(employee_id, work_date, shift) DO NOTHING`).run(empId, d, code, by || '', empKitchenId(empId));
+const insSignup = (empId, d, code, by) => {
+  db.prepare('DELETE FROM meal_signup_off WHERE employee_id = ? AND work_date = ? AND shift = ?').run(empId, d, code);
+  return db.prepare(`INSERT INTO meal_orders(employee_id, work_date, shift, menu_id, dish, set_by, kitchen_id, created_at, updated_at)
+    VALUES (?,?,?,NULL,'',?,?,datetime('now'),datetime('now')) ON CONFLICT(employee_id, work_date, shift) DO NOTHING`).run(empId, d, code, by || '', empKitchenId(empId));
+};
+// Huỷ đăng ký ăn + ghi mốc huỷ: lượt quẹt máy TRƯỚC mốc này không báo lại suất vừa huỷ (chỉ quẹt sau mốc mới tính là báo lại)
+const delSignup = (empId, d, code) => {
+  db.prepare('DELETE FROM meal_orders WHERE employee_id = ? AND work_date = ? AND shift = ?').run(empId, d, code);
+  db.prepare(`INSERT INTO meal_signup_off(employee_id, work_date, shift, off_at) VALUES (?,?,?,?)
+    ON CONFLICT(employee_id, work_date, shift) DO UPDATE SET off_at = excluded.off_at`).run(empId, d, code, new Date().toISOString());
+};
+
+/* ---------------------------- BÁO CƠM BẰNG QUẸT MÁY CHẤM CÔNG ---------------------------- */
+// Máy dùng để báo cơm (Cấu hình suất ăn); trống = mọi máy chấm công thật
+const signupSerials = () => String(getSetting('meal_signup_serials', '')).split(',').map((s) => s.trim()).filter(Boolean);
+export const mealSignupSerials = signupSerials;
+const syncDone = new Set();
+// Đổi lượt quẹt máy trong giờ mở đăng ký thành đăng ký ăn (source 'may') cho các ngày ăn [from, to]. Gọi lúc ĐỌC (báo cáo, màn hình bếp, app NV…):
+// không có tiến trình chạy ngầm, máy tải bù lượt quẹt muộn thì lần đọc sau tự có. Không đè đơn đã có (NV tự báo app / HR báo hộ);
+// suất đã bị huỷ (meal_signup_off) chỉ báo lại khi quẹt SAU lúc huỷ. Lượt quẹt ở máy đếm suất ăn TRONG giờ ăn = đi ăn, không phải báo cơm
+// (trừ máy được chọn riêng cho báo cơm). Nhớ khoá (khoảng ngày + lượt quẹt mới nhất + cấu hình) để khỏi quét lại khi không có gì mới.
+export function syncMachineSignups(from, to) {
+  if (!machineSignupOn() || !isIsoDate(from) || !isIsoDate(to) || to < from) return 0;
+  const all = listShifts({ onlyEnabled: true });
+  const shifts = all.filter((s) => isHHMM(s.open_at));
+  if (!shifts.length) return 0;
+  const only = signupSerials(), eat = serialFilter();
+  const maxId = db.prepare('SELECT IFNULL(MAX(id), 0) m FROM device_punches').get().m;
+  const key = [from, to, maxId, only.join(','), eat.join(','), JSON.stringify(all.map((s) => [s.code, s.open_at, s.lock_at, s.lock_before_min, s.from_time, s.to_time]))].join('|');
+  if (syncDone.has(key)) return 0;
+  let lo = Infinity, hi = -Infinity;
+  for (const s of shifts) { lo = Math.min(lo, orderOpenMs(from, s)); hi = Math.max(hi, orderDeadlineMs(to, s)); }
+  const notIn = NON_MACHINE_SERIALS.map(() => '?').join(',');
+  const rows = db.prepare(`SELECT p.employee_id, p.punch_at, p.serial FROM device_punches p JOIN employees e ON e.id = p.employee_id
+      WHERE p.punch_at >= ? AND p.punch_at < ? AND p.serial NOT IN (${notIn})${only.length ? ` AND p.serial IN (${only.map(() => '?').join(',')})` : ''}${adminAttWhere('e.role')}
+      ORDER BY p.punch_at`).all(new Date(lo).toISOString(), new Date(hi).toISOString(), ...NON_MACHINE_SERIALS, ...only);
+  const off = new Map(db.prepare('SELECT employee_id, work_date, shift, off_at FROM meal_signup_off WHERE work_date >= ? AND work_date <= ?').all(from, to)
+    .map((r) => [r.employee_id + '|' + r.work_date + '|' + r.shift, Date.parse(r.off_at)]));
+  const picked = new Map();
+  for (const p of rows) {
+    if (!only.length && (!eat.length || eat.includes(p.serial)) && shiftForPunch(p.punch_at, all)) continue;   // đang đi ăn
+    const hit = signupShiftForPunch(p.punch_at, shifts);
+    if (!hit || hit.workDate < from || hit.workDate > to) continue;
+    const k = p.employee_id + '|' + hit.workDate + '|' + hit.shift.code;
+    if (picked.has(k) || (off.has(k) && Date.parse(p.punch_at) <= off.get(k))) continue;
+    picked.set(k, { emp: p.employee_id, d: hit.workDate, code: hit.shift.code, at: new Date(Date.parse(p.punch_at)).toISOString().slice(0, 19).replace('T', ' ') });
+  }
+  let n = 0;
+  if (picked.size) {
+    const km = empKitchenMap();
+    const ins = db.prepare(`INSERT INTO meal_orders(employee_id, work_date, shift, menu_id, dish, set_by, kitchen_id, created_at, updated_at, source)
+      VALUES (?,?,?,NULL,'','',?,?,?,'may') ON CONFLICT(employee_id, work_date, shift) DO NOTHING`);
+    db.exec('BEGIN');
+    try {
+      for (const x of picked.values()) n += ins.run(x.emp, x.d, x.code, km.get(x.emp) ?? null, x.at, x.at).changes;
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+  if (syncDone.size > 500) syncDone.clear();
+  syncDone.add(key);
+  return n;
+}
 
 // NV tự bấm Có ăn (on) / Không ăn cho 1 bữa — chỉ trong giờ mở đăng ký, trước giờ khoá
 export function setMySignup(empId, workDate, code, on, now = new Date()) {
@@ -615,8 +684,9 @@ export function setMySignup(empId, workDate, code, on, now = new Date()) {
   const st = orderState(workDate, shift, now);
   if (st === 'wait') throw userError(`Chưa tới giờ mở đăng ký bữa ${shift.name.toLowerCase()} (mở lúc ${whenTxt(orderOpenVn(workDate, shift))})`);
   if (st === 'locked') throw userError(`Đã khoá đăng ký bữa ${shift.name.toLowerCase()} (hạn ${whenTxt(orderDeadlineVn(workDate, shift))}) — cần đăng ký / huỷ thì báo HR`);
+  syncMachineSignups(workDate, workDate);
   if (on) insSignup(empId, workDate, code, '');
-  else db.prepare('DELETE FROM meal_orders WHERE employee_id = ? AND work_date = ? AND shift = ?').run(empId, workDate, code);
+  else delSignup(empId, workDate, code);
   return { registered: !!orderRow(empId, workDate, code) };
 }
 
@@ -630,6 +700,7 @@ export function hrSetSignup({ workDate, code, employeeIds, department, on, reaso
   const ids = pickEmployees(employeeIds, department);
   if (!ids.length) throw userError('Chưa chọn nhân viên nào');
   if (ids.length > 5000) throw userError('Tối đa 5.000 nhân viên mỗi lần');
+  syncMachineSignups(workDate, workDate);
   let changed = 0, skipped = 0;
   db.exec('BEGIN');
   try {
@@ -638,7 +709,7 @@ export function hrSetSignup({ workDate, code, employeeIds, department, on, reaso
       const cur = orderRow(emp.id, workDate, shift.code);
       if (on ? cur : !cur) { skipped++; continue; }
       if (on) insSignup(emp.id, workDate, shift.code, by || 'HR');
-      else db.prepare('DELETE FROM meal_orders WHERE employee_id = ? AND work_date = ? AND shift = ?').run(emp.id, workDate, shift.code);
+      else delSignup(emp.id, workDate, shift.code);
       logAdjust({ by, workDate, code: shift.code, kind: 'signup', dish: cur?.dish || '', employeeId: emp.id, empLabel: emp.code ? `${emp.code} - ${emp.full_name}` : emp.full_name,
         oldValue: on ? '' : 'Có ăn', newValue: on ? 'Có ăn' : '', reason: why });
       changed++;
@@ -671,7 +742,7 @@ export function setMealExtra({ workDate, code, kitchenId, qty, reason, by }) {
 }
 
 /* ---------------------------- tổng hợp đăng ký ăn theo bếp (1 ngày) + GỬI BẾP ---------------------------- */
-const ordersFull = (workDate, code) => db.prepare(`SELECT o.employee_id, o.dish, o.set_by, o.kitchen_id, o.created_at, o.updated_at, e.code, e.full_name, IFNULL(e.department, '') department
+const ordersFull = (workDate, code) => db.prepare(`SELECT o.employee_id, o.dish, o.set_by, o.source, o.kitchen_id, o.created_at, o.updated_at, e.code, e.full_name, IFNULL(e.department, '') department
     FROM meal_orders o JOIN employees e ON e.id = o.employee_id WHERE o.work_date = ? AND o.shift = ? ORDER BY e.department, e.code`).all(workDate, code);
 const extraOf = (workDate, code) => db.prepare('SELECT kitchen_id, qty, note, updated_by, updated_at FROM meal_extra WHERE work_date = ? AND shift = ?').all(workDate, code);
 export function dispatchOf(workDate, code) {
@@ -684,6 +755,7 @@ export function dispatchOf(workDate, code) {
 // 1 bữa của 1 ngày: số đăng ký theo bếp (NV tự / HR hộ / HR thêm tay / tổng / đã quẹt / ĐK mà không quẹt / quẹt mà không ĐK) + giờ mở, khoá, gửi bếp.
 // detail = true → kèm danh sách người đăng ký (giờ đăng ký, ai đăng ký, đã quẹt lúc) + người quẹt mà không đăng ký.
 export function mealSignupReport(workDate, shift, now = new Date(), { detail = false } = {}) {
+  syncMachineSignups(workDate, workDate);
   const kitchens = listKitchens(), km = empKitchenMap();
   const orders = ordersFull(workDate, shift.code), punchers = punchersOf(workDate, shift), ex = extraOf(workDate, shift.code);
   const rep = buildSignupReport({ orders, punchers: new Set(punchers.keys()), extra: Object.fromEntries(ex.map((x) => [x.kitchen_id, x.qty])), kitchens, kitchenOf: (id) => km.get(id) ?? 0 });
@@ -697,7 +769,7 @@ export function mealSignupReport(workDate, shift, now = new Date(), { detail = f
     const kOf = (empId, v) => { const x = v ?? km.get(empId) ?? 0; return known.has(x) ? x : 0; };
     const signed = new Set(orders.map((o) => o.employee_id));
     out.list = orders.map((o) => ({ employee_id: o.employee_id, code: o.code, full_name: o.full_name, department: o.department, kitchen_id: kOf(o.employee_id, o.kitchen_id),
-      dish: o.dish, set_by: o.set_by, at: o.created_at || o.updated_at, punched: punchers.get(o.employee_id)?.at || '' }));
+      dish: o.dish, set_by: o.set_by, source: o.source, at: o.created_at || o.updated_at, punched: punchers.get(o.employee_id)?.at || '' }));
     out.walk_in = [...punchers].filter(([id]) => !signed.has(id)).map(([id, p]) => ({ employee_id: id, code: p.code, full_name: p.full_name, department: p.department, kitchen_id: kOf(id, null), punched: p.at }));
   }
   return out;
@@ -783,7 +855,8 @@ function punchersRange(from, to, shifts) {
 }
 // Dữ liệu chung của các báo cáo theo khoảng ngày (bữa đang bật + bữa đã tắt nhưng còn đơn trong khoảng)
 function rangeData(from, to) {
-  const ordRows = db.prepare(`SELECT o.employee_id, o.work_date, o.shift, o.dish, o.set_by, o.kitchen_id, o.created_at, o.updated_at, e.code, e.full_name, IFNULL(e.department, '') department
+  syncMachineSignups(from, to);
+  const ordRows = db.prepare(`SELECT o.employee_id, o.work_date, o.shift, o.dish, o.set_by, o.source, o.kitchen_id, o.created_at, o.updated_at, e.code, e.full_name, IFNULL(e.department, '') department
       FROM meal_orders o JOIN employees e ON e.id = o.employee_id WHERE o.work_date >= ? AND o.work_date <= ? ORDER BY e.department, e.code`).all(from, to);
   const extraRows = db.prepare('SELECT * FROM meal_extra WHERE work_date >= ? AND work_date <= ?').all(from, to);
   const has = new Set([...ordRows, ...extraRows].map((r) => r.shift));
@@ -822,7 +895,7 @@ export function mealRangeSummary(from, to, now = new Date(), { detail = false } 
     rows.push({ date: d, shift: s.code, shift_name: s.name, open: orderOpenVn(d, s), deadline: orderDeadlineVn(d, s), ended: mealEnded(d, s, now),
       first_signup: times[0] || '', last_signup: times[times.length - 1] || '', sent_at: dp ? dp.sent_at : '', sent_total: dp ? dp.total : null, kitchens: used, totals: rep.totals });
     if (detail) for (const o of os) list.push({ date: d, shift_name: s.name, code: o.code, full_name: o.full_name, department: o.department, kitchen_id: R.kOf(o.employee_id, o.kitchen_id),
-      dish: o.dish, set_by: o.set_by, at: o.created_at || o.updated_at, punched: ps.get(o.employee_id)?.at || '', ended: mealEnded(d, s, now) });
+      dish: o.dish, set_by: o.set_by, source: o.source, at: o.created_at || o.updated_at, punched: ps.get(o.employee_id)?.at || '', ended: mealEnded(d, s, now) });
   }
   return { from, to, kitchens: R.kitchens, rows, ...(detail ? { list } : {}) };
 }
@@ -869,7 +942,7 @@ export function mealExceptions(from, to, now = new Date()) {
     if (!os.length && !ps.size) continue;
     const signed = new Set(os.map((o) => o.employee_id));
     if (mealEnded(d, s, now)) for (const o of os) if (!ps.has(o.employee_id)) noShow.push({ date: d, shift: s.code, shift_name: s.name, employee_id: o.employee_id, code: o.code,
-      full_name: o.full_name, department: o.department, kitchen_id: R.kOf(o.employee_id, o.kitchen_id), dish: o.dish, set_by: o.set_by, at: o.created_at || o.updated_at });
+      full_name: o.full_name, department: o.department, kitchen_id: R.kOf(o.employee_id, o.kitchen_id), dish: o.dish, set_by: o.set_by, source: o.source, at: o.created_at || o.updated_at });
     for (const [id, p] of ps) if (!signed.has(id)) walkIn.push({ date: d, shift: s.code, shift_name: s.name, employee_id: id, code: p.code, full_name: p.full_name,
       department: p.department, kitchen_id: R.kOf(id, null), punched: p.at });
   }
@@ -904,7 +977,7 @@ export function mealMonthGrid(from, to, { mode = 'signup', kitchenId = 0, now = 
     for (const [id, who, o] of list) {
       if (!people.has(id)) people.set(id, { employee_id: id, code: who.code, full_name: who.full_name, department: who.department, cells: {}, totals: {} });
       const r = people.get(id), v = vnParts(byPunch ? who.at : (o.created_at || o.updated_at));
-      (r.cells[s.code] ||= {})[d] = { t: v ? v.hm : '', day: v ? v.day : '', hr: !!o?.set_by, ...(byPunch ? { walk_in: !o } : { no_show: ended && !ps.has(id) }) };
+      (r.cells[s.code] ||= {})[d] = { t: v ? v.hm : '', day: v ? v.day : '', hr: !!o?.set_by, may: o?.source === 'may', ...(byPunch ? { walk_in: !o } : { no_show: ended && !ps.has(id) }) };
       r.totals[s.code] = (r.totals[s.code] || 0) + 1;
       totals[s.code] = (totals[s.code] || 0) + 1;
       used.add(s.code);
@@ -919,11 +992,14 @@ export function mealMonthGrid(from, to, { mode = 'signup', kitchenId = 0, now = 
 export function mealDayList(workDate, code, { kitchenId = 0 } = {}) {
   needDate(workDate);
   const shift = needShift(code);
+  syncMachineSignups(workDate, workDate);
   const kitchens = listKitchens(), km = empKitchenMap(), known = new Set(kitchens.map((k) => k.id));
   const kid = known.has(Number(kitchenId)) ? Number(kitchenId) : 0;
   const kOf = (o) => { const x = o.kitchen_id ?? km.get(o.employee_id) ?? 0; return known.has(x) ? x : 0; };
+  const both = selfOrderOn() && machineSignupOn();
   const rows = ordersFull(workDate, shift.code).filter((o) => !kid || kOf(o) === kid)
-    .map((o) => ({ employee_id: o.employee_id, code: o.code, full_name: o.full_name, department: o.department, at: o.created_at || o.updated_at, set_by: o.set_by, note: o.set_by ? 'HR báo hộ' : '' }))
+    .map((o) => ({ employee_id: o.employee_id, code: o.code, full_name: o.full_name, department: o.department, at: o.created_at || o.updated_at, set_by: o.set_by, source: o.source,
+      note: o.set_by ? 'HR báo hộ' : o.source === 'may' && both ? 'Quẹt máy' : '' }))
     .sort((a, b) => (a.set_by ? 1 : 0) - (b.set_by ? 1 : 0) || byDeptCode(a, b));
   return { date: workDate, shift: shift.code, shift_name: shift.name, kitchen_id: kid, kitchens, company: getSetting('company_name', ''), rows };
 }
@@ -951,9 +1027,9 @@ export function mealCompare(from, to, { kitchenId = 0, now = new Date() } = {}) 
       r.signed++;
       if (ps.has(o.employee_id)) { ok++; r.ok++; continue; }
       if (!ended) continue;
-      ns++; r.no_show++; r.no_show_items.push({ ...item, set_by: o.set_by });
+      ns++; r.no_show++; r.no_show_items.push({ ...item, set_by: o.set_by, source: o.source });
       noShow.push({ ...item, employee_id: o.employee_id, code: o.code, full_name: o.full_name, department: o.department, kitchen_id: R.kOf(o.employee_id, o.kitchen_id),
-        dish: o.dish, set_by: o.set_by, at: o.created_at || o.updated_at });
+        dish: o.dish, set_by: o.set_by, source: o.source, at: o.created_at || o.updated_at });
     }
     for (const [id, p] of ps) {
       const r = get(id, p);

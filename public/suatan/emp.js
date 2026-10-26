@@ -23,7 +23,9 @@ export async function renderMealTab(root) {
   const orderBox = el('div'), headBox = el('div');
   // công ty tắt "Nhân viên tự chọn món" → bỏ phần chọn món, chỉ còn phần trưởng bộ phận nhập số
   // công ty tắt "Có chọn món" → chế độ CHỈ ĐĂNG KÝ ĂN: mỗi bữa 1 cặp nút Có ăn / Không ăn
+  // chỉ báo cơm bằng quẹt máy (tắt tự đăng ký trên app) → NV vẫn xem được bữa nào đã báo, không bấm được
   if (me.self_order !== false) { root.append(orderBox); if (me.dish_choice === false) drawSignups(orderBox, me); else drawOrders(orderBox, me); }
+  else if (me.machine_signup) { root.append(orderBox); drawSignups(orderBox, me, { readOnly: true }); }
   else if (!me.head_of.length) root.append(el('div', { class: 'sa-empty' }, 'Công ty đăng ký suất ăn theo bộ phận — trưởng bộ phận / HR báo số giúp bạn, bạn không cần đăng ký.'));
   if (me.head_of.length) { root.append(headBox); drawHead(headBox, me); }
 }
@@ -76,13 +78,16 @@ async function drawOrders(box, me) {
 /* ---------- đăng ký ăn (không chọn món): Có ăn / Không ăn cho từng bữa, 7 ngày tới ---------- */
 // 'YYYY-MM-DD HH:MM' → 'HH:MM' (cùng ngày `day`) hoặc 'HH:MM ngày dd/mm'
 const atTxt = (v, day) => (v ? v.slice(11) + (v.slice(0, 10) === day ? '' : ' ngày ' + dmy(v.slice(0, 10))) : '');
-async function drawSignups(box, me) {
+async function drawSignups(box, me, { readOnly = false } = {}) {
   const today = me.today || vnToday();
   let sel = today, days = [];
   const strip = el('div', { class: 'sa-days' });
   const list = el('div');
   box.append(el('div', { class: 'sa-sec', style: 'margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap' }, '📝 Đăng ký ăn', me.kitchen ? el('span', { class: 'sa-pill muted' }, '🍳 ' + me.kitchen) : null),
-    el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'Bấm "Có ăn" cho bữa bạn sẽ ăn — chưa bấm là KHÔNG ăn. Hết giờ khoá muốn đổi thì báo HR.'), strip, list);
+    el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, readOnly
+      ? 'Báo ăn bằng cách QUẸT MÁY CHẤM CÔNG trong giờ đăng ký của từng bữa (xem giờ bên dưới). Cần huỷ / đổi thì báo HR.'
+      : me.machine_signup ? 'Bấm "Có ăn" — hoặc QUẸT MÁY CHẤM CÔNG trong giờ đăng ký — cho bữa bạn sẽ ăn; chưa báo là KHÔNG ăn. Hết giờ khoá muốn đổi thì báo HR.'
+        : 'Bấm "Có ăn" cho bữa bạn sẽ ăn — chưa bấm là KHÔNG ăn. Hết giờ khoá muốn đổi thì báo HR.'), strip, list);
   const drawStrip = () => {
     strip.innerHTML = '';
     for (const d of days) {
@@ -98,20 +103,23 @@ async function drawSignups(box, me) {
     const day = days.find((d) => d.date === sel);
     if (!day || !day.shifts.length) { list.append(el('div', { class: 'sa-empty' }, 'Chưa có bữa ăn nào được bật.')); return; }
     for (const s of day.shifts) {
-      const when = s.state === 'wait' ? `⏳ Mở đăng ký lúc ${atTxt(s.open, sel)}` : s.state === 'open' ? `🟢 Đăng ký đến ${atTxt(s.deadline, sel)}` : `🔒 Đã khoá lúc ${atTxt(s.deadline, sel)}`;
+      // chỉ quẹt máy mà bữa chưa đặt giờ mở đăng ký → quẹt không báo được bữa này
+      const when = readOnly && !s.open && s.state !== 'locked' ? 'không nhận báo bằng quẹt máy — cần ăn thì báo HR'
+        : s.state === 'wait' ? `⏳ Mở đăng ký lúc ${atTxt(s.open, sel)}` : s.state === 'open' ? `🟢 Đăng ký đến ${atTxt(s.deadline, sel)}` : `🔒 Đã khoá lúc ${atTxt(s.deadline, sel)}`;
       const set = (on) => async () => {
         if (on === s.registered) return;
         try { await api('/meal/signup', { method: 'PUT', body: { date: sel, shift: s.code, on } }); toast(on ? `Đã đăng ký ăn ${s.name.toLowerCase()} ${dmy(sel)}` : `Đã huỷ bữa ${s.name.toLowerCase()} ${dmy(sel)}`, 'ok'); load(); }
         catch (e) { toast(e.message, 'err'); }
       };
-      const dis = s.editable ? {} : { disabled: '' };
+      const dis = s.editable && !readOnly ? {} : { disabled: '' };
       const yes = el('button', { type: 'button', class: 'yes' + (s.registered ? ' on' : ''), ...dis }, '✔ Có ăn');
       const no = el('button', { type: 'button', class: 'no' + (s.registered ? '' : ' on'), ...dis }, '✕ Không ăn');
       yes.onclick = set(true); no.onclick = set(false);
       list.append(el('div', { class: 'sa-meal' + (s.registered ? ' sa-meal-on' : '') }, el('h4', {}, 'Bữa ' + s.name.toLowerCase()),
         el('div', { class: 'when' }, `Ăn khoảng ${s.from_time} → ${s.to_time} · ${when}`),
-        el('div', { class: 'sa-yn' }, yes, no),
-        s.registered && s.set_by ? el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'HR đã đăng ký giúp bạn bữa này.') : null));
+        readOnly ? el('div', { class: 'sa-hint', style: 'font-weight:600' }, s.registered ? '✔ Đã báo ăn' : '— Chưa báo ăn') : el('div', { class: 'sa-yn' }, yes, no),
+        s.registered && s.set_by ? el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'HR đã đăng ký giúp bạn bữa này.')
+          : s.registered && s.source === 'may' ? el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'Bạn đã báo bữa này bằng quẹt máy chấm công.') : null));
     }
   };
   async function load() {

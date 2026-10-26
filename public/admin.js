@@ -176,7 +176,7 @@ async function afterLogin() {
     && !((key === 'mealrep' || key === 'mealmenu') && !mealOpt('dish_choice'))   // chỉ đăng ký ăn → không thực đơn / tổng hợp theo món
     && !(key === 'mealreg' && mealOpt('dish_choice'))
     && !(key === 'mealinv' && SETTINGS.meal_ingredient !== '1')            // định lượng nguyên liệu: chỉ khi tài khoản tổng bật
-    && !(key === 'mealme' && !mealOpt('self_order') && !mealOpt('dept_head')));
+    && !(key === 'mealme' && !mealOpt('self_order') && !mealOpt('dept_head') && !(SETTINGS.meal_machine_signup === '1' && !mealOpt('dish_choice'))));
   // dựng khung nhóm: tiêu đề (bấm để xổ / thu, nhớ trên máy) + phần thân chứa các mục
   _navGrp.clear(); _navSubs.length = 0;
   const visKeys = new Set(visible.map((v) => v[0]));
@@ -7381,9 +7381,14 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 // Người khác (admin công ty) chỉ xem đang bật gì.
 function displayPanel(s) {
   if (!hasPerm('settings') && !isMaster()) return null;
-  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1', pay: s.pay_pro === '1' };
-  const mealWay = (o) => !o.self && !o.head ? 'HR tự nhập (không có ai đăng ký trên app)'
-    : [o.self ? (o.dish ? 'NV tự chọn món trên app' : 'NV tự bấm Có ăn / Không ăn trên app (không chọn món)') : null, o.head ? 'trưởng bộ phận báo số' : null].filter(Boolean).join(' + ');
+  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1', pay: s.pay_pro === '1', mach: s.meal_machine_signup === '1' };
+  // mach = báo cơm bằng quẹt máy chấm công (chỉ ở chế độ không chọn món)
+  const mealWay = (o) => {
+    const mach = o.mach && !o.dish;
+    const self = o.self ? (o.dish ? 'NV tự chọn món trên app' : mach ? 'NV bấm Có ăn trên app hoặc quẹt máy chấm công trong giờ đăng ký' : 'NV tự bấm Có ăn / Không ăn trên app (không chọn món)')
+      : mach ? 'NV quẹt máy chấm công trong giờ đăng ký để báo ăn' : null;
+    return !self && !o.head ? 'HR tự nhập (không có ai đăng ký trên app)' : [self, o.head ? 'trưởng bộ phận báo số' : null].filter(Boolean).join(' + ');
+  };
   const box = el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' }, el('h3', { style: 'margin-top:0' }, 'Cấu hình hiển thị'));
   if (!isMaster()) {
     const st = (b) => el('b', { style: `color:${b ? 'var(--ok,#16a34a)' : 'var(--muted)'}` }, b ? 'BẬT' : 'TẮT');
@@ -7398,13 +7403,21 @@ function displayPanel(s) {
   }
   const cb = (v) => el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.15)', ...(v ? { checked: '' } : {}) });
   const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head), inv: cb(on.inv), pay: cb(on.pay) };
+  // Cách NV báo ăn khi KHÔNG chọn món: chỉ app · chỉ quẹt máy · cả hai · không (trưởng BP / HR báo) = 2 công tắc meal_self_order + meal_machine_signup
+  const how = el('select', { style: 'width:auto;max-width:100%' },
+    el('option', { value: 'app' }, '📱 Chỉ trên app (bấm Có ăn / Không ăn)'), el('option', { value: 'may' }, '🖐️ Chỉ quẹt máy chấm công'),
+    el('option', { value: 'both' }, '📱 + 🖐️ Cả app lẫn quẹt máy'), el('option', { value: 'none' }, '— Không (trưởng bộ phận / HR báo giúp)'));
+  how.value = on.self ? (on.mach ? 'both' : 'app') : on.mach ? 'may' : 'none';
+  const howRow = el('div', { style: 'display:flex;flex-direction:column;gap:4px;font-size:13px' }, el('b', {}, '🙋 Nhân viên báo ăn bằng'), how,
+    el('div', { style: 'font-size:13px;color:var(--muted)' }, 'Quẹt máy = quẹt vân tay / khuôn mặt / thẻ trong giờ mở đăng ký của bữa (giờ mở → giờ khoá ở Cấu hình suất ăn) là đã báo ăn bữa đó; huỷ thì bấm Không ăn trên app hoặc báo HR. Chọn máy dùng để báo cơm ở Cấu hình suất ăn.'));
   const row = (chk, title, desc, sub = false) => el('label', { style: `display:flex;gap:10px;align-items:flex-start;cursor:pointer${sub ? '' : ';padding:10px;border:1px solid var(--line,#eee);border-radius:10px'}` },
     chk, el('div', {}, el('b', {}, title), el('div', { style: 'font-size:13px;color:var(--muted)' }, desc)));
   const way = el('div', { class: 'map-hint', style: 'margin-top:2px' });
+  const selfRow = row(c.self, '📱 Nhân viên tự đăng ký trên app', 'Tắt: nhân viên thường không thấy tab Suất ăn; số suất do trưởng bộ phận báo / HR nhập.', true);
   const sub = el('div', { style: 'margin:-4px 0 0 26px;padding:10px 12px;border-left:3px solid var(--line,#e5e7eb);display:flex;flex-direction:column;gap:9px' },
     el('div', { style: 'font-size:13px;font-weight:700' }, 'Cách đăng ký suất ăn (mặc định bật cả 3 = như cũ):'),
-    row(c.self, '📱 Nhân viên tự đăng ký trên app', 'Tắt: nhân viên thường không thấy tab Suất ăn; số suất do trưởng bộ phận báo / HR nhập.', true),
     row(c.dish, '🍽️ Có chọn món', 'Bật: HR nhập thực đơn, nhân viên chọn món từng bữa, màn hình bếp hiện món. Tắt: KHÔNG có thực đơn — nhân viên chỉ bấm "Có ăn / Không ăn"; menu Suất ăn có trang "Đăng ký ăn".', true),
+    selfRow, howRow,
     row(c.head, '📋 Trưởng bộ phận báo số', 'Bật: trưởng bộ phận nhập số suất của bộ phận, HR đối chiếu & chốt (trang Đối chiếu & chốt). Tắt: ẩn phần này.', true),
     way,
     el('div', { style: 'font-size:13px;font-weight:700;margin-top:4px' }, 'Thêm (mặc định tắt):'),
@@ -7412,16 +7425,22 @@ function displayPanel(s) {
   const sync = () => {
     sub.style.opacity = c.meal.checked ? '' : '.45';
     for (const k of ['self', 'dish', 'head', 'inv']) c[k].disabled = !c.meal.checked;
-    way.textContent = '→ ' + mealWay({ self: c.self.checked, dish: c.dish.checked, head: c.head.checked });
+    how.disabled = !c.meal.checked;
+    // không chọn món → ô chọn "báo ăn bằng" thay cho công tắc tự đăng ký trên app
+    selfRow.style.display = c.dish.checked ? 'flex' : 'none'; howRow.style.display = c.dish.checked ? 'none' : 'flex';
+    if (!c.dish.checked) c.self.checked = how.value === 'app' || how.value === 'both';
+    way.textContent = '→ ' + mealWay({ self: c.self.checked, dish: c.dish.checked, head: c.head.checked, mach: !c.dish.checked && (how.value === 'may' || how.value === 'both') });
   };
   for (const k of ['meal', 'self', 'dish', 'head']) c[k].addEventListener('change', sync);
+  how.addEventListener('change', sync);
   sync();
   const save = el('button', { class: 'btn' }, 'Lưu cấu hình hiển thị');
   save.onclick = async () => {
     if (!c.att.checked && !c.meal.checked && !c.hr.checked) return toast('Phải bật ít nhất 1 phân hệ (Chấm công / Suất ăn / Nhân sự)', 'err');
     try {
       await api('/admin/settings', { method: 'PUT', body: { att_enabled: c.att.checked, meal_enabled: c.meal.checked, hr_enabled: c.hr.checked,
-        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked, pay_pro: c.pay.checked } });
+        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked, pay_pro: c.pay.checked,
+        ...(c.dish.checked ? {} : { meal_machine_signup: how.value === 'may' || how.value === 'both' }) } });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
   };

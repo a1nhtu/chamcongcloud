@@ -56,7 +56,7 @@ test('Cấu hình hiển thị: mặc định Chấm công BẬT + 3 công tắc
   for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head']) assert.equal(getSetting(k), null, k + ' không được tự ghi');
   const s = (await call('GET', '/admin/settings', { token: tok.ADM })).body;
   assert.deepEqual([s.att_enabled, s.meal_self_order, s.meal_dish_choice, s.meal_dept_head], ['1', '1', '1', '1']);
-  assert.deepEqual((await call('GET', '/meal/config', { token: tok.A1 })).body, { enabled: true, self_order: true, dish_choice: true, dept_head: true, head: false });
+  assert.deepEqual((await call('GET', '/meal/config', { token: tok.A1 })).body, { enabled: true, self_order: true, dish_choice: true, dept_head: true, machine_signup: false, head: false });
   // admin công ty gửi lên → bỏ qua
   await call('PUT', '/admin/settings', { token: tok.ADM, body: { att_enabled: false, meal_dish_choice: false } });
   assert.equal(getSetting('att_enabled', '1'), '1'); assert.equal(getSetting('meal_dish_choice', '1'), '1');
@@ -64,7 +64,7 @@ test('Cấu hình hiển thị: mặc định Chấm công BẬT + 3 công tắc
   // tài khoản tổng: tắt chấm công + chuyển sang CHỈ ĐĂNG KÝ ĂN, không trưởng bộ phận
   await call('PUT', '/admin/settings', { token: tok.master, body: { att_enabled: false, meal_dish_choice: false, meal_dept_head: false } });
   assert.equal(getSetting('att_enabled'), '0');
-  assert.deepEqual((await call('GET', '/admin/meal/options', { token: tok.HR1 })).body, { self_order: true, dish_choice: false, dept_head: false });
+  assert.deepEqual((await call('GET', '/admin/meal/options', { token: tok.HR1 })).body, { self_order: true, dish_choice: false, dept_head: false, machine_signup: false });
   const c = (await call('GET', '/meal/config', { token: tok.A1 })).body;
   assert.equal(c.dish_choice, false); assert.equal(c.dept_head, false);
   // chọn món / trưởng bộ phận bị chặn đúng chế độ
@@ -289,6 +289,61 @@ test('MẪU BÁO CƠM: bảng tổng hợp tháng (giờ báo / giờ ăn) · da
   assert.deepEqual([sd.getCell('B4').value, sd.getCell('C4').value, sd.getCell('A33').value, sd.getCell('D4').value], ['Lê Cường', 'HR báo hộ', 30, 31]);
   const wc = await load(`type=compare&from=${P}&to=${P}`);
   assert.deepEqual(wc.worksheets.map((w) => w.name), ['Tổng hợp theo ngày', 'Theo nhân viên', 'Báo mà không ăn', 'Ăn mà không báo']);
+});
+
+test('BÁO CƠM BẰNG QUẸT MÁY: công tắc tắt = như cũ · quẹt trong giờ mở → đã báo · chọn máy báo cơm · huỷ không bị quẹt cũ báo lại · chỉ máy / cả hai', async () => {
+  const P2 = '2026-10-02';   // trưa 02/10: mở 15:00 01/10, khoá 09:00 02/10 (VN)
+  const day = async (d) => (await call('GET', `/admin/meal/rpt/daylist?from=${d}&shift=trua`, { token: tok.HR1 })).body.rows;
+  punch('B2', '2026-10-01T00:45:00Z', 'K2SN');   // 07:45 sáng 01/10 — trong giờ đăng ký bữa trưa 01/10
+  // công tắc TẮT (mặc định) → lượt quẹt không thành đăng ký, như cũ
+  assert.deepEqual((await day(P)).map((r) => r.code), ['B1', 'A1', 'A2']);
+  assert.equal(getSetting('meal_machine_signup'), null);
+  // chỉ tài khoản tổng bật
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.HR1, body: { machine_signup: true } })).status, 403);
+  assert.equal((await call('PUT', '/admin/meal/options', { token: tok.master, body: { machine_signup: true } })).body.machine_signup, true);
+  assert.equal((await call('GET', '/meal/config', { token: tok.A1 })).body.machine_signup, true);
+  // cả app lẫn máy → B2 có trong danh sách, ghi "Quẹt máy", giờ báo = giờ quẹt; lượt quẹt đi ăn 11:00 không báo bữa nào
+  const rows = await day(P);
+  const b2 = rows.find((r) => r.code === 'B2');
+  assert.deepEqual([b2.note, b2.source, b2.at], ['Quẹt máy', 'may', '2026-10-01 00:45:00']);
+  assert.deepEqual(rows.filter((r) => r.code !== 'B2').map((r) => r.note), ['HR báo hộ', 'HR báo hộ', 'HR báo hộ']);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM meal_orders WHERE source='may'").get().n, 1);
+  const c = (await call('GET', `/admin/meal/rpt/compare?from=${P}&to=${P}`, { token: tok.HR1 })).body.days.find((x) => x.shift === 'trua');
+  assert.deepEqual([c.signed, c.walk_in], [4, 0]);   // B2 thành có báo
+  const sg = (await call('GET', `/admin/meal/signups?date=${P}&shift=trua`, { token: tok.HR1 })).body.shifts.find((x) => x.code === 'trua');
+  assert.deepEqual([sg.totals.app, sg.totals.may, sg.totals.hr], [1, 1, 3]);
+  // chỉ máy K1SN dùng để báo cơm
+  assert.equal((await call('PUT', '/admin/meal/devices', { token: tok.HR1, body: { kind: 'signup', serials: ['K1SN', 'LA'] } })).status, 200);
+  const dv = (await call('GET', '/admin/meal/devices', { token: tok.HR1 })).body;
+  assert.deepEqual(dv.signup_serials, ['K1SN']); assert.equal(getSetting('meal_signup_serials'), 'K1SN');
+  punch('A1', '2026-10-01T12:00:00Z', 'K2SN'); punch('B1', '2026-10-01T12:05:00Z', 'K1SN');
+  assert.deepEqual((await day(P2)).map((r) => [r.code, r.source]), [['B1', 'may']]);
+  const pl = (await call('GET', `/meal/plan?from=${P2}&to=${P2}`, { token: tok.B1 })).body.days[0].shifts.find((x) => x.code === 'trua');
+  assert.deepEqual([pl.registered, pl.source], [true, 'may']);
+  // HR huỷ → không bị lượt quẹt cũ báo lại; quẹt SAU lúc huỷ mới báo lại
+  const put = (on) => call('PUT', '/admin/meal/signup-for', { token: tok.HR1, body: { date: P2, shift: 'trua', employee_ids: [E.B1], on, reason: 'thử huỷ suất quẹt máy' } });
+  assert.deepEqual((await put(false)).body, { ok: true, changed: 1, skipped: 0 });
+  punch('A2', '2026-10-01T13:00:00Z', 'K2SN');   // có lượt quẹt mới → đồng bộ lại
+  assert.deepEqual(await day(P2), []);
+  db.prepare("UPDATE meal_signup_off SET off_at = '2026-10-01T12:02:00.000Z' WHERE employee_id = ?").run(E.B1);
+  punch('A2', '2026-10-01T13:01:00Z', 'K2SN');
+  assert.deepEqual((await day(P2)).map((r) => r.code), ['B1']);   // quẹt 12:05 sau lúc huỷ 12:02 → báo lại
+  await put(false);
+  assert.deepEqual((await put(true)).body, { ok: true, changed: 1, skipped: 0 });   // HR đăng ký lại → thành HR báo hộ
+  assert.deepEqual((await day(P2)).map((r) => [r.code, r.note]), [['B1', 'HR báo hộ']]);
+  assert.equal(db.prepare('SELECT COUNT(*) n FROM meal_signup_off WHERE employee_id = ?').get(E.B1).n, 0);
+  // CHỈ MÁY: NV không tự đăng ký trên app được, vẫn xem được bữa đã báo; màn hình bếp vẫn có ô số suất
+  await call('PUT', '/admin/meal/options', { token: tok.master, body: { self_order: false } });
+  assert.equal((await call('PUT', '/meal/signup', { token: tok.A1, body: { date: F, shift: 'chieu', on: true } })).status, 403);
+  const me = (await call('GET', '/meal/me', { token: tok.A1 })).body;
+  assert.deepEqual([me.self_order, me.machine_signup], [false, true]);
+  assert.ok(M.kitchenBoard({ kitchen: null }, new Date('2026-10-01T03:00:00Z')).length > 0);
+  assert.deepEqual((await day(P)).find((r) => r.code === 'B2').note, '');   // chỉ máy → mọi dòng đều quẹt, khỏi ghi
+  // trả lại như cũ
+  await call('PUT', '/admin/meal/options', { token: tok.master, body: { self_order: true, machine_signup: false } });
+  await call('PUT', '/admin/meal/devices', { token: tok.HR1, body: { kind: 'signup', serials: [] } });
+  assert.deepEqual(M.kitchenBoard({ kitchen: null }, new Date('2026-10-01T03:00:00Z')).length > 0, true);
+  assert.equal(M.syncMachineSignups(P, P2), 0);
 });
 
 test('xoá bếp: NV thành "chưa phân bếp", đơn tương lai bỏ gắn bếp, đơn ngày đã qua giữ nguyên', async () => {

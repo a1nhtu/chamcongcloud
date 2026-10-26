@@ -231,12 +231,30 @@ export const mealEnded = (workDate, shift, now = new Date()) => now.toISOString(
 //   kitchenOf: (employee_id) => bếp hiện tại của NV (cho người quẹt mà không đăng ký / đơn cũ chưa ghi bếp)
 // Mỗi bếp: app + hr + extra = total (không âm); ate = đã đăng ký và đã quẹt; no_show = đăng ký mà không quẹt; walk_in = quẹt mà không đăng ký.
 // Bếp không còn trong danh mục / NV chưa phân bếp → dòng id 0 "Chưa phân bếp" (chỉ hiện khi có số liệu, hoặc khi không có bếp nào thì là "Bếp chung").
+// BÁO CƠM BẰNG QUẸT MÁY: lượt quẹt (ISO UTC) báo cho bữa nào → { workDate, shift } hoặc null.
+// Chỉ bữa đang bật CÓ giờ mở đăng ký (open_at) — quẹt trong [giờ mở, giờ khoá) của ngày ăn đó; nhiều bữa cùng đang mở → bữa khoá sớm nhất (bữa gần nhất).
+export function signupShiftForPunch(punchIso, shifts) {
+  const t = Date.parse(punchIso);
+  if (Number.isNaN(t)) return null;
+  const vnDay = new Date(t + VN_MS).toISOString().slice(0, 10);
+  let best = null;
+  for (const sh of shifts) {
+    if (!sh.enabled || !isHHMM(sh.open_at)) continue;
+    for (const d of [vnDay, addDaysIso(vnDay, 1), addDaysIso(vnDay, 2)]) {
+      const dl = orderDeadlineMs(d, sh);
+      if (t < orderOpenMs(d, sh) || t >= dl) continue;
+      if (!best || dl < best.dl) best = { workDate: d, shift: sh, dl };
+    }
+  }
+  return best ? { workDate: best.workDate, shift: best.shift } : null;
+}
+
 export function buildSignupReport({ orders = [], punchers = new Set(), extra = {}, kitchens = [], kitchenOf = () => 0 }) {
   const known = new Set(kitchens.map((k) => k.id));
   const kid = (v) => (v != null && known.has(Number(v)) ? Number(v) : 0);
-  const rows = new Map(kitchens.map((k) => [k.id, { kitchen_id: k.id, name: k.name, app: 0, hr: 0, extra: 0, total: 0, ate: 0, no_show: 0, walk_in: 0 }]));
+  const rows = new Map(kitchens.map((k) => [k.id, { kitchen_id: k.id, name: k.name, app: 0, may: 0, hr: 0, extra: 0, total: 0, ate: 0, no_show: 0, walk_in: 0 }]));
   const row = (id) => {
-    if (!rows.has(id)) rows.set(id, { kitchen_id: id, name: kitchens.length ? 'Chưa phân bếp' : 'Bếp chung', app: 0, hr: 0, extra: 0, total: 0, ate: 0, no_show: 0, walk_in: 0 });
+    if (!rows.has(id)) rows.set(id, { kitchen_id: id, name: kitchens.length ? 'Chưa phân bếp' : 'Bếp chung', app: 0, may: 0, hr: 0, extra: 0, total: 0, ate: 0, no_show: 0, walk_in: 0 });
     return rows.get(id);
   };
   if (!kitchens.length) row(0);
@@ -245,7 +263,7 @@ export function buildSignupReport({ orders = [], punchers = new Set(), extra = {
     if (signed.has(o.employee_id)) continue;
     signed.add(o.employee_id);
     const r = row(kid(o.kitchen_id ?? kitchenOf(o.employee_id)));
-    if (o.set_by) r.hr++; else r.app++;
+    if (o.set_by) r.hr++; else { r.app++; if (o.source === 'may') r.may++; }
     if (punchers.has(o.employee_id)) r.ate++; else r.no_show++;
   }
   for (const id of punchers) if (!signed.has(id)) row(kid(kitchenOf(id))).walk_in++;
@@ -253,7 +271,7 @@ export function buildSignupReport({ orders = [], punchers = new Set(), extra = {
   const list = [...rows.values()].sort((a, b) => (a.kitchen_id === 0) - (b.kitchen_id === 0) || 0);
   for (const r of list) r.total = Math.max(0, r.app + r.hr + r.extra);
   const sum = (f) => list.reduce((s, r) => s + r[f], 0);
-  return { rows: list, totals: { app: sum('app'), hr: sum('hr'), signed: sum('app') + sum('hr'), extra: sum('extra'), total: sum('total'), ate: sum('ate'), no_show: sum('no_show'), walk_in: sum('walk_in') } };
+  return { rows: list, totals: { app: sum('app'), may: sum('may'), hr: sum('hr'), signed: sum('app') + sum('hr'), extra: sum('extra'), total: sum('total'), ate: sum('ate'), no_show: sum('no_show'), walk_in: sum('walk_in') } };
 }
 
 // Lý do HR chỉnh tay (bắt buộc ≥ 3 ký tự sau khi gom khoảng trắng) → chuỗi đã làm sạch hoặc null

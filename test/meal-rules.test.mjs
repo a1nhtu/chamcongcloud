@@ -216,10 +216,10 @@ test('buildSignupReport: theo bếp — NV tự / HR hộ / thêm tay / đã qu�
   });
   const by = Object.fromEntries(r.rows.map((x) => [x.name, x]));
   assert.deepEqual(r.rows.map((x) => x.name), ['Bếp 1', 'Bếp 2', 'Chưa phân bếp']);
-  assert.deepEqual({ ...by['Bếp 1'], name: undefined }, { kitchen_id: 1, name: undefined, app: 1, hr: 1, extra: 0, total: 2, ate: 1, no_show: 1, walk_in: 0 });
+  assert.deepEqual({ ...by['Bếp 1'], name: undefined }, { kitchen_id: 1, name: undefined, app: 1, may: 0, hr: 1, extra: 0, total: 2, ate: 1, no_show: 1, walk_in: 0 });
   assert.deepEqual([by['Bếp 2'].app, by['Bếp 2'].extra, by['Bếp 2'].total, by['Bếp 2'].ate, by['Bếp 2'].walk_in], [1, 3, 4, 1, 1]);   // 21 quẹt không ĐK
   assert.deepEqual([by['Chưa phân bếp'].app, by['Chưa phân bếp'].extra, by['Chưa phân bếp'].total, by['Chưa phân bếp'].no_show, by['Chưa phân bếp'].walk_in], [1, -1, 0, 1, 1]);   // 40 quẹt, chưa phân bếp
-  assert.deepEqual(r.totals, { app: 3, hr: 1, signed: 4, extra: 2, total: 6, ate: 2, no_show: 2, walk_in: 2 });
+  assert.deepEqual(r.totals, { app: 3, may: 0, hr: 1, signed: 4, extra: 2, total: 6, ate: 2, no_show: 2, walk_in: 2 });
   // không có bếp nào → 1 dòng "Bếp chung"
   const one = buildSignupReport({ orders: [{ employee_id: 1, set_by: '' }], punchers: new Set([1]) });
   assert.deepEqual(one.rows.map((x) => [x.name, x.total, x.ate]), [['Bếp chung', 1, 1]]);
@@ -238,4 +238,17 @@ test('cleanReason: gom khoảng trắng, tối thiểu 3 ký tự', () => {
   assert.equal(cleanReason('  quên   đăng ký '), 'quên đăng ký');
   assert.equal(cleanReason('ab'), null);
   assert.equal(cleanReason(null), null);
+});
+
+test('signupShiftForPunch: quẹt trong [giờ mở, giờ khoá) → bữa đó; bữa luôn mở / tắt không nhận; nhiều bữa đang mở → bữa khoá sớm nhất', async () => {
+  const { signupShiftForPunch } = await import('../server/meal-rules.js');
+  const trua = { code: 'trua', enabled: 1, from_time: '10:30', to_time: '13:30', lock_at: '09:00', open_at: '15:00' };   // mở 15:00 hôm trước, khoá 09:00
+  const chieu = { code: 'chieu', enabled: 1, from_time: '16:00', to_time: '20:00', lock_at: '14:00', open_at: '06:00' };   // mở 06:00, khoá 14:00 cùng ngày
+  const dem = { code: 'dem', enabled: 1, from_time: '23:00', to_time: '02:00', lock_before_min: 0, open_at: '' };          // luôn mở → không nhận quẹt
+  const hit = (iso, list = [trua, chieu, dem]) => { const h = signupShiftForPunch(iso, list); return h ? [h.workDate, h.shift.code] : null; };
+  assert.deepEqual(hit('2026-10-01T08:00:00Z'), ['2026-10-02', 'trua']);   // 15:00 01/10 VN → trưa 02/10
+  assert.equal(hit('2026-10-01T07:59:00Z'), null);                          // 14:59: trưa 02/10 chưa mở, chiều 01/10 đã khoá 14:00
+  assert.deepEqual(hit('2026-10-01T01:00:00Z'), ['2026-10-01', 'trua']);   // 08:00: trưa (khoá 09:00) và chiều (khoá 14:00) cùng mở → trưa
+  assert.deepEqual(hit('2026-10-01T03:00:00Z'), ['2026-10-01', 'chieu']);  // 10:00: trưa đã khoá → chiều
+  assert.equal(hit('2026-10-01T08:00:00Z', [{ ...trua, enabled: 0 }, dem]), null);   // bữa tắt / luôn mở không nhận
 });

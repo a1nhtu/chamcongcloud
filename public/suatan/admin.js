@@ -14,6 +14,8 @@ const vnToday = () => new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_C
 const dmy = (s) => (/^\d{4}-\d{2}-\d{2}$/.test(s || '') ? `${s.slice(8, 10)}/${s.slice(5, 7)}/${s.slice(0, 4)}` : '');
 const addDays = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);
 const nf = (n) => (n == null ? '—' : Number(n).toLocaleString('vi-VN'));
+// Số NV tự đăng ký, kèm số báo bằng quẹt máy chấm công (nếu có)
+const appN = (k) => (k.may ? `${nf(k.app)} (${nf(k.may)} quẹt máy)` : nf(k.app));
 // bỏ dấu + chữ thường để tìm tên không cần gõ dấu
 const noAcc = (s) => String(s ?? '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
 const MODE_TXT = {
@@ -475,8 +477,11 @@ export async function pageMealCfg(ctx) {
   const sec = (t) => el('div', { class: 'sa-sec' }, `${++secN}. ${t}`);
 
   /* --- cách đăng ký: tài khoản tổng đổi ở Cài đặt › Cấu hình hiển thị --- */
-  const way = !opt.self_order && !opt.dept_head ? 'HR tự nhập số suất'
-    : [opt.self_order ? (opt.dish_choice ? 'Nhân viên tự chọn món trên app' : 'Nhân viên tự bấm "Có ăn / Không ăn" trên app (không chọn món)') : null,
+  const selfWay = opt.self_order ? (opt.dish_choice ? 'Nhân viên tự chọn món trên app'
+    : opt.machine_signup ? 'Nhân viên bấm "Có ăn" trên app hoặc quẹt máy chấm công trong giờ đăng ký' : 'Nhân viên tự bấm "Có ăn / Không ăn" trên app (không chọn món)')
+    : opt.machine_signup ? 'Nhân viên quẹt máy chấm công trong giờ đăng ký để báo ăn' : null;
+  const way = !selfWay && !opt.dept_head ? 'HR tự nhập số suất'
+    : [selfWay,
       opt.dept_head ? 'trưởng bộ phận báo số → HR đối chiếu & chốt' : null].filter(Boolean).join(' + ');
   main.append(el('div', { class: 'sa-info' }, el('span', {}, 'Cách đăng ký suất ăn: ', el('b', {}, way)), el('span', { class: 'sa-hint' }, 'Tài khoản tổng đổi ở Cài đặt › Cấu hình hiển thị.')));
 
@@ -689,6 +694,36 @@ export async function pageMealCfg(ctx) {
   devBox.append(saveDev, el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'Không chọn máy nào = tính mọi máy chấm công thật. Lượt thêm tay và lượt chấm bằng điện thoại không bao giờ tính suất ăn.'));
   main.append(devBox);
 
+  /* --- báo cơm bằng quẹt máy chấm công (chỉ khi tài khoản tổng chọn "quẹt máy" / "cả app lẫn quẹt máy") --- */
+  if (opt.machine_signup) {
+    main.append(sec('Báo cơm bằng quẹt máy chấm công'));
+    const mBox = el('div', { class: 'sa-card' });
+    const toMin = (v) => { const [h, m] = String(v || '').split(':').map(Number); return h * 60 + m; };
+    const hm = (m) => `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+    const at = (t) => { const d = Math.floor(t / 1440); return hm(t - d * 1440) + (d === 0 ? '' : d === -1 ? ' hôm trước' : ` ${-d} ngày trước`); };
+    const on = (shifts.shifts || []).filter((s) => s.enabled);
+    const lines = on.map((s) => {
+      const f = toMin(s.from_time);
+      const dl = /^\d\d:\d\d$/.test(s.lock_at || '') ? (toMin(s.lock_at) > f ? toMin(s.lock_at) - 1440 : toMin(s.lock_at)) : f - (Number(s.lock_before_min) || 0);
+      if (!s.open_at) return el('li', { style: 'color:#b45309' }, el('b', {}, s.name), ': chưa đặt giờ mở đăng ký → quẹt máy KHÔNG báo được bữa này (đặt giờ mở ở mục 1).');
+      let o = Math.floor(dl / 1440) * 1440 + toMin(s.open_at); if (o >= dl) o -= 1440;
+      return el('li', {}, el('b', {}, s.name), `: quẹt từ ${at(o)} đến trước ${at(dl)} (ăn ${s.from_time} → ${s.to_time})`);
+    });
+    mBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, 'Nhân viên quẹt máy chấm công trong giờ đăng ký của bữa = đã báo ăn bữa đó (như bấm "Có ăn"). Quẹt nhiều lần chỉ tính 1 suất; đang mở nhiều bữa cùng lúc → tính cho bữa khoá sớm nhất. Huỷ: NV bấm "Không ăn" trên app (nếu dùng app) hoặc HR huỷ hộ — quẹt lại sau đó mới báo lại.'),
+      el('ul', { style: 'margin:4px 0 10px 18px;padding:0;font-size:14px;line-height:1.7' }, ...lines));
+    const pickS = new Set(devs.signup_serials || []);
+    mBox.append(el('div', { style: 'font-weight:700;margin-bottom:4px' }, 'Máy dùng để báo cơm:'));
+    for (const d of devs.devices) {
+      const c = el('input', { type: 'checkbox', style: 'width:auto', ...(pickS.has(d.serial) ? { checked: '' } : {}) });
+      c.onchange = () => { c.checked ? pickS.add(d.serial) : pickS.delete(d.serial); };
+      mBox.append(el('label', { style: 'display:flex;gap:8px;align-items:center;margin:5px 0;color:inherit;font-size:14px' }, c, `${d.name || d.serial} (${d.serial})`));
+    }
+    const saveS = el('button', { class: 'sa-btn', type: 'button', style: 'margin-top:8px' }, '💾 Lưu');
+    saveS.onclick = async () => { try { await api('/admin/meal/devices', { method: 'PUT', body: { kind: 'signup', serials: [...pickS] } }); toast('Đã lưu', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+    mBox.append(saveS, el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'Không chọn máy nào = mọi máy chấm công thật (quẹt vào ca buổi sáng cũng là báo cơm trưa); khi đó lượt quẹt ở máy đếm suất ăn TRONG giờ ăn được coi là đi ăn, không tính báo bữa khác. Chọn riêng 1 máy đặt ở cổng / căng tin nếu muốn tách việc báo cơm với chấm công.'));
+    main.append(mBox);
+  }
+
   /* --- màn hình bếp chung (mọi bếp) --- */
   main.append(sec(kits.kitchens.length ? 'Màn hình bếp CHUNG (hiện mọi bếp)' : 'Màn hình bếp'));
   const kBox2 = el('div', { class: 'sa-card' });
@@ -787,9 +822,9 @@ export async function pageMealReg(ctx) {
       el('thead', {}, el('tr', {}, el('th', {}, 'Bếp'), el('th', { class: 'num' }, 'NV tự ĐK'), el('th', { class: 'num' }, 'HR ĐK hộ'), el('th', { class: 'num' }, 'Thêm tay'),
         el('th', { class: 'num' }, 'Tổng phải nấu'), el('th', { class: 'num' }, 'Đã quẹt'), el('th', { class: 'num', title: 'Có đăng ký nhưng không quẹt thẻ (tính khi bữa đã kết thúc)' }, 'ĐK mà không quẹt'),
         el('th', { class: 'num' }, 'Quẹt mà không ĐK'))),
-      el('tbody', {}, ...s.rows.map((k) => el('tr', {}, el('td', { class: 'dept' }, k.name), el('td', { class: 'num' }, nf(k.app)), el('td', { class: 'num' }, k.hr ? nf(k.hr) : '—'),
+      el('tbody', {}, ...s.rows.map((k) => el('tr', {}, el('td', { class: 'dept' }, k.name), el('td', { class: 'num' }, appN(k)), el('td', { class: 'num' }, k.hr ? nf(k.hr) : '—'),
         adjBtn(k), el('td', { class: 'num sa-total' }, nf(k.total)), el('td', { class: 'num' }, nf(k.ate)), el('td', { class: 'num' }, ns(k.no_show)), el('td', { class: 'num' }, nf(k.walk_in))))),
-      s.rows.length > 1 ? el('tfoot', {}, el('tr', {}, el('td', {}, 'Tổng cộng'), el('td', { class: 'num' }, nf(t.app)), el('td', { class: 'num' }, nf(t.hr)),
+      s.rows.length > 1 ? el('tfoot', {}, el('tr', {}, el('td', {}, 'Tổng cộng'), el('td', { class: 'num' }, appN(t)), el('td', { class: 'num' }, nf(t.hr)),
         el('td', { class: 'num' }, t.extra ? (t.extra > 0 ? '+' : '−') + nf(Math.abs(t.extra)) : '—'), el('td', { class: 'num sa-total', style: 'font-size:17px' }, nf(t.total)),
         el('td', { class: 'num' }, nf(t.ate)), el('td', { class: 'num' }, ns(t.no_show)), el('td', { class: 'num' }, nf(t.walk_in)))) : null)));
     const regBtn = el('button', { class: 'sa-btn', type: 'button' }, '➕ Đăng ký hộ');
@@ -834,7 +869,7 @@ export async function pageMealReg(ctx) {
         return el('tr', {}, el('td', { class: 'num sa-hint' }, String(i + 1)), el('td', {}, x.code || ''), el('td', { class: 'dept' }, x.full_name), el('td', {}, x.department || ''),
           R.kitchens.length ? el('td', {}, kn(x.kitchen_id)) : null,
           el('td', {}, x.reg ? stamp(x.at) : el('span', { class: 'sa-pill red' }, 'không đăng ký')),
-          el('td', {}, x.reg ? (x.set_by ? el('span', { class: 'sa-pill warn' }, `HR hộ: ${x.set_by}`) : 'NV tự ĐK') : ''),
+          el('td', {}, x.reg ? (x.set_by ? el('span', { class: 'sa-pill warn' }, `HR hộ: ${x.set_by}`) : x.source === 'may' ? '🖐️ Quẹt máy' : 'NV tự ĐK') : ''),
           el('td', {}, x.punched ? hhmm(x.punched) : x.reg && s.ended ? el('span', { class: 'sa-pill red' }, 'không ăn') : '—'), el('td', {}, act));
       }));
       wrap.append(el('table', { class: 'sa-tbl' }, el('thead', {}, el('tr', {}, el('th', { class: 'num' }, '#'), el('th', {}, 'Mã NV'), el('th', {}, 'Họ tên'), el('th', {}, 'Bộ phận'),
@@ -1058,11 +1093,11 @@ export async function pageMealRpt(ctx) {
       tb.append(el('tr', { style: 'background:var(--sa-soft)' }, el('td', { class: 'dept', style: 'white-space:nowrap' }, dmy(x.date)), el('td', { class: 'dept' }, x.shift_name),
         el('td', { style: 'white-space:nowrap' }, x.open ? atTxt(x.open, x.date) : 'luôn mở'), el('td', { style: 'white-space:nowrap' }, atTxt(x.deadline, x.date)),
         el('td', { style: 'white-space:nowrap' }, x.first_signup ? `${stamp(x.first_signup)} → ${stamp(x.last_signup)}` : '—'),
-        el('td', { class: 'num' }, nf(t.app)), el('td', { class: 'num' }, t.hr ? nf(t.hr) : '—'), el('td', { class: 'num' }, t.extra ? (t.extra > 0 ? '+' : '−') + nf(Math.abs(t.extra)) : '—'),
+        el('td', { class: 'num' }, appN(t)), el('td', { class: 'num' }, t.hr ? nf(t.hr) : '—'), el('td', { class: 'num' }, t.extra ? (t.extra > 0 ? '+' : '−') + nf(Math.abs(t.extra)) : '—'),
         el('td', { class: 'num sa-total' }, nf(t.total)), el('td', { class: 'num' }, nf(t.ate)), el('td', { class: 'num' }, x.ended ? nf(t.no_show) : '—'), el('td', { class: 'num' }, nf(t.walk_in)),
         el('td', {}, x.sent_at ? `${stamp(x.sent_at)} (${nf(x.sent_total)})` : el('span', { class: 'sa-hint' }, 'chưa gửi'))));
       if (multi) for (const k of x.kitchens) tb.append(el('tr', {}, el('td', {}), el('td', { class: 'sa-hint', colspan: '4', style: 'padding-left:24px' }, '↳ ' + k.name),
-        el('td', { class: 'num' }, nf(k.app)), el('td', { class: 'num' }, k.hr ? nf(k.hr) : '—'), el('td', { class: 'num' }, k.extra ? (k.extra > 0 ? '+' : '−') + nf(Math.abs(k.extra)) : '—'),
+        el('td', { class: 'num' }, appN(k)), el('td', { class: 'num' }, k.hr ? nf(k.hr) : '—'), el('td', { class: 'num' }, k.extra ? (k.extra > 0 ? '+' : '−') + nf(Math.abs(k.extra)) : '—'),
         el('td', { class: 'num' }, nf(k.total)), el('td', { class: 'num' }, nf(k.ate)), el('td', { class: 'num' }, x.ended ? nf(k.no_show) : '—'), el('td', { class: 'num' }, nf(k.walk_in)), el('td', {})));
     }
     body.append(el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
@@ -1102,7 +1137,7 @@ export async function pageMealRpt(ctx) {
             ...r.days.map((d) => {
               const v = cells[d];
               if (!v) return el('td', {});
-              const tip = `${punch ? 'Quẹt' : 'Báo'} lúc ${v.t} ${dmy(v.day)}${v.hr ? ' · HR báo hộ' : ''}${v.no_show ? ' · KHÔNG ĂN' : ''}${v.walk_in ? ' · KHÔNG BÁO CƠM' : ''}`;
+              const tip = `${punch ? 'Quẹt' : 'Báo'} lúc ${v.t} ${dmy(v.day)}${v.hr ? ' · HR báo hộ' : v.may ? ' · Báo bằng quẹt máy' : ''}${v.no_show ? ' · KHÔNG ĂN' : ''}${v.walk_in ? ' · KHÔNG BÁO CƠM' : ''}`;
               return el('td', { class: [v.no_show ? 'ns' : '', v.walk_in ? 'wi' : '', v.hr ? 'hr' : ''].join(' ').trim(), title: tip }, v.t);
             }),
             el('td', { style: 'font-weight:700' }, p.totals[s.code] ? String(p.totals[s.code]) : '')));
@@ -1185,7 +1220,7 @@ export async function pageMealRpt(ctx) {
       foldCard('cmp_emp', true, [el('b', { class: 'sa-fold-h' }, '👥 Tổng hợp theo nhân viên')], [el('span', { class: 'sa-sum-n' }, nf(r.people.filter((x) => x.no_show || x.walk_in).length)), el('span', { class: 'sa-hint' }, ' người có ngoại lệ')],
         [el('div', { class: 'sa-bar' }, el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0;color:inherit;font-size:14px' }, onlyEx, 'Chỉ người ăn mà không báo / báo mà không ăn'), q), empBox]),
       foldCard('cmp_ns', false, [el('b', { class: 'sa-fold-h' }, '🚫 Chi tiết: báo cơm mà KHÔNG ăn')], [el('span', { class: 'sa-sum-n' }, nf(r.no_show.length)), el('span', { class: 'sa-hint' }, ' lượt')],
-        [tbl(r.no_show, [...base, ['Giờ báo', (x) => stamp(x.at)], ['Người báo', (x) => (x.set_by ? `HR báo hộ: ${x.set_by}` : 'NV tự báo')]])]),
+        [tbl(r.no_show, [...base, ['Giờ báo', (x) => stamp(x.at)], ['Người báo', (x) => (x.set_by ? `HR báo hộ: ${x.set_by}` : x.source === 'may' ? 'Quẹt máy chấm công' : 'NV tự báo')]])]),
       foldCard('cmp_wi', false, [el('b', { class: 'sa-fold-h' }, '⚠ Chi tiết: ăn mà KHÔNG báo cơm')], [el('span', { class: 'sa-sum-n' }, nf(r.walk_in.length)), el('span', { class: 'sa-hint' }, ' lượt')],
         [tbl(r.walk_in, [...base, ['Quẹt lúc', (x) => hhmm(x.punched)]])]),
       el('div', { class: 'sa-hint' }, 'Báo = có đăng ký ăn (tự báo hoặc HR báo hộ). Ăn = quẹt máy chấm ăn trong giờ ăn. "Báo mà không ăn" chỉ tính bữa đã kết thúc. Tối đa 31 ngày mỗi lần. File Excel có 4 sheet: theo ngày, theo nhân viên, 2 sheet chi tiết.'));

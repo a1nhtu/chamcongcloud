@@ -950,6 +950,16 @@ function migrateColumns() {
   add('meal_shifts', 'custom',  'INTEGER NOT NULL DEFAULT 0');
   add('meal_orders', 'created_at', "TEXT NOT NULL DEFAULT ''");   // giờ đăng ký LẦN ĐẦU (đổi món không đổi giờ này)
   add('meal_orders', 'kitchen_id', 'INTEGER');                     // bếp của NV lúc đăng ký (HR đổi bếp → đơn từ hôm nay trở đi theo bếp mới)
+  // BÁO CƠM BẰNG QUẸT MÁY CHẤM CÔNG (công tắc meal_machine_signup): đơn tự sinh từ lượt quẹt trong giờ mở → khoá đăng ký có source 'may'.
+  // meal_signup_off = lúc HR huỷ hộ / NV bấm Không ăn → chỉ lượt quẹt SAU lúc đó mới báo lại (không tự thêm lại đơn vừa huỷ).
+  add('meal_orders', 'source', "TEXT NOT NULL DEFAULT ''");
+  db.exec(`CREATE TABLE IF NOT EXISTS meal_signup_off (
+      employee_id INTEGER NOT NULL,
+      work_date   TEXT NOT NULL,
+      shift       TEXT NOT NULL,
+      off_at      TEXT NOT NULL,                      -- ISO UTC lúc huỷ
+      PRIMARY KEY (employee_id, work_date, shift)
+    )`);
   db.exec(`
     CREATE TABLE IF NOT EXISTS meal_kitchens (        -- danh mục BẾP (VD Bếp 1, Bếp 2); không có bếp nào = 1 bếp chung như cũ
       id         INTEGER PRIMARY KEY AUTOINCREMENT,

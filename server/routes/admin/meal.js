@@ -4,7 +4,7 @@ import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
-  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, mealOptions, setMealAdjust, hrSetOrder, mealEmpSearch,
+  getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, mealOptions, mealSignupSerials, setMealAdjust, hrSetOrder, mealEmpSearch,
   createShift, deleteShift, listKitchens, saveKitchen, deleteKitchen, renewKitchenKey, assignKitchen, kitchenDeptMap, kitchenDeptEmployees, kitchenAllEmployees,
   hrSetSignup, setMealExtra, signupDay, sendToKitchen, mealRangeSummary, mealNoShow, mealExceptions, mealMonthGrid, mealDayList, mealCompare,
 } from '../../meal.js';
@@ -105,13 +105,15 @@ export function registerMealRoutes(r) {
   // ---------- máy chấm công nào được tính suất ăn (rỗng = mọi máy thật; lượt thêm tay / chấm điện thoại không bao giờ tính) ----------
   r.get('/meal/devices', wrap('GET /admin/meal/devices', (req, res) => {
     const devices = db.prepare("SELECT serial, name FROM push_devices WHERE active = 1 ORDER BY name, serial").all();
-    res.json({ devices, serials: getSetting('meal_serials', '').split(',').map((x) => x.trim()).filter(Boolean) });
+    res.json({ devices, serials: getSetting('meal_serials', '').split(',').map((x) => x.trim()).filter(Boolean), signup_serials: mealSignupSerials() });
   }));
   r.put('/meal/devices', wrap('PUT /admin/meal/devices', (req, res) => {
     const known = new Set(db.prepare('SELECT serial FROM push_devices').all().map((d) => d.serial));
     const list = [...new Set((Array.isArray(req.body?.serials) ? req.body.serials : []).map((x) => String(x).trim()).filter((x) => known.has(x)))];
-    setSetting('meal_serials', list.join(','));
-    res.json({ ok: true, serials: list });
+    // kind 'signup' = máy dùng để BÁO CƠM bằng quẹt (rỗng = mọi máy thật)
+    const signup = req.body?.kind === 'signup';
+    setSetting(signup ? 'meal_signup_serials' : 'meal_serials', list.join(','));
+    res.json({ ok: true, [signup ? 'signup_serials' : 'serials']: list });
   }));
 
   // ---------- BÁO CÁO suất ăn + HR chỉnh tay (lưu vết ở meal_adjust_log) ----------
@@ -141,7 +143,7 @@ export function registerMealRoutes(r) {
   r.get('/meal/options', wrap('GET /admin/meal/options', (req, res) => res.json(mealOptions())));
   r.put('/meal/options', wrap('PUT /admin/meal/options', (req, res) => {
     if (!req.user.master) return res.status(403).json({ error: 'Chỉ tài khoản tổng đổi được cách đăng ký suất ăn (Cài đặt › Cấu hình hiển thị)' });
-    for (const [k, key] of [['self_order', 'meal_self_order'], ['dish_choice', 'meal_dish_choice'], ['dept_head', 'meal_dept_head']])
+    for (const [k, key] of [['self_order', 'meal_self_order'], ['dish_choice', 'meal_dish_choice'], ['dept_head', 'meal_dept_head'], ['machine_signup', 'meal_machine_signup']])
       if (req.body?.[k] != null) setSetting(key, req.body[k] ? '1' : '0');
     res.json({ ok: true, ...mealOptions() });
   }));

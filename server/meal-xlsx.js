@@ -87,7 +87,7 @@ export async function writeMealReportXlsx(res, from, to, now = new Date()) {
 const vnDT = (s) => { if (!s) return ''; const t = new Date(Date.parse(s.replace(' ', 'T') + (s.includes('T') ? '' : 'Z')) + 7 * 3600000).toISOString(); return `${t.slice(8, 10)}/${t.slice(5, 7)} ${t.slice(11, 16)}`; };
 const vnOf = (v) => (v ? `${v.slice(11)} ${v.slice(8, 10)}/${v.slice(5, 7)}` : '');   // 'YYYY-MM-DD HH:MM' → 'HH:MM dd/mm'
 const kitchenLabel = (kitchens) => { const m = new Map(kitchens.map((k) => [k.id, k.name])); return (id) => m.get(id) || (kitchens.length ? 'Chưa phân bếp' : ''); };
-const byWho = (setBy) => (setBy ? `HR đăng ký hộ (${setBy})` : 'NV tự đăng ký');
+const byWho = (setBy, source) => (setBy ? `HR đăng ký hộ (${setBy})` : source === 'may' ? 'Quẹt máy chấm công' : 'NV tự đăng ký');
 
 export async function writeMealRptXlsx(res, type, from, to, now = new Date(), opt = {}) {
   const wb = new ExcelJS.Workbook();
@@ -118,7 +118,7 @@ export async function writeMealRptXlsx(res, type, from, to, now = new Date(), op
     for (const x of r.people) addRow(s2, [x.code || '', x.full_name, x.department, kn(x.kitchen_id), x.signed, x.ate, x.ok, x.no_show, x.walk_in, its(x.no_show_items), its(x.walk_in_items)], { numFrom: 5 });
     const s3 = sheet(wb, 'Báo mà không ăn', 'CHI TIẾT BÁO CƠM MÀ KHÔNG ĂN', sub,
       ['Ngày', 'Bữa', 'Mã NV', 'Họ tên', 'Bộ phận', 'Bếp', 'Giờ báo', 'Người báo', 'Món'], [12, 14, 11, 26, 24, 16, 13, 26, 24]);
-    for (const x of r.no_show) addRow(s3, [vn(x.date), x.shift_name, x.code || '', x.full_name, x.department, kn(x.kitchen_id), vnDT(x.at), byWho(x.set_by), x.dish || '']);
+    for (const x of r.no_show) addRow(s3, [vn(x.date), x.shift_name, x.code || '', x.full_name, x.department, kn(x.kitchen_id), vnDT(x.at), byWho(x.set_by, x.source), x.dish || '']);
     const s4 = sheet(wb, 'Ăn mà không báo', 'CHI TIẾT ĂN MÀ KHÔNG BÁO CƠM', sub,
       ['Ngày', 'Bữa', 'Mã NV', 'Họ tên', 'Bộ phận', 'Bếp', 'Quẹt thẻ lúc'], [12, 14, 11, 26, 24, 16, 12]);
     for (const x of r.walk_in) addRow(s4, [vn(x.date), x.shift_name, x.code || '', x.full_name, x.department, kn(x.kitchen_id), vnTime(x.punched)]);
@@ -138,7 +138,7 @@ export async function writeMealRptXlsx(res, type, from, to, now = new Date(), op
     }
     const s2 = sheet(wb, 'Chi tiết đăng ký', 'CHI TIẾT TỪNG LƯỢT ĐĂNG KÝ ĂN', `${range} · Giờ đăng ký = lúc bấm đăng ký lần đầu`,
       ['Ngày', 'Bữa', 'Mã NV', 'Họ tên', 'Bộ phận', 'Bếp', 'Giờ đăng ký', 'Người đăng ký', 'Món', 'Quẹt thẻ lúc'], [12, 14, 11, 26, 24, 16, 13, 26, 24, 12]);
-    for (const l of r.list) addRow(s2, [vn(l.date), l.shift_name, l.code || '', l.full_name, l.department, kn(l.kitchen_id), vnDT(l.at), byWho(l.set_by), l.dish || '', l.punched ? vnTime(l.punched) : (l.ended ? 'KHÔNG ĂN' : '')]);
+    for (const l of r.list) addRow(s2, [vn(l.date), l.shift_name, l.code || '', l.full_name, l.department, kn(l.kitchen_id), vnDT(l.at), byWho(l.set_by, l.source), l.dish || '', l.punched ? vnTime(l.punched) : (l.ended ? 'KHÔNG ĂN' : '')]);
   } else if (type === 'noshow') {
     const r = mealNoShow(from, to, now);
     const kn = kitchenLabel(r.kitchens);
@@ -153,7 +153,7 @@ export async function writeMealRptXlsx(res, type, from, to, now = new Date(), op
     name = 'ngoai_le_suat_an';
     const s1 = sheet(wb, 'ĐK mà không quẹt', 'ĐĂNG KÝ ĂN MÀ KHÔNG QUẸT THẺ', `${range} · Chỉ bữa đã kết thúc`,
       ['Ngày', 'Bữa', 'Mã NV', 'Họ tên', 'Bộ phận', 'Bếp', 'Giờ đăng ký', 'Người đăng ký', 'Món'], [12, 14, 11, 26, 24, 16, 13, 26, 24]);
-    for (const x of r.no_show) addRow(s1, [vn(x.date), x.shift_name, x.code || '', x.full_name, x.department, kn(x.kitchen_id), vnDT(x.at), byWho(x.set_by), x.dish || '']);
+    for (const x of r.no_show) addRow(s1, [vn(x.date), x.shift_name, x.code || '', x.full_name, x.department, kn(x.kitchen_id), vnDT(x.at), byWho(x.set_by, x.source), x.dish || '']);
     const s2 = sheet(wb, 'Quẹt mà không ĐK', 'QUẸT MÁY CHẤM ĂN MÀ KHÔNG ĐĂNG KÝ', range,
       ['Ngày', 'Bữa', 'Mã NV', 'Họ tên', 'Bộ phận', 'Bếp', 'Quẹt thẻ lúc'], [12, 14, 11, 26, 24, 16, 12]);
     for (const x of r.walk_in) addRow(s2, [vn(x.date), x.shift_name, x.code || '', x.full_name, x.department, kn(x.kitchen_id), vnTime(x.punched)]);

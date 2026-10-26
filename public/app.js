@@ -105,7 +105,7 @@ function showApp() {
   if (!ATT_ON) for (const t of ['cham', 'chonca', 'baocao', 'dontu', 'bangcong']) { const b = document.querySelector(`.bottom-nav button[data-tab="${t}"]`); if (b) b.style.display = 'none'; }
   const mealCfg = api('/meal/config').then((m) => {
     const b = $('#nav-monan');
-    const show = !!(b && m && m.enabled && (m.self_order !== false || m.head));
+    const show = !!(b && m && m.enabled && (m.self_order !== false || m.head || m.machine_signup));   // báo cơm bằng quẹt máy: NV xem được bữa đã báo
     if (show) { b.style.display = ''; if (m.dish_choice === false && b.lastChild) b.lastChild.textContent = 'Đăng ký ăn'; }
     return show;
   }).catch(() => false);
