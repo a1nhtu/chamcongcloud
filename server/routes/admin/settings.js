@@ -63,6 +63,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
         audit_method: getSetting('audit_method', 'ratio'), audit_block: getSetting('audit_block', '15'),
         audit_week_lv: getSetting('audit_week_lv', '1,2,3'), audit_month_lv: getSetting('audit_month_lv', '1,2,3'), audit_year_lv: getSetting('audit_year_lv', '1,2,3'),
         audit_sun_l1: getSetting('audit_sun_l1', ''), audit_sun_l2: getSetting('audit_sun_l2', ''), audit_sun_l3: getSetting('audit_sun_l3', ''),
+        audit_totday_l1: getSetting('audit_totday_l1', ''), audit_totday_l2: getSetting('audit_totday_l2', ''), audit_totday_l3: getSetting('audit_totday_l3', ''),
+        audit_totweek_l1: getSetting('audit_totweek_l1', ''), audit_totweek_l2: getSetting('audit_totweek_l2', ''), audit_totweek_l3: getSetting('audit_totweek_l3', ''),
         audit_clamp_lv: getSetting('audit_clamp_lv', ''), audit_clamp_in_min: getSetting('audit_clamp_in_min', '14'), audit_clamp_out_min: getSetting('audit_clamp_out_min', '14'),
         audit_k_lv: getSetting('audit_k_lv', ''), audit_k_early_min: getSetting('audit_k_early_min', '15'), audit_k_late_max: getSetting('audit_k_late_max', '60'),
         audit_k_out_gap: getSetting('audit_k_out_gap', '15'), audit_k_in_gap: getSetting('audit_k_in_gap', '5'),
@@ -163,6 +165,14 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       // hạn mức tuần / tháng / năm + khống chế giờ chấm: áp cho những mức ảo nào ('1,2,3'; '' = không mức nào)
       for (const k of ['audit_week_lv', 'audit_month_lv', 'audit_year_lv', 'audit_clamp_lv', 'audit_k_lv'])
         if (b[k] != null) setSetting(k, [...new Set(String(b[k]).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)))].sort().join(','));
+      // TỔNG giờ làm (công + TC) tối đa / ngày (0–24h) · / tuần (0–168h) của từng mức ảo ('' = không giới hạn)
+      for (const [k, max] of [['audit_totday_l1', 24], ['audit_totday_l2', 24], ['audit_totday_l3', 24], ['audit_totweek_l1', 168], ['audit_totweek_l2', 168], ['audit_totweek_l3', 168]]) if (b[k] != null) {
+        const v = String(b[k]).trim();
+        if (v === '') { setSetting(k, ''); continue; }
+        const x = parseFloat(v);
+        if (!Number.isFinite(x) || x < 0 || x > max) return res.status(400).json({ error: `Tổng giờ làm tối đa phải là số 0 – ${max} (để trống = không giới hạn)` });
+        setSetting(k, String(x));
+      }
       // chủ nhật đi làm tối đa / tháng của từng mức ảo ('' = không giới hạn)
       for (const k of ['audit_sun_l1', 'audit_sun_l2', 'audit_sun_l3']) if (b[k] != null) {
         const v = String(b[k]).trim();

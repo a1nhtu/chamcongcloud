@@ -12,6 +12,10 @@ const pad = (n) => String(n).padStart(2, '0');
 const addDays = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * DAY).toISOString().slice(0, 10);
 const monday = (d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return addDays(d, -((w + 6) % 7)); };
 
+// Map mức ảo 1/2/3 → số phút (đọc giờ; '' / âm = null = không giới hạn)
+function hoursLv(prefix) {
+  return Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting(prefix + l, ''); const n = parseFloat(v); return [l, v === '' || v == null || !Number.isFinite(n) || n < 0 ? null : Math.round(n * 60)]; }));
+}
 export function auditSettings() {
   const num = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v >= 0 ? v : d; };
   const lvs = (k, d) => new Set(String(getSetting(k, d)).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)));
@@ -30,6 +34,9 @@ export function auditSettings() {
     kInGap: Math.round(num('audit_k_in_gap', 5)),        // vào lại sớm hơn giờ hết nghỉ quá N phút → hiện trong N phút cuối giờ nghỉ
     // số ngày nghỉ hằng tuần (chủ nhật…) đi làm tối đa / tháng lương của từng mức ảo; null = không giới hạn
     sunMax: Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting('audit_sun_l' + l, ''); const n = parseInt(v, 10); return [l, v === '' || v == null || !Number.isFinite(n) || n < 0 ? null : n]; })),
+    // tổng giờ làm (giờ công + tăng ca) tối đa / ngày · / tuần — mỗi mức ảo một số giờ riêng ('' = không giới hạn), đổi sang phút
+    totDay: hoursLv('audit_totday_l'),
+    totWeek: hoursLv('audit_totweek_l'),
     enabled: getSetting('audit_enabled', '0') === '1',
     weekMin: num('audit_ot_week_h', 0) * 60,         // tối đa / tuần (giờ)
     monthMin: num('audit_ot_month_h', 0) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
@@ -171,6 +178,20 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
   const sunHidden = S.sunMax[lv] != null ? sundayDrops(ids, L, R, S.sunMax[lv], lv, P, lockedDay) : new Map();
   const counted = (t) => t === 'le' ? S.inclHoliday : t === 'cuoi_tuan' ? S.inclWeekend : true;
   const byEmp = new Map();
+  // TỔNG GIỜ LÀM (công + TC) tối đa / ngày · / tuần: tổng giờ công thật (không cắt) để trừ ra hạn mức tăng ca còn lại
+  const totDay = S.totDay[lv], totWeek = S.totWeek[lv];
+  const dayWork = new Map(), weekWork = new Map();
+  if (totDay != null || totWeek != null) {
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      for (const r of db.prepare(`SELECT employee_id, work_date, work_minutes FROM attendance WHERE employee_id IN (${chunk.map(() => '?').join(',')})
+          AND work_date >= ? AND work_date <= ? AND work_minutes > 0`).all(...chunk, L, R)) {
+        if (lockedDay(r.work_date)) continue;
+        dayWork.set(r.employee_id + '|' + r.work_date, (dayWork.get(r.employee_id + '|' + r.work_date) || 0) + r.work_minutes);
+        const wk = r.employee_id + '|' + monday(r.work_date); weekWork.set(wk, (weekWork.get(wk) || 0) + r.work_minutes);
+      }
+    }
+  }
   for (const r of rows) {
     if (!counted(r.ot_type || 'thuong') || lockedDay(r.work_date) || sunHidden.has(r.id)) continue;   // tháng đã chốt: không tính lại; chủ nhật bị gỡ: không tính vào hạn mức
     if (!byEmp.has(r.employee_id)) byEmp.set(r.employee_id, []);
@@ -183,6 +204,8 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
     items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
     for (const [d, xs] of group(items, (d) => d)) { const cap = dayCap(eid, d); if (cap != null) reduce(xs, cap, S, eid * 7919 + Date.parse(d) / DAY + lv); }
     if (weekOn) for (const [w, xs] of group(items, monday)) reduce(xs, S.weekMin, S, eid * 104729 + Date.parse(w) / DAY);
+    if (totDay != null) for (const [d, xs] of group(items, (d) => d)) reduce(xs, Math.max(0, totDay - (dayWork.get(eid + '|' + d) || 0)), S, eid * 2750159 + Date.parse(d) / DAY + lv);
+    if (totWeek != null) for (const [w, xs] of group(items, monday)) reduce(xs, Math.max(0, totWeek - (weekWork.get(eid + '|' + w) || 0)), S, eid * 49979687 + Date.parse(w) / DAY + lv);
     const months = group(items, P.key);
     if (monthOn) for (const [k, xs] of months) reduce(xs, S.monthMin, S, eid * 1299709 + +k.replace('-', ''));
     if (yearOn) {

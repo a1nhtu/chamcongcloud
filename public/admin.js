@@ -4438,6 +4438,11 @@ function auditPanelEl(s) {
   // chủ nhật (ngày nghỉ hằng tuần) đi làm tối đa / tháng — mỗi mức ảo 1 ô, để trống = không giới hạn
   const sunI = [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max: 6, step: 1, placeholder: '—', value: s['audit_sun_l' + l] ?? '' }));
   const sunBox = el('span', { class: 'lv-pick' }, ...sunI.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
+  // TỔNG giờ làm (công + TC) tối đa / ngày · / tuần — mỗi mức ảo một ô giờ, để trống = không giới hạn
+  const totDayI = [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max: 24, step: '0.5', placeholder: '—', value: s['audit_totday_l' + l] ?? '' }));
+  const totWeekI = [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max: 168, step: '0.5', placeholder: '—', value: s['audit_totweek_l' + l] ?? '' }));
+  const totDayBox = el('span', { class: 'lv-pick' }, ...totDayI.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
+  const totWeekBox = el('span', { class: 'lv-pick' }, ...totWeekI.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
   const auWk = el('input', { type: 'checkbox', ...(s.audit_incl_weekend !== '0' ? { checked: '' } : {}) });
   const auHol = el('input', { type: 'checkbox', ...(s.audit_incl_holiday !== '0' ? { checked: '' } : {}) });
   // Chú thích đổi THEO Ô TÍCH (chỉ nói trạng thái đang chọn) + ghi chú hạn mức tuần
@@ -4466,6 +4471,8 @@ function auditPanelEl(s) {
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value,
         audit_week_lv: pkWeek.val(), audit_month_lv: pkMonth.val(), audit_year_lv: pkYear.val(),
         audit_sun_l1: sunI[0].value, audit_sun_l2: sunI[1].value, audit_sun_l3: sunI[2].value,
+        audit_totday_l1: totDayI[0].value, audit_totday_l2: totDayI[1].value, audit_totday_l3: totDayI[2].value,
+        audit_totweek_l1: totWeekI[0].value, audit_totweek_l2: totWeekI[1].value, audit_totweek_l3: totWeekI[2].value,
         audit_clamp_lv: pkClamp.val(), audit_clamp_in_min: clIn.value, audit_clamp_out_min: clOut.value,
         audit_k_lv: pkK.val(), audit_k_early_min: kEarly.value, audit_k_late_max: kLate.value, audit_k_out_gap: kOut.value, audit_k_in_gap: kIn.value } });
       SETTINGS = await api('/admin/settings'); toast('Đã lưu hạn mức công ảo', 'ok');
@@ -4479,6 +4486,8 @@ function auditPanelEl(s) {
       lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', pkWeek.node, wkNote),
       lvRow('Tăng ca tối đa mỗi tháng', auMonth, 'giờ', pkMonth.node, '(theo kỳ lương ở Cài đặt › Lương)'),
       lvRow('Tăng ca tối đa mỗi năm', auYear, 'giờ', pkYear.node, '(cộng dồn từ kỳ lương tháng 1)'),
+      lvRow('Tổng giờ làm tối đa / ngày', totDayBox, 'giờ', 'Giờ công + tăng ca của cả ngày. Mỗi mức một số (để trống = không giới hạn). Vượt thì cắt bớt tăng ca cho tổng không quá số này (giờ công thật giữ nguyên).'),
+      lvRow('Tổng giờ làm tối đa / tuần', totWeekBox, 'giờ', 'Giờ công + tăng ca cả tuần (thứ 2 → chủ nhật). Mỗi mức một số (để trống = không giới hạn). Vượt thì cắt bớt tăng ca trong tuần.'),
       lvRow(`Đi làm ${wkName} tối đa / tháng`, sunBox, 'ngày',
         `Mỗi mức một số ngày (để trống = không giới hạn). Tháng lương có nhiều ngày ${wkName} đi làm hơn thì các ngày thừa bị gỡ hẳn khỏi công ảo (như không đi làm, kể cả tăng ca ngày đó). Ngày được giữ chọn ngẫu nhiên nhưng cố định theo từng nhân viên. Ngày làm bù và ngày lễ không tính vào số này.`),
       lvRow('Khống chế giờ chấm ảo', pkClamp.node,
