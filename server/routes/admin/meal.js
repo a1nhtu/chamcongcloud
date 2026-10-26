@@ -6,7 +6,7 @@ import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
   getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, mealOptions, setMealAdjust, hrSetOrder, mealEmpSearch,
   createShift, deleteShift, listKitchens, saveKitchen, deleteKitchen, renewKitchenKey, assignKitchen, kitchenDeptMap, kitchenDeptEmployees, kitchenAllEmployees,
-  hrSetSignup, setMealExtra, signupDay, sendToKitchen, mealRangeSummary, mealNoShow, mealExceptions,
+  hrSetSignup, setMealExtra, signupDay, sendToKitchen, mealRangeSummary, mealNoShow, mealExceptions, mealMonthGrid, mealDayList, mealCompare,
 } from '../../meal.js';
 import { writeMealReportXlsx, writeMealRptXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
@@ -180,8 +180,13 @@ export function registerMealRoutes(r) {
   r.get('/meal/rpt/summary', wrap('GET /admin/meal/rpt/summary', (req, res) => res.json(mealRangeSummary(needDate(req.query.from), needDate(req.query.to || req.query.from)))));
   r.get('/meal/rpt/noshow', wrap('GET /admin/meal/rpt/noshow', (req, res) => res.json(mealNoShow(needDate(req.query.from), needDate(req.query.to || req.query.from)))));
   r.get('/meal/rpt/except', wrap('GET /admin/meal/rpt/except', (req, res) => res.json(mealExceptions(needDate(req.query.from), needDate(req.query.to || req.query.from)))));
+  // mẫu in báo cơm: bảng tháng (mode signup = giờ báo · punch = giờ ăn) · danh sách 1 bữa 1 ngày · đối chiếu báo ↔ ăn; kitchen = lọc theo bếp
+  r.get('/meal/rpt/month', wrap('GET /admin/meal/rpt/month', (req, res) => res.json(mealMonthGrid(needDate(req.query.from), needDate(req.query.to || req.query.from), { mode: req.query.mode, kitchenId: req.query.kitchen }))));
+  r.get('/meal/rpt/daylist', wrap('GET /admin/meal/rpt/daylist', (req, res) => res.json(mealDayList(needDate(req.query.from), req.query.shift, { kitchenId: req.query.kitchen }))));
+  r.get('/meal/rpt/compare', wrap('GET /admin/meal/rpt/compare', (req, res) => res.json(mealCompare(needDate(req.query.from), needDate(req.query.to || req.query.from), { kitchenId: req.query.kitchen }))));
   r.get('/meal/rpt.xlsx', async (req, res) => {
-    try { await writeMealRptXlsx(res, String(req.query.type || ''), needDate(req.query.from), needDate(req.query.to || req.query.from)); }
+    const q = req.query;
+    try { await writeMealRptXlsx(res, String(q.type || ''), needDate(q.from), needDate(q.to || q.from), new Date(), { mode: q.mode, kitchenId: q.kitchen, shift: q.shift, place: q.place }); }
     catch (e) { if (!res.headersSent) sendCaughtError(res, 'GET /admin/meal/rpt.xlsx', e); else res.end(); }
   });
 

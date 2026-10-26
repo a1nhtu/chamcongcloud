@@ -239,6 +239,58 @@ test('BÁO CÁO: tổng số & giờ đăng ký · báo ăn mà không ăn theo 
   assert.equal((await fetch(`${base}/admin/meal/rpt.xlsx?type=abc&from=${P}&to=${P}`, { headers: { Authorization: 'Bearer ' + tok.HR1 } })).status, 400);
 });
 
+test('MẪU BÁO CƠM: bảng tổng hợp tháng (giờ báo / giờ ăn) · danh sách báo cơm theo ngày · đối chiếu báo ↔ ăn + Excel', async () => {
+  // ngày P: A1, A2 (bếp 1), B1 (bếp 2) được HR báo hộ bữa trưa; quẹt: A1, B1 (ăn), B2 (ăn mà không báo); A2 báo mà không ăn
+  const m = (await call('GET', `/admin/meal/rpt/month?from=2026-10-01&to=2026-10-31`, { token: tok.HR1 })).body;
+  assert.equal(m.days.length, 31); assert.equal(m.mode, 'signup');
+  assert.ok(m.shifts.some((s) => s.code === 'trua'));
+  assert.deepEqual(m.rows.map((r) => r.code), ['B1', 'A1', 'A2']);   // theo bộ phận (Cắt trước May) rồi mã NV
+  const cell = (code) => m.rows.find((r) => r.code === code).cells.trua[P];
+  assert.match(cell('A1').t, /^\d{2}:\d{2}$/);
+  assert.deepEqual([cell('A1').hr, cell('A1').no_show, cell('A2').no_show], [true, false, true]);
+  assert.equal(m.totals.trua, 3);
+  const mp = (await call('GET', `/admin/meal/rpt/month?from=2026-10-01&to=2026-10-31&mode=punch`, { token: tok.HR1 })).body;
+  assert.deepEqual(mp.rows.map((r) => [r.code, r.cells.trua[P].t, r.cells.trua[P].walk_in]), [['B1', '11:05', false], ['B2', '11:10', true], ['A1', '11:00', false]]);
+  const mk = (await call('GET', `/admin/meal/rpt/month?from=2026-10-01&to=2026-10-31&kitchen=${K1.id}`, { token: tok.HR1 })).body;
+  assert.deepEqual(mk.rows.map((r) => r.code), ['A1', 'A2']);
+  assert.equal((await call('GET', `/admin/meal/rpt/month?from=2026-09-01&to=2026-10-31`, { token: tok.HR1 })).status, 400);   // quá 31 ngày
+  // danh sách 1 bữa: HR báo hộ → ghi chú, xếp theo bộ phận
+  const dl = (await call('GET', `/admin/meal/rpt/daylist?from=${P}&shift=trua`, { token: tok.HR1 })).body;
+  assert.deepEqual(dl.rows.map((r) => [r.code, r.note]), [['B1', 'HR báo hộ'], ['A1', 'HR báo hộ'], ['A2', 'HR báo hộ']]);
+  assert.equal((await call('GET', `/admin/meal/rpt/daylist?from=${P}&shift=khongco`, { token: tok.HR1 })).status, 404);
+  // đối chiếu
+  const c = (await call('GET', `/admin/meal/rpt/compare?from=${P}&to=${P}`, { token: tok.HR1 })).body;
+  const d = c.days.find((x) => x.shift === 'trua');
+  assert.deepEqual([d.signed, d.ate, d.ok, d.no_show, d.walk_in], [3, 3, 2, 1, 1]);
+  assert.deepEqual(c.people.slice(0, 2).map((x) => [x.code, x.no_show, x.walk_in]), [['A2', 1, 0], ['B2', 0, 1]]);
+  assert.deepEqual([c.no_show.map((x) => x.code), c.walk_in.map((x) => x.code)], [['A2'], ['B2']]);
+  const c2 = (await call('GET', `/admin/meal/rpt/compare?from=${P}&to=${P}&kitchen=${K2.id}`, { token: tok.HR1 })).body;
+  assert.deepEqual([c2.no_show.length, c2.walk_in.map((x) => x.code)], [0, ['B2']]);
+  // Excel đúng mẫu
+  const ExcelJS = (await import('exceljs')).default;
+  const load = async (q) => {
+    const res = await fetch(`${base}/admin/meal/rpt.xlsx?${q}`, { headers: { Authorization: 'Bearer ' + tok.HR1 } });
+    assert.equal(res.status, 200, q);
+    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(await res.arrayBuffer()));
+    return wb;
+  };
+  const wm = await load(`type=month&from=2026-10-01&to=2026-10-31&place=${encodeURIComponent('Nhà công vụ')}`);
+  const ws = wm.getWorksheet('Bảng tổng hợp báo cơm');
+  assert.equal(ws.getCell('A4').value, 'BẢNG TỔNG HỢP BÁO CƠM NHÀ CÔNG VỤ');
+  assert.equal(ws.getCell('A5').value, 'Tháng 10 năm 2026');
+  assert.equal(ws.getCell(7, 4).value, 1); assert.equal(ws.getCell(8, 4).value, 'T5');   // 01/10/2026 là thứ 5
+  assert.equal(ws.getCell(9, 2).value, 'Lê Cường');
+  let tot = null;
+  ws.eachRow((r) => { if (String(r.getCell(4).value || '').startsWith('Tổng số suất ăn từ 01 đến 31/10/2026')) tot = r.getCell(35).value; });
+  assert.equal(tot, m.total);
+  const wd = await load(`type=daylist&from=${P}&shift=trua`);
+  const sd = wd.worksheets[0];
+  assert.equal(sd.getCell('A1').value, `DANH SÁCH BÁO CƠM TRƯA NGÀY 01/10/2026`);
+  assert.deepEqual([sd.getCell('B4').value, sd.getCell('C4').value, sd.getCell('A33').value, sd.getCell('D4').value], ['Lê Cường', 'HR báo hộ', 30, 31]);
+  const wc = await load(`type=compare&from=${P}&to=${P}`);
+  assert.deepEqual(wc.worksheets.map((w) => w.name), ['Tổng hợp theo ngày', 'Theo nhân viên', 'Báo mà không ăn', 'Ăn mà không báo']);
+});
+
 test('xoá bếp: NV thành "chưa phân bếp", đơn tương lai bỏ gắn bếp, đơn ngày đã qua giữ nguyên', async () => {
   assert.equal((await call('DELETE', `/admin/meal/kitchens/${K2.id}`, { token: tok.HR1 })).status, 200);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM meal_emp_kitchen WHERE kitchen_id=?').get(K2.id).n, 0);

@@ -876,4 +876,101 @@ export function mealExceptions(from, to, now = new Date()) {
   return { from, to, kitchens: R.kitchens, no_show: noShow, walk_in: walkIn };
 }
 
+/* ---------------------------- MẪU IN BÁO CƠM (bảng tháng · danh sách theo ngày) + ĐỐI CHIẾU BÁO ↔ ĂN ---------------------------- */
+// Mốc giờ (datetime('now') SQLite UTC hoặc ISO) → { day: 'YYYY-MM-DD', hm: 'HH:MM' } giờ VN
+const vnParts = (s) => { if (!s) return null; const t = new Date(Date.parse(s.includes('T') ? s : s.replace(' ', 'T') + 'Z') + 7 * 3600000).toISOString(); return { day: t.slice(0, 10), hm: t.slice(11, 16) }; };
+const byDeptCode = (a, b) => String(a.department).localeCompare(String(b.department), 'vi') || String(a.code || '').localeCompare(String(b.code || ''), 'vi', { numeric: true });
+// Lọc theo bếp (kitchenId rỗng / không hợp lệ = tất cả): bếp của đơn đăng ký, hoặc bếp NV đang được phân
+const kitchenFilter = (R, kitchenId) => {
+  const kid = Number(kitchenId) || 0;
+  if (!kid || !R.kitchens.some((k) => k.id === kid)) return { kid: 0, okOrder: () => true, okPunch: () => true };
+  return { kid, okOrder: (o) => R.kOf(o.employee_id, o.kitchen_id) === kid, okPunch: (id) => R.kOf(id, null) === kid };
+};
+
+// BÁO CÁO 4 — BẢNG TỔNG HỢP BÁO CƠM (mẫu bảng tháng): mỗi NV × bữa 1 dòng, mỗi ngày 1 cột ghi GIỜ BÁO (lúc đăng ký lần đầu) —
+// hoặc GIỜ ĂN (lượt quẹt đầu trong giờ ăn) khi mode = 'punch'; cột Tổng buổi + dòng cộng từng bữa.
+// Ô được đánh dấu: no_show = báo mà không ăn (bữa đã kết thúc) · walk_in = ăn mà không báo (chỉ ở mode 'punch').
+export function mealMonthGrid(from, to, { mode = 'signup', kitchenId = 0, now = new Date() } = {}) {
+  needRange(from, to, 31);
+  const byPunch = mode === 'punch';
+  const R = rangeData(from, to), F = kitchenFilter(R, kitchenId);
+  const days = [];
+  for (let d = from; d <= to; d = addDaysIso(d, 1)) days.push(d);
+  const people = new Map(), used = new Set(), totals = {};
+  for (const d of days) for (const s of R.shifts) {
+    const k = d + '|' + s.code, os = (R.orders.get(k) || []).filter(F.okOrder), ps = R.P.get(k) || new Map();
+    const ended = mealEnded(d, s, now), signed = new Map(os.map((o) => [o.employee_id, o]));
+    const list = byPunch ? [...ps].filter(([id]) => signed.has(id) || F.okPunch(id)).map(([id, p]) => [id, p, signed.get(id)]) : os.map((o) => [o.employee_id, o, o]);
+    for (const [id, who, o] of list) {
+      if (!people.has(id)) people.set(id, { employee_id: id, code: who.code, full_name: who.full_name, department: who.department, cells: {}, totals: {} });
+      const r = people.get(id), v = vnParts(byPunch ? who.at : (o.created_at || o.updated_at));
+      (r.cells[s.code] ||= {})[d] = { t: v ? v.hm : '', day: v ? v.day : '', hr: !!o?.set_by, ...(byPunch ? { walk_in: !o } : { no_show: ended && !ps.has(id) }) };
+      r.totals[s.code] = (r.totals[s.code] || 0) + 1;
+      totals[s.code] = (totals[s.code] || 0) + 1;
+      used.add(s.code);
+    }
+  }
+  const shifts = R.shifts.filter((s) => s.enabled || used.has(s.code)).map((s) => ({ code: s.code, name: s.name }));
+  return { from, to, mode: byPunch ? 'punch' : 'signup', kitchen_id: F.kid, kitchens: R.kitchens, company: getSetting('company_name', ''), days, shifts,
+    rows: [...people.values()].sort(byDeptCode), totals, total: Object.values(totals).reduce((t, n) => t + n, 0) };
+}
+
+// BÁO CÁO 5 — DANH SÁCH BÁO CƠM 1 bữa của 1 ngày (mẫu in cho bếp): người tự báo trước (theo bộ phận, mã NV), người HR báo hộ xếp cuối, ghi chú "HR báo hộ".
+export function mealDayList(workDate, code, { kitchenId = 0 } = {}) {
+  needDate(workDate);
+  const shift = needShift(code);
+  const kitchens = listKitchens(), km = empKitchenMap(), known = new Set(kitchens.map((k) => k.id));
+  const kid = known.has(Number(kitchenId)) ? Number(kitchenId) : 0;
+  const kOf = (o) => { const x = o.kitchen_id ?? km.get(o.employee_id) ?? 0; return known.has(x) ? x : 0; };
+  const rows = ordersFull(workDate, shift.code).filter((o) => !kid || kOf(o) === kid)
+    .map((o) => ({ employee_id: o.employee_id, code: o.code, full_name: o.full_name, department: o.department, at: o.created_at || o.updated_at, set_by: o.set_by, note: o.set_by ? 'HR báo hộ' : '' }))
+    .sort((a, b) => (a.set_by ? 1 : 0) - (b.set_by ? 1 : 0) || byDeptCode(a, b));
+  return { date: workDate, shift: shift.code, shift_name: shift.name, kitchen_id: kid, kitchens, company: getSetting('company_name', ''), rows };
+}
+
+// BÁO CÁO 6 — ĐỐI CHIẾU BÁO CƠM ↔ ĂN THỰC TẾ: tổng hợp theo ngày × bữa · tổng hợp theo nhân viên · chi tiết BÁO MÀ KHÔNG ĂN (bữa đã kết thúc)
+// · chi tiết ĂN MÀ KHÔNG BÁO (quẹt máy chấm ăn trong giờ ăn mà không đăng ký).
+export function mealCompare(from, to, { kitchenId = 0, now = new Date() } = {}) {
+  needRange(from, to, 31);
+  const R = rangeData(from, to), F = kitchenFilter(R, kitchenId);
+  const days = [], people = new Map(), noShow = [], walkIn = [];
+  const get = (id, o) => {
+    if (!people.has(id)) people.set(id, { employee_id: id, code: o.code, full_name: o.full_name, department: o.department, kitchen_id: R.kOf(id, null),
+      signed: 0, ate: 0, ok: 0, no_show: 0, walk_in: 0, no_show_items: [], walk_in_items: [] });
+    return people.get(id);
+  };
+  for (let d = from; d <= to; d = addDaysIso(d, 1)) for (const s of R.shifts) {
+    const k = d + '|' + s.code, os = (R.orders.get(k) || []).filter(F.okOrder);
+    const signed = new Set(os.map((o) => o.employee_id));
+    const ps = new Map([...(R.P.get(k) || new Map())].filter(([id]) => signed.has(id) || F.okPunch(id)));
+    if (!os.length && !ps.size) continue;
+    const ended = mealEnded(d, s, now), item = { date: d, shift: s.code, shift_name: s.name };
+    let ok = 0, ns = 0, wi = 0;
+    for (const o of os) {
+      const r = get(o.employee_id, o);
+      r.signed++;
+      if (ps.has(o.employee_id)) { ok++; r.ok++; continue; }
+      if (!ended) continue;
+      ns++; r.no_show++; r.no_show_items.push({ ...item, set_by: o.set_by });
+      noShow.push({ ...item, employee_id: o.employee_id, code: o.code, full_name: o.full_name, department: o.department, kitchen_id: R.kOf(o.employee_id, o.kitchen_id),
+        dish: o.dish, set_by: o.set_by, at: o.created_at || o.updated_at });
+    }
+    for (const [id, p] of ps) {
+      const r = get(id, p);
+      r.ate++;
+      if (signed.has(id)) continue;
+      wi++; r.walk_in++; r.walk_in_items.push({ ...item, punched: p.at });
+      walkIn.push({ ...item, employee_id: id, code: p.code, full_name: p.full_name, department: p.department, kitchen_id: R.kOf(id, null), punched: p.at });
+    }
+    days.push({ ...item, ended, signed: os.length, ate: ps.size, ok, no_show: ended ? ns : null, walk_in: wi });
+  }
+  const sum = (f) => days.reduce((t, x) => t + (x[f] || 0), 0);
+  return {
+    from, to, kitchen_id: F.kid, kitchens: R.kitchens, days,
+    totals: { signed: sum('signed'), ate: sum('ate'), ok: sum('ok'), no_show: sum('no_show'), walk_in: sum('walk_in') },
+    people: [...people.values()].sort((a, b) => (b.no_show + b.walk_in) - (a.no_show + a.walk_in) || b.no_show - a.no_show || byDeptCode(a, b)),
+    no_show: noShow, walk_in: walkIn,
+  };
+}
+
 export { vnNow };

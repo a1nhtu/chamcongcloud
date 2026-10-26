@@ -935,47 +935,111 @@ export async function pageMealReg(ctx) {
 }
 
 /* ===================== BÁO CÁO SUẤT ĂN theo khoảng ngày ===================== */
-async function downloadRpt(type, from, to) {
+async function downloadRpt(type, query) {
   try {
-    const res = await api(`/admin/meal/rpt.xlsx?type=${type}&from=${from}&to=${to}`, { raw: true });
+    const res = await api(`/admin/meal/rpt.xlsx?type=${type}&${query}`, { raw: true });
     if (!res.ok) { let m = 'Không xuất được báo cáo'; try { m = (await res.json()).error || m; } catch {} return toast(m, 'err'); }
-    const name = (/filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '') || [])[1] || `bao_cao_suat_an_${from}_${to}.xlsx`;
+    const name = (/filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '') || [])[1] || `bao_cao_suat_an_${type}.xlsx`;
     const url = URL.createObjectURL(await res.blob());
     const a = el('a', { href: url, download: name });
     document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
     toast('Đã xuất Excel', 'ok');
   } catch { toast('Không xuất được báo cáo', 'err'); }
 }
-const RPT = { tab: 'summary', from: '', to: '' };
+const RPT = { tab: 'summary', from: '', to: '', month: '', mode: 'signup', day: '', shift: '', kitchen: '' };
+const PLACE_LS = 'sa_rpt_place';   // "nơi ăn" in trên tiêu đề mẫu báo cơm (VD NHÀ CÔNG VỤ) — nhớ trên máy này
+const lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* trình duyệt chặn lưu trữ */ } };
+const monthEnd = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
+const WD_SHORT = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
 export async function pageMealRpt(ctx) {
   C = ctx; css();
   const main = el('div', { class: 'sa' });
   C.setMain(C.head('📊 Suất ăn — báo cáo'), main);
   if (!RPT.to) { RPT.to = vnToday(); RPT.from = addDays(RPT.to, -6); }
-  const TABS = [['summary', '1. Tổng số suất ăn & giờ đăng ký'], ['noshow', '2. Báo ăn mà không ăn (theo NV)'], ['except', '3. Ngoại lệ: quẹt ↔ đăng ký']];
+  if (!RPT.month) RPT.month = vnToday().slice(0, 7);
+  if (!RPT.day) RPT.day = vnToday();
+  let shifts = [], kitchens = [];
+  try {
+    const [a, b] = await Promise.all([api('/admin/meal/shifts'), api('/admin/meal/kitchens')]);
+    shifts = (a.shifts || []).filter((s) => s.enabled); kitchens = b.kitchens || [];
+  } catch { /* lỗi mạng: vẫn mở trang, chọn bữa trống */ }
+  if (!shifts.some((s) => s.code === RPT.shift)) RPT.shift = shifts[0]?.code || '';
+  if (RPT.kitchen && !kitchens.some((k) => String(k.id) === RPT.kitchen)) RPT.kitchen = '';
+  const TABS = [['summary', '1. Tổng số suất ăn & giờ đăng ký'], ['month', '2. Bảng tổng hợp báo cơm (tháng)'], ['daylist', '3. Danh sách báo cơm theo ngày'],
+    ['compare', '4. Đối chiếu báo ↔ ăn (ai ăn mà không báo, báo mà không ăn)']];
+  if (!TABS.some(([k]) => k === RPT.tab)) RPT.tab = 'summary';
   const tabs = el('div', { class: 'sa-seg', style: 'margin-bottom:10px;flex-wrap:wrap' });
-  const fI = el('input', { type: 'date', value: RPT.from }), tI = el('input', { type: 'date', value: RPT.to });
-  const quick = (label, fn) => { const b = el('button', { class: 'sa-btn ghost', type: 'button' }, label); b.onclick = () => { fn(); fI.value = RPT.from; tI.value = RPT.to; load(); }; return b; };
-  const view = el('button', { class: 'sa-btn', type: 'button' }, 'Xem');
-  const xls = el('button', { class: 'sa-btn ghost', type: 'button' }, '⬇ Xuất Excel');
+  const bar = el('div', { class: 'sa-bar' });
   const body = el('div');
-  view.onclick = () => { RPT.from = fI.value; RPT.to = tI.value; load(); };
-  xls.onclick = () => downloadRpt(RPT.tab, fI.value, tI.value);
+  // tham số theo từng báo cáo (cũng dùng cho file Excel)
+  const qs = () => {
+    const kq = RPT.kitchen ? `&kitchen=${RPT.kitchen}` : '';
+    if (RPT.tab === 'month') return `from=${RPT.month}-01&to=${monthEnd(RPT.month)}&mode=${RPT.mode}${kq}`;
+    if (RPT.tab === 'daylist') return `from=${RPT.day}&shift=${encodeURIComponent(RPT.shift)}${kq}`;
+    return `from=${RPT.from}&to=${RPT.to}${RPT.tab === 'compare' ? kq : ''}`;
+  };
+  const xlsx = () => downloadRpt(RPT.tab, qs() + (['month', 'daylist'].includes(RPT.tab) && lsGet(PLACE_LS) ? `&place=${encodeURIComponent(lsGet(PLACE_LS))}` : ''));
   const drawTabs = () => {
     tabs.innerHTML = '';
-    for (const [k, label] of TABS) { const b = el('button', { type: 'button', class: k === RPT.tab ? 'on' : '' }, label); b.onclick = () => { RPT.tab = k; drawTabs(); load(); }; tabs.append(b); }
+    for (const [k, label] of TABS) { const b = el('button', { type: 'button', class: k === RPT.tab ? 'on' : '' }, label); b.onclick = () => { RPT.tab = k; drawTabs(); drawBar(); load(); }; tabs.append(b); }
   };
-  drawTabs();
-  main.append(tabs, el('div', { class: 'sa-bar' }, el('span', {}, 'Từ'), fI, el('span', {}, 'đến'), tI, view,
-    quick('Hôm nay', () => { RPT.from = RPT.to = vnToday(); }), quick('7 ngày', () => { RPT.to = vnToday(); RPT.from = addDays(RPT.to, -6); }),
-    quick('Tháng này', () => { const d = vnToday(); RPT.from = d.slice(0, 8) + '01'; RPT.to = d; }), xls), body);
+  const kitchenSel = () => {
+    if (!kitchens.length) return null;
+    const s = el('select', { style: 'width:auto' }, el('option', { value: '' }, 'Tất cả bếp'), ...kitchens.map((k) => el('option', { value: String(k.id) }, k.name)));
+    s.value = RPT.kitchen; s.onchange = () => { RPT.kitchen = s.value; load(); };
+    return s;
+  };
+  const placeIn = () => {
+    const i = el('input', { type: 'text', placeholder: 'Nơi ăn in trên tiêu đề (VD: NHÀ CÔNG VỤ)', style: 'width:250px', maxlength: '60', value: lsGet(PLACE_LS),
+      title: 'In thêm vào tiêu đề file Excel: "BẢNG TỔNG HỢP BÁO CƠM <nơi ăn>" · "DANH SÁCH BÁO CƠM <nơi ăn> TRƯA NGÀY …". Để trống = tên bếp đang lọc.' });
+    i.onchange = () => lsSet(PLACE_LS, i.value.trim());
+    return i;
+  };
+  const xlsBtn = () => { const b = el('button', { class: 'sa-btn ghost', type: 'button' }, '⬇ Xuất Excel (mẫu in)'); b.onclick = xlsx; return b; };
+  const put = (...xs) => bar.append(...xs.filter(Boolean));   // bỏ ô không dùng (VD chọn bếp khi không có bếp)
+  function drawBar() {
+    bar.innerHTML = '';
+    if (RPT.tab === 'month') {
+      const mI = el('input', { type: 'month', value: RPT.month, style: 'width:auto' });
+      mI.onchange = () => { if (mI.value) { RPT.month = mI.value; load(); } };
+      const mode = el('select', { style: 'width:auto' }, el('option', { value: 'signup' }, 'Ô ghi giờ báo cơm'), el('option', { value: 'punch' }, 'Ô ghi giờ ăn (quẹt thẻ)'));
+      mode.value = RPT.mode; mode.onchange = () => { RPT.mode = mode.value; load(); };
+      put(el('span', {}, 'Tháng'), mI, mode, kitchenSel(), placeIn(), xlsBtn());
+      return;
+    }
+    if (RPT.tab === 'daylist') {
+      const dI = el('input', { type: 'date', value: RPT.day, style: 'width:auto' });
+      dI.onchange = () => { if (dI.value) { RPT.day = dI.value; load(); } };
+      const step = (n, t) => { const b = el('button', { class: 'sa-btn ghost', type: 'button' }, t); b.onclick = () => { RPT.day = addDays(RPT.day, n); dI.value = RPT.day; load(); }; return b; };
+      const sh = el('select', { style: 'width:auto' }, ...shifts.map((s) => el('option', { value: s.code }, s.name)));
+      sh.value = RPT.shift; sh.onchange = () => { RPT.shift = sh.value; load(); };
+      put(el('span', {}, 'Ngày'), step(-1, '‹'), dI, step(1, '›'), el('span', {}, 'Bữa'), sh, kitchenSel(), placeIn(), xlsBtn());
+      return;
+    }
+    const fI = el('input', { type: 'date', value: RPT.from }), tI = el('input', { type: 'date', value: RPT.to });
+    const quick = (label, fn) => { const b = el('button', { class: 'sa-btn ghost', type: 'button' }, label); b.onclick = () => { fn(); fI.value = RPT.from; tI.value = RPT.to; load(); }; return b; };
+    const view = el('button', { class: 'sa-btn', type: 'button' }, 'Xem');
+    view.onclick = () => { RPT.from = fI.value; RPT.to = tI.value; load(); };
+    const xls = el('button', { class: 'sa-btn ghost', type: 'button' }, '⬇ Xuất Excel');
+    xls.onclick = () => { RPT.from = fI.value; RPT.to = tI.value; xlsx(); };
+    put(el('span', {}, 'Từ'), fI, el('span', {}, 'đến'), tI, view,
+      quick('Hôm nay', () => { RPT.from = RPT.to = vnToday(); }), quick('7 ngày', () => { RPT.to = vnToday(); RPT.from = addDays(RPT.to, -6); }),
+      quick('Tháng này', () => { const d = vnToday(); RPT.from = d.slice(0, 8) + '01'; RPT.to = d; }), RPT.tab === 'compare' ? kitchenSel() : null, xls);
+  }
+  drawTabs(); drawBar();
+  main.append(tabs, bar, body);
 
+  let seq = 0;
   async function load() {
+    const my = ++seq;
     body.innerHTML = ''; body.append(C.loading());
+    if (RPT.tab === 'daylist' && !RPT.shift) { body.innerHTML = ''; body.append(el('div', { class: 'sa-empty' }, 'Chưa có bữa ăn nào đang bật (Cấu hình suất ăn).')); return; }
     let r;
-    try { r = await api(`/admin/meal/rpt/${RPT.tab}?from=${RPT.from}&to=${RPT.to}`); } catch (e) { body.innerHTML = ''; body.append(el('div', { class: 'empty' }, e.message)); return; }
+    try { r = await api(`/admin/meal/rpt/${RPT.tab}?${qs()}`); } catch (e) { if (my === seq) { body.innerHTML = ''; body.append(el('div', { class: 'empty' }, e.message)); } return; }
+    if (my !== seq) return;   // đã đổi lựa chọn khi đang tải
     body.innerHTML = '';
-    ({ summary: drawSummary, noshow: drawNoShow, except: drawExcept })[RPT.tab](r);
+    ({ summary: drawSummary, month: drawMonth, daylist: drawDayList, compare: drawCompare })[RPT.tab](r);
   }
 
   // 1. tổng số suất ăn & giờ đăng ký: mỗi ngày × bữa 1 dòng cộng + từng bếp (khi có nhiều bếp)
@@ -1008,49 +1072,123 @@ export async function pageMealRpt(ctx) {
       el('div', { class: 'sa-hint', style: 'margin-top:8px' }, 'Giờ đăng ký từng người (lúc bấm đăng ký, ai đăng ký) có trong file Excel, sheet "Chi tiết đăng ký". "ĐK không quẹt" chỉ tính bữa đã kết thúc.'));
   }
 
-  // 2. số lần báo ăn mà không ăn theo nhân viên
-  function drawNoShow(r) {
-    const kn = kitchenNamer(r.kitchens);
-    const onlyNo = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
+  // 2. BẢNG TỔNG HỢP BÁO CƠM (tháng): NV × bữa × ngày — ô ghi giờ báo (hoặc giờ ăn), Tổng buổi, dòng Tổng cộng
+  function drawMonth(r) {
+    const punch = r.mode === 'punch';
+    body.append(el('div', { class: 'sa-kpis' },
+      ...r.shifts.map((s) => el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, `Số suất ăn ${s.name.toLowerCase()}`), el('div', { class: 'v' }, nf(r.totals[s.code] || 0)))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Tổng số suất ăn'), el('div', { class: 'v' }, nf(r.total))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Số nhân viên'), el('div', { class: 'v' }, nf(r.rows.length)))));
+    if (!r.rows.length) { body.append(el('div', { class: 'sa-empty' }, punch ? 'Không có ai quẹt máy chấm ăn trong tháng này.' : 'Không có ai báo cơm trong tháng này.')); return; }
     const q = el('input', { type: 'search', placeholder: 'Tìm mã / tên / bộ phận…', style: 'width:220px' });
-    const wrap = el('div', { class: 'sa-wrap', style: 'margin-top:8px' });
     const cnt = el('span', { class: 'sa-hint' });
-    const noA = (x) => String(x || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/gi, 'd').toLowerCase();
+    const wrap = el('div', { class: 'sa-wrap', style: 'margin-top:8px;max-height:70vh' });
+    let limit = 300;
     const draw = () => {
-      const k = noA(q.value.trim());
-      const rows = r.rows.filter((x) => (!onlyNo.checked || x.no_show > 0) && (!k || noA(x.code).includes(k) || noA(x.full_name).includes(k) || noA(x.department).includes(k)));
-      cnt.textContent = `${nf(rows.length)} nhân viên · ${nf(r.meals)} bữa đã kết thúc có dữ liệu`;
+      const k = noAcc(q.value.trim());
+      const rows = r.rows.filter((p) => !k || noAcc(p.code).includes(k) || noAcc(p.full_name).includes(k) || noAcc(p.department).includes(k));
+      cnt.textContent = `${nf(rows.length)} nhân viên`;
+      const head1 = el('tr', {}, el('th', { rowspan: '2' }, 'STT'), el('th', { rowspan: '2' }, 'Tên nhân viên'), el('th', { rowspan: '2' }, 'Buổi'),
+        ...r.days.map((d) => el('th', {}, String(Number(d.slice(8))))), el('th', { rowspan: '2' }, 'Tổng buổi'));
+      const head2 = el('tr', {}, ...r.days.map((d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return el('th', { class: w === 0 ? 'cn' : '', style: 'font-weight:400' }, WD_SHORT[w]); }));
+      const tb = el('tbody');
+      rows.slice(0, limit).forEach((p, i) => {
+        r.shifts.forEach((s, si) => {
+          const cells = p.cells[s.code] || {};
+          tb.append(el('tr', { class: si ? 'sub' : '' },
+            si ? null : el('td', { rowspan: String(r.shifts.length) }, String(i + 1)),
+            si ? null : el('td', { rowspan: String(r.shifts.length), class: 'nm', title: `${p.code || ''} · ${p.department || ''}` }, p.full_name),
+            el('td', {}, s.name),
+            ...r.days.map((d) => {
+              const v = cells[d];
+              if (!v) return el('td', {});
+              const tip = `${punch ? 'Quẹt' : 'Báo'} lúc ${v.t} ${dmy(v.day)}${v.hr ? ' · HR báo hộ' : ''}${v.no_show ? ' · KHÔNG ĂN' : ''}${v.walk_in ? ' · KHÔNG BÁO CƠM' : ''}`;
+              return el('td', { class: [v.no_show ? 'ns' : '', v.walk_in ? 'wi' : '', v.hr ? 'hr' : ''].join(' ').trim(), title: tip }, v.t);
+            }),
+            el('td', { style: 'font-weight:700' }, p.totals[s.code] ? String(p.totals[s.code]) : '')));
+        });
+      });
+      const span = `từ ${dmy(r.from).slice(0, 2)} đến ${dmy(r.to)}`;
+      const foot = el('tfoot', {}, ...r.shifts.map((s) => el('tr', {}, el('td', { colspan: String(3 + r.days.length), style: 'text-align:center' }, `Số suất ăn ${s.name.toLowerCase()} ${span}`), el('td', {}, nf(r.totals[s.code] || 0)))),
+        el('tr', {}, el('td', { colspan: String(3 + r.days.length), style: 'text-align:center' }, `Tổng số suất ăn ${span}`), el('td', {}, nf(r.total))));
       wrap.innerHTML = '';
-      if (!rows.length) { wrap.append(el('div', { class: 'sa-empty', style: 'padding:12px' }, 'Không có ai.')); return; }
-      wrap.append(el('table', { class: 'sa-tbl' },
-        el('thead', {}, el('tr', {}, el('th', { class: 'num' }, '#'), el('th', {}, 'Mã NV'), el('th', {}, 'Họ tên'), el('th', {}, 'Bộ phận'), r.kitchens.length ? el('th', {}, 'Bếp') : null,
-          el('th', { class: 'num' }, 'Số lần ĐK'), el('th', { class: 'num' }, 'Đã ăn'), el('th', { class: 'num' }, 'Báo mà không ăn'), el('th', { class: 'num' }, 'Tỉ lệ'), el('th', { class: 'num' }, 'Quẹt không ĐK'), el('th', {}, 'Các bữa không ăn'))),
-        el('tbody', {}, ...rows.slice(0, 1000).map((x, i) => el('tr', {}, el('td', { class: 'num sa-hint' }, String(i + 1)), el('td', {}, x.code || ''), el('td', { class: 'dept' }, x.full_name), el('td', {}, x.department),
-          r.kitchens.length ? el('td', {}, kn(x.kitchen_id)) : null, el('td', { class: 'num' }, nf(x.registered)), el('td', { class: 'num' }, nf(x.ate)),
-          el('td', { class: 'num' }, x.no_show ? el('span', { class: 'sa-total', style: 'color:var(--sa-red)' }, nf(x.no_show)) : '0'), el('td', { class: 'num' }, x.registered ? `${String(x.rate).replace('.', ',')}%` : '—'),
-          el('td', { class: 'num' }, x.walk_in ? nf(x.walk_in) : '—'),
-          el('td', { class: 'sa-hint' }, x.items.slice(0, 8).map((it) => `${dmy(it.date).slice(0, 5)} ${it.shift_name}${it.set_by ? ' (HR hộ)' : ''}`).join(', ') + (x.items.length > 8 ? ` … +${x.items.length - 8}` : '')))))));
+      wrap.append(el('table', { class: 'sa-pgrid' }, el('thead', {}, head1, head2), tb, foot));
+      if (rows.length > limit) { const more = el('button', { class: 'sa-btn ghost', type: 'button', style: 'margin:8px' }, `Hiện thêm (${nf(rows.length - limit)} người)`); more.onclick = () => { limit += 500; draw(); }; wrap.append(more); }
     };
-    onlyNo.onchange = draw; let tm = 0; q.oninput = () => { clearTimeout(tm); tm = setTimeout(draw, 200); };
-    body.append(el('div', { class: 'sa-bar' }, el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0;color:inherit;font-size:14px' }, onlyNo, 'Chỉ người có báo mà không ăn'), q, cnt), wrap,
-      el('div', { class: 'sa-hint', style: 'margin-top:8px' }, 'Báo mà không ăn = có đăng ký (tự đăng ký hoặc HR đăng ký hộ) nhưng không quẹt máy chấm ăn trong giờ ăn. Chỉ tính bữa đã kết thúc. Người bỏ nhiều nhất lên đầu.'));
+    let tm = 0; q.oninput = () => { clearTimeout(tm); tm = setTimeout(draw, 200); };
+    body.append(el('div', { class: 'sa-bar' }, q, cnt), wrap,
+      el('div', { class: 'sa-hint', style: 'margin-top:8px' }, punch
+        ? [el('span', { class: 'sa-legend', style: 'background:#ffedd5' }), 'Ăn mà không báo cơm. Mỗi ô ghi giờ quẹt máy chấm ăn đầu tiên trong giờ ăn.']
+        : [el('span', { class: 'sa-legend', style: 'background:#fde2e2' }), 'Báo cơm mà không ăn (bữa đã kết thúc, không quẹt máy chấm ăn). Mỗi ô ghi giờ báo cơm (lúc đăng ký lần đầu); chữ nghiêng = HR báo hộ. File Excel in đúng mẫu bảng tổng hợp.']));
     draw();
   }
 
-  // 3. ngoại lệ: đăng ký mà không quẹt · quẹt mà không đăng ký
-  function drawExcept(r) {
-    const kn = kitchenNamer(r.kitchens);
-    const tbl = (rows, cols) => (rows.length ? el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
-      el('thead', {}, el('tr', {}, ...cols.map(([h]) => el('th', {}, h)))), el('tbody', {}, ...rows.slice(0, 2000).map((x) => el('tr', {}, ...cols.map(([, f]) => el('td', {}, f(x))))))))
+  // 3. DANH SÁCH BÁO CƠM 1 bữa của 1 ngày: 3 khối TT · Họ và tên · Ghi chú (mẫu in cho bếp)
+  function drawDayList(r) {
+    const hr = r.rows.filter((x) => x.set_by).length;
+    body.append(el('div', { class: 'sa-kpis' },
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, `Báo cơm ${r.shift_name.toLowerCase()} ${dmy(r.date)}`), el('div', { class: 'v' }, nf(r.rows.length))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Tự báo'), el('div', { class: 'v' }, nf(r.rows.length - hr))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'HR báo hộ'), el('div', { class: 'v' }, nf(hr)))));
+    if (!r.rows.length) { body.append(el('div', { class: 'sa-empty' }, 'Chưa có ai báo cơm bữa này.')); return; }
+    const per = Math.max(30, Math.ceil(r.rows.length / 3));
+    const tb = el('tbody');
+    for (let i = 0; i < per; i++) {
+      tb.append(el('tr', {}, ...[0, 1, 2].flatMap((b) => {
+        const n = b * per + i, x = r.rows[n];
+        return [el('td', { style: 'text-align:right;color:var(--sa-mut)' }, String(n + 1)), el('td', { class: 'nm', title: x ? `${x.code || ''} · ${x.department || ''}` : '' }, x ? x.full_name : ''),
+          el('td', { class: x?.note ? 'note' : '', style: 'text-align:left;min-width:90px' }, x?.note || '')];
+      })));
+    }
+    const th = () => [el('th', {}, 'TT'), el('th', {}, 'Họ và tên'), el('th', {}, 'Ghi chú')];
+    body.append(el('div', { style: 'font-weight:800;font-size:16px;text-align:center;margin:6px 0 10px' }, `DANH SÁCH BÁO CƠM ${r.shift_name.toUpperCase()} NGÀY ${dmy(r.date)}`),
+      el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-pgrid', style: 'width:100%' }, el('thead', {}, el('tr', {}, ...th(), ...th(), ...th())), tb)),
+      el('div', { class: 'sa-hint', style: 'margin-top:8px' }, 'Người tự báo xếp trước (theo bộ phận, mã NV), người HR báo hộ xếp cuối và ghi chú "HR báo hộ". File Excel in đúng mẫu: 90 người / trang, ngang A4.'));
+  }
+
+  // 4. ĐỐI CHIẾU BÁO ↔ ĂN: tổng hợp theo ngày, theo nhân viên + chi tiết báo mà không ăn / ăn mà không báo
+  function drawCompare(r) {
+    const kn = kitchenNamer(r.kitchens), t = r.totals;
+    body.append(el('div', { class: 'sa-kpis' },
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Số báo cơm'), el('div', { class: 'v' }, nf(t.signed))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Số ăn (quẹt thẻ)'), el('div', { class: 'v' }, nf(t.ate))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Báo và có ăn'), el('div', { class: 'v' }, nf(t.ok))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Báo mà KHÔNG ăn'), el('div', { class: 'v', style: 'color:var(--sa-red)' }, nf(t.no_show))),
+      el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, 'Ăn mà KHÔNG báo'), el('div', { class: 'v', style: 'color:var(--sa-warn)' }, nf(t.walk_in)))));
+    if (!r.days.length) { body.append(el('div', { class: 'sa-empty' }, 'Không có dữ liệu trong khoảng này.')); return; }
+    const tbl = (rows, cols, max = 2000) => (rows.length ? el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
+      el('thead', {}, el('tr', {}, ...cols.map(([h, , num]) => el('th', { class: num ? 'num' : '' }, h)))),
+      el('tbody', {}, ...rows.slice(0, max).map((x) => el('tr', {}, ...cols.map(([, f, num]) => el('td', { class: num ? 'num' : '' }, f(x))))))))
       : el('div', { class: 'sa-empty' }, 'Không có.'));
+    const red = (n) => (n ? el('b', { style: 'color:var(--sa-red)' }, nf(n)) : '0'), org = (n) => (n ? el('b', { style: 'color:var(--sa-warn)' }, nf(n)) : '0');
+    const its = (list) => list.slice(0, 8).map((i) => `${dmy(i.date).slice(0, 5)} ${i.shift_name}`).join(', ') + (list.length > 8 ? ` … +${list.length - 8}` : '');
     const base = [['Ngày', (x) => dmy(x.date)], ['Bữa', (x) => x.shift_name], ['Mã NV', (x) => x.code || ''], ['Họ tên', (x) => x.full_name], ['Bộ phận', (x) => x.department],
       ...(r.kitchens.length ? [['Bếp', (x) => kn(x.kitchen_id)]] : [])];
+    // theo nhân viên: mặc định chỉ người có ngoại lệ, có ô tìm
+    const onlyEx = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
+    const q = el('input', { type: 'search', placeholder: 'Tìm mã / tên / bộ phận…', style: 'width:220px' });
+    const empBox = el('div', { style: 'margin-top:8px' });
+    const drawEmp = () => {
+      const k = noAcc(q.value.trim());
+      const rows = r.people.filter((x) => (!onlyEx.checked || x.no_show || x.walk_in) && (!k || noAcc(x.code).includes(k) || noAcc(x.full_name).includes(k) || noAcc(x.department).includes(k)));
+      empBox.innerHTML = '';
+      empBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:6px' }, `${nf(rows.length)} nhân viên`), tbl(rows, [['Mã NV', (x) => x.code || ''], ['Họ tên', (x) => x.full_name], ['Bộ phận', (x) => x.department],
+        ...(r.kitchens.length ? [['Bếp', (x) => kn(x.kitchen_id)]] : []), ['Số lần báo', (x) => nf(x.signed), 1], ['Số lần ăn', (x) => nf(x.ate), 1], ['Báo mà không ăn', (x) => red(x.no_show), 1],
+        ['Ăn mà không báo', (x) => org(x.walk_in), 1], ['Các bữa báo mà không ăn', (x) => el('span', { class: 'sa-hint' }, its(x.no_show_items))], ['Các bữa ăn mà không báo', (x) => el('span', { class: 'sa-hint' }, its(x.walk_in_items))]], 1000));
+    };
+    onlyEx.onchange = drawEmp; let tm = 0; q.oninput = () => { clearTimeout(tm); tm = setTimeout(drawEmp, 200); };
+    drawEmp();
     body.append(
-      foldCard('ex_no', true, [el('b', { class: 'sa-fold-h' }, '🚫 Đăng ký mà KHÔNG quẹt thẻ')], [el('span', { class: 'sa-sum-n' }, nf(r.no_show.length)), el('span', { class: 'sa-hint' }, ' lượt')],
-        [tbl(r.no_show, [...base, ['Giờ đăng ký', (x) => stamp(x.at)], ['Người đăng ký', (x) => (x.set_by ? `HR hộ: ${x.set_by}` : 'NV tự ĐK')]])]),
-      foldCard('ex_walk', true, [el('b', { class: 'sa-fold-h' }, '⚠ Quẹt máy chấm ăn mà KHÔNG đăng ký')], [el('span', { class: 'sa-sum-n' }, nf(r.walk_in.length)), el('span', { class: 'sa-hint' }, ' lượt')],
+      foldCard('cmp_day', true, [el('b', { class: 'sa-fold-h' }, '📅 Tổng hợp theo ngày')], [el('span', { class: 'sa-sum-n' }, nf(r.days.length)), el('span', { class: 'sa-hint' }, ' bữa')],
+        [tbl(r.days, [['Ngày', (x) => dmy(x.date)], ['Bữa', (x) => x.shift_name], ['Số báo cơm', (x) => nf(x.signed), 1], ['Số ăn (quẹt)', (x) => nf(x.ate), 1], ['Báo và có ăn', (x) => nf(x.ok), 1],
+          ['Báo mà không ăn', (x) => (x.ended ? red(x.no_show) : el('span', { class: 'sa-hint' }, 'chưa ăn xong')), 1], ['Ăn mà không báo', (x) => org(x.walk_in), 1]])]),
+      foldCard('cmp_emp', true, [el('b', { class: 'sa-fold-h' }, '👥 Tổng hợp theo nhân viên')], [el('span', { class: 'sa-sum-n' }, nf(r.people.filter((x) => x.no_show || x.walk_in).length)), el('span', { class: 'sa-hint' }, ' người có ngoại lệ')],
+        [el('div', { class: 'sa-bar' }, el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0;color:inherit;font-size:14px' }, onlyEx, 'Chỉ người ăn mà không báo / báo mà không ăn'), q), empBox]),
+      foldCard('cmp_ns', false, [el('b', { class: 'sa-fold-h' }, '🚫 Chi tiết: báo cơm mà KHÔNG ăn')], [el('span', { class: 'sa-sum-n' }, nf(r.no_show.length)), el('span', { class: 'sa-hint' }, ' lượt')],
+        [tbl(r.no_show, [...base, ['Giờ báo', (x) => stamp(x.at)], ['Người báo', (x) => (x.set_by ? `HR báo hộ: ${x.set_by}` : 'NV tự báo')]])]),
+      foldCard('cmp_wi', false, [el('b', { class: 'sa-fold-h' }, '⚠ Chi tiết: ăn mà KHÔNG báo cơm')], [el('span', { class: 'sa-sum-n' }, nf(r.walk_in.length)), el('span', { class: 'sa-hint' }, ' lượt')],
         [tbl(r.walk_in, [...base, ['Quẹt lúc', (x) => hhmm(x.punched)]])]),
-      el('div', { class: 'sa-hint' }, '"Đăng ký mà không quẹt" chỉ tính bữa đã kết thúc. Tối đa 31 ngày mỗi lần xem.'));
+      el('div', { class: 'sa-hint' }, 'Báo = có đăng ký ăn (tự báo hoặc HR báo hộ). Ăn = quẹt máy chấm ăn trong giờ ăn. "Báo mà không ăn" chỉ tính bữa đã kết thúc. Tối đa 31 ngày mỗi lần. File Excel có 4 sheet: theo ngày, theo nhân viên, 2 sheet chi tiết.'));
   }
   load();
 }

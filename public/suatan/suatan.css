@@ -171,3 +171,17 @@ button.sa-kpi:hover { border-color: var(--sa-navy); }
 /* ô giờ 24h (time24 trong admin.js) */
 .sa input.sa-time { font-variant-numeric: tabular-nums; letter-spacing: .5px; }
 .sa input.sa-time.bad { border-color: var(--sa-red); background: #fff5f4; }
+/* Mẫu báo cơm: bảng tổng hợp tháng (NV × bữa × ngày) + danh sách báo cơm theo ngày — dạng giống bản in */
+.sa-pgrid { border-collapse: collapse; font-size: 12.5px; background: #fff; }
+.sa-pgrid th, .sa-pgrid td { border: 1px solid #b9c3d3; padding: 3px 5px; text-align: center; white-space: nowrap; }
+.sa-pgrid thead { position: sticky; top: 0; z-index: 1; }
+.sa-pgrid th { background: var(--sa-navy); color: #fff; font-weight: 600; }
+.sa-pgrid th.cn { color: #ffb4ae; font-weight: 700 !important; }
+.sa-pgrid td.nm { text-align: left; font-weight: 600; min-width: 150px; }
+.sa-pgrid tr.sub td { border-top-style: dotted; }
+.sa-pgrid td.ns { background: #fde2e2; }
+.sa-pgrid td.wi { background: #ffedd5; }
+.sa-pgrid td.hr { font-style: italic; color: var(--sa-navy-2); }
+.sa-pgrid td.note { background: #ffd1d6; color: #c00000; }
+.sa-pgrid tfoot td { font-weight: 800; background: var(--sa-soft); font-size: 13.5px; }
+.sa-legend { display: inline-block; width: 14px; height: 14px; border: 1px solid #999; vertical-align: -2px; margin-right: 6px; }
