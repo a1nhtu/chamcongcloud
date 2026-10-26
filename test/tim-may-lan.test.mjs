@@ -127,3 +127,34 @@ test('chặn: bản LAN (không tên miền) không trỏ được; IP ngoài m�
   assert.equal(badIp.code, 400);
   assert.equal(dev().restarted, 0);
 });
+
+test('đọc bảng ARP: lấy IP + MAC, nhận máy ZKTeco theo MAC 00:17', async () => {
+  const { parseArp, isZkMac } = await import('../server/zk-tcp.js');
+  const a = parseArp(`Interface: 192.168.1.218 --- 0x7
+  Internet Address      Physical Address      Type
+  192.168.1.1           a4-91-b1-22-33-44     dynamic
+  192.168.1.244         00-17-61-12-ab-cd     dynamic
+  192.168.1.255         ff-ff-ff-ff-ff-ff     static`);
+  assert.deepEqual(a[1], { ip: '192.168.1.244', mac: '00:17:61:12:AB:CD' });
+  assert.equal(a.length, 3);
+  assert.deepEqual(a.map((x) => isZkMac(x.mac)), [false, true, false]);
+});
+
+test('máy đóng cổng 4370 nhưng mở cổng 8818: vẫn hiện, không gọi SDK, không trỏ', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({});
+  const extra = createServer((s) => s.end());
+  await new Promise((ok) => extra.listen(0, '127.0.0.2', ok));
+  const keep = process.env.ZK_SCAN_HOSTS;
+  process.env.ZK_SCAN_EXTRA_PORT = String(extra.address().port);
+  process.env.ZK_SCAN_HOSTS = `${keep},127.0.0.2:1`;
+  try {
+    const { out } = await call('POST /devices/lan-scan');
+    assert.equal(out.rows.length, 2);
+    const r = out.rows.find((x) => x.ip === '127.0.0.2');
+    assert.equal(r.no_sdk, true); assert.equal(r.port, null);
+    assert.deepEqual(r.ports, [extra.address().port]);
+    assert.equal(r.serial, undefined);
+    assert.equal(out.rows.find((x) => x.ip === '127.0.0.1').serial, 'ZK0001', 'máy mở 4370 vẫn đọc như cũ');
+    assert.equal(dev().restarted, 0);
+  } finally { process.env.ZK_SCAN_HOSTS = keep; delete process.env.ZK_SCAN_EXTRA_PORT; extra.close(); }
+});

@@ -6366,7 +6366,7 @@ function lanScanModal() {
   };
   const render = (r) => {
     box.innerHTML = '';
-    box.append(el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Đã dò mạng ${r.nets.join(', ') || '(không thấy mạng LAN)'} · cổng 4370.`));
+    box.append(el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Đã dò mạng ${r.nets.join(', ') || '(không thấy mạng LAN)'} · cổng 4370, 8818 · địa chỉ MAC 00:17:…`));
     box.append(r.domain ? el('div', { style: 'font-size:13.5px;margin-bottom:6px' }, 'Tên miền của phần mềm này: ', el('b', { style: 'font-family:monospace;color:var(--brand-ink,#c0392b)' }, r.domain))
       : warn('Bản cài này chưa có tên miền (bản LAN) — chỉ xem được máy, chưa trỏ tự động được. Trên máy chấm công điền IP + Port theo "Cách A".'));
     if (!r.enabled) box.append(warn('Phần mềm đang TẮT dùng máy chấm công — máy trỏ về sẽ chưa hiện. Liên hệ Digiplus để bật.'));
@@ -6386,9 +6386,13 @@ function lanScanModal() {
       if (r.domain && !x.points_here) act.append(btnSm('➜ Trỏ về phần mềm này', () => point(x, r, act)));
       else if (r.domain && x.points_here && (!x.known || mismatch || offline)) act.append(' ', btnSm('Trỏ lại', () => point(x, r, act), 'ghost'));
       const mono = (t) => el('div', { class: 'muted', style: 'font-size:12px;font-family:monospace' }, t);
+      // thấy máy qua cổng 8818 / MAC 00:17 nhưng cổng 4370 đóng → chỉ báo, cài Cloud Server tay trên máy
+      const seen = x.no_sdk && [(x.ports || []).length ? 'cổng ' + x.ports.join(', ') : '', x.mac ? 'MAC ' + x.mac : ''].filter(Boolean).join(' · ');
+      const noSdk = x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, `⚠️ Thấy máy (${seen}) nhưng máy đóng cổng 4370 — phần mềm không đọc / trỏ tự động được.`),
+        warn(r.domain ? `Ra máy chấm công: Comm → Cloud Server → bật chế độ tên miền, điền ${r.domain} rồi khởi động lại máy.` : 'Ra máy chấm công cài Cloud Server theo IP + Port ("Cách A").'));
       tb.append(el('tr', {},
-        el('td', {}, el('b', {}, x.model || 'Máy chấm công'), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip)),
-        el('td', { style: 'font-size:13px' }, x.error ? el('span', { style: 'color:#b45309' }, '⚠️ Không đọc được: ' + x.error) : svrText(x), act)));
+        el('td', {}, el('b', {}, x.model || (x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip), x.mac ? mono('MAC ' + x.mac) : ''),
+        el('td', { style: 'font-size:13px' }, x.no_sdk ? noSdk : x.error ? el('span', { style: 'color:#b45309' }, '⚠️ Không đọc được: ' + x.error) : svrText(x), x.no_sdk ? '' : act)));
     }
     tbl.append(tb);
     box.append(el('div', { class: 'tbl-scroll' }, tbl),

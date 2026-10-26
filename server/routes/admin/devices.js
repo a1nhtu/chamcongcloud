@@ -301,7 +301,8 @@ export function registerDeviceRoutes(r, { need }) {
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });
   /* -------- TÌM MÁY TRONG MẠNG LAN + TRỎ MÁY PUSH VỀ TÊN MIỀN (khỏi gõ tay Cloud Server trên máy) --------
-     Không cần bật chế độ TCP/IP: chỉ mượn SDK cổng 4370 để đọc / ghi cài đặt máy chủ, máy vẫn chạy kiểu Push. */
+     Không cần bật chế độ TCP/IP: chỉ mượn SDK cổng 4370 để đọc / ghi cài đặt máy chủ, máy vẫn chạy kiểu Push.
+     Dò thêm cổng 8818 + MAC 00:17:… để thấy cả máy đóng cổng 4370 (chỉ hiện, không trỏ tự động được). */
   const winOnly = (req, res, next) => (process.platform === 'win32' || process.env.ZK_SCAN_HOSTS ? next()
     : res.status(400).json({ error: 'Tìm máy trong mạng LAN chỉ chạy khi phần mềm cài trên máy tính Windows cùng mạng với máy chấm công.' }));
   const isLan = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip);
@@ -311,7 +312,8 @@ export function registerDeviceRoutes(r, { need }) {
       const found = await scanLan(ips);
       const rows = [];
       for (const h of found) {   // SDK: TUẦN TỰ từng máy
-        const row = { ip: h.ip, port: h.port };
+        const row = { ip: h.ip, port: h.port, ports: h.ports, mac: h.mac };
+        if (!h.port) { row.no_sdk = true; rows.push(row); continue; }   // thấy qua cổng 8818 / MAC 00:17 nhưng cổng 4370 đóng → không đọc được cài đặt
         try {
           Object.assign(row, await tcpServerInfo({ tcp_ip: h.ip, tcp_port: h.port, tcp_key: 0 }));
           row.points_here = !!domain && row.svr_fun === '1' && row.svr_mode === '1' && (row.svr_url || '').toLowerCase() === domain;

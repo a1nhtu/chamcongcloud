@@ -2,7 +2,7 @@
 // SDK là thư viện COM của Windows nên gọi qua 1 tiến trình PowerShell phụ (server/zk/zk-tcp.ps1): mỗi thao tác = 1 lần kết nối.
 // Quy tắc SDK: làm TUẦN TỰ từng máy (không chạy song song), đọc xong luôn bật lại máy + ngắt kết nối (script lo).
 // Dữ liệu tải về đi chung đường với máy Push: lượt chấm → ingestAttlog, nhân viên → ingestUserData (tự tạo NV, tự tính công).
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { connect } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -80,19 +80,44 @@ export function saveInfo(id, info) {
 }
 
 /* ---------- tìm máy trong mạng LAN + trỏ máy Push về tên miền (ghi qua SDK cổng 4370) ---------- */
-// Dò cổng 4370 cả lớp mạng /24 của từng IP LAN máy tính: chỉ mở/đóng kết nối TCP (chưa gọi SDK) → ~1-2 giây / lớp mạng.
-// ZK_SCAN_HOSTS="ip[:cổng],…" thay danh sách dò (chỉ dùng khi kiểm thử). Trả [{ ip, port }].
+// Dò cả lớp mạng /24 của từng IP LAN máy tính: cổng 4370 (SDK) + cổng 8818, rồi đọc bảng ARP tìm MAC 00:17:… (ZKTeco)
+// → bắt được cả máy tắt cổng 4370. Chỉ mở/đóng kết nối TCP (chưa gọi SDK) → vài giây / lớp mạng.
+// ZK_SCAN_HOSTS="ip[:cổng],…" thay danh sách dò (chỉ dùng khi kiểm thử).
+// Trả [{ ip, port (cổng SDK mở, null = không mở), ports: [cổng mở], mac }].
+const extraPort = () => +process.env.ZK_SCAN_EXTRA_PORT || 8818;   // ZK_SCAN_EXTRA_PORT: chỉ dùng khi kiểm thử
+export const isZkMac = (mac) => /^00[:-]17[:-]/i.test(mac || '');
+// "arp -a" của Windows → [{ ip, mac 'AA:BB:…' }]
+export function parseArp(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(/(\d+\.\d+\.\d+\.\d+)\s+([0-9a-f]{2}(?:[-:][0-9a-f]{2}){5})/gi)) out.push({ ip: m[1], mac: m[2].replace(/-/g, ':').toUpperCase() });
+  return out;
+}
+const arpTable = () => new Promise((ok) => {
+  if (process.platform !== 'win32') return ok([]);
+  execFile('arp', ['-a'], { windowsHide: true, timeout: 10000 }, (e, out) => ok(e ? [] : parseArp(out)));
+});
 export async function scanLan(ips, port = 4370, ms = 800) {
-  const hosts = process.env.ZK_SCAN_HOSTS
+  const test = !!process.env.ZK_SCAN_HOSTS;
+  const nets = [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.')))];
+  const hosts = test
     ? process.env.ZK_SCAN_HOSTS.split(',').map((h) => h.trim()).filter(Boolean).map((h) => ({ ip: h.split(':')[0], port: +h.split(':')[1] || port }))
-    : [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.')))].flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port })));
-  const found = [];
-  for (let i = 0; i < hosts.length; i += 128) {
-    const part = hosts.slice(i, i + 128);
+    : nets.flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port })));
+  const probes = hosts.flatMap((h) => [{ ...h, sdk: true }, { ip: h.ip, port: extraPort() }]);
+  const byIp = new Map();
+  const hit = (ip) => byIp.get(ip) || byIp.set(ip, { ip, port: null, ports: [], mac: '' }).get(ip);
+  for (let i = 0; i < probes.length; i += 256) {
+    const part = probes.slice(i, i + 256);
     const ok = await Promise.all(part.map((h) => tcpProbe(h.ip, h.port, ms)));
-    part.forEach((h, j) => { if (ok[j]) found.push(h); });
+    part.forEach((h, j) => { if (!ok[j]) return; const x = hit(h.ip); x.ports.push(h.port); if (h.sdk) x.port = h.port; });
   }
-  return found;
+  // dò xong thì bảng ARP đã có MAC mọi máy đang bật trong lớp mạng (kể cả máy đóng hết cổng)
+  if (!test) for (const a of await arpTable()) {
+    if (!nets.includes(a.ip.split('.').slice(0, 3).join('.'))) continue;
+    if (byIp.has(a.ip)) byIp.get(a.ip).mac = a.mac;
+    else if (isZkMac(a.mac)) hit(a.ip).mac = a.mac;
+  }
+  const num = (ip) => ip.split('.').reduce((n, p) => n * 256 + +p, 0);
+  return [...byIp.values()].sort((a, b) => num(a.ip) - num(b.ip));
 }
 const kvOf = (out) => (k, c) => { if (k === 'I' && c[0]) out[c[0]] = c[1] || ''; };
 // Đọc cài đặt Cloud Server trong máy: { serial, model, firmware, svr_fun, svr_mode (1 = tên miền), svr_url, svr_port }
