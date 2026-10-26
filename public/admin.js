@@ -6386,12 +6386,12 @@ function lanScanModal() {
       if (r.domain && !x.points_here) act.append(btnSm('➜ Trỏ về phần mềm này', () => point(x, r, act)));
       else if (r.domain && x.points_here && (!x.known || mismatch || offline)) act.append(' ', btnSm('Trỏ lại', () => point(x, r, act), 'ghost'));
       const mono = (t) => el('div', { class: 'muted', style: 'font-size:12px;font-family:monospace' }, t);
-      // thấy máy qua cổng 8818 / MAC 00:17 nhưng cổng 4370 đóng → chỉ báo, cài Cloud Server tay trên máy
+      // thấy máy qua cổng 8818 / MAC 00:17 nhưng không kết nối SDK được (4370 đóng, 8818 không nhận) → chỉ báo, cài Cloud Server tay trên máy
       const seen = x.no_sdk && [(x.ports || []).length ? 'cổng ' + x.ports.join(', ') : '', x.mac ? 'MAC ' + x.mac : ''].filter(Boolean).join(' · ');
-      const noSdk = x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, `⚠️ Thấy máy (${seen}) nhưng máy đóng cổng 4370 — phần mềm không đọc / trỏ tự động được.`),
+      const noSdk = x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, `⚠️ Thấy máy (${seen}) nhưng máy đóng cổng 4370${x.sdk_tried ? `, thử kết nối qua cổng ${x.sdk_tried} máy cũng không nhận` : ''} — phần mềm không đọc / trỏ tự động được.`),
         warn(r.domain ? `Ra máy chấm công: Comm → Cloud Server → bật chế độ tên miền, điền ${r.domain} rồi khởi động lại máy.` : 'Ra máy chấm công cài Cloud Server theo IP + Port ("Cách A").'));
       tb.append(el('tr', {},
-        el('td', {}, el('b', {}, x.model || (x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip), x.mac ? mono('MAC ' + x.mac) : ''),
+        el('td', {}, el('b', {}, x.model || (x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip + (x.port && x.port !== 4370 && !x.no_sdk ? ' · cổng ' + x.port : '')), x.mac ? mono('MAC ' + x.mac) : ''),
         el('td', { style: 'font-size:13px' }, x.no_sdk ? noSdk : x.error ? el('span', { style: 'color:#b45309' }, '⚠️ Không đọc được: ' + x.error) : svrText(x), x.no_sdk ? '' : act)));
     }
     tbl.append(tb);

@@ -21,6 +21,7 @@ process.env.FAKE_ZK_STATE = STATE;
 writeFileSync(FAKE, '﻿' + `param([string]$Ip, [int]$Port = 4370, [int]$Key = 0, [string]$Action = 'info', [string]$From = '', [string]$To = '', [int]$Machine = 1)
 function Out($s) { [Console]::Out.WriteLine($s) }
 $st = Get-Content $env:FAKE_ZK_STATE -Raw | ConvertFrom-Json
+if ($env:FAKE_ZK_DEAD_PORT -and $Port -eq [int]$env:FAKE_ZK_DEAD_PORT) { Out "ERR\`tCONNECT-1\`tKhong ket noi duoc may $Ip"; exit 1 }
 if ([int]$st.key -ne $Key) { Out "ERR\`tCONNECT-6\`tKhong ket noi duoc may $Ip"; exit 1 }
 switch ($Action) {
   'svr' { foreach ($k in 'serial','model','firmware','svr_fun','svr_mode','svr_url','svr_port') { Out ("I\`t$k\`t" + $st.$k) }; Out "OK\`tsvr" }
@@ -140,21 +141,40 @@ test('đọc bảng ARP: lấy IP + MAC, nhận máy ZKTeco theo MAC 00:17', asy
   assert.deepEqual(a.map((x) => isZkMac(x.mac)), [false, true, false]);
 });
 
-test('máy đóng cổng 4370 nhưng mở cổng 8818: vẫn hiện, không gọi SDK, không trỏ', { skip: !WIN }, async () => {
-  withDomain('abc1'); setDev({});
+// máy giả chỉ mở cổng "8818" (cổng ngẫu nhiên thay cho 8818) ở 127.0.0.2, cổng 4370 đóng
+const with8818 = async (fn) => {
   const extra = createServer((s) => s.end());
   await new Promise((ok) => extra.listen(0, '127.0.0.2', ok));
-  const keep = process.env.ZK_SCAN_HOSTS;
-  process.env.ZK_SCAN_EXTRA_PORT = String(extra.address().port);
+  const keep = process.env.ZK_SCAN_HOSTS, p = extra.address().port;
+  process.env.ZK_SCAN_EXTRA_PORT = String(p);
   process.env.ZK_SCAN_HOSTS = `${keep},127.0.0.2:1`;
-  try {
+  try { await fn(p); } finally { process.env.ZK_SCAN_HOSTS = keep; delete process.env.ZK_SCAN_EXTRA_PORT; delete process.env.FAKE_ZK_DEAD_PORT; extra.close(); }
+};
+
+test('máy đóng cổng 4370, cổng 8818 nhận SDK: đọc được + trỏ tự động qua 8818', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({ svr_port: '8081' });
+  await with8818(async (p) => {
+    const { out } = await call('POST /devices/lan-scan');
+    const r = out.rows.find((x) => x.ip === '127.0.0.2');
+    assert.equal(r.no_sdk, undefined); assert.equal(r.port, p); assert.equal(r.serial, 'ZK0001');
+    assert.equal(dev().restarted, 0, 'chỉ dò thì KHÔNG được đụng vào máy');
+    const pt = await call('POST /devices/lan-point', { ip: '127.0.0.2', port: p });
+    assert.equal(pt.code, 200, JSON.stringify(pt.out));
+    assert.equal(dev().svr_url, 'abc1.maychamcongcloud.com'); assert.equal(dev().svr_port, '80'); assert.equal(dev().restarted, 1);
+  });
+});
+
+test('máy đóng cổng 4370, cổng 8818 KHÔNG nhận SDK: vẫn hiện, báo cài tay, không trỏ', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({});
+  await with8818(async (p) => {
+    process.env.FAKE_ZK_DEAD_PORT = String(p);
     const { out } = await call('POST /devices/lan-scan');
     assert.equal(out.rows.length, 2);
     const r = out.rows.find((x) => x.ip === '127.0.0.2');
-    assert.equal(r.no_sdk, true); assert.equal(r.port, null);
-    assert.deepEqual(r.ports, [extra.address().port]);
+    assert.equal(r.no_sdk, true); assert.equal(r.sdk_tried, p);
+    assert.deepEqual(r.ports, [p]);
     assert.equal(r.serial, undefined);
     assert.equal(out.rows.find((x) => x.ip === '127.0.0.1').serial, 'ZK0001', 'máy mở 4370 vẫn đọc như cũ');
     assert.equal(dev().restarted, 0);
-  } finally { process.env.ZK_SCAN_HOSTS = keep; delete process.env.ZK_SCAN_EXTRA_PORT; extra.close(); }
+  });
 });
