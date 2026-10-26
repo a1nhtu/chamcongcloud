@@ -77,8 +77,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "ISCC loi $LASTEXITCODE" }
           Write-Host ("Setup: {0:N1} MB" -f ((Get-Item 'DigiplusChamCong-Setup.exe').Length/1MB))
 
-      - name: Up 3 ban (tunnel zip + LAN zip + Setup.exe) len Release tag base (ghi de asset cu)
+      - name: Nen Setup.exe thanh .zip (Chrome khong bao "tep dang ngo" khi tai .zip)
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = Join-Path $PWD 'DigiplusChamCong-Setup.zip'
+          if (Test-Path $zip) { Remove-Item $zip -Force }
+          $tmp = Join-Path $PWD '_setupzip'; New-Item -ItemType Directory -Force $tmp | Out-Null
+          Copy-Item 'DigiplusChamCong-Setup.exe' (Join-Path $tmp 'DigiplusChamCong-Setup.exe') -Force
+          [System.IO.Compression.ZipFile]::CreateFromDirectory($tmp, $zip, 'Optimal', $false)
+          Write-Host ("Setup.zip: {0:N1} MB" -f ((Get-Item $zip).Length/1MB))
+
+      - name: Up ban (tunnel zip + LAN zip + Setup.exe + Setup.zip) len Release tag base (ghi de asset cu)
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload base DigiplusChamCong-base.zip DigiplusChamCong-lan.zip DigiplusChamCong-Setup.exe --clobber
+        run: gh release upload base DigiplusChamCong-base.zip DigiplusChamCong-lan.zip DigiplusChamCong-Setup.exe DigiplusChamCong-Setup.zip --clobber

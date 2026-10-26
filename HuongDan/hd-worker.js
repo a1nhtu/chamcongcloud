@@ -352,8 +352,24 @@ async function handleLanZip(request, env) {
   return new Response(upstream.body, { status: 200, headers });
 }
 
-// Tải TRÌNH CÀI ĐẶT (Setup.exe kiểu Next-Next, dùng chung cho mọi khách + bản LAN): proxy từ GitHub Release.
+// Tải TRÌNH CÀI ĐẶT dạng .ZIP (mặc định): Chrome KHÔNG báo "tệp đáng ngờ" với file .zip như với .exe trần
+// → khách tải được, giải nén rồi chạy DigiplusChamCong-Setup.exe bên trong. Proxy từ GitHub Release.
 async function handleSetupExe(request, env) {
+  const src = env.SETUP_ZIP_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/base/DigiplusChamCong-Setup.zip";
+  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 60 } });
+  if (!upstream.ok || !upstream.body)
+    return jsonRes({ error: "Chưa tải được bộ cài (HTTP " + upstream.status + "). Thử lại sau ít phút." }, 502);
+  const headers = new Headers();
+  headers.set("content-type", "application/zip");
+  const len = upstream.headers.get("content-length");
+  if (len) headers.set("content-length", len);
+  headers.set("content-disposition", 'attachment; filename="DigiplusChamCong-Setup.zip"');
+  headers.set("cache-control", "no-cache");   // bộ cài build lại thường xuyên → luôn lấy bản mới nhất
+  return new Response(upstream.body, { status: 200, headers });
+}
+
+// Bản .exe trần (dự phòng, cho ai cần): /tai-bo-cai.exe
+async function handleSetupExeRaw(request, env) {
   const src = env.SETUP_EXE_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/base/DigiplusChamCong-Setup.exe";
   const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 60 } });
   if (!upstream.ok || !upstream.body)
@@ -363,7 +379,7 @@ async function handleSetupExe(request, env) {
   const len = upstream.headers.get("content-length");
   if (len) headers.set("content-length", len);
   headers.set("content-disposition", 'attachment; filename="DigiplusChamCong-Setup.exe"');
-  headers.set("cache-control", "no-cache");   // bộ cài build lại thường xuyên → luôn lấy bản mới nhất (đệm Cloudflare chỉ 60 giây)
+  headers.set("cache-control", "no-cache");
   return new Response(upstream.body, { status: 200, headers });
 }
 
@@ -406,7 +422,8 @@ export default {
     // Link cũ /tai-ban-lan (đã phát ra ngoài, trang cũ còn nằm trong bộ nhớ trình duyệt) giờ cũng trả Setup.exe;
     // file zip bản LAN chỉ còn ở /tai-ban-lan.zip để dự phòng.
     if (url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
-    if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-bo-cai" || url.pathname === "/tai-bo-cai.exe") return handleSetupExe(request, env);
+    if (url.pathname === "/tai-bo-cai.exe") return handleSetupExeRaw(request, env);
+    if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-bo-cai" || url.pathname === "/tai-bo-cai.zip") return handleSetupExe(request, env);
     // Tool phá quản trị máy chấm công (bộ cài riêng)
     if (url.pathname === "/tai-tool-pha-quan-tri" || url.pathname === "/tai-tool-pha-quan-tri.exe") return handleToolPhaQuanTri(request, env);
 
