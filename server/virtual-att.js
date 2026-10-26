@@ -37,6 +37,8 @@ export function auditSettings() {
     // tổng giờ làm (giờ công + tăng ca) tối đa / ngày · / tuần — mỗi mức ảo một số giờ riêng ('' = không giới hạn), đổi sang phút
     totDay: hoursLv('audit_totday_l'),
     totWeek: hoursLv('audit_totweek_l'),
+    // số ngày làm LIÊN TỤC tối đa / mức ảo (ngày; '' / <1 = không giới hạn) — vượt thì gỡ bớt ngày (coi như nghỉ) xen vào
+    streak: Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting('audit_streak_l' + l, ''); const n = parseInt(v, 10); return [l, v === '' || v == null || !Number.isFinite(n) || n < 1 ? null : n]; })),
     enabled: getSetting('audit_enabled', '0') === '1',
     weekMin: num('audit_ot_week_h', 0) * 60,         // tối đa / tuần (giờ)
     monthMin: num('audit_ot_month_h', 0) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
@@ -176,6 +178,8 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
   }
   // CHỦ NHẬT ĐI LÀM TỐI ĐA / THÁNG: ngày nghỉ hằng tuần (dòng công loại tăng ca 'cuoi_tuan') vượt số cho phép bị gỡ hẳn khỏi công ảo
   const sunHidden = S.sunMax[lv] != null ? sundayDrops(ids, L, R, S.sunMax[lv], lv, P, lockedDay) : new Map();
+  // SỐ NGÀY LÀM LIÊN TỤC TỐI ĐA: chuỗi dài hơn số cho phép → gỡ bớt ngày (ưu tiên ngày ít công) để không chuỗi nào vượt
+  const streakHidden = S.streak[lv] != null ? streakDrops(ids, L, R, S.streak[lv], lv, lockedDay, sunHidden) : new Map();
   const counted = (t) => t === 'le' ? S.inclHoliday : t === 'cuoi_tuan' ? S.inclWeekend : true;
   const byEmp = new Map();
   // TỔNG GIỜ LÀM (công + TC) tối đa / ngày · / tuần: tổng giờ công thật (không cắt) để trừ ra hạn mức tăng ca còn lại
@@ -193,7 +197,7 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
     }
   }
   for (const r of rows) {
-    if (!counted(r.ot_type || 'thuong') || lockedDay(r.work_date) || sunHidden.has(r.id)) continue;   // tháng đã chốt: không tính lại; chủ nhật bị gỡ: không tính vào hạn mức
+    if (!counted(r.ot_type || 'thuong') || lockedDay(r.work_date) || sunHidden.has(r.id) || streakHidden.has(r.id)) continue;   // tháng đã chốt: không tính lại; chủ nhật / vượt ngày liên tục bị gỡ: không tính vào hạn mức
     if (!byEmp.has(r.employee_id)) byEmp.set(r.employee_id, []);
     byEmp.get(r.employee_id).push({ r, date: r.work_date, type: r.ot_type || 'thuong', v: r.ot_min || 0 });
   }
@@ -226,6 +230,7 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
     }
   }
   for (const [id, x] of sunHidden) if (x.date >= from && x.date <= to) out.set(id, { hidden: true, check_in_at: null, check_out_at: null, ot_min: 0, cut: x.ot });
+  for (const [id, x] of streakHidden) if (x.date >= from && x.date <= to) out.set(id, { hidden: true, check_in_at: null, check_out_at: null, ot_min: 0, cut: x.ot });
   if (S.clampLv.has(lv)) clampRange(out, ids, from, to, S, lv, lockedDay);
   if (S.kLv.has(lv)) kRange(out, ids, from, to, S, lv, lockedDay);
   return out;
@@ -295,6 +300,46 @@ function sundayDrops(ids, L, R, max, lv, P, lockedDay) {
       // giữ ưu tiên ngày có công / tăng ca; ngày chỉ có 1 lượt chấm (thiếu giờ ra) bị gỡ trước
       const order = [...days.entries()].map(([d, rs]) => [d, rs.some((r) => r.worked) ? 0 : 1, rnd()]).sort((a, b) => a[1] - b[1] || a[2] - b[2]).map((x) => x[0]);
       for (const d of order.slice(max)) for (const r of days.get(d)) out.set(r.id, { date: d, ot: r.ot_min || 0 });
+    }
+  }
+  return out;
+}
+
+// SỐ NGÀY LÀM LIÊN TỤC TỐI ĐA: mỗi chuỗi ngày đi làm liền nhau dài hơn `max` → gỡ bớt ngày (coi như nghỉ) để cắt chuỗi.
+// Mỗi lần cắt: trong `max`+1 ngày đầu của phần chuỗi còn lại, gỡ ngày YẾU nhất (ít giờ công nhất; ngày chỉ có tăng ca = 0 công bị gỡ trước), tie cố định theo NV + ngày + mức.
+// Ngày đã chốt kỳ hoặc đã bị gỡ vì chủ nhật không tính (coi như ngày nghỉ, tự cắt chuỗi). Trả Map attendance.id → { date, ot } của các dòng bị gỡ.
+function streakDrops(ids, L, R, max, lv, lockedDay, sunHidden) {
+  const out = new Map();
+  const dnum = (d) => Math.round(Date.parse(d + 'T12:00:00Z') / DAY);
+  for (let i = 0; i < ids.length; i += 500) {
+    const chunk = ids.slice(i, i + 500);
+    const byEmp = new Map();   // eid → Map ngày → { rows:[], work: tổng giờ công }
+    for (const r of db.prepare(`SELECT id, employee_id, work_date, ot_min, work_minutes FROM attendance WHERE employee_id IN (${chunk.map(() => '?').join(',')})
+        AND work_date >= ? AND work_date <= ? AND (work_minutes > 0 OR ot_min > 0 OR check_in_at IS NOT NULL)`).all(...chunk, L, R)) {
+      if (lockedDay(r.work_date) || sunHidden.has(r.id)) continue;
+      if (!byEmp.has(r.employee_id)) byEmp.set(r.employee_id, new Map());
+      const dm = byEmp.get(r.employee_id);
+      if (!dm.has(r.work_date)) dm.set(r.work_date, { rows: [], work: 0 });
+      const g = dm.get(r.work_date); g.rows.push(r); g.work += r.work_minutes || 0;
+    }
+    for (const [eid, dm] of byEmp) {
+      const dates = [...dm.keys()].sort();
+      const rndOf = (d) => { let h = (eid * 2654435761 + dnum(d) * 40503 + lv * 97) >>> 0; h = (Math.imul(h ^ (h >>> 15), 2246822507) + 0x9e3779b9) >>> 0; return h; };
+      let run = [];
+      const flush = () => {
+        if (run.length <= max) { run = []; return; }
+        let j = 0;   // đầu phần chuỗi chưa xử lý
+        while (run.length - j > max) {
+          const window = run.slice(j, j + max + 1);
+          let best = window[0];
+          for (const d of window) { const w = dm.get(d).work, bw = dm.get(best).work; if (w < bw || (w === bw && rndOf(d) < rndOf(best))) best = d; }
+          for (const r of dm.get(best).rows) out.set(r.id, { date: best, ot: r.ot_min || 0 });
+          j = run.indexOf(best) + 1;
+        }
+        run = [];
+      };
+      for (let k = 0; k < dates.length; k++) { if (k > 0 && dnum(dates[k]) - dnum(dates[k - 1]) !== 1) flush(); run.push(dates[k]); }
+      flush();
     }
   }
   return out;

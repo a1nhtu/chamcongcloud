@@ -69,3 +69,38 @@ test('ngày + tuần cùng bật: lấy mức chặt hơn', () => {
   assert.ok(got.reduce((a, x) => a + x.ot, 0) <= 720);
   setSetting('audit_totday_l1', ''); setSetting('audit_totweek_l1', '');
 });
+
+// ---- F9: số ngày làm liên tục tối đa ----
+test('số ngày làm liên tục tối đa 3: chuỗi 5 ngày → gỡ bớt cho không chuỗi nào quá 3', () => {
+  for (const k of ['audit_totday_l1', 'audit_totweek_l1']) setSetting(k, '');
+  // h1 đã có T2–T6 (07–11/09) đi làm liên tục 5 ngày; đặt max = 3
+  setSetting('audit_streak_l1', '3');
+  const got = otOf('2026-09-07', '2026-09-11');
+  const hidden = got.filter((x) => x.ot === 0).length;
+  // 5 ngày liên tục, max 3 → phải gỡ ít nhất 1 ngày; các ngày còn lại không quá 3 liên tục
+  assert.ok(hidden >= 1, JSON.stringify(got));
+  // kiểm không còn chuỗi > 3: dựng lại chuỗi ngày không bị gỡ
+  const keptDays = got.filter((x) => x.ot > 0).map((x) => Number(x.date.slice(8, 10)));
+  let run = 1, mx = 1;
+  for (let i = 1; i < keptDays.length; i++) { if (keptDays[i] - keptDays[i - 1] === 1) { run++; mx = Math.max(mx, run); } else run = 1; }
+  if (keptDays.length) assert.ok(mx <= 3, 'còn chuỗi > 3: ' + keptDays.join(','));
+  setSetting('audit_streak_l1', '');
+});
+
+test('số ngày làm liên tục: để trống = không gỡ gì', () => {
+  setSetting('audit_streak_l1', '');
+  assert.deepEqual(otOf('2026-09-07', '2026-09-11').map((x) => x.ot), [300, 300, 300, 300, 300]);
+});
+
+test('số ngày làm liên tục: ngày nghỉ thật cắt chuỗi (chuỗi ≤ max thì không gỡ)', () => {
+  // h2: làm 07,08,09 rồi nghỉ 10, làm 11,12,13 → 2 chuỗi 3 ngày, max 3 → không gỡ
+  const h2 = Number(db.prepare("INSERT INTO employees(code, full_name, role, username, password_hash) VALUES ('H2','Chuỗi','employee','h2','x')").run().lastInsertRowid);
+  for (const d of ['2026-09-07', '2026-09-08', '2026-09-09', '2026-09-11', '2026-09-12', '2026-09-13'])
+    db.prepare("INSERT INTO attendance(employee_id, work_date, shift_id, check_in_at, check_out_at, work_minutes, work_unit, ot_min, ot_type) VALUES (?,?,1,?,?,480,1,120,'thuong')")
+      .run(h2, d, vn(d, '07:30'), vn(d, '18:30'));
+  setSetting('audit_streak_l1', '3');
+  const m = virtualOt([h2], '2026-09-07', '2026-09-13', true, 1);
+  const rows = db.prepare("SELECT id FROM attendance WHERE employee_id=? ORDER BY work_date").all(h2);
+  assert.ok(rows.every((x) => { const v = m.get(x.id); return !v || !v.hidden; }), 'không được gỡ ngày nào');
+  setSetting('audit_streak_l1', '');
+});
