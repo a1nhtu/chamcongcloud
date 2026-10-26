@@ -367,6 +367,21 @@ async function handleSetupExe(request, env) {
   return new Response(upstream.body, { status: 200, headers });
 }
 
+// Tải TOOL PHÁ QUẢN TRỊ MÁY CHẤM CÔNG (Setup.exe riêng): proxy từ GitHub Release tag `tool-pha-quan-tri`.
+async function handleToolPhaQuanTri(request, env) {
+  const src = env.TOOL_PQT_URL || "https://github.com/a1nhtu/chamcongcloud/releases/download/tool-pha-quan-tri/ToolPhaQuanTri-Setup.exe";
+  const upstream = await fetch(src, { redirect: "follow", cf: { cacheEverything: true, cacheTtl: 60 } });
+  if (!upstream.ok || !upstream.body)
+    return jsonRes({ error: "Chưa tải được tool (HTTP " + upstream.status + "). Thử lại sau ít phút." }, 502);
+  const headers = new Headers();
+  headers.set("content-type", "application/octet-stream");
+  const len = upstream.headers.get("content-length");
+  if (len) headers.set("content-length", len);
+  headers.set("content-disposition", 'attachment; filename="ToolPhaQuanTri-Setup.exe"');
+  headers.set("cache-control", "no-cache");
+  return new Response(upstream.body, { status: 200, headers });
+}
+
 // Lệnh cài BẢN LINUX ngắn gọn: curl -fsSL https://huongdan.maychamcongcloud.com/cai-linux | sudo bash
 // → trả script tools/linux/cai-dat.sh mới nhất trên nhánh main (repo công khai).
 async function handleLinuxScript() {
@@ -392,6 +407,8 @@ export default {
     // file zip bản LAN chỉ còn ở /tai-ban-lan.zip để dự phòng.
     if (url.pathname === "/tai-ban-lan.zip") return handleLanZip(request, env);
     if (url.pathname === "/tai-ban-lan" || url.pathname === "/tai-bo-cai" || url.pathname === "/tai-bo-cai.exe") return handleSetupExe(request, env);
+    // Tool phá quản trị máy chấm công (bộ cài riêng)
+    if (url.pathname === "/tai-tool-pha-quan-tri" || url.pathname === "/tai-tool-pha-quan-tri.exe") return handleToolPhaQuanTri(request, env);
 
     const res = await env.ASSETS.fetch(request);
 

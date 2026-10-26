@@ -1,0 +1,56 @@
+name: Build tool phá quản trị → Release
+
+# Build bộ cài "Tool phá quản trị máy chấm công" (C# WinForms + Inno Setup)
+# rồi UP LÊN GitHub Release tag `tool-pha-quan-tri`. Worker /tai-tool-pha-quan-tri proxy asset này.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'tools/tim-may-cham-cong/**'
+      - '.github/workflows/build-tool.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # cần để up asset lên Release
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build tool (Release x86)
+        shell: pwsh
+        run: |
+          msbuild tools\tim-may-cham-cong\TimMayChamCong.csproj /p:Configuration=Release /p:Platform=x86 /t:Rebuild /v:minimal
+          if ($LASTEXITCODE -ne 0) { throw "msbuild loi $LASTEXITCODE" }
+          $exe = 'tools\tim-may-cham-cong\bin\Release\TimMayChamCong.exe'
+          if (-not (Test-Path $exe)) { throw "Khong thay $exe" }
+          Write-Host ("EXE: {0:N0} KB" -f ((Get-Item $exe).Length/1KB))
+
+      - name: Bien dich bo cai Setup.exe (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          $exe   = Join-Path $PWD 'tools\tim-may-cham-cong\bin\Release\TimMayChamCong.exe'
+          $zksdk = Join-Path $PWD 'tools\installer\zksdk'
+          & $iscc "/DExe=$exe" "/DZkSdk=$zksdk" "/DAppVer=1.0.0" "/DOutDir=$PWD" 'tools\tim-may-cham-cong\ToolPhaQuanTri.iss'
+          if ($LASTEXITCODE -ne 0) { throw "ISCC loi $LASTEXITCODE" }
+          Write-Host ("Setup: {0:N1} MB" -f ((Get-Item 'ToolPhaQuanTri-Setup.exe').Length/1MB))
+
+      - name: Up len Release tag tool-pha-quan-tri (ghi de asset cu)
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view tool-pha-quan-tri 2>$null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create tool-pha-quan-tri --title "Tool phá quản trị máy chấm công" --notes "Bộ cài tool tìm IP máy chấm công khác dải + đổi IP + xóa quản trị. Tải: https://huongdan.maychamcongcloud.com/tai-tool-pha-quan-tri"
+          }
+          gh release upload tool-pha-quan-tri ToolPhaQuanTri-Setup.exe --clobber
