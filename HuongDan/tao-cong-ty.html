@@ -43,6 +43,9 @@ input:focus{border-color:var(--brand)}
 .kv span{color:var(--muted);font-size:14px;white-space:nowrap}.kv b{text-align:right;word-break:break-all}
 .pass{font-family:ui-monospace,Consolas,monospace;font-size:20px;letter-spacing:1px}
 .note{font-size:13.5px;color:var(--muted);margin-top:12px}
+.shareBox{margin-top:10px}
+.shareBox textarea{width:100%;min-height:118px;padding:12px;border:1px solid var(--line);border-radius:11px;font-size:15px;line-height:1.45;background:var(--surface);color:var(--ink);font-family:inherit;resize:none}
+.shareBox .st{font-size:13.5px;font-weight:600;color:var(--ok);margin:6px 0 0}
 .spin{display:inline-block;width:16px;height:16px;border:2px solid #fff6;border-top-color:#fff;border-radius:50%;animation:s 1s linear infinite;vertical-align:-3px;margin-right:6px}
 @keyframes s{to{transform:rotate(360deg)}}
 </style>
@@ -93,6 +96,10 @@ input:focus{border-color:var(--brand)}
     <p class="note">Ghi lại mật khẩu này — đăng nhập xong nên đổi mật khẩu. Tên miền mới có thể mất khoảng 1 phút mới mở được.</p>
     <button class="btn" id="open" type="button">Mở phần mềm</button>
     <button class="btn sec" id="share" type="button">Gửi thông tin (Zalo, tin nhắn…)</button>
+    <div class="shareBox hide" id="shareBox">
+      <textarea id="shareTxt" readonly aria-label="Thông tin gửi khách"></textarea>
+      <p class="st" id="shareSt"></p>
+    </div>
     <button class="btn sec" id="again" type="button">Tạo công ty khác</button>
   </div>
 </div>
@@ -183,15 +190,28 @@ $('go').onclick = async () => {
 
 const info = () => `Phần mềm chấm công — ${last.name}\nĐịa chỉ quản trị: ${last.domain}/admin\nTài khoản: ${last.admin_user}\nMật khẩu: ${last.admin_pass}\nDùng thử tới: ${last.exp.split('-').reverse().join('/')}`;
 $('open').onclick = () => { location.href = last.domain + '/admin'; };
+// Gửi thông tin: LUÔN hiện khung chữ trên trang + sao chép sẵn (không dựa vào hộp chia sẻ / prompt — trên máy tính
+// Windows hộp chia sẻ hay không hiện, trong Zalo prompt bị chặn → bấm như không có gì). Điện thoại: mở thêm bảng chia sẻ.
+async function copyText(t) {
+  try { await navigator.clipboard.writeText(t); return true; } catch {}
+  try { $('shareTxt').focus(); $('shareTxt').select(); return document.execCommand('copy'); } catch { return false; }
+}
 $('share').onclick = async () => {
-  try { if (navigator.share) { await navigator.share({ title: 'Phần mềm chấm công', text: info() }); return; } } catch (e) { if (e.name === 'AbortError') return; }
-  try { await navigator.clipboard.writeText(info()); $('share').textContent = '✓ Đã sao chép — dán vào Zalo'; }
-  catch { prompt('Sao chép thông tin:', info()); }
+  const t = info();
+  $('shareTxt').value = t; show('shareBox', true);
+  $('shareTxt').style.height = 'auto'; $('shareTxt').style.height = $('shareTxt').scrollHeight + 4 + 'px';
+  const copied = await copyText(t);
+  $('shareSt').textContent = copied ? '✓ Đã sao chép — mở Zalo / tin nhắn rồi dán vào.' : 'Giữ ngón tay vào khung trên → Chọn tất cả → Sao chép.';
+  $('shareSt').style.color = copied ? '' : 'var(--muted)';
+  if (navigator.share && matchMedia('(pointer:coarse)').matches) {
+    try { await navigator.share({ title: 'Phần mềm chấm công', text: t }); } catch {}
+  }
 };
+$('shareTxt').onfocus = () => $('shareTxt').select();
 $('again').onclick = () => {
   $('name').value = ''; $('slug').value = ''; $('tel').value = ''; $('email').value = '';
-  slugEdited = false; last = null; setAddr(''); show('slugBox', false);
-  show('done', false); show('form', true); $('share').textContent = 'Gửi thông tin (Zalo, tin nhắn…)';
+  slugEdited = false; last = null; setAddr(''); show('slugBox', false); show('shareBox', false);
+  show('done', false); show('form', true);
 };
 
 // Mở trang: có link → kiểm tra link còn hiệu lực rồi hiện form
