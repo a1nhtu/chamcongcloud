@@ -12,6 +12,8 @@
 #     --slug <tenkhach>  khách trên trang Tạo khách (<tenkhach>.maychamcongcloud.com)
 #     --port <cổng>      cổng app (khách mới / bản LAN)
 #     --lan              bản KHÔNG tên miền, dùng trong mạng nội bộ
+#     --may-chu <tên>    MÁY CHỦ NHIỀU CÔNG TY (vd vps1): 1 phần mềm + 1 tunnel cho mọi công ty tạo bằng
+#                        link "Tạo công ty" trên điện thoại (cấu hình lấy từ trang nội bộ /may-chu)
 #     --file <tar.gz>    dùng bộ cài có sẵn thay vì tải từ GitHub
 #     --yes              tự đồng ý các câu hỏi Có/Không (dùng mặc định)
 #  Mật khẩu cấp domain: script hỏi (gõ không hiện), hoặc đặt biến DIGIPLUS_PASS.
@@ -25,15 +27,16 @@ ZONE="maychamcongcloud.com"
 BASE_DIR="/opt/digiplus"
 RUN_USER="digiplus"
 
-SLUG=""; PORT=""; LAN=0; FILE=""; YES=0
+SLUG=""; PORT=""; LAN=0; FILE=""; YES=0; HOST=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --slug) SLUG="${2:-}"; shift 2 ;;
     --port) PORT="${2:-}"; shift 2 ;;
     --lan)  LAN=1; shift ;;
+    --may-chu) HOST="${2:-}"; shift 2 ;;
     --file) FILE="${2:-}"; shift 2 ;;
     --yes|-y) YES=1; shift ;;
-    -h|--help) sed -n '2,21p' "$0" 2>/dev/null || true; exit 0 ;;
+    -h|--help) sed -n '2,23p' "$0" 2>/dev/null || true; exit 0 ;;
     *) echo "Tuỳ chọn không hiểu: $1"; exit 1 ;;
   esac
 done
@@ -158,17 +161,42 @@ api_err() {
 }
 
 # ---------- 3) Chọn kiểu cài ----------
-if [ "$LAN" = 0 ] && [ -z "$SLUG" ]; then
+if [ "$LAN" = 0 ] && [ -z "$SLUG" ] && [ -z "$HOST" ]; then
   say ""
   say "  Kiểu cài:"
   say "    1) Có TÊN MIỀN <khách>.$ZONE  (khách đã tạo trên trang Tạo khách — dùng cho VPS)"
   say "    2) Bản LAN, không tên miền   (chỉ dùng trong mạng nội bộ)"
+  say "    3) MÁY CHỦ NHIỀU CÔNG TY      (1 phần mềm cho nhiều công ty, tạo công ty bằng điện thoại)"
   ask kieu "Chọn" "1"
   [ "$kieu" = 2 ] && LAN=1
+  [ "$kieu" = 3 ] && ask HOST "Tên máy chủ (vd: vps1)" "vps1"
 fi
 
 CFG=""
-if [ "$LAN" = 1 ]; then
+if [ -n "$HOST" ]; then
+  # ----- Máy chủ nhiều công ty -----
+  HOST="$(printf '%s' "$HOST" | tr 'A-Z' 'a-z' | tr -d ' ')"
+  [[ "$HOST" =~ ^[a-z0-9]{1,20}$ ]] || die "Tên máy chủ chỉ gồm chữ thường không dấu + số (vd: vps1)."
+  NAME="may-chu-$HOST"; DIR="$BASE_DIR/$NAME"
+  OWN=""; [ -f "$DIR/config.txt" ] && OWN="$(tr -d '\r' < "$DIR/config.txt" | sed -n 's/^PORT=//p' | head -n1)"
+  while :; do
+    [ -n "$PORT" ] || ask PORT "Cổng phần mềm máy chủ" "${OWN:-$(next_free_port "$DIR")}"
+    pp="$(port_problem "$PORT" "$DIR")"; [ -z "$pp" ] && break
+    warn "Cổng $PORT $pp."; PORT=""; has_tty || exit 1
+  done
+  export DP_PASS="${DIGIPLUS_PASS:-}"
+  for i in 1 2 3; do
+    [ -n "$DP_PASS" ] || { ask_secret DP_PASS "Mật khẩu cấp domain"; export DP_PASS; }
+    api /api/may-chu "{\"action\":\"host-config\",\"name\":\"$HOST\",\"port\":$PORT,\"plain\":true}"
+    [ "$HTTP" = 200 ] && break
+    warn "$(api_err)"; [ "$HTTP" = 401 ] && has_tty && [ -z "${DIGIPLUS_PASS:-}" ] && { DP_PASS=""; continue; }
+    exit 1
+  done
+  [ "$HTTP" = 200 ] || die "Không lấy được cấu hình máy chủ."
+  CFG="$RESP"
+  printf '%s' "$CFG" | grep -q '^MULTI_TENANT=1' && printf '%s' "$CFG" | grep -q '^TUNNEL_TOKEN=.' || die "Máy chủ Digiplus trả cấu hình không hợp lệ."
+  ok "Máy chủ $HOST — cổng $PORT"
+elif [ "$LAN" = 1 ]; then
   # ----- Bản LAN -----
   [ -n "$PORT" ] || ask PORT "Cổng app" "$(next_free_port)"
   NAME="lan-$PORT"; DIR="$BASE_DIR/$NAME"
@@ -343,11 +371,18 @@ say ""
 say "============================================"
 if [ "$up" = 1 ]; then say "   CÀI ĐẶT XONG!"; else say "   ĐÃ CÀI — nhưng phần mềm chưa lên sau 90 giây"; fi
 say "============================================"
+if [ -n "$HOST" ]; then
+  say "  Máy chủ nhiều công ty: $HOST  (cổng $PORT)"
+  say "  Thư mục cài:  $DIR   — dữ liệu từng công ty: $DIR/app/data/tenants/<mã>"
+  say "  Tạo công ty:  gửi link trên trang https://huongdan.$ZONE/may-chu (mục Link tạo công ty)"
+  say "  Chuyển khách cũ trên VPS này vào: cùng trang, mục \"Chuyển khách cũ vào máy chủ\"."
+else
 [ "$HAS_TOKEN" = 1 ] && say "  Tên miền:     https://$NAME.$ZONE/admin   (đợi 1-2 phút để tunnel kết nối)"
 say "  Trên VPS:     http://${IP:-<IP-VPS>}:$PORT/admin"
 say "  Thư mục cài:  $DIR"
 say "  Đăng nhập lần đầu: admin / admin123 → đổi mật khẩu ngay."
 say "  Lần đầu mở trang quản lý sẽ hiện MÃ MÁY → gửi Digiplus cấp license."
+fi
 say ""
 say "  Xem tình trạng / log:  sudo $DIR/kiem-tra.sh"
 say "  Gỡ cài đặt:            sudo $DIR/go-cai-dat.sh"

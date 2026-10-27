@@ -7,6 +7,7 @@
 <title>Digiplus — Máy chủ nhiều công ty</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <style>
 :root{--paper:#FBF4EF;--surface:#fff;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;--brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--ok:#15803D;--shadow-sm:0 4px 14px rgba(80,30,10,.08)}
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--paper:#191210;--surface:#241A15;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;--brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--ok:#4ADE80}}
@@ -60,8 +61,14 @@ pre{background:var(--paper);border:1px solid var(--line);border-radius:10px;padd
         <div><button class="btn sec" id="hCfg">Thêm / lấy cấu hình máy chủ</button></div>
       </div>
       <div class="err" id="hErr"></div>
-      <div class="hide" id="hOut"><pre id="hTxt"></pre><button class="btn sm sec" id="hDl" style="margin-top:8px">Tải config.txt</button>
-        <span class="muted" style="font-size:13px">Chép vào thư mục cài máy chủ. Giữ kín: có mã điều khiển máy chủ.</span></div>
+      <div class="hide" id="hOut"><pre id="hTxt"></pre>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
+          <button class="btn sm" id="hZip">Tải bộ cài máy chủ Windows (.zip)</button>
+          <button class="btn sm sec" id="hDl">Chỉ tải config.txt</button>
+        </div>
+        <p class="muted" style="font-size:13px;margin:8px 0 0">Windows: giải nén vào thư mục MỚI (vd C:\Digiplus\may-chu-<span class="hn"></span>, cạnh các bản cài cũ) rồi chạy CaiDat.bat.
+          Linux (root): <span class="mono" id="hLinux"></span><br>Giữ kín file này: có mã điều khiển máy chủ.</p>
+        <div class="err" id="hZipSt"></div></div>
     </div>
 
     <div class="card">
@@ -155,13 +162,28 @@ $('dSave').onclick = () => busy($('dSave'), 'dErr', async () => {
   try { await navigator.clipboard.writeText(d.link); $('dErr').textContent = '✓ Đã chép link: ' + d.link; } catch { $('dErr').textContent = 'Link: ' + d.link; }
 });
 
-let CFG = '';
+let CFG = '', HNAME = '';
 $('hCfg').onclick = () => busy($('hCfg'), 'hErr', async () => {
   const d = await api({ action: 'host-config', name: $('hName').value.trim(), port: $('hPort').value });
-  CFG = d.configTxt;
+  CFG = d.configTxt; HNAME = d.name;
+  document.querySelectorAll('.hn').forEach((e) => (e.textContent = d.name));
+  $('hLinux').textContent = `curl -fsSL ${location.origin}/cai-linux | sudo bash -s -- --may-chu ${d.name} --port ${d.port}`;
   $('hTxt').textContent = CFG.replace(/(HOST_TOKEN|TUNNEL_TOKEN)=(.{6}).*/g, '$1=$2… (đầy đủ trong file tải về)');
   $('hOut').classList.remove('hide');
   await loadAll();
+});
+$('hZip').onclick = () => busy($('hZip'), 'hZipSt', async () => {
+  $('hZipSt').textContent = 'Đang tải bộ cài gốc…';
+  const r = await fetch('/api/base-zip');
+  if (!r.ok) { let e = 'HTTP ' + r.status; try { e = (await r.json()).error || e; } catch {} throw new Error('Tải bộ cài gốc lỗi: ' + e); }
+  const zip = await JSZip.loadAsync(await r.blob());
+  let key = Object.keys(zip.files).find((k) => k.replace(/\\/g, '/').toLowerCase().endsWith('digipluschamcong/config.txt'));
+  if (key) zip.remove(key); else key = 'DigiplusChamCong\\config.txt';
+  zip.file(key, CFG.replace(/\n/g, '\r\n'));
+  const out = await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }, (m) => { $('hZipSt').textContent = 'Đang đóng gói… ' + Math.round(m.percent) + '%'; });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(out); a.download = 'may-chu-' + HNAME + '_BoCai.zip'; a.click();
+  $('hZipSt').textContent = '✓ Đã tải may-chu-' + HNAME + '_BoCai.zip';
 });
 $('hDl').onclick = () => {
   const a = document.createElement('a');

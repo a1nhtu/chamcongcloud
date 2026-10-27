@@ -112,20 +112,23 @@ function readConfigTxt(f) {
   } catch { return null; }
 }
 const oldSlug = (cfg) => String(cfg.CUSTOMER || '').trim().toLowerCase();
+// Bản cài (Windows + Linux): <thư mục cài>/config.txt, phần mềm + dữ liệu ở <thư mục cài>/app (data/, uploads/)
+const appOf = (dir) => (existsSync(join(dir, 'app', 'data', 'digiplus.db')) ? join(dir, 'app') : dir);
+const INSTALL_DIR = dirname(ROOT);   // thư mục cài của chính máy chủ
 
 // Bản cài 1 công ty nằm cạnh máy chủ (cùng thư mục cha; Linux: /opt/digiplus/*) — để chuyển vào máy chủ
 export function findOldInstalls() {
   const out = [], seen = new Set();
-  const bases = process.env.OLD_INSTALLS_DIR ? [process.env.OLD_INSTALLS_DIR] : [dirname(ROOT), '/opt/digiplus'];
+  const bases = process.env.OLD_INSTALLS_DIR ? [process.env.OLD_INSTALLS_DIR] : [dirname(INSTALL_DIR), '/opt/digiplus'];
   for (const base of bases) {
     let names = [];
     try { names = readdirSync(base); } catch { continue; }
     for (const n of names) {
       const dir = join(base, n);
-      if (dir === ROOT || seen.has(dir)) continue;
+      if (dir === INSTALL_DIR || dir === ROOT || seen.has(dir)) continue;
       seen.add(dir);
       const cfg = readConfigTxt(join(dir, 'config.txt'));
-      if (!cfg || cfg.MULTI_TENANT === '1' || !existsSync(join(dir, 'data', 'digiplus.db'))) continue;
+      if (!cfg || cfg.MULTI_TENANT === '1' || !existsSync(join(appOf(dir), 'data', 'digiplus.db'))) continue;
       const slug = oldSlug(cfg);
       out.push({ dir, slug, port: Number(cfg.PORT) || null, onHost: !!tenantBySlug(slug), slugOk: SLUG_RE.test(slug) });
     }
@@ -139,7 +142,8 @@ export function findOldInstalls() {
 export async function importOldInstall({ dir, slug, force } = {}) {
   dir = String(dir || '');
   const cfg = readConfigTxt(join(dir, 'config.txt'));
-  const src = join(dir, 'data', 'digiplus.db');
+  const app = appOf(dir);
+  const src = join(app, 'data', 'digiplus.db');
   if (!cfg || !existsSync(src)) throw Object.assign(new Error('Không thấy bản cài ở thư mục này (thiếu config.txt hoặc data/digiplus.db)'), { status: 400 });
   if (cfg.MULTI_TENANT === '1') throw Object.assign(new Error('Thư mục này là máy chủ nhiều công ty, không phải bản cài 1 công ty'), { status: 400 });
   slug = String(slug || oldSlug(cfg)).toLowerCase();
@@ -162,12 +166,12 @@ export async function importOldInstall({ dir, slug, force } = {}) {
 
   if (t) { await stopHeavyWorkers(); try { t.db?.close(); } catch {} t.db = null; }
   // Ảnh/logo + giấy tờ nhân sự + bản quyền (bản quyền vẫn hợp lệ nếu bản cũ chạy CÙNG máy với mã khách = <mã>)
-  for (const [from, to] of [[join(dir, 'uploads'), join(root, 'uploads')], [join(dir, 'data', 'hr-files'), join(root, 'data', 'hr-files')]]) {
+  for (const [from, to] of [[join(app, 'uploads'), join(root, 'uploads')], [join(app, 'data', 'hr-files'), join(root, 'data', 'hr-files')]]) {
     if (!existsSync(from)) continue;
     rmSync(to, { recursive: true, force: true });
     cpSync(from, to, { recursive: true });
   }
-  if (existsSync(join(dir, 'data', 'license.key'))) copyFileSync(join(dir, 'data', 'license.key'), join(root, 'data', 'license.key'));
+  if (existsSync(join(app, 'data', 'license.key'))) copyFileSync(join(app, 'data', 'license.key'), join(root, 'data', 'license.key'));
   const meta = readMeta(slug) || { created: new Date().toISOString() };
   Object.assign(meta, { name, env, migratedFrom: dir, migratedAt: new Date().toISOString() });
   writeMeta(slug, meta);
