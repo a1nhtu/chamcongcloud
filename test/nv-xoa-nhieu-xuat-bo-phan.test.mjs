@@ -44,7 +44,7 @@ const exportXlsx = async (query) => {
 before(async () => {
   const D = await import('../server/db.js');
   db = D.db; D.initSchema();
-  BACKUP_DIR = (await import('../server/backup.js')).BACKUP_DIR;
+  BACKUP_DIR = (await import('../server/backup.js')).backupDir();
   const add = (m) => (p, ...h) => { routes[`${m} ${p}`] = h[h.length - 1]; };
   const R = { get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') };
   (await import('../server/routes/admin/employees.js')).registerEmployeeRoutes(R, { need: () => (q, s, n) => n() });

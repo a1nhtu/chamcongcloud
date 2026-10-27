@@ -3,23 +3,23 @@ import crypto from 'node:crypto';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { dataDir, cfg, MULTI, needTenant } from './tenant.js';
 
 // Khoá công khai của Digiplus (nhúng sẵn — không bí mật). Khoá RIÊNG do Anh giữ để cấp license.
 const PUBLIC_KEY_DER_B64 = 'MCowBQYDK2VwAyEAF/1ATcAPsGqwXobiqTedXn/Nwt3VGy6gAtslKyD4yi8=';
 const publicKey = crypto.createPublicKey({ key: Buffer.from(PUBLIC_KEY_DER_B64, 'base64'), format: 'der', type: 'spki' });
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = join(__dirname, '..', 'data');
-const LICENSE_PATH = join(DATA_DIR, 'license.key');
+// File bản quyền của công ty đang phục vụ (bản 1 công ty: data/license.key như cũ)
+const licensePath = () => join(dataDir(), 'license.key');
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest('hex');
 
 // Mã máy: ưu tiên MachineGuid của Windows; dự phòng hostname + MAC.
-let _mid = null;
-export function machineId() {
-  if (_mid) return _mid;
+let _raw = null;
+const _mid = new Map();   // mã khách → Mã máy
+function machineRaw() {
+  if (_raw) return _raw;
   let raw = '';
   try {
     const out = execFileSync('reg', ['query', 'HKLM\\SOFTWARE\\Microsoft\\Cryptography', '/v', 'MachineGuid'], { stdio: ['ignore', 'pipe', 'ignore'] }).toString();
@@ -39,13 +39,17 @@ export function machineId() {
       .map((n) => n.mac).sort().join(',');
     raw = 'h:' + os.hostname() + '|' + macs;
   }
+  return (_raw = raw);
+}
+export function machineId() {
   // Mã khách (từ config.txt qua env CUSTOMER): để NHIỀU công ty trên CÙNG 1 VPS
   // có Mã máy KHÁC nhau → mỗi công ty 1 license riêng (đại lý không tự nhân thêm được).
   // Bỏ trống (cài máy riêng của khách / bản cũ) → giữ nguyên Mã máy cũ (tương thích ngược).
-  const cust = (process.env.CUSTOMER || '').trim().toLowerCase();
-  if (cust) raw += '|c:' + cust;
-  _mid = sha(raw).slice(0, 16).toUpperCase();
-  return _mid;
+  // Máy chủ nhiều công ty: luôn theo mã của công ty (tên miền) đang phục vụ.
+  const cust = (MULTI ? needTenant().slug : (cfg('CUSTOMER') || '')).trim().toLowerCase();
+  let id = _mid.get(cust);
+  if (!id) { id = sha(machineRaw() + (cust ? '|c:' + cust : '')).slice(0, 16).toUpperCase(); _mid.set(cust, id); }
+  return id;
 }
 export function machineIdFmt() {
   const id = machineId();
@@ -105,12 +109,12 @@ export function verifyDeviceKey(keyString, serial) {
 }
 
 export function loadLicenseKey() {
-  try { return existsSync(LICENSE_PATH) ? readFileSync(LICENSE_PATH, 'utf8').trim() : null; }
+  try { const p = licensePath(); return existsSync(p) ? readFileSync(p, 'utf8').trim() : null; }
   catch { return null; }
 }
 export function saveLicenseKey(key) {
-  mkdirSync(DATA_DIR, { recursive: true });
-  writeFileSync(LICENSE_PATH, String(key).trim());
+  mkdirSync(dataDir(), { recursive: true });
+  writeFileSync(licensePath(), String(key).trim());
 }
 
 // Trạng thái bản quyền hiện tại

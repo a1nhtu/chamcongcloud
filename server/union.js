@@ -8,7 +8,8 @@ import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { db, getSetting, DATA_DIR } from './db.js';
+import { db, getSetting } from './db.js';
+import { MULTI, ROOT } from './tenant.js';
 import { ingestAttlog, ingestUserData, forgetDeviceUsers } from './device-sync.js';
 import { guardIncoming } from './pin-guard.js';
 
@@ -19,7 +20,7 @@ const tidOf = (serial) => parseInt(String(serial).replace(/^UNION-/, ''), 10);
 
 const SRC = fileURLToPath(new URL('./union/UnionBridge.cs', import.meta.url));
 const SDK_DIR = process.env.UNION_SDK_DIR || fileURLToPath(new URL('./union/sdk', import.meta.url));
-const OUT_DIR = join(DATA_DIR, 'union');
+const OUT_DIR = join(ROOT, 'data', 'union');   // cầu nối SDK dùng chung của bản cài (không theo công ty)
 const EXE = join(OUT_DIR, 'UnionBridge.exe');
 const PID_FILE = join(OUT_DIR, 'bridge.pid');
 
@@ -43,7 +44,8 @@ let seq = 0;
 const acks = new Map();     // mã lệnh → resolve(kết quả gọi SDK)
 const waiters = new Set();  // việc đang chờ dữ liệu từ máy: { tid, on(k, cols) → true = xong }
 
-export const unionStatus = () => ({ running: !!(bridge && bridge.ready), port: bridge?.port || unionPort(), error: lastErr });
+export const unionStatus = () => ({ running: !!(bridge && bridge.ready), port: bridge?.port || unionPort(),
+  error: MULTI ? 'Máy chủ nhiều công ty của Digiplus chưa hỗ trợ máy Union' : lastErr });
 export const unionOnline = (serial) => online.has(tidOf(serial));
 
 function startBridge() {
@@ -113,6 +115,8 @@ export function syncUnion() {
 let timer = null;
 export function startUnion() {
   if (timer) return;
+  // Máy chủ nhiều công ty: máy Union nối thẳng về 1 cổng TCP, chưa phân biệt được máy của công ty nào → chưa hỗ trợ
+  if (MULTI) return;
   syncUnion();
   timer = setInterval(syncUnion, Math.max(1000, parseInt(process.env.UNION_TICK_MS || '10000', 10) || 10000));
   timer.unref();

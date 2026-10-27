@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { db } from './db.js';
 import { vnNowStr } from './device-sync.js';
 import { aiEnabled, parseMsg, onReg, onSendlog, onSenduser, onReply, nextAiCommand, requeueCmd, finishCmd } from './ai-device.js';
+import { MULTI, runAsTenant, tenantKey, tenantForRequest } from './tenant.js';
 
 const GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11';
 const MAX_MSG = 32 * 1024 * 1024;   // 1 tin tối đa 32MB (lượt chấm / mẫu khuôn mặt kèm ảnh base64)
@@ -13,13 +14,14 @@ const REPLY_MS = Number(process.env.AI_REPLY_MS || 60000);   // máy không tr�
 const IDLE_MS = 180000;                                      // 3 phút không nhận được gì (kể cả pong) → đóng kết nối
 const TICK_MS = Number(process.env.AI_TICK_MS || 5000);
 
-const sessions = new Map();   // serial → Session (máy đã đăng ký + đã duyệt đang kết nối)
+const sessions = new Map();   // công ty|serial → Session (máy đã đăng ký + đã duyệt đang kết nối)
+const skey = (serial) => tenantKey() + '|' + serial;   // máy chủ nhiều công ty: 2 công ty trùng serial vẫn tách riêng
 // Máy đang giữ kết nối (kể cả máy đã đăng ký nhưng còn Chờ duyệt)
-export const aiOnline = (serial) => sessions.has(serial) || [...all].some((s) => s.serial === serial && !s.closed);
+export const aiOnline = (serial) => sessions.has(skey(serial)) || [...all].some((s) => s.tk === tenantKey() && s.serial === serial && !s.closed);
 // Có lệnh mới xếp cho máy → gửi ngay (khỏi chờ nhịp 5 giây)
-export function aiPoke(serial) { const s = sessions.get(serial); if (s) s.pump(); }
+export function aiPoke(serial) { const s = sessions.get(skey(serial)); if (s) s.pump(); }
 // Vừa duyệt / tạm dừng máy → ngắt để máy kết nối + đăng ký lại (nhận kết quả duyệt mới)
-export function aiKick(serial) { for (const s of [...all]) if (s.serial === serial) s.close(1012); }
+export function aiKick(serial) { const tk = tenantKey(); for (const s of [...all]) if (s.tk === tk && s.serial === serial) s.close(1012); }
 
 /* ---------- khung WebSocket ---------- */
 export function encodeFrame(payload, opcode = 1) {
@@ -57,16 +59,18 @@ const closeFrame = (code) => { const b = Buffer.alloc(2); b.writeUInt16BE(code, 
 
 /* ---------- 1 kết nối máy ---------- */
 class Session {
-  constructor(socket, ip) {
+  constructor(socket, ip, tenant = null) {
+    this.t = tenant; this.tk = tenantKey();   // công ty của kết nối (máy chủ nhiều công ty: theo tên miền máy kết nối tới)
     this.s = socket; this.ip = ip; this.buf = Buffer.alloc(0); this.frag = null;
     this.serial = null; this.active = false; this.fl = null;   // fl = lệnh đang chờ máy trả lời
     this.lastRx = Date.now(); this.lastPing = Date.now(); this.lastSeenDb = 0; this.closed = false;
     socket.setNoDelay(true); socket.setKeepAlive(true, 30000);
-    socket.on('data', (d) => this.onData(d));
-    socket.on('close', () => this.cleanup());
-    socket.on('error', () => this.cleanup());
+    socket.on('data', (d) => this.run(() => this.onData(d)));
+    socket.on('close', () => this.run(() => this.cleanup()));
+    socket.on('error', () => this.run(() => this.cleanup()));
     all.add(this);
   }
+  run(fn) { return this.t ? runAsTenant(this.t, fn) : fn(); }   // mọi xử lý của kết nối chạy trong ngữ cảnh đúng công ty
   send(obj) {
     if (this.closed) return;
     try { this.s.write(encodeFrame(Buffer.from(typeof obj === 'string' ? obj : JSON.stringify(obj), 'utf8'), 1)); } catch {}
@@ -101,10 +105,10 @@ class Session {
       const r = onReg(m, this.ip);
       this.send(r.reply);
       if (!r.serial) return;
-      const old = sessions.get(r.serial);
+      const old = sessions.get(skey(r.serial));
       if (old && old !== this) old.close(1000);   // máy kết nối lại → bỏ kết nối cũ
       this.serial = r.serial; this.active = r.ok;
-      if (r.ok) { sessions.set(r.serial, this); this.pump(); }
+      if (r.ok) { sessions.set(skey(r.serial), this); this.pump(); }
       return;
     }
     if (!this.serial || !this.active) { if (cmd) this.send({ ret: cmd, result: false, reason: 1 }); return; }   // chưa đăng ký / chưa duyệt
@@ -151,7 +155,7 @@ class Session {
     if (this.closed && !all.has(this)) return;
     this.closed = true; all.delete(this);
     if (this.fl) { requeueCmd(this.fl.id); this.fl = null; }   // lệnh đang gửi dở → gửi lại lần kết nối sau
-    if (this.serial && sessions.get(this.serial) === this) sessions.delete(this.serial);
+    if (this.serial && sessions.get(this.tk + '|' + this.serial) === this) sessions.delete(this.tk + '|' + this.serial);
   }
 }
 const all = new Set();   // mọi kết nối (kể cả chưa đăng ký)
@@ -167,13 +171,18 @@ export function attachAiWs(server) {
     if (String(req.headers.upgrade || '').toLowerCase() !== 'websocket' || !req.headers['sec-websocket-key']) {
       socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return;
     }
-    if (!aiEnabled()) { socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return; }
-    const accept = createHash('sha1').update(String(req.headers['sec-websocket-key']).trim() + GUID).digest('base64');
-    const proto = String(req.headers['sec-websocket-protocol'] || '').split(',')[0].trim();
-    socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n'
-      + (proto ? 'Sec-WebSocket-Protocol: ' + proto + '\r\n' : '') + '\r\n');
-    const s = new Session(socket, clientIp(req));
-    if (head && head.length) s.onData(head);
+    const t = MULTI ? tenantForRequest(req) : null;   // máy chủ nhiều công ty: công ty theo tên miền máy kết nối tới
+    if (MULTI && !t) { socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return; }
+    if (t) runAsTenant(t, () => acceptWs(req, socket, head, t)); else acceptWs(req, socket, head, null);
   });
-  if (!ticker) { ticker = setInterval(() => { for (const s of [...all]) s.tick(); }, TICK_MS); ticker.unref(); }
+  if (!ticker) { ticker = setInterval(() => { for (const s of [...all]) s.run(() => s.tick()); }, TICK_MS); ticker.unref(); }
+}
+function acceptWs(req, socket, head, t) {
+  if (!aiEnabled()) { socket.end('HTTP/1.1 503 Service Unavailable\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return; }
+  const accept = createHash('sha1').update(String(req.headers['sec-websocket-key']).trim() + GUID).digest('base64');
+  const proto = String(req.headers['sec-websocket-protocol'] || '').split(',')[0].trim();
+  socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ' + accept + '\r\n'
+    + (proto ? 'Sec-WebSocket-Protocol: ' + proto + '\r\n' : '') + '\r\n');
+  const s = new Session(socket, clientIp(req), t);
+  if (head && head.length) s.onData(head);
 }

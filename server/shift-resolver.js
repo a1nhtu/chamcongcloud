@@ -2,9 +2,9 @@
 // Thứ tự ưu tiên xuyên suốt: phân ca NGÀY (đè) → phân ca KHOẢNG → lịch trình → ca mặc định của NV → tự dò theo giờ.
 // Phụ thuộc MỘT CHIỀU vào db.js (chỉ đọc dữ liệu) — không có vòng import ngược.
 import { db } from './db.js';
-// Câu lệnh SQL biên dịch MỘT LẦN rồi dùng lại (bảng Excel cả công ty gọi giải ca hàng chục nghìn lần)
-const STMT = new Map();
-const q = (sql) => { let st = STMT.get(sql); if (!st) { st = db.prepare(sql); STMT.set(sql, st); } return st; };
+// Câu lệnh SQL biên dịch MỘT LẦN rồi dùng lại (bảng Excel cả công ty gọi giải ca hàng chục nghìn lần) — db.prepare đã tự nhớ
+// theo TỪNG CSDL (db.js), không nhớ riêng ở đây để máy chủ nhiều công ty không dùng nhầm câu lệnh của công ty khác.
+const q = (sql) => db.prepare(sql);
 
 export const getShift = (id) => q('SELECT * FROM shifts WHERE id = ?').get(id);
 const hhmm2min = (s) => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };

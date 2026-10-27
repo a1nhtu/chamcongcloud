@@ -1,13 +1,11 @@
 // Lưu ảnh selfie (data URL base64) xuống thư mục uploads, trả về đường dẫn public
 import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { appRoot, MULTI } from './tenant.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const UPLOAD_DIR = join(__dirname, '..', 'uploads');
-mkdirSync(UPLOAD_DIR, { recursive: true });
-
-export { UPLOAD_DIR };
+// Thư mục ảnh (selfie + logo) của công ty đang phục vụ: bản 1 công ty = uploads/ của app như cũ
+export const uploadDir = () => { const d = join(appRoot(), 'uploads'); mkdirSync(d, { recursive: true }); return d; };
+if (!MULTI) uploadDir();
 
 // dataUrl dạng: data:image/jpeg;base64,....
 export function savePhoto(dataUrl, prefix = 'img') {
@@ -19,13 +17,13 @@ export function savePhoto(dataUrl, prefix = 'img') {
   // Giới hạn ~3MB để tránh lạm dụng
   if (buf.length > 3 * 1024 * 1024) throw new Error('Ảnh quá lớn');
   const name = `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-  writeFileSync(join(UPLOAD_DIR, name), buf);
+  writeFileSync(join(uploadDir(), name), buf);
   return `/uploads/${name}`;
 }
 
 const LOGO_EXTS = ['png', 'jpg', 'webp', 'svg'];
 function clearLogoFiles() {
-  for (const e of LOGO_EXTS) { const f = join(UPLOAD_DIR, `brand-logo.${e}`); if (existsSync(f)) { try { rmSync(f); } catch {} } }
+  for (const e of LOGO_EXTS) { const f = join(uploadDir(), `brand-logo.${e}`); if (existsSync(f)) { try { rmSync(f); } catch {} } }
 }
 // Lưu logo công ty (data URL base64) → trả về URL public kèm cache-bust để đổi hiện ngay
 export function saveBrandLogo(dataUrl) {
@@ -36,7 +34,7 @@ export function saveBrandLogo(dataUrl) {
   const buf = Buffer.from(m[2], 'base64');
   if (buf.length > 2 * 1024 * 1024) throw new Error('Logo quá lớn (tối đa 2MB).');
   clearLogoFiles();                       // xoá logo cũ (mọi đuôi) tránh sót
-  writeFileSync(join(UPLOAD_DIR, `brand-logo.${ext}`), buf);
+  writeFileSync(join(uploadDir(), `brand-logo.${ext}`), buf);
   return `/uploads/brand-logo.${ext}?v=${Date.now()}`;
 }
 export function removeBrandLogo() { clearLogoFiles(); }

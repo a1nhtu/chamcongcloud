@@ -7,6 +7,7 @@ import { vnParts } from './util.js';
 import { loadContracts, warnDays, hrEnabled } from './hr.js';
 import { reminderStage, reminderDigest } from './hr-rules.js';
 import { notifyPerm } from './push.js';
+import { busyFlag, eachTenant } from './tenant.js';
 
 export const remindEnabled = () => getSetting('hr_remind_push', '1') !== '0';
 
@@ -45,13 +46,12 @@ export async function runHrReminders({ force = false, now = new Date(), send = n
   return { items: items.length, total: r.total, sent: r.sent, title: payload.title, body: payload.body };
 }
 
-let _busy = false;
+const busy = busyFlag();
 export function startHrRemindScheduler() {
-  const tick = async () => {
-    if (_busy) return;
-    _busy = true;
-    try { await runHrReminders(); } catch (e) { console.error('[hr-remind]', e.message); } finally { _busy = false; }
-  };
+  const tick = () => eachTenant(async () => {
+    if (!busy.take()) return;
+    try { await runHrReminders(); } catch (e) { console.error('[hr-remind]', e.message); } finally { busy.done(); }
+  });
   setTimeout(tick, 60 * 1000).unref?.();
   setInterval(tick, 30 * 60 * 1000).unref?.();
 }

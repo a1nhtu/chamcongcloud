@@ -2,6 +2,7 @@
 // (kể cả kiểm tra đăng nhập / quyền / tài khoản kiểm tra) với kết nối CSDL riêng; chỉ nghe trên 127.0.0.1.
 import { parentPort } from 'node:worker_threads';
 import express from 'express';
+import { MULTI, runAsTenant } from './tenant.js';
 
 try {
   const [{ default: adminRoutes }, { default: reportRoutes }] = await Promise.all([import('./routes/admin.js'), import('./routes/reports.js')]);
@@ -11,6 +12,15 @@ try {
   // pay_sheet_rows của chính bảng nháp đó, làm lại nhiều lần cùng kết quả (SQLite WAL + busy_timeout cho 2 luồng ghi nối tiếp)
   const POST_OK = /^\/api\/admin\/pay\/sheets\/\d+\/compute$/;
   app.use((req, res, next) => (req.method === 'GET' || (req.method === 'POST' && POST_OK.test(req.path)) ? next() : res.status(405).json({ error: 'Luồng phụ chỉ đọc' })));
+  // Máy chủ nhiều công ty: luồng chính báo công ty (x-dgp-tenant) → chạy trong ngữ cảnh công ty đó; không có → từ chối
+  if (MULTI) {
+    const { workerTenant } = await import('./host.js');
+    app.use((req, res, next) => {
+      const t = workerTenant(req.headers['x-dgp-tenant']);
+      if (!t) return res.status(404).json({ error: 'Không xác định được công ty' });
+      runAsTenant(t, next);
+    });
+  }
   app.use('/api/admin', adminRoutes);
   app.use('/api/reports', reportRoutes);
   app.use((err, req, res, next) => { console.error('[heavy-worker]', err); if (!res.headersSent) res.status(500).json({ error: err.message || 'Lỗi máy chủ' }); });

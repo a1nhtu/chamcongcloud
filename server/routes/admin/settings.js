@@ -3,6 +3,7 @@ import { db, getSetting, setSetting, attModeMix } from '../../db.js';
 import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
 import { checkUpdate, startUpdate, updateStatus, currentVersion, updateConfig } from '../../update.js';
 import { auditAllowed } from '../../virtual-att.js';
+import { cfg, MULTI } from '../../tenant.js';
 
 export function registerSettingsRoutes(r, { need, adminOnly }) {
   /* ----------------------------- CÀI ĐẶT ----------------------------- */
@@ -40,8 +41,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       union_port: getSetting('union_port', '9870'),
       phone_enabled: getSetting('phone_enabled', '1'),           // dùng chấm công điện thoại (selfie+GPS)
       // Giá trị bộ cài (config.txt) đặt sẵn lúc cài — chỉ để hiện gợi ý; tài khoản tổng vẫn đổi được trên web
-      use_device_cfg: ['0', '1'].includes(process.env.USE_DEVICE) ? process.env.USE_DEVICE : '',
-      use_phone_cfg: ['0', '1'].includes(process.env.USE_PHONE) ? process.env.USE_PHONE : '',
+      use_device_cfg: ['0', '1'].includes(cfg('USE_DEVICE')) ? cfg('USE_DEVICE') : '',
+      use_phone_cfg: ['0', '1'].includes(cfg('USE_PHONE')) ? cfg('USE_PHONE') : '',
       device_autocreate: getSetting('device_autocreate', '1'),   // tự tạo NV khi máy đăng ký vân tay
       device_key_required: getSetting('device_key_required', '0'),// bắt buộc key theo máy mới duyệt được
       device_pin_guard: getSetting('device_pin_guard', '1'),     // cảnh báo trùng Số ID giữa các máy
@@ -78,6 +79,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       setup_done: getSetting('setup_done', '0'),
       company_logo: getSetting('company_logo', ''),
       app_version: currentVersion(),
+      host_managed: MULTI ? '1' : '',   // máy chủ nhiều công ty: Digiplus cập nhật chung cho mọi công ty (ẩn nút Cập nhật)
       update_repo: updateConfig().repo,
       update_branch: updateConfig().branch,
     });
@@ -218,11 +220,13 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
   /* ----------------------------- CẬP NHẬT PHẦN MỀM ----------------------------- */
   // Kiểm tra bản mới trên GitHub (chỉ admin)
   r.get('/update/check', adminOnly, async (req, res) => {
+    if (MULTI) return res.json({ hasUpdate: false, current: currentVersion(), latest: currentVersion(), managed: true });   // Digiplus tự cập nhật máy chủ
     try { res.json(await checkUpdate()); }
     catch (e) { res.status(400).json({ error: e.message, current: currentVersion() }); }
   });
   // Bắt đầu tải & áp dụng bản mới (chạy nền, tự khởi động lại) — tiến độ xem ở /update/status (chỉ admin)
   r.post('/update/apply', adminOnly, async (req, res) => {
+    if (MULTI) return res.status(400).json({ error: 'Phần mềm đang chạy trên máy chủ của Digiplus — Digiplus tự cập nhật cho mọi công ty, không cần bấm cập nhật.' });
     try { res.json(await startUpdate()); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });

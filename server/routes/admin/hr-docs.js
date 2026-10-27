@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node
 import { join, extname } from 'node:path';
 import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
-import { HR_FILES_DIR, hrToday, hrGate } from '../../hr.js';
+import { hrFilesDir, hrToday, hrGate } from '../../hr.js';
 import { currentContract, addDays, isDate } from '../../hr-rules.js';
 import { buildDocx, fillDocx, listPlaceholders } from '../../docx.js';
 import {
@@ -13,7 +13,7 @@ import {
 } from '../../hr-docs.js';
 
 // Mẫu riêng của công ty: data/hr-files/_templates/<key>.docx (không phát công khai, có trong "Sao lưu toàn bộ")
-const TPL_DIR = join(HR_FILES_DIR, '_templates');
+const tplDir = () => join(hrFilesDir(), '_templates');
 const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
 // Thông tin công ty in trên giấy tờ: [setting, trường trong co, nhãn]
 const CO_KEYS = [['hr_doc_company', 'name'], ['hr_doc_address', 'address'], ['hr_doc_tax', 'tax'], ['hr_doc_phone', 'phone'],
@@ -30,7 +30,7 @@ export function docCompany() {
   };
 }
 const tplMeta = () => { try { return JSON.parse(getSetting('hr_doc_templates', '{}')) || {}; } catch { return {}; } };
-const customPath = (key) => join(TPL_DIR, key + '.docx');
+const customPath = (key) => join(tplDir(), key + '.docx');
 const hasCustom = (key) => existsSync(customPath(key));
 async function templateBuffer(key, which = 'current') {
   if (which !== 'default' && hasCustom(key)) return readFileSync(customPath(key));
@@ -106,7 +106,7 @@ export function registerHrDocRoutes(r, { need }) {
     const valid = fieldsForTemplate(key);
     const unknown = found.filter((k) => !valid.has(k));
     try {
-      mkdirSync(TPL_DIR, { recursive: true });
+      mkdirSync(tplDir(), { recursive: true });
       writeFileSync(customPath(key), buf);
       const meta = tplMeta();
       meta[key] = { name: String(b.fileName).slice(0, 150), at: new Date().toISOString(), by: req.user?.full_name || 'Quản lý' };

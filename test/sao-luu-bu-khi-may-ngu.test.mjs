@@ -22,7 +22,7 @@ before(async () => {
   setSetting('backup_enabled', '1');
   setSetting('backup_keep_days', '100000');   // không dọn bản sao lưu có sẵn trong data/backups
 });
-after(() => { for (const n of made) { try { rmSync(join(B.BACKUP_DIR, n)); } catch {} } });
+after(() => { for (const n of made) { try { rmSync(join(B.backupDir(), n)); } catch {} } });
 
 test('chưa tới giờ hẹn trong ngày → chưa sao lưu', () => {
   setSetting('backup_hour', String(vnHour() + 1));   // 23h thì giờ hẹn 24 (không bao giờ tới) — vẫn đúng ý

@@ -10,6 +10,7 @@ import { db, getSetting } from './db.js';
 import { ingestAttlog, ingestUserData, forgetDeviceUsers } from './device-sync.js';
 import { guardIncoming, pmNameFor } from './pin-guard.js';
 import { vnDateStr } from './util.js';
+import { tenantKey, busyFlag, eachTenant } from './tenant.js';
 
 export const hikEnabled = () => getSetting('device_enabled', '0') === '1' && getSetting('hik_device_enabled', '0') === '1';
 
@@ -422,7 +423,7 @@ export function hikReceive({ token = '', contentType = '', body, remoteIp = '' }
   const ask = [];
   for (const pin of unknown) {
     if (names.has(pin)) addDeviceUsers(d.serial, [`USER PIN=${pin}\tName=${names.get(pin)}`]);
-    else if (Date.now() - (askedAt.get(d.serial + '|' + pin) || 0) > 10 * 60000) { askedAt.set(d.serial + '|' + pin, Date.now()); ask.push(pin); }
+    else { const k = tenantKey() + '|' + d.serial + '|' + pin; if (Date.now() - (askedAt.get(k) || 0) > 10 * 60000) { askedAt.set(k, Date.now()); ask.push(pin); } }
   }
   if (ask.length) hikFetchUsers(d, ask).catch((e) => console.error('[hik] hỏi tên NV từ máy lỗi:', e.message));
   return { device: d.serial, added };
@@ -474,7 +475,7 @@ export async function hikSetupPush(dev, { host, port } = {}) {
  * đọc số lượt chấm trên máy → không đổi thì bỏ qua; đổi thì tải NV (khi số NV đổi) + tải lượt chấm từ hôm trước lần tải gần nhất. */
 export const HIK_AUTO_CHOICES = [0, 5, 10, 15, 30, 60, 120, 240];
 export const hikAutoMinutes = () => { const n = parseInt(getSetting('hik_auto_min', '0'), 10) || 0; return n > 0 ? Math.max(1, n) : 0; };
-let autoBusy = false;
+const autoBusy = busyFlag();
 async function autoOne(d, prog = () => {}) {
   const mark = (ok, msg, extra = {}) => {
     db.prepare('UPDATE push_devices SET tcp_auto_at=?, tcp_auto_ok=?, tcp_auto_msg=?, tcp_auto_logs=COALESCE(?, tcp_auto_logs), tcp_auto_users=COALESCE(?, tcp_auto_users) WHERE id=?')
@@ -499,8 +500,7 @@ async function autoOne(d, prog = () => {}) {
   } catch (e) { return mark(false, e.message || String(e)); }
 }
 export async function hikAutoCycle(force = false, prog = () => {}) {
-  if (autoBusy) return null;
-  autoBusy = true;
+  if (!autoBusy.take()) return null;
   try {
     const every = hikAutoMinutes() * 60000, out = [];
     for (const d of db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND active=1 AND tcp_auto=1 ORDER BY id").all()) {
@@ -509,14 +509,14 @@ export async function hikAutoCycle(force = false, prog = () => {}) {
       out.push({ device: d.name || d.serial, msg: await autoOne(d, prog) });
     }
     return out;
-  } finally { autoBusy = false; }
+  } finally { autoBusy.done(); }
 }
 let autoTimer = null;
 export function startHikScheduler() {
   if (autoTimer) return;
-  autoTimer = setInterval(() => {
+  autoTimer = setInterval(() => eachTenant(() => {
     if (!hikEnabled() || !hikAutoMinutes()) return;
-    hikAutoCycle(false).catch((e) => console.error('[hik] tự tải lỗi:', e.message));
-  }, Math.max(2000, parseInt(process.env.HIK_TICK_MS || '30000', 10) || 30000));
+    return hikAutoCycle(false).catch((e) => console.error('[hik] tự tải lỗi:', e.message));
+  }), Math.max(2000, parseInt(process.env.HIK_TICK_MS || '30000', 10) || 30000));
   autoTimer.unref();
 }

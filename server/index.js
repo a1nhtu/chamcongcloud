@@ -7,7 +7,8 @@ import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { initSchema, getSetting, optimizeDb } from './db.js';
-import { UPLOAD_DIR } from './storage.js';
+import { uploadDir } from './storage.js';
+import { MULTI, eachTenant } from './tenant.js';
 import { ensureSeed } from './seed.js';
 import { maybeAutoBackup } from './backup.js';
 import { fixOverlappingAssignmentsOnce } from './assign-normalize.js';
@@ -38,22 +39,30 @@ import { startRebootScheduler } from './reboot-schedule.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 
-initSchema();
-fixOverlappingAssignmentsOnce();   // dọn 1 lần các lịch gán ca chồng ngày của bản cũ (chạy SAU khi CSDL đã khởi tạo)
-optimizeDb();
+// Máy chủ nhiều công ty (MULTI_TENANT=1): mở + khởi tạo CSDL của TỪNG công ty (data/tenants/<mã>) thay cho CSDL duy nhất
+const H = MULTI ? await import('./host.js') : null;
+if (H) H.openAllTenants();
+else {
+  initSchema();
+  fixOverlappingAssignmentsOnce();   // dọn 1 lần các lịch gán ca chồng ngày của bản cũ (chạy SAU khi CSDL đã khởi tạo)
+  optimizeDb();
+}
 startTcpScheduler();   // tự tải máy chấm công TCP/IP theo lịch (chỉ chạy khi đã bật + đặt số phút)
 startHikScheduler();   // tự tải máy Hikvision theo lịch (chỉ chạy khi đã bật "Dùng máy Hikvision" + đặt số phút)
 startUnion();          // máy Union tự kết nối về cổng 9870 (chỉ mở cổng khi đã bật "Dùng máy Union")
-ensureSeed();
+if (!H) ensureSeed();   // máy chủ nhiều công ty: đã tạo lúc mở từng công ty
 startHrScheduler();   // nhân sự: tới ngày hiệu lực thì tự áp dụng quyết định thuyên chuyển / nghỉ việc
 startHrRemindScheduler();   // nhân sự: nhắc HĐ sắp hết hạn / hết thử việc qua thông báo đẩy (công tắc hr_remind_push)
 startRebootScheduler();   // máy chấm công: tự khởi động lại theo giờ hẹn của từng máy (chưa hẹn máy nào = không làm gì)
 
 // Tự động sao lưu dữ liệu: kiểm tra mỗi 5 phút, chạy khi tới giờ đã đặt (1 lần/ngày)
-maybeAutoBackup();
-setInterval(maybeAutoBackup, 5 * 60 * 1000);
+const backupTick = () => eachTenant(maybeAutoBackup);
+backupTick();
+setInterval(backupTick, 5 * 60 * 1000);
 
 const app = express();
+// Máy chủ nhiều công ty: API điều khiển (tạo công ty — cần HOST_TOKEN) + mọi yêu cầu khác chạy theo công ty của TÊN MIỀN
+if (H) { app.use(H.hostRouter()); app.use(H.tenantGate); }
 
 // Máy chấm công ZKTeco đẩy dữ liệu (ADMS push) — đặt TRƯỚC express.json + cổng bản quyền
 app.use('/', iclockRoutes);
@@ -112,7 +121,7 @@ app.use('/uploads', (req, res, next) => {
     res.setHeader('X-Content-Type-Options', 'nosniff');
   }
   next();
-}, express.static(UPLOAD_DIR, { maxAge: '7d' }));
+}, H ? H.tenantUploads({ maxAge: '7d' }) : express.static(uploadDir(), { maxAge: '7d' }));
 
 // Trang tĩnh (PWA nhân viên + trang admin)
 app.use('/suatan', mealStaticGate);   // giao diện Suất ăn: tắt công tắc meal_enabled → 404 (đặt TRƯỚC express.static)
@@ -169,6 +178,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   console.log(`  HTTP  (máy này):  http://localhost:${PORT}/  |  /admin`);
   // Bản cài của khách: tự bảo đảm app tự bật khi mở máy/đăng nhập (khách cũ bấm Cập nhật là được sửa, khỏi chạy lại CaiDat.bat)
   import('./autostart.js').then((m) => m.ensureAutostart()).catch((e) => console.error('[autostart] lỗi:', e.message));
+  if (H) H.startDevicePorts(app, attachAiWs);   // cổng riêng cho máy chấm công chỉ điền được IP + cổng
 });
 
 // HTTPS (cho điện thoại dùng camera + GPS qua mạng LAN/wifi nội bộ) — KHÔNG bắt buộc:
@@ -177,7 +187,8 @@ const keyPath = join(CERT_DIR, 'key.pem');
 const certPath = join(CERT_DIR, 'cert.pem');
 // Tự sinh chứng chỉ tự ký theo IP LAN của MÁY KHÁCH nếu chưa có (bản LAN khỏi bake cert sẵn).
 // Dùng lib 'selfsigned' (thuần JS, không cần openssl ở máy khách). Best-effort: lỗi/thiếu lib → bỏ qua, app vẫn chạy HTTP.
-if (!existsSync(keyPath) || !existsSync(certPath)) {
+// (Máy chủ nhiều công ty chạy trên VPS: điện thoại vào qua tên miền HTTPS của Cloudflare → không cần HTTPS mạng LAN)
+if (!H && (!existsSync(keyPath) || !existsSync(certPath))) {
   try {
     const { default: selfsigned } = await import('selfsigned');
     mkdirSync(CERT_DIR, { recursive: true });
@@ -192,7 +203,7 @@ if (!existsSync(keyPath) || !existsSync(certPath)) {
     console.warn('  [!] Chưa tạo được chứng chỉ tự động (' + e.message + ') — app vẫn chạy HTTP; HTTPS điện thoại tạm chưa dùng.');
   }
 }
-if (existsSync(keyPath) && existsSync(certPath)) {
+if (!H && existsSync(keyPath) && existsSync(certPath)) {
   const httpsServer = createHttps({ key: readFileSync(keyPath), cert: readFileSync(certPath) }, app);
   httpsServer.on('error', (e) => {
     console.warn(`  [!] Bỏ qua HTTPS cổng ${HTTPS_PORT} (${e.code}) — app VẪN CHẠY bình thường qua HTTP + tunnel.`);
@@ -205,6 +216,6 @@ if (existsSync(keyPath) && existsSync(certPath)) {
     for (const ip of ips) console.log(`     https://${ip}:${HTTPS_PORT}/        (điện thoại mở link này)`);
     console.log(`  * Điện thoại sẽ báo "không an toàn" (chứng chỉ tự ký) → bấm Nâng cao → Tiếp tục.\n`);
   });
-} else {
+} else if (!H) {
   console.log(`  (Chưa có chứng chỉ HTTPS trong /certs — chạy "npm run cert" để tạo, cần cho camera/GPS trên điện thoại)\n`);
 }

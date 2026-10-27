@@ -3,6 +3,14 @@ import { raw } from 'express';
 import { getSetting, setSetting } from '../../db.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../../backup.js';
 import { sendCaughtError } from '../../util.js';
+import { MULTI, currentTenant } from '../../tenant.js';
+
+// Máy chủ nhiều công ty: mở lại CSDL riêng công ty này ngay (không khởi động lại cả máy chủ — các công ty khác không bị gián đoạn)
+async function applyNow() {
+  if (!MULTI) return false;
+  const { reloadTenant } = await import('../../host.js');
+  return reloadTenant(currentTenant().slug);
+}
 
 export function registerBackupRoutes(r, { need }) {
   r.get('/backup', need('backup'), (req, res) => {
@@ -42,7 +50,8 @@ export function registerBackupRoutes(r, { need }) {
     try {
       if (!req.body || !req.body.length) return res.status(400).json({ error: 'Chưa nhận được file' });
       stageRestore(req.body);
-      res.json({ ok: true, restartNeeded: true });
+      if (!MULTI) return res.json({ ok: true, restartNeeded: true });
+      applyNow().then(() => res.json({ ok: true, applied: true })).catch((e) => sendCaughtError(res, 'POST /admin/backup/restore', e));
     } catch (e) { sendCaughtError(res, 'POST /admin/backup/restore', e, { status: 400 }); }
   });
   // Sao lưu TOÀN BỘ (.zip = DB + ảnh + logo) — dùng khi chuyển máy/VPS
@@ -55,7 +64,8 @@ export function registerBackupRoutes(r, { need }) {
     try {
       if (!req.body || !req.body.length) return res.status(400).json({ error: 'Chưa nhận được file' });
       stageFullRestore(req.body);
-      res.json({ ok: true, restartNeeded: true });
+      if (!MULTI) return res.json({ ok: true, restartNeeded: true });
+      applyNow().then(() => res.json({ ok: true, applied: true })).catch((e) => sendCaughtError(res, 'POST /admin/backup/full-restore', e));
     } catch (e) { sendCaughtError(res, 'POST /admin/backup/full-restore', e, { status: 400 }); }
   });
 }

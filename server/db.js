@@ -5,43 +5,64 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { HR_FIELD_KEYS } from './hr-rules.js';
+import { MULTI, ROOT, dataDir as tenantDataDir, needTenant, cfg } from './tenant.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(__dirname, '..');
-export const DATA_DIR = join(ROOT, 'data');
-mkdirSync(DATA_DIR, { recursive: true });
+const ROOT_DATA = join(ROOT, 'data');
+mkdirSync(ROOT_DATA, { recursive: true });
+const SINGLE_DB_PATH = process.env.DB_PATH || join(ROOT_DATA, 'digiplus.db');
 
-export const DB_PATH = process.env.DB_PATH || join(DATA_DIR, 'digiplus.db');
+// Thư mục dữ liệu + file CSDL của công ty đang phục vụ (bản 1 công ty: data/ của app như cũ)
+export const dataDir = () => (MULTI ? tenantDataDir() : ROOT_DATA);
+export const dbPath = () => (MULTI ? join(tenantDataDir(), 'digiplus.db') : SINGLE_DB_PATH);
 
-// PHỤC HỒI: nếu có file chờ (.restore) → thay CSDL trước khi mở (an toàn, làm 1 lần lúc khởi động)
-const RESTORE_FILE = DB_PATH + '.restore';
-if (isMainThread && existsSync(RESTORE_FILE)) {   // chỉ luồng chính lúc khởi động (luồng phụ xuất báo cáo cũng nạp file này)
+// PHỤC HỒI: nếu có file chờ (.restore) → thay CSDL trước khi mở (an toàn, làm 1 lần lúc mở CSDL)
+export function applyPendingRestore(path) {
+  const restoreFile = path + '.restore';
+  if (!existsSync(restoreFile)) return;
   try {
-    if (existsSync(DB_PATH)) copyFileSync(DB_PATH, DB_PATH + '.prerestore'); // giữ bản trước khi phục hồi
-    for (const ext of ['-wal', '-shm']) { const f = DB_PATH + ext; if (existsSync(f)) rmSync(f); } // bỏ WAL cũ
-    renameSync(RESTORE_FILE, DB_PATH);
+    if (existsSync(path)) copyFileSync(path, path + '.prerestore'); // giữ bản trước khi phục hồi
+    for (const ext of ['-wal', '-shm']) { const f = path + ext; if (existsSync(f)) rmSync(f); } // bỏ WAL cũ
+    renameSync(restoreFile, path);
     console.log('  [restore] Đã phục hồi dữ liệu từ bản sao lưu.');
   } catch (e) { console.error('  [restore] Lỗi phục hồi:', e.message); }
 }
 
-export const db = new DatabaseSync(DB_PATH);
-db.exec('PRAGMA journal_mode = WAL;');
-db.exec('PRAGMA foreign_keys = ON;');
-// WAL + synchronous NORMAL: không ép đĩa ghi xong sau TỪNG lần ghi (CSDL vẫn không hỏng khi mất điện, cùng lắm mất vài thao tác cuối)
-// → tính lại công / nhận lượt quẹt nhanh hơn nhiều lần. busy_timeout: luồng phụ (xuất báo cáo, tính lại) và luồng chính chờ nhau thay vì báo lỗi.
-db.exec('PRAGMA synchronous = NORMAL;');
-db.exec('PRAGMA busy_timeout = 15000;');
-// NHỚ CÂU LỆNH ĐÃ SOẠN: mã gọi db.prepare(...) lại ở mỗi lần chạy (hàng triệu lần khi tính lại công / dựng báo cáo công ty đông người);
-// soạn 1 lần rồi dùng lại. Chỉ nhớ câu ngắn (câu có danh sách IN dài thay đổi liên tục thì soạn như cũ).
-{
-  const prep = db.prepare.bind(db), cache = new Map();
-  db.prepare = (sql) => {
+export function openDb(path) {
+  const d = new DatabaseSync(path);
+  d.exec('PRAGMA journal_mode = WAL;');
+  d.exec('PRAGMA foreign_keys = ON;');
+  // WAL + synchronous NORMAL: không ép đĩa ghi xong sau TỪNG lần ghi (CSDL vẫn không hỏng khi mất điện, cùng lắm mất vài thao tác cuối)
+  // → tính lại công / nhận lượt quẹt nhanh hơn nhiều lần. busy_timeout: luồng phụ (xuất báo cáo, tính lại) và luồng chính chờ nhau thay vì báo lỗi.
+  d.exec('PRAGMA synchronous = NORMAL;');
+  d.exec('PRAGMA busy_timeout = 15000;');
+  // NHỚ CÂU LỆNH ĐÃ SOẠN: mã gọi db.prepare(...) lại ở mỗi lần chạy (hàng triệu lần khi tính lại công / dựng báo cáo công ty đông người);
+  // soạn 1 lần rồi dùng lại. Chỉ nhớ câu ngắn (câu có danh sách IN dài thay đổi liên tục thì soạn như cũ).
+  // Bộ nhớ này gắn với TỪNG CSDL → máy chủ nhiều công ty không bao giờ dùng nhầm câu lệnh của công ty khác.
+  const prep = d.prepare.bind(d), cache = new Map();
+  d.prepare = (sql) => {
     if (typeof sql !== 'string' || sql.length > 700) return prep(sql);
     let st = cache.get(sql);
     if (!st) { if (cache.size >= 2000) cache.clear(); st = prep(sql); cache.set(sql, st); }
     return st;
   };
+  return d;
 }
+
+// Bản 1 công ty: chỉ luồng chính áp file phục hồi lúc khởi động (luồng phụ xuất báo cáo cũng nạp file này)
+if (!MULTI && isMainThread) applyPendingRestore(SINGLE_DB_PATH);
+
+// db: bản 1 công ty = đúng CSDL như cũ. Máy chủ nhiều công ty = "cửa" trỏ tới CSDL của công ty đang phục vụ;
+// không có ngữ cảnh công ty → báo lỗi (needTenant), không bao giờ trỏ nhầm sang công ty khác.
+export const db = MULTI
+  ? new Proxy({}, {
+    get(_, k) {
+      const real = needTenant().db;
+      if (!real) throw new Error('[nhiều công ty] CSDL của công ty chưa mở');
+      const v = real[k];
+      return typeof v === 'function' ? v.bind(real) : v;
+    },
+  })
+  : openDb(SINGLE_DB_PATH);
 
 // Cập nhật số liệu thống kê để SQLite chọn đúng chỉ mục (nhẹ: chỉ lấy mẫu, chỉ làm khi cần) — gọi lúc khởi động
 export function optimizeDb() {
@@ -1174,7 +1195,7 @@ function migrateColumns() {
   // Bắt buộc KEY theo máy: '0' = tắt (mặc định, giữ khách cũ chạy), '1' = máy phải có key Digiplus cấp mới duyệt được
   // MẶC ĐỊNH BẬT yêu cầu key nếu bộ cài bật máy chấm công (USE_DEVICE=1) → chống khách mua máy ngoài.
   // Chỉ đặt LẦN ĐẦU (khi null); tài khoản tổng vẫn tắt được sau. Bản cũ/không có USE_DEVICE → '0' như trước.
-  if (getSetting('device_key_required') == null) setSetting('device_key_required', process.env.USE_DEVICE === '1' ? '1' : '0');
+  if (getSetting('device_key_required') == null) setSetting('device_key_required', cfg('USE_DEVICE') === '1' ? '1' : '0');
   // Khoá thiết bị chấm công điện thoại (chống chấm hộ): '0' = tắt (mặc định), '1' = mỗi tài khoản chỉ chấm trên 1 điện thoại đã duyệt
   if (getSetting('device_lock_enabled') == null) setSetting('device_lock_enabled', '0');
   // Bỏ qua lần chấm TRÙNG trong vòng N phút (chống double-tap app + máy quẹt liên tiếp). '0' = tắt.
@@ -1207,7 +1228,7 @@ function migrateColumns() {
   //   Chỉ là GIÁ TRỊ BAN ĐẦU: áp khi config ghi rõ '0'/'1' VÀ khác lần áp trước (mới cài / vừa sửa config.txt).
   //   Sau đó tài khoản tổng đổi trên web (Cài đặt › Hình thức chấm công) thì giữ nguyên qua các lần khởi động lại.
   const applyEnvFlag = (envName, settingName) => {
-    const v = process.env[envName];
+    const v = cfg(envName);
     if (v !== '0' && v !== '1') return;
     const mark = 'cfg_applied_' + envName;
     if (getSetting(mark) === v) return;

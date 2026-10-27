@@ -6,6 +6,7 @@
 // Luồng phụ không chạy được / lỗi trước khi trả lời → luồng chính tự xử lý như bản cũ (next()).
 import { Worker, isMainThread } from 'node:worker_threads';
 import http from 'node:http';
+import { currentTenant } from './tenant.js';
 
 const OFF = process.env.HEAVY_WORKERS === '0';   // HEAVY_WORKERS=0 → tắt hẳn, chạy 1 luồng như bản cũ
 const SIZE = Math.max(1, Math.min(4, parseInt(process.env.HEAVY_WORKERS || '2', 10) || 2));   // số luồng phụ (mặc định 2)
@@ -47,6 +48,9 @@ export function offload(patterns, postPatterns = []) {
     if (OFF || !isMainThread || broken >= 6 || !(isGet || isPost)) return next();
     pick().then((slot) => {
       const headers = { ...req.headers, connection: 'close' };
+      delete headers['x-dgp-tenant'];
+      const t = currentTenant();   // máy chủ nhiều công ty: báo luồng phụ đọc CSDL của công ty nào (người ngoài không tự đặt được)
+      if (t) headers['x-dgp-tenant'] = t.slug;
       if (isPost) { delete headers['content-length']; delete headers['transfer-encoding']; delete headers['content-type']; }
       const p = http.request({ host: '127.0.0.1', port: slot.port, path: req.originalUrl, method: req.method, headers }, (r) => {
         res.writeHead(r.statusCode, r.headers);
@@ -59,3 +63,9 @@ export function offload(patterns, postPatterns = []) {
   };
 }
 export const heavyInfo = () => ({ off: OFF, workers: pool.length, broken });
+// Tắt hết luồng phụ (máy chủ nhiều công ty mở lại CSDL 1 công ty sau khi phục hồi: luồng phụ đang giữ file CSDL cũ).
+// Yêu cầu nặng kế tiếp tự sinh luồng mới.
+export async function stopHeavyWorkers() {
+  const all = pool.splice(0, pool.length);
+  await Promise.all(all.map((s) => { s.dead = true; return s.w.terminate().catch(() => {}); }));
+}

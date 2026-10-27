@@ -4,6 +4,7 @@ import { appendFileSync, mkdirSync, statSync, renameSync, rmSync } from 'node:fs
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { format } from 'node:util';
+import { currentTenant, MULTI } from './tenant.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 export const LOG_DIR = join(__dirname, '..', 'data', 'logs');
@@ -28,7 +29,8 @@ function stamp() {
 
 export function writeLog(level, args) {
   try {
-    const line = `${stamp()} [${level}] ${format(...args)}\n`;
+    const t = currentTenant();   // máy chủ nhiều công ty: ghi kèm công ty để tra lỗi
+    const line = `${stamp()} [${level}]${t ? ' [' + t.slug + ']' : ''} ${format(...args)}\n`;
     if (size + line.length > MAX_BYTES) rotate();
     appendFileSync(LOG_FILE, line);
     size += line.length;
@@ -43,6 +45,7 @@ for (const [method, level] of [['log', 'INFO'], ['warn', 'WARN'], ['error', 'ERR
 
 // Giữ nguyên hành vi mặc định của Node (lỗi chưa bắt → app thoát), chỉ thêm ghi log trước khi thoát.
 process.on('uncaughtException', (err) => { writeLog('FATAL', ['uncaughtException:', err && err.stack || err]); process.exit(1); });
-process.on('unhandledRejection', (err) => { writeLog('FATAL', ['unhandledRejection:', err && err.stack || err]); process.exit(1); });
+// Máy chủ nhiều công ty: 1 lời hứa lỗi của 1 công ty không được làm sập máy chủ của MỌI công ty → chỉ ghi log
+process.on('unhandledRejection', (err) => { writeLog(MULTI ? 'ERROR' : 'FATAL', ['unhandledRejection:', err && err.stack || err]); if (!MULTI) process.exit(1); });
 
 writeLog('INFO', ['=== Khởi động máy chủ (pid ' + process.pid + ') ===']);

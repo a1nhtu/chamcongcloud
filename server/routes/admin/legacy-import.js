@@ -4,6 +4,7 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { readLegacy, summarize, applyLegacy } from '../../legacy-import.js';
+import { tenantKey } from '../../tenant.js';
 
 const cache = new Map();   // token → { data, summary, at }
 const jobs = new Map();    // id → { state: run|done|err, pct, msg, result }
@@ -14,7 +15,7 @@ function keep(data) {
   while (cache.size >= 3) cache.delete(cache.keys().next().value);   // file chấm công lớn tốn RAM → chỉ giữ vài bản gần nhất
   const token = randomBytes(9).toString('hex');
   const summary = summarize(data);
-  cache.set(token, { data, summary, at: Date.now() });
+  cache.set(token, { data, summary, at: Date.now(), tk: tenantKey() });
   return { token, summary };
 }
 
@@ -31,7 +32,7 @@ export function registerLegacyImportRoutes(r, { need }) {
   r.post('/legacy/apply', need('devices'), (req, res) => {
     const b = req.body || {};
     const c = cache.get(String(b.token || ''));
-    if (!c) return res.status(400).json({ error: 'Dữ liệu đã đọc hết hạn (quá 30 phút) — chọn lại file' });
+    if (!c || c.tk !== tenantKey()) return res.status(400).json({ error: 'Dữ liệu đã đọc hết hạn (quá 30 phút) — chọn lại file' });
     if (busy) return res.status(409).json({ error: 'Đang chuyển dữ liệu — chờ lượt trước xong' });
     const ISO = /^\d{4}-\d{2}-\d{2}$/;
     const opts = { depts: b.depts !== false, emps: b.emps !== false, punches: b.punches !== false, overwrite: !!b.overwrite,
@@ -39,6 +40,7 @@ export function registerLegacyImportRoutes(r, { need }) {
     if (!opts.depts && !opts.emps && !opts.punches) return res.status(400).json({ error: 'Chưa chọn phần nào để chuyển' });
     const id = randomBytes(6).toString('hex');
     const j = { state: 'run', pct: 0, msg: 'Bắt đầu…', result: null, at: Date.now() };
+    Object.defineProperty(j, 'tk', { value: tenantKey() });
     jobs.set(id, j);
     for (const [k, v] of jobs) if (v.state !== 'run' && Date.now() - v.at > TTL) jobs.delete(k);
     busy = true;
@@ -51,7 +53,7 @@ export function registerLegacyImportRoutes(r, { need }) {
 
   r.get('/legacy/job/:id', need('devices'), (req, res) => {
     const j = jobs.get(req.params.id);
-    if (!j) return res.status(404).json({ error: 'Không thấy tiến trình' });
+    if (!j || j.tk !== tenantKey()) return res.status(404).json({ error: 'Không thấy tiến trình' });
     res.json(j);
   });
 }

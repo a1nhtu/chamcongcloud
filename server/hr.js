@@ -1,13 +1,14 @@
 // PHÂN HỆ NHÂN SỰ — phần dùng CSDL: đọc hợp đồng kèm trạng thái, áp dụng quyết định thuyên chuyển / nghỉ việc
 // khi tới ngày hiệu lực (chạy lúc khởi động + mỗi 30 phút + mỗi lần mở trang Nhân sự). Quy tắc thuần ở hr-rules.js.
 import { join } from 'node:path';
-import { db, getSetting, DATA_DIR } from './db.js';
+import { db, getSetting, dataDir } from './db.js';
 import { vnDateStr } from './util.js';
 import { contractStatus, currentContract, decisionDue, expiredTooLong, EMP_TYPE_BY_CONTRACT, dmy } from './hr-rules.js';
+import { eachTenant } from './tenant.js';
 
 // Giấy tờ nhân sự (CCCD, bằng cấp…) lưu TRONG data/ — thư mục máy chủ KHÔNG phát công khai; chỉ tải qua API có quyền Nhân sự.
 // Có trong bản "Sao lưu toàn bộ" (server/backup.js).
-export const HR_FILES_DIR = join(DATA_DIR, 'hr-files');
+export const hrFilesDir = () => join(dataDir(), 'hr-files');   // của công ty đang phục vụ
 export const hrToday = () => vnDateStr();
 // Công tắc phân hệ (chỉ tài khoản tổng bật — Cài đặt). Tắt: menu ẩn, API Nhân sự trả 403, không gửi nhắc.
 export const hrEnabled = () => getSetting('hr_enabled', '0') === '1';
@@ -112,6 +113,7 @@ export function applyDueDecisions(today = hrToday()) {
 }
 
 export function startHrScheduler() {
-  try { applyDueDecisions(); } catch (e) { console.error('[hr]', e.message); }
-  setInterval(() => { try { applyDueDecisions(); } catch (e) { console.error('[hr]', e.message); } }, 30 * 60 * 1000).unref?.();
+  const run = () => eachTenant(() => { try { applyDueDecisions(); } catch (e) { console.error('[hr]', e.message); } });
+  run();
+  setInterval(run, 30 * 60 * 1000).unref?.();
 }

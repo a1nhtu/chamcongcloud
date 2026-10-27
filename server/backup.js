@@ -2,17 +2,17 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, rmSync, writeFileSync, readFileSync, cpSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
-import { db, DATA_DIR, DB_PATH, getSetting, setSetting } from './db.js';
-import { HR_FILES_DIR } from './hr.js';
-import { UPLOAD_DIR } from './storage.js';
+import { db, dataDir, dbPath, getSetting, setSetting } from './db.js';
+import { hrFilesDir } from './hr.js';
+import { uploadDir } from './storage.js';
+import { appRoot } from './tenant.js';
 import { userError } from './util.js';
 
-const ROOT = join(DATA_DIR, '..');                 // thư mục app (chứa uploads/)
 // Linux: GNU tar không đọc/ghi được .zip → dùng bsdtar (gói libarchive-tools, bộ cài Linux tự cài)
 const winTar = () => { if (process.platform !== 'win32') return 'bsdtar'; const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
 
-export const BACKUP_DIR = join(DATA_DIR, 'backups');
-mkdirSync(BACKUP_DIR, { recursive: true });
+// Thư mục sao lưu của công ty đang phục vụ (bản 1 công ty: data/backups như cũ)
+export const backupDir = () => { const d = join(dataDir(), 'backups'); mkdirSync(d, { recursive: true }); return d; };
 
 const pad = (n) => String(n).padStart(2, '0');
 // Giờ/ngày theo múi giờ VN (UTC+7)
@@ -29,17 +29,17 @@ export function doBackup(reason = 'manual') {
   try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
   const p = vnParts();
   const name = `digiplus_${p.date}_${pad(p.hour)}${pad(p.min)}_${reason}.db`;
-  const dest = join(BACKUP_DIR, name);
-  copyFileSync(DB_PATH, dest);
+  const dest = join(backupDir(), name);
+  copyFileSync(dbPath(), dest);
   return { name, size: statSync(dest).size };
 }
 
 // Danh sách bản sao lưu (mới nhất trước)
 export function listBackups() {
-  if (!existsSync(BACKUP_DIR)) return [];
-  return readdirSync(BACKUP_DIR)
+  const dir = backupDir();
+  return readdirSync(dir)
     .filter((f) => f.endsWith('.db') || f.endsWith('.zip'))
-    .map((f) => { const s = statSync(join(BACKUP_DIR, f)); return { name: f, size: s.size, mtime: s.mtimeMs, full: f.endsWith('.zip') }; })
+    .map((f) => { const s = statSync(join(dir, f)); return { name: f, size: s.size, mtime: s.mtimeMs, full: f.endsWith('.zip') }; })
     .sort((a, b) => b.mtime - a.mtime);
 }
 
@@ -47,14 +47,14 @@ export function listBackups() {
 export function pruneBackups(keep) {
   keep = Math.max(1, parseInt(keep, 10) || 7);
   const all = listBackups().filter((b) => !b.full);   // chỉ dọn bản .db tự động; GIỮ .zip toàn bộ
-  for (const b of all.slice(keep)) { try { rmSync(join(BACKUP_DIR, b.name)); } catch {} }
+  for (const b of all.slice(keep)) { try { rmSync(join(backupDir(), b.name)); } catch {} }
   return Math.max(0, all.length - keep);
 }
 
 export function backupPath(name) {
   // chống path traversal: chỉ nhận tên file .db/.zip, không có dấu tách thư mục
   if (!/^[\w.\-]+\.(db|zip)$/.test(name)) return null;
-  const p = join(BACKUP_DIR, name);
+  const p = join(backupDir(), name);
   return existsSync(p) ? p : null;
 }
 
@@ -64,13 +64,13 @@ export function deleteBackup(name) {
   rmSync(p); return true;
 }
 
-// --- Phục hồi: ghi file chờ, việc ĐỔI file thực hiện lúc khởi động lại (xem db.js) ---
-const PENDING = DB_PATH + '.restore';
+// --- Phục hồi: ghi file chờ, việc ĐỔI file thực hiện lúc mở lại CSDL (khởi động lại; máy chủ nhiều công ty: mở lại riêng công ty đó) ---
+const pending = () => dbPath() + '.restore';
 export function stageRestore(buffer) {
   // kiểm tra chữ ký SQLite ("SQLite format 3\0")
   const sig = buffer.slice(0, 16).toString('latin1');
   if (!sig.startsWith('SQLite format 3')) throw userError('File không phải cơ sở dữ liệu Digiplus hợp lệ');
-  writeFileSync(PENDING, buffer);   // ghi đồng bộ
+  writeFileSync(pending(), buffer);   // ghi đồng bộ
   return true;
 }
 
@@ -80,16 +80,16 @@ export function doFullBackup() {
   try { db.exec('PRAGMA wal_checkpoint(TRUNCATE)'); } catch {}
   const p = vnParts();
   const name = `digiplus_full_${p.date}_${pad(p.hour)}${pad(p.min)}.zip`;
-  const dest = join(BACKUP_DIR, name);
+  const dest = join(backupDir(), name);
   if (existsSync(dest)) { try { rmSync(dest); } catch {} }
   // Copy DB ra thư mục tạm trước (tar đọc trực tiếp file DB đang mở sẽ bị "Permission denied")
-  const stage = join(BACKUP_DIR, '_full_' + Date.now());
+  const stage = join(backupDir(), '_full_' + Date.now());
   mkdirSync(stage, { recursive: true });
-  copyFileSync(DB_PATH, join(stage, 'digiplus.db'));
+  copyFileSync(dbPath(), join(stage, 'digiplus.db'));
   try {
     const args = ['--format', 'zip', '-cf', dest, '-C', stage, 'digiplus.db'];
-    if (existsSync(UPLOAD_DIR)) args.push('-C', ROOT, 'uploads');   // kèm ảnh + logo nếu có (không bị khoá)
-    if (existsSync(HR_FILES_DIR)) args.push('-C', DATA_DIR, 'hr-files');   // giấy tờ nhân sự (CCCD, bằng cấp…)
+    if (existsSync(uploadDir())) args.push('-C', appRoot(), 'uploads');   // kèm ảnh + logo nếu có (không bị khoá)
+    if (existsSync(hrFilesDir())) args.push('-C', dataDir(), 'hr-files');   // giấy tờ nhân sự (CCCD, bằng cấp…)
     execFileSync(winTar(), args, { stdio: 'ignore' });
   } finally { rmSync(stage, { recursive: true, force: true }); }
   return { name, size: statSync(dest).size };
@@ -98,7 +98,7 @@ export function doFullBackup() {
 // Phục hồi từ .zip: nạp lại database (áp lúc khởi động lại) + thay ngay thư mục uploads.
 export function stageFullRestore(buffer) {
   if (buffer.slice(0, 2).toString('latin1') !== 'PK') throw userError('File không phải bản sao lưu .zip hợp lệ');
-  const tmp = join(BACKUP_DIR, '_restore_' + Date.now());
+  const tmp = join(backupDir(), '_restore_' + Date.now());
   mkdirSync(tmp, { recursive: true });
   const zp = join(tmp, 'in.zip');
   writeFileSync(zp, buffer);
@@ -108,16 +108,16 @@ export function stageFullRestore(buffer) {
   if (!existsSync(dbIn)) { rmSync(tmp, { recursive: true, force: true }); throw userError('File sao lưu thiếu dữ liệu (digiplus.db)'); }
   const head = readFileSync(dbIn).slice(0, 16).toString('latin1');
   if (!head.startsWith('SQLite format 3')) { rmSync(tmp, { recursive: true, force: true }); throw userError('Dữ liệu trong file không hợp lệ'); }
-  copyFileSync(dbIn, PENDING);                         // DB áp lúc khởi động lại (giống phục hồi .db)
+  copyFileSync(dbIn, pending());                         // DB áp lúc khởi động lại (giống phục hồi .db)
   const upIn = join(tmp, 'uploads');
   if (existsSync(upIn)) {                              // thay ảnh + logo ngay
-    try { rmSync(UPLOAD_DIR, { recursive: true, force: true }); } catch {}
-    try { cpSync(upIn, UPLOAD_DIR, { recursive: true }); } catch {}
+    try { rmSync(uploadDir(), { recursive: true, force: true }); } catch {}
+    try { cpSync(upIn, uploadDir(), { recursive: true }); } catch {}
   }
   const hrIn = join(tmp, 'hr-files');
   if (existsSync(hrIn)) {                              // giấy tờ nhân sự
-    try { rmSync(HR_FILES_DIR, { recursive: true, force: true }); } catch {}
-    try { cpSync(hrIn, HR_FILES_DIR, { recursive: true }); } catch {}
+    try { rmSync(hrFilesDir(), { recursive: true, force: true }); } catch {}
+    try { cpSync(hrIn, hrFilesDir(), { recursive: true }); } catch {}
   }
   rmSync(tmp, { recursive: true, force: true });
   return true;

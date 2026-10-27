@@ -11,10 +11,10 @@ import {
   CONTRACT_TYPES, CONTRACT_TYPE_LABEL, CONTRACT_STATUS_LABEL, TRANSFER_KINDS, RESIGN_KINDS, RESIGN_KIND_LABEL,
   DEFAULT_HANDOVER, noticeWarning, currentContract, dmy,
 } from '../../hr-rules.js';
-import { hrToday, warnDays, loadContracts, currentContractsByEmp, applyDecision, applyDueDecisions, HR_FILES_DIR, hrGate } from '../../hr.js';
+import { hrToday, warnDays, loadContracts, currentContractsByEmp, applyDecision, applyDueDecisions, hrFilesDir, hrGate } from '../../hr.js';
 import { remindEnabled, runHrReminders } from '../../hr-remind.js';
 
-const HR_DIR = HR_FILES_DIR;   // giấy tờ đính kèm: data/hr-files/<employee_id>/ (không phát công khai)
+const hrDir = hrFilesDir;   // giấy tờ đính kèm: data/hr-files/<employee_id>/ (không phát công khai)
 const DOC_EXT = new Set(['.pdf', '.jpg', '.jpeg', '.png', '.webp', '.doc', '.docx', '.xls', '.xlsx']);
 const DOC_KINDS = ['CCCD / CMND', 'Sơ yếu lý lịch', 'Bằng cấp / chứng chỉ', 'Giấy khám sức khoẻ', 'Hợp đồng (bản scan)', 'Quyết định', 'Khác'];
 const MIME = { '.pdf': 'application/pdf', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.webp': 'image/webp',
@@ -295,7 +295,7 @@ export function registerHrRoutes(r, { need }) {
     if (!buf.length) return res.status(400).json({ error: 'File rỗng' });
     if (buf.length > 4.2 * 1024 * 1024) return res.status(400).json({ error: 'File quá lớn (tối đa 4MB)' });
     try {
-      const dir = join(HR_DIR, String(e.id));
+      const dir = join(hrDir(), String(e.id));
       mkdirSync(dir, { recursive: true });
       const name = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}${ext}`;
       writeFileSync(join(dir, name), buf);
@@ -307,7 +307,7 @@ export function registerHrRoutes(r, { need }) {
   r.get('/hr/documents/:docId/file', hr, (req, res) => {
     const d = db.prepare('SELECT * FROM hr_documents WHERE id = ?').get(+req.params.docId);
     if (!d || !/^[\w.-]+$/.test(d.file_name)) return res.status(404).json({ error: 'Không tìm thấy file' });
-    const p = join(HR_DIR, String(d.employee_id), d.file_name);
+    const p = join(hrDir(), String(d.employee_id), d.file_name);
     if (!existsSync(p)) return res.status(404).json({ error: 'File đã bị xoá khỏi máy chủ' });
     res.setHeader('Content-Type', d.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename*=UTF-8''${encodeURIComponent(d.orig_name || d.file_name)}`);
@@ -318,7 +318,7 @@ export function registerHrRoutes(r, { need }) {
   r.delete('/hr/documents/:docId', hr, (req, res) => {
     const d = db.prepare('SELECT * FROM hr_documents WHERE id = ?').get(+req.params.docId);
     if (!d) return res.json({ ok: true });
-    if (/^[\w.-]+$/.test(d.file_name)) { try { rmSync(join(HR_DIR, String(d.employee_id), d.file_name), { force: true }); } catch {} }
+    if (/^[\w.-]+$/.test(d.file_name)) { try { rmSync(join(hrDir(), String(d.employee_id), d.file_name), { force: true }); } catch {} }
     db.prepare('DELETE FROM hr_documents WHERE id = ?').run(d.id);
     res.json({ ok: true });
   });

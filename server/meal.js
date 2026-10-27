@@ -6,6 +6,7 @@ import { randomInt, timingSafeEqual } from 'node:crypto';
 import { db, getSetting, setSetting, adminAttWhere, deptWithChildren } from './db.js';
 import { hasPerm } from './auth.js';
 import { userError } from './util.js';
+import { tenantKey } from './tenant.js';
 import {
   DEFAULT_MEAL_SHIFTS, NON_MACHINE_SERIALS, windowBoundsUtc, countValidPunches, buildBoard, shiftForPunch, vnNow,
   isIsoDate, parseCount, cleanDishes, canOrderMeal, orderDeadlineVn, addDaysIso, inWindow, buildDishReport, parseAdjust,
@@ -639,7 +640,7 @@ export function syncMachineSignups(from, to) {
   if (!shifts.length) return 0;
   const only = signupSerials(), eat = serialFilter();
   const maxId = db.prepare('SELECT IFNULL(MAX(id), 0) m FROM device_punches').get().m;
-  const key = [from, to, maxId, only.join(','), eat.join(','), JSON.stringify(all.map((s) => [s.code, s.open_at, s.lock_at, s.lock_before_min, s.from_time, s.to_time]))].join('|');
+  const key = [tenantKey(), from, to, maxId, only.join(','), eat.join(','), JSON.stringify(all.map((s) => [s.code, s.open_at, s.lock_at, s.lock_before_min, s.from_time, s.to_time]))].join('|');
   if (syncDone.has(key)) return 0;
   let lo = Infinity, hi = -Infinity;
   for (const s of shifts) { lo = Math.min(lo, orderOpenMs(from, s)); hi = Math.max(hi, orderDeadlineMs(to, s)); }

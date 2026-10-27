@@ -10,6 +10,7 @@ import { tcpEnabled, tcpProbe, zkRun } from './zk-tcp.js';
 import { unionEnabled, unionSimple } from './union.js';
 import { aiEnabled, aiAction } from './ai-device.js';
 import { hikEnabled, hikRestart } from './hik-isapi.js';
+import { busyFlag, eachTenant } from './tenant.js';
 
 const WINDOW_MIN = 10;
 const DAY_VI = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
@@ -63,11 +64,10 @@ async function rebootNow(d, utc) {
   return 'đã gửi lệnh';
 }
 
-let busy = false;
+const busy = busyFlag();
 // 1 nhịp kiểm tra (gọi mỗi 30 giây; nowMs để kiểm thử). Trả danh sách máy đã xử lý ở nhịp này.
 export async function rebootTick(nowMs = Date.now()) {
-  if (busy) return [];
-  busy = true;
+  if (!busy.take()) return [];
   const done = [];
   try {
     const utc = new Date(nowMs).toISOString().slice(0, 19).replace('T', ' ');
@@ -90,12 +90,12 @@ export async function rebootTick(nowMs = Date.now()) {
         break;
       }
     }
-  } finally { busy = false; }
+  } finally { busy.done(); }
   return done;
 }
 
 export function startRebootScheduler() {
-  const run = () => rebootTick().catch((e) => console.error('[hẹn giờ khởi động lại]', e.message));
+  const run = () => eachTenant(() => rebootTick().catch((e) => console.error('[hẹn giờ khởi động lại]', e.message)));
   setTimeout(run, 15000).unref?.();
   setInterval(run, 30000).unref?.();
 }

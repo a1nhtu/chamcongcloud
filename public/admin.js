@@ -7338,6 +7338,7 @@ async function restoreBackup(file) {
   const res = await fetch('/api/admin/backup/restore', { method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'Content-Type': 'application/octet-stream' }, body: buf });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) { toast(j.error || 'Lỗi phục hồi', 'err'); return; }
+  if (j.applied) { alert('✅ Đã phục hồi dữ liệu. Trang sẽ tải lại.'); location.reload(); return; }   // máy chủ Digiplus: áp ngay
   alert('✅ Đã nạp bản sao lưu.\n\nBây giờ hãy KHỞI ĐỘNG LẠI phần mềm (tắt rồi mở lại) để hoàn tất phục hồi dữ liệu.');
 }
 async function restoreFullBackup(file) {
@@ -7345,6 +7346,7 @@ async function restoreFullBackup(file) {
   const res = await fetch('/api/admin/backup/full-restore', { method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'Content-Type': 'application/octet-stream' }, body: buf });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) { toast(j.error || 'Lỗi phục hồi', 'err'); return; }
+  if (j.applied) { alert('✅ Đã phục hồi TOÀN BỘ (dữ liệu + ảnh + logo). Trang sẽ tải lại.'); location.reload(); return; }
   alert('✅ Đã nạp bản sao lưu TOÀN BỘ (dữ liệu + ảnh + logo).\n\nBây giờ hãy KHỞI ĐỘNG LẠI phần mềm (tắt rồi mở lại) để hoàn tất.');
 }
 const fmtSize = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
@@ -7917,7 +7919,9 @@ async function pageSettings() {
     el('h3', { style: 'margin-top:0' }, '⬆ Cập nhật phần mềm'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
       el('div', {}, el('span', { style: 'color:var(--muted)' }, 'Phiên bản đang dùng: '), el('b', {}, s.app_version || '—')),
-      el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, checkBtn, applyBtn),
+      s.host_managed === '1'   // chạy trên máy chủ của Digiplus: Digiplus cập nhật chung, khách không cần bấm
+        ? el('div', { class: 'map-hint' }, 'Phần mềm đang chạy trên máy chủ của Digiplus — Digiplus tự cập nhật bản mới, không cần làm gì.')
+        : el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, checkBtn, applyBtn),
       updStatus,
       el('div', {}, logBtn, el('span', { class: 'map-hint', style: 'margin-left:8px' }, 'Khi gặp lỗi, tải file này gửi cho Digiplus để được hỗ trợ nhanh.')),
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;
