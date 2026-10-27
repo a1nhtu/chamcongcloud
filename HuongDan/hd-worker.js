@@ -457,6 +457,8 @@ async function handleLinuxScript() {
      (HMAC) nên không phải lưu ở đâu: Secret HOST_SECRET, chưa đặt thì dựa trên LICENSE_PRIVATE_KEY.
    • Link tạo công ty của Anh/đại lý: /tao-cong-ty?k=<mã-đại-lý>.<chữ-ký>. Đại lý lưu trong DNS (bản ghi TXT
      _dl-<mã>), XOÁ bản ghi = khoá link ngay; "cấp lại" = tăng v → link cũ hết hiệu lực.
+   • Link GỌN do Anh tự đặt: /tao/<mã>-<chữ bí mật>. Chữ bí mật lưu MÃ HOÁ (pe=) trong bản ghi TXT, vì TXT
+     ai cũng tra được qua DNS. "Cấp lại" xoá luôn chữ bí mật (link gọn cũ cũng chết).
    ============================================================ */
 const HOST_TUN = "dgphost-";
 const hostNameOk = (s) => /^[a-z0-9]{1,20}$/.test(s);
@@ -475,6 +477,30 @@ async function hmacHex(secret, msg) {
 }
 const hostToken = async (env, name) => (await hmacHex(hostSecret(env), "host:" + name)).slice(0, 40);
 const dlSig = async (env, code, v) => (await hmacHex(hostSecret(env), `dl:${code}:${v}`)).slice(0, 16);
+
+// Chữ bí mật của link gọn: 4–20 chữ thường/số (không gạch ngang → tách được <mã>-<chữ> ở gạch cuối cùng)
+const dlWordOk = (s) => /^[a-z0-9]{4,20}$/.test(s);
+const b64u = (u8) => btoa(String.fromCharCode(...u8)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64u = (s) => Uint8Array.from(atob(s.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+async function dlWordKey(env) {
+  const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("dl-word|" + hostSecret(env)));
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+async function sealWord(env, code, word) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(code) },
+    await dlWordKey(env), new TextEncoder().encode(word)));
+  const out = new Uint8Array(iv.length + ct.length); out.set(iv); out.set(ct, iv.length);
+  return b64u(out);
+}
+async function openWord(env, code, pe) {
+  try {
+    const b = unb64u(pe);
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b.slice(0, 12), additionalData: new TextEncoder().encode(code) },
+      await dlWordKey(env), b.slice(12));
+    return new TextDecoder().decode(pt);
+  } catch { return ""; }
+}
 
 // Ngày theo giờ Việt Nam (+7), cộng thêm n ngày
 const vnDate = (n = 0) => new Date(Date.now() + 7 * 3600000 + n * 86400000).toISOString().slice(0, 10);
@@ -527,7 +553,7 @@ function parseDealer(rec, zoneName) {
   const code = rec.name.slice(4, -(zoneName.length + 1));
   const m = parseComment(String(rec.content || "").replace(/^"|"$/g, ""));
   let ten = code; try { ten = decodeURIComponent(m.ten || code); } catch {}
-  return { code, ten, host: m.host || "", v: parseInt(m.v || "1", 10) || 1, dnsId: rec.id };
+  return { code, ten, host: m.host || "", v: parseInt(m.v || "1", 10) || 1, pe: m.pe || "", dnsId: rec.id };
 }
 async function listDealers(token, zoneId, zoneName) {
   const recs = await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=TXT&per_page=1000`);
@@ -539,17 +565,31 @@ async function getDealer(token, zoneId, zoneName, code) {
   return recs.length ? parseDealer(recs[0], zoneName) : null;
 }
 const dealerLink = async (env, origin, d) => `${origin}/tao-cong-ty?k=${d.code}.${await dlSig(env, d.code, d.v)}`;
+// Link (dài) + link gọn (nếu đã đặt chữ bí mật) cho trang nội bộ; không trả chuỗi mã hoá ra ngoài
+async function dealerOut(env, origin, d) {
+  const word = d.pe ? await openWord(env, d.code, d.pe) : "";
+  const { pe, dnsId, ...rest } = d;
+  return { ...rest, word, link: await dealerLink(env, origin, d), short: word ? `${origin}/tao/${d.code}-${word}` : "" };
+}
 async function saveDealer(token, zoneId, zoneName, d) {
   return upsertDns(token, zoneId, { type: "TXT", name: `_dl-${d.code}.${zoneName}`, ttl: 300,
-    content: `"dgp-dl v=${d.v} host=${d.host} ten=${encodeURIComponent(d.ten)}"`, comment: "digiplus đại lý tạo công ty" });
+    content: `"dgp-dl v=${d.v} host=${d.host} ten=${encodeURIComponent(d.ten)}${d.pe ? " pe=" + d.pe : ""}"`, comment: "digiplus đại lý tạo công ty" });
 }
-// Link ?k=<mã>.<chữ ký> còn hiệu lực? → trả đại lý, không thì null
+// Link còn hiệu lực? ?k=<mã>.<chữ ký> hoặc link gọn /tao/<mã>-<chữ bí mật> → trả đại lý, không thì null
 async function dealerFromLink(env, token, zoneId, zoneName, k) {
-  const m = String(k || "").trim().toLowerCase().match(/^([a-z0-9-]{1,30})\.([0-9a-f]{16})$/);
+  const s = String(k || "").trim().toLowerCase();
+  let m = s.match(/^([a-z0-9-]{1,30})\.([0-9a-f]{16})$/);
+  if (m) {
+    if (!dlCodeOk(m[1])) return null;
+    const d = await getDealer(token, zoneId, zoneName, m[1]);
+    return d && safeEqual(m[2], await dlSig(env, d.code, d.v)) ? d : null;
+  }
+  m = s.match(/^([a-z0-9-]{1,30})-([a-z0-9]{4,20})$/);
   if (!m || !dlCodeOk(m[1])) return null;
   const d = await getDealer(token, zoneId, zoneName, m[1]);
-  if (!d) return null;
-  return safeEqual(m[2], await dlSig(env, d.code, d.v)) ? d : null;
+  if (!d || !d.pe) return null;
+  const word = await openWord(env, d.code, d.pe);
+  return word && safeEqual(m[2], word) ? d : null;
 }
 
 // Mã công ty (phần đầu tên miền) gợi ý từ tên: bỏ dấu + bỏ "công ty / TNHH / cổ phần..."
@@ -649,8 +689,7 @@ async function handleMayChu(request, env) {
         delete h.tunnelId;
       }
       const dealers = await listDealers(token, zoneId, zoneName);
-      for (const d of dealers) { d.link = await dealerLink(env, origin, d); delete d.dnsId; }
-      return jsonRes({ ok: true, hosts, dealers, zone: zoneName });
+      return jsonRes({ ok: true, hosts, dealers: await Promise.all(dealers.map((d) => dealerOut(env, origin, d))), zone: zoneName });
     }
 
     if (a === "host-config") {   // tạo / lấy cấu hình máy chủ (config.txt cho bộ cài máy chủ)
@@ -745,16 +784,23 @@ async function handleMayChu(request, env) {
         if (cur) await cfProv(token, "DELETE", `/zones/${zoneId}/dns_records/${cur.dnsId}`);
         return jsonRes({ ok: true });
       }
-      const d = { code, ten: cur ? cur.ten : code, host: cur ? cur.host : "", v: cur ? cur.v : 1 };
+      const d = { code, ten: cur ? cur.ten : code, host: cur ? cur.host : "", v: cur ? cur.v : 1, pe: cur ? cur.pe : "" };
       if (a === "dl-save") {
         d.ten = String(b.ten || d.ten).trim().slice(0, 60) || code;
         d.host = hostNameOk(String(b.host || "")) ? String(b.host) : d.host;
+        if (b.word !== undefined && b.word !== null) {   // chữ bí mật của link gọn: để trống = bỏ link gọn
+          const word = String(b.word).trim().toLowerCase();
+          if (word && !dlWordOk(word)) return jsonRes({ error: "Chữ bí mật: 4–20 chữ thường không dấu hoặc số, không cách, không gạch ngang (vd: hoasen2026)." }, 400);
+          if (word && word === code) return jsonRes({ error: "Chữ bí mật phải khác mã link." }, 400);
+          d.pe = word ? await sealWord(env, code, word) : "";
+        }
       } else if (a === "dl-renew") {
         if (!cur) return jsonRes({ error: "Chưa có đại lý này" }, 404);
         d.v = cur.v + 1;   // link cũ hết hiệu lực
+        d.pe = "";         // link gọn cũ cũng hết hiệu lực
       } else return jsonRes({ error: "Thao tác không hợp lệ" }, 400);
       await saveDealer(token, zoneId, zoneName, d);
-      return jsonRes({ ok: true, ...d, link: await dealerLink(env, origin, d) });
+      return jsonRes({ ok: true, ...(await dealerOut(env, origin, d)) });
     }
     return jsonRes({ error: "Thao tác không hợp lệ" }, 400);
   } catch (e) {
@@ -777,6 +823,8 @@ export default {
     if (url.pathname === "/api/tao-cong-ty") return handleTaoCongTy(request, env);   // trang điện thoại: tạo công ty trên máy chủ nhiều công ty
     if (url.pathname === "/api/may-chu") return handleMayChu(request, env);         // nội bộ: máy chủ, công ty, link đại lý
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
+    // Link gọn tạo công ty /tao/<mã>-<chữ bí mật> → chính trang tạo công ty (trang tự đọc mã từ đường dẫn)
+    if (/^\/tao\/[^/]+\/?$/.test(url.pathname)) return env.ASSETS.fetch(new Request(new URL("/tao-cong-ty", url), request));
     // Link TẢI BỘ CÀI LAN có thương hiệu (proxy từ GitHub Release → tải thẳng về)
     // Link cũ /tai-ban-lan (đã phát ra ngoài, trang cũ còn nằm trong bộ nhớ trình duyệt) giờ cũng trả Setup.exe;
     // file zip bản LAN chỉ còn ở /tai-ban-lan.zip để dự phòng.

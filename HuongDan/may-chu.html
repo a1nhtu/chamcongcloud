@@ -73,12 +73,14 @@ pre{background:var(--paper);border:1px solid var(--line);border-radius:10px;padd
 
     <div class="card">
       <h2>Link tạo công ty (đại lý)</h2>
-      <p class="sub">Gửi link cho đại lý/kỹ thuật: mở trên điện thoại, điền tên công ty là xong (dùng thử 30 ngày). Khoá = link chết ngay.</p>
+      <p class="sub">Gửi link cho đại lý/kỹ thuật: mở trên điện thoại, điền tên công ty là xong (dùng thử 30 ngày). Khoá = link chết ngay.<br>
+        Link gọn <span class="mono">/tao/&lt;mã&gt;-&lt;chữ bí mật&gt;</span>: Anh tự đặt chữ bí mật (4–20 chữ thường/số), đổi chữ = link gọn cũ chết. Chữ càng khó đoán càng an toàn.</p>
       <div class="tblw"><table class="tbl" id="dls"></table></div>
       <div class="grid" style="margin-top:14px">
         <div><label for="dCode">Mã (không dấu)</label><input id="dCode" placeholder="skytech"></div>
         <div><label for="dTen">Tên hiện trên trang</label><input id="dTen" placeholder="Skytech"></div>
         <div><label for="dHost">Tạo trên máy chủ</label><select id="dHost"></select></div>
+        <div><label for="dWord">Chữ bí mật (link gọn)</label><input id="dWord" placeholder="hoasen2026" autocomplete="off"></div>
         <div><button class="btn sec" id="dSave">Thêm / sửa link</button></div>
       </div>
       <div class="err" id="dErr"></div>
@@ -141,9 +143,10 @@ async function loadAll() {
   $('oHost').innerHTML = opts;
   $('dls').innerHTML = '<tr><th>Mã</th><th>Tên</th><th>Máy chủ</th><th>Link</th><th></th></tr>' +
     (d.dealers.length ? d.dealers.map((x) => `<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.ten)}</td><td>${esc(x.host || '(đầu tiên)')}</td>
-      <td class="mono">${esc(x.link)}</td>
-      <td class="act"><button class="btn sm sec" onclick="copy('${esc(x.link)}', this)">Chép</button>
-        <button class="btn sm sec" onclick="dl('dl-renew','${esc(x.code)}', this)" title="Link cũ hết hiệu lực">Cấp lại</button>
+      <td class="mono">${x.short ? `<b>${esc(x.short)}</b><div class="muted" style="font-size:12px">${esc(x.link)}</div>` : esc(x.link)}</td>
+      <td class="act"><button class="btn sm sec" onclick="copy('${esc(x.short || x.link)}', this)">Chép</button>
+        <button class="btn sm sec" onclick="word('${esc(x.code)}', '${esc(x.word || '')}', this)">${x.short ? 'Đổi chữ' : 'Đặt link gọn'}</button>
+        <button class="btn sm sec" onclick="dl('dl-renew','${esc(x.code)}', this)" title="Link cũ và link gọn hết hiệu lực">Cấp lại</button>
         <button class="btn sm sec" onclick="dl('dl-lock','${esc(x.code)}', this)">Khoá</button></td></tr>`).join('')
       : '<tr><td colspan="5" class="muted">Chưa có link nào.</td></tr>');
   if (HOSTS.length && !$('tens').innerHTML) loadTenants();
@@ -152,14 +155,25 @@ async function loadAll() {
 window.copy = async (t, btn) => { try { await navigator.clipboard.writeText(t); btn.textContent = '✓'; } catch { prompt('Sao chép:', t); } };
 window.dl = (action, code, btn) => {
   if (action === 'dl-lock' && !confirm(`Khoá link "${code}"? Đại lý sẽ không tạo công ty được nữa.`)) return;
-  if (action === 'dl-renew' && !confirm(`Cấp link mới cho "${code}"? Link cũ hết hiệu lực.`)) return;
+  if (action === 'dl-renew' && !confirm(`Cấp link mới cho "${code}"? Link cũ và link gọn hết hiệu lực.`)) return;
   busy(btn, 'dErr', async () => { await api({ action, code }); await loadAll(); });
 };
+async function showLink(d) {
+  const l = d.short || d.link;
+  try { await navigator.clipboard.writeText(l); $('dErr').textContent = '✓ Đã chép link: ' + l; } catch { $('dErr').textContent = 'Link: ' + l; }
+}
+window.word = (code, cur, btn) => {
+  const w = prompt(`Chữ bí mật cho link gọn của "${code}" (4–20 chữ thường không dấu hoặc số, không cách).\nĐổi chữ = link gọn cũ hết hiệu lực. Để trống = bỏ link gọn.`, cur);
+  if (w === null) return;
+  busy(btn, 'dErr', async () => { const d = await api({ action: 'dl-save', code, word: w.trim() }); await loadAll(); await showLink(d); });
+};
 $('dSave').onclick = () => busy($('dSave'), 'dErr', async () => {
-  const d = await api({ action: 'dl-save', code: $('dCode').value.trim(), ten: $('dTen').value.trim(), host: $('dHost').value });
-  $('dCode').value = ''; $('dTen').value = '';
+  const body = { action: 'dl-save', code: $('dCode').value.trim(), ten: $('dTen').value.trim(), host: $('dHost').value };
+  if ($('dWord').value.trim()) body.word = $('dWord').value.trim();
+  const d = await api(body);
+  $('dCode').value = ''; $('dTen').value = ''; $('dWord').value = '';
   await loadAll();
-  try { await navigator.clipboard.writeText(d.link); $('dErr').textContent = '✓ Đã chép link: ' + d.link; } catch { $('dErr').textContent = 'Link: ' + d.link; }
+  await showLink(d);
 });
 
 let CFG = '', HNAME = '';

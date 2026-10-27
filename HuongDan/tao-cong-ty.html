@@ -101,8 +101,9 @@ const $ = (id) => document.getElementById(id);
 const show = (id, on) => $(id).classList.toggle('hide', !on);
 const KEY = 'dgp_tao_cong_ty_k';
 
-// Link riêng của đại lý: ?k=... → lưu trên điện thoại, lần sau mở trang không cần link
-let k = new URLSearchParams(location.search).get('k') || '';
+// Link riêng của đại lý: ?k=... hoặc link gọn /tao/<mã>-<chữ bí mật> → lưu trên điện thoại, lần sau mở trang không cần link
+const pathK = (location.pathname.match(/^\/tao\/([^/]+)/) || [])[1] || '';
+let k = new URLSearchParams(location.search).get('k') || decodeURIComponent(pathK);
 try { if (k) localStorage.setItem(KEY, k); else k = localStorage.getItem(KEY) || ''; } catch {}
 
 async function api(body) {
