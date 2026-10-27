@@ -78,6 +78,18 @@ pre{background:var(--paper);border:1px solid var(--line);border-radius:10px;padd
     </div>
 
     <div class="card">
+      <h2>Chuyển khách cũ vào máy chủ</h2>
+      <p class="sub">Bản cài riêng của khách nằm CÙNG máy chủ. Làm lần lượt từng khách: <b>1. Chép dữ liệu</b> (bản cũ vẫn chạy, không bị sửa)
+        → kiểm tra trên máy chủ → <b>2. Trỏ tên miền</b> (chép lại 1 lần ngay trước bước này cho dữ liệu mới nhất) → <b>3.</b> tắt bản cũ. Lỗi thì bấm <b>Trả về bản cũ</b>.</p>
+      <div class="grid" style="grid-template-columns:minmax(150px,240px) auto 1fr">
+        <div><label for="oHost">Máy chủ</label><select id="oHost"></select></div>
+        <div><button class="btn sec" id="oLoad">Tìm bản cài cũ</button></div>
+      </div>
+      <div class="err" id="oErr"></div>
+      <div class="tblw"><table class="tbl" id="olds"></table></div>
+    </div>
+
+    <div class="card">
       <h2>Công ty trên máy chủ</h2>
       <div class="grid" style="grid-template-columns:minmax(150px,240px) auto 1fr">
         <div><label for="tHost">Máy chủ</label><select id="tHost"></select></div>
@@ -119,6 +131,7 @@ async function loadAll() {
   const opts = HOSTS.map((h) => `<option value="${esc(h.name)}">${esc(h.name)}</option>`).join('');
   $('dHost').innerHTML = '<option value="">(máy chủ đầu tiên)</option>' + opts;
   $('tHost').innerHTML = opts;
+  $('oHost').innerHTML = opts;
   $('dls').innerHTML = '<tr><th>Mã</th><th>Tên</th><th>Máy chủ</th><th>Link</th><th></th></tr>' +
     (d.dealers.length ? d.dealers.map((x) => `<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.ten)}</td><td>${esc(x.host || '(đầu tiên)')}</td>
       <td class="mono">${esc(x.link)}</td>
@@ -154,6 +167,48 @@ $('hDl').onclick = () => {
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([CFG.replace(/\n/g, '\r\n')], { type: 'text/plain' }));
   a.download = 'config.txt'; a.click();
+};
+
+async function loadOld() {
+  const host = $('oHost').value;
+  if (!host) return;
+  const d = await api({ action: 'old-installs', host });
+  $('olds').innerHTML = '<tr><th>Khách</th><th>Thư mục</th><th>Trên máy chủ</th><th>Tên miền đang trỏ</th><th></th></tr>' +
+    (d.installs.length ? d.installs.map((x, i) => `<tr><td><b>${esc(x.slug)}</b><div class="muted" style="font-size:12.5px">cổng ${esc(x.port)}</div></td>
+      <td class="mono">${esc(x.dir)}</td>
+      <td>${x.onHost ? '<span class="tag on">Đã chép</span>' : '<span class="muted">chưa</span>'}</td>
+      <td>${x.dnsOnHost ? '<span class="tag on">Máy chủ</span>' : (x.dns ? 'Bản cũ' : '<span class="muted">không có</span>')}</td>
+      <td class="act">${x.slugOk ? `<button class="btn sm sec" onclick="imp(${i}, this)">${x.onHost ? 'Chép lại' : '1. Chép dữ liệu'}</button>
+        ${x.onHost && !x.dnsOnHost ? `<button class="btn sm" onclick="dnsTo('dns-to-host','${esc(x.slug)}', this)">2. Trỏ tên miền</button>` : ''}
+        ${x.dnsOnHost ? `<button class="btn sm sec" onclick="dnsTo('dns-to-old','${esc(x.slug)}', this)">Trả về bản cũ</button>` : ''}`
+        : '<span class="muted">config.txt thiếu CUSTOMER</span>'}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">Không thấy bản cài cũ nào cạnh máy chủ.</td></tr>');
+  OLD = d.installs;
+}
+let OLD = [];
+$('oLoad').onclick = () => busy($('oLoad'), 'oErr', loadOld);
+window.imp = (i, btn) => {
+  const x = OLD[i];
+  if (x.onHost && !confirm(`Chép lại "${x.slug}"? Dữ liệu của công ty này TRÊN MÁY CHỦ sẽ bị thay bằng dữ liệu mới nhất của bản cũ.`)) return;
+  busy(btn, 'oErr', async () => {
+    const r = await api({ action: 'import-old', host: $('oHost').value, dir: x.dir, force: x.onHost });
+    await loadOld();
+    $('oErr').textContent = `✓ Đã chép "${r.name}" (${r.employees} NV). Bản quyền: ${r.activated ? (r.exp ? 'tới ' + vn(r.exp) : 'vĩnh viễn') : 'CHƯA hợp lệ — bấm Gia hạn ở bảng Công ty'}.`;
+  });
+};
+window.dnsTo = (action, slug, btn) => {
+  const msg = action === 'dns-to-host'
+    ? `Trỏ ${slug}.${'maychamcongcloud.com'} về máy chủ?
+Máy chấm công + người dùng sẽ vào máy chủ. Nên "Chép lại" ngay trước bước này.`
+    : `Trả ${slug} về bản cài cũ? (bản cũ phải còn đang chạy)`;
+  if (!confirm(msg)) return;
+  busy(btn, 'oErr', async () => {
+    await api({ action, host: $('oHost').value, slug });
+    await loadOld();
+    $('oErr').textContent = action === 'dns-to-host'
+      ? `✓ ${slug} đã chạy trên máy chủ. Bước 3: tắt bản cũ (cửa sổ/dịch vụ của ${slug}) và tắt tự bật của nó.`
+      : `✓ ${slug} đã trả về bản cũ.`;
+  });
 };
 
 let TENANTS = [];

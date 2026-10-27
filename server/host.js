@@ -4,8 +4,9 @@
 // Mỗi công ty 1 thư mục  data/tenants/<mã>/  có cấu trúc Y HỆT 1 bản cài (data/digiplus.db, data/license.key,
 // data/backups, uploads/…) + tenant.json (tên, cấu hình). Nhờ vậy file "Sao lưu TOÀN BỘ (.zip)" của bản cài
 // riêng phục hồi thẳng vào máy chủ được (chuyển khách cũ vào), và ngược lại.
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync, rmSync, cpSync, copyFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { randomInt, timingSafeEqual } from 'node:crypto';
 import { createServer as createHttp } from 'node:http';
 import express from 'express';
@@ -100,6 +101,79 @@ export function createTenant(opts = {}) {
     db.prepare("UPDATE employees SET password_hash=? WHERE username='admin'").run(hashPassword(pass));
   });
   return { slug, name, admin_user: 'admin', admin_pass: pass, machine_id: runAsTenant(t, () => licenseState().machineIdFmt) };
+}
+
+/* ------------------------- CHUYỂN KHÁCH CŨ (bản cài riêng trên CÙNG máy) VÀO MÁY CHỦ ------------------------- */
+function readConfigTxt(f) {
+  try {
+    const out = {};
+    for (const line of readFileSync(f, 'utf8').split(/\r?\n/)) { const i = line.indexOf('='); if (i > 0) out[line.slice(0, i).trim()] = line.slice(i + 1).trim(); }
+    return out;
+  } catch { return null; }
+}
+const oldSlug = (cfg) => String(cfg.CUSTOMER || '').trim().toLowerCase();
+
+// Bản cài 1 công ty nằm cạnh máy chủ (cùng thư mục cha; Linux: /opt/digiplus/*) — để chuyển vào máy chủ
+export function findOldInstalls() {
+  const out = [], seen = new Set();
+  const bases = process.env.OLD_INSTALLS_DIR ? [process.env.OLD_INSTALLS_DIR] : [dirname(ROOT), '/opt/digiplus'];
+  for (const base of bases) {
+    let names = [];
+    try { names = readdirSync(base); } catch { continue; }
+    for (const n of names) {
+      const dir = join(base, n);
+      if (dir === ROOT || seen.has(dir)) continue;
+      seen.add(dir);
+      const cfg = readConfigTxt(join(dir, 'config.txt'));
+      if (!cfg || cfg.MULTI_TENANT === '1' || !existsSync(join(dir, 'data', 'digiplus.db'))) continue;
+      const slug = oldSlug(cfg);
+      out.push({ dir, slug, port: Number(cfg.PORT) || null, onHost: !!tenantBySlug(slug), slugOk: SLUG_RE.test(slug) });
+    }
+  }
+  return out.sort((a, b) => a.slug.localeCompare(b.slug));
+}
+
+// Chép dữ liệu 1 bản cài cũ vào công ty <mã> trên máy chủ: CSDL (ảnh chụp nhất quán dù bản cũ đang chạy),
+// ảnh/logo, giấy tờ nhân sự, bản quyền, lựa chọn máy/điện thoại. Bản cũ KHÔNG bị sửa gì.
+// Công ty đã có trên máy chủ → chỉ ghi đè khi force (chép lại lần 2 trước khi trỏ tên miền).
+export async function importOldInstall({ dir, slug, force } = {}) {
+  dir = String(dir || '');
+  const cfg = readConfigTxt(join(dir, 'config.txt'));
+  const src = join(dir, 'data', 'digiplus.db');
+  if (!cfg || !existsSync(src)) throw Object.assign(new Error('Không thấy bản cài ở thư mục này (thiếu config.txt hoặc data/digiplus.db)'), { status: 400 });
+  if (cfg.MULTI_TENANT === '1') throw Object.assign(new Error('Thư mục này là máy chủ nhiều công ty, không phải bản cài 1 công ty'), { status: 400 });
+  slug = String(slug || oldSlug(cfg)).toLowerCase();
+  if (!SLUG_RE.test(slug) || RESERVED.has(slug) || slug.startsWith('ctl-')) throw Object.assign(new Error(`Mã công ty "${slug}" không hợp lệ`), { status: 400 });
+  let t = tenantBySlug(slug);
+  if (t && !force) throw Object.assign(new Error(`Công ty "${slug}" đã có trên máy chủ — chọn "chép lại" để ghi đè bằng dữ liệu mới nhất của bản cũ`), { status: 409 });
+
+  // Ảnh chụp CSDL nhất quán (bản cũ vẫn đang ghi được) → file chờ phục hồi của công ty
+  const root = join(TENANTS_DIR, slug);
+  mkdirSync(join(root, 'data'), { recursive: true });
+  const pending = join(root, 'data', 'digiplus.db.restore');
+  rmSync(pending, { force: true });
+  const snap = new DatabaseSync(src, { readOnly: true });
+  try { snap.exec(`VACUUM INTO '${pending.replace(/'/g, "''")}'`); } finally { snap.close(); }
+
+  let name = slug;
+  try { const d = new DatabaseSync(pending, { readOnly: true }); name = d.prepare("SELECT value FROM settings WHERE key='company_name'").get()?.value || slug; d.close(); } catch {}
+  const env = {};
+  for (const k of ['USE_DEVICE', 'USE_PHONE']) if (['0', '1'].includes(cfg[k])) env[k] = cfg[k];
+
+  if (t) { await stopHeavyWorkers(); try { t.db?.close(); } catch {} t.db = null; }
+  // Ảnh/logo + giấy tờ nhân sự + bản quyền (bản quyền vẫn hợp lệ nếu bản cũ chạy CÙNG máy với mã khách = <mã>)
+  for (const [from, to] of [[join(dir, 'uploads'), join(root, 'uploads')], [join(dir, 'data', 'hr-files'), join(root, 'data', 'hr-files')]]) {
+    if (!existsSync(from)) continue;
+    rmSync(to, { recursive: true, force: true });
+    cpSync(from, to, { recursive: true });
+  }
+  if (existsSync(join(dir, 'data', 'license.key'))) copyFileSync(join(dir, 'data', 'license.key'), join(root, 'data', 'license.key'));
+  const meta = readMeta(slug) || { created: new Date().toISOString() };
+  Object.assign(meta, { name, env, migratedFrom: dir, migratedAt: new Date().toISOString() });
+  writeMeta(slug, meta);
+  if (t) { Object.assign(t, { name, env: { ...env } }); bootTenant(t); }
+  else t = bootTenant(makeTenant(slug, meta));
+  return tenantInfo(t);
 }
 
 export function setTenantDisabled(slug, disabled) {
@@ -215,6 +289,14 @@ export function hostRouter() {
     if (!v.valid) return res.status(400).json({ error: v.reason });
     runAsTenant(t, () => saveLicenseKey(key));
     res.json({ ok: true, ...tenantInfo(t) });
+  });
+  // Chuyển khách cũ trên CÙNG máy: danh sách bản cài cũ + chép dữ liệu vào máy chủ
+  r.get('/_host/old-installs', (req, res) => res.json({ installs: findOldInstalls() }));
+  r.post('/_host/import-old', async (req, res) => {
+    const want = findOldInstalls().find((x) => x.dir === String(req.body?.dir || ''));
+    if (!want) return res.status(400).json({ error: 'Chỉ chép được từ bản cài cũ nằm trên máy chủ này (xem danh sách)' });
+    try { res.json({ ok: true, ...(await importOldInstall({ dir: want.dir, slug: req.body?.slug, force: !!req.body?.force })) }); }
+    catch (e) { res.status(e.status || 500).json({ error: e.message }); }
   });
   r.post('/_host/tenants/:slug/disable', (req, res) => res.json({ ok: setTenantDisabled(req.params.slug, true) }));
   r.post('/_host/tenants/:slug/enable', (req, res) => res.json({ ok: setTenantDisabled(req.params.slug, false) }));

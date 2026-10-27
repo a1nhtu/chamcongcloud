@@ -147,6 +147,7 @@ async function listCustomers(token, accountId, zoneId, zoneName) {
     const fqdn = `${slug}.${zoneName}`;
     const rec = byName.get(fqdn);
     const meta = parseComment(rec && rec.comment);
+    if (meta.mode === "host") continue;   // đã chuyển vào máy chủ nhiều công ty (tunnel cũ chỉ còn để trả về)
     let port = parseInt(meta.port || "", 10) || null;
     if (!port && backfill < 15) {
       backfill++;
@@ -628,6 +629,7 @@ async function handleTaoCongTy(request, env) {
 // Trang nội bộ "Máy chủ nhiều công ty" (/may-chu): mật khẩu cấp domain. b.action:
 //   hosts | host-config {name,port} | tenants {host} | disable/enable {host,slug} | renew {host,slug,exp,max}
 //   dl-save {code,ten,host} | dl-renew {code} | dl-lock {code}
+//   old-installs {host} | import-old {host,dir,force} | dns-to-host {host,slug} | dns-to-old {slug}
 async function handleMayChu(request, env) {
   const { b, res } = await readProvBody(request, env);
   if (res) return res;
@@ -696,6 +698,43 @@ async function handleMayChu(request, env) {
       const t = await hostCall(env, zoneName, host, "GET", `/tenants/${slug}`);
       const key = await signTenantLicense(env, t.name || slug, t.machine_id, exp, b.max);
       return jsonRes(await hostCall(env, zoneName, host, "POST", `/tenants/${slug}/license`, { key }));
+    }
+
+    // CHUYỂN KHÁCH CŨ (bản cài riêng trên cùng VPS) vào máy chủ: 1) xem danh sách 2) chép dữ liệu 3) trỏ tên miền
+    //   (trả về: dns-to-old trỏ lại tunnel cũ "digiplus-<mã>")
+    if (a === "old-installs") {
+      if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
+      const d = await hostCall(env, zoneName, host, "GET", "/old-installs");
+      const cnames = await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&per_page=1000`);
+      const byName = new Map((cnames || []).map((r) => [r.name, parseComment(r.comment)]));
+      for (const x of d.installs || []) { const m = byName.get(`${x.slug}.${zoneName}`); x.dnsOnHost = !!(m && m.mode === "host" && m.host === host); x.dns = !!m; }
+      return jsonRes({ ok: true, installs: d.installs || [] });
+    }
+    if (a === "import-old") {
+      if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
+      return jsonRes(await hostCall(env, zoneName, host, "POST", "/import-old", { dir: b.dir, force: !!b.force }));
+    }
+    if (a === "dns-to-host" || a === "dns-to-old") {
+      if (!slugOkProv(slug)) return jsonRes({ error: "Thiếu mã công ty" }, 400);
+      const fqdn = `${slug}.${zoneName}`;
+      const cur = (await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&name=${encodeURIComponent(fqdn)}`))[0];
+      const old = parseComment(cur && cur.comment);
+      const tunnels = await allTunnels(token, accountId);
+      if (a === "dns-to-host") {
+        if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
+        const h = hostsOf(tunnels).find((x) => x.name === host);
+        if (!h) return jsonRes({ error: `Không có máy chủ "${host}"` }, 404);
+        const t = await hostCall(env, zoneName, host, "GET", `/tenants/${slug}`);   // phải chép dữ liệu xong mới trỏ
+        const rec = { type: "CNAME", name: fqdn, content: `${h.tunnelId}.cfargotunnel.com`, proxied: true,
+          comment: `${DNS_TAG} host=${host} mode=host dev=${old.dev || "1"} phone=${old.phone || "1"} by=chuyen d=${vnDate()}${old.port ? " old=" + old.port : ""}` };
+        await upsertDns(token, zoneId, rec);
+        return jsonRes({ ok: true, slug, domain: `https://${fqdn}`, name: t.name, activated: t.activated });
+      }
+      const ot = tunnels.find((x) => x.name === `digiplus-${slug}`);
+      if (!ot) return jsonRes({ error: `Không còn tunnel cũ "digiplus-${slug}" để trả về` }, 404);
+      await upsertDns(token, zoneId, { type: "CNAME", name: fqdn, content: `${ot.id}.cfargotunnel.com`, proxied: true,
+        comment: `${DNS_TAG} port=${old.old || ""} mode=vps dev=${old.dev || "1"} phone=${old.phone || "1"}` });
+      return jsonRes({ ok: true, slug, domain: `https://${fqdn}` });
     }
 
     if (a.startsWith("dl-")) {
