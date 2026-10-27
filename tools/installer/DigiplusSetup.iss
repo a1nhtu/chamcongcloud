@@ -30,6 +30,7 @@
   #error Không biên dịch được MoPhanMem.cs (cần .NET Framework 4)
 #endif
 #define ApiUrl "https://huongdan.maychamcongcloud.com/api/tao-domain"
+#define InstallCfgUrl "https://huongdan.maychamcongcloud.com/api/cai-config"
 #define ListUrl "https://huongdan.maychamcongcloud.com/api/ds-khach"
 
 [Setup]
@@ -398,7 +399,7 @@ begin
   try
     W := CreateOleObject('WinHttp.WinHttpRequest.5.1');
     W.SetTimeouts(15000, 15000, 30000, 60000);
-    W.Open('POST', '{#ApiUrl}', False);
+    if Kind = FETCH_EXISTING then W.Open('POST', '{#InstallCfgUrl}', False) else W.Open('POST', '{#ApiUrl}', False);
     W.SetRequestHeader('Content-Type', 'application/json');
     W.Send(Body);
     St := W.Status;
@@ -588,31 +589,28 @@ begin
   ModePage := CreateInputOptionPage(wpSelectDir, 'Kiểu cài đặt', 'Chọn cách phần mềm sẽ chạy trên máy này',
     'Chọn một kiểu rồi bấm Tiếp tục.', True, False);
   ModePage.Add('Giữ cấu hình đang có trên máy này (cập nhật / cài lại, giữ nguyên dữ liệu)');
-  ModePage.Add('Bản có tên miền — xem được từ xa qua Internet (nhập tên khách + mật khẩu)');
+  ModePage.Add('Bản có tên miền — xem được từ xa qua Internet (chỉ cần nhập tên miền)');
   ModePage.Add('Bản LAN — chỉ dùng trong mạng nội bộ, không cần tên miền');
 
-  DomainPage := CreateInputQueryPage(ModePage.ID, 'Thông tin khách', 'Bản có tên miền',
-    'Nhập tên khách (viết liền không dấu) và mật khẩu cấp domain. Khách chưa có sẽ được tạo mới. Ô máy chấm công / điện thoại chỉ áp dụng khi tạo khách mới. Máy này cần có Internet.');
-  DomainPage.Add('Tên khách (ví dụ: congtyabc):', False);
-  DomainPage.Add('Mật khẩu cấp domain:', True);
+  DomainPage := CreateInputQueryPage(ModePage.ID, 'Tên miền của khách', 'Bản có tên miền',
+    'Nhập tên miền của khách (phần trước .maychamcongcloud.com). Khách phải được Digiplus tạo tên miền trước. Máy này cần có Internet.');
+  DomainPage.Add('Tên miền (ví dụ: congtyabc):', False);
+  { Ẩn — bản tên miền lấy máy chấm công / điện thoại / cổng theo cấu hình khách đã tạo trên máy chủ }
   ChkDevice := TNewCheckBox.Create(DomainPage);
   ChkDevice.Parent := DomainPage.Surface;
-  ChkDevice.Top := DomainPage.Edits[1].Top + DomainPage.Edits[1].Height + ScaleY(18);
+  ChkDevice.Top := DomainPage.Edits[0].Top + DomainPage.Edits[0].Height + ScaleY(18);
   ChkDevice.Width := DomainPage.SurfaceWidth; ChkDevice.Height := ScaleY(20);
-  ChkDevice.Caption := 'Khách dùng máy chấm công (vân tay / khuôn mặt)';
-  ChkDevice.Checked := True;
+  ChkDevice.Checked := True; ChkDevice.Visible := False;
   ChkPhone := TNewCheckBox.Create(DomainPage);
   ChkPhone.Parent := DomainPage.Surface;
   ChkPhone.Top := ChkDevice.Top + ScaleY(24);
   ChkPhone.Width := DomainPage.SurfaceWidth; ChkPhone.Height := ScaleY(20);
-  ChkPhone.Caption := 'Khách chấm công bằng điện thoại (chụp ảnh + định vị)';
-  ChkPhone.Checked := True;
+  ChkPhone.Checked := True; ChkPhone.Visible := False;
   ChkVps := TNewCheckBox.Create(DomainPage);
   ChkVps.Parent := DomainPage.Surface;
   ChkVps.Top := ChkPhone.Top + ScaleY(34);
   ChkVps.Width := DomainPage.SurfaceWidth; ChkVps.Height := ScaleY(20);
-  ChkVps.Caption := 'Đang cài trên VPS nhiều khách của Digiplus (cài ở máy khách thì BỎ tích)';
-  ChkVps.Checked := OtherInstCount > 0;   { máy đã có bản Digiplus khác → nhiều khả năng là VPS }
+  ChkVps.Checked := False; ChkVps.Visible := False;
 
   PortPage := CreateInputQueryPage(DomainPage.ID, 'Cổng phần mềm', 'Chọn cổng cho phần mềm trên máy này',
     'Phần mềm chạy tại http://localhost:<cổng>/admin. Mỗi bản Digiplus trên cùng một máy cần một cổng riêng. Không rõ thì bấm "Tự chọn cổng trống".');
@@ -677,13 +675,13 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   if PageID = DomainPage.ID then Result := ModePage.SelectedValueIndex <> MODE_DOMAIN;
-  if PageID = PortPage.ID then Result := ModePage.SelectedValueIndex = MODE_KEEP;
+  if PageID = PortPage.ID then Result := (ModePage.SelectedValueIndex = MODE_KEEP) or (ModePage.SelectedValueIndex = MODE_DOMAIN);
   { cài im lặng: lựa chọn lấy từ tham số dòng lệnh (SilentSetup), không chạy các trang hỏi }
   if WizardSilent and ((PageID = DomainPage.ID) or (PageID = PortPage.ID)) then Result := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
-var Cfg, Err, Slug, Pass, P, Why, Alt: String; NotFound: Boolean; Kind: Integer;
+var Cfg, Err, Slug, P, Why, Alt: String; NotFound: Boolean;
 begin
   Result := True;
   if WizardSilent then Exit;
@@ -697,35 +695,26 @@ begin
   else if CurPageID = DomainPage.ID then begin
     Slug := Lowercase(Trim(DomainPage.Values[0]));
     if not ValidSlug(Slug) then begin
-      MsgBox('Tên khách chỉ gồm chữ thường, số, gạch ngang (ví dụ: congtyabc).', mbError, MB_OK); Result := False; Exit;
+      MsgBox('Tên miền chỉ gồm chữ thường, số, gạch ngang (ví dụ: congtyabc).', mbError, MB_OK); Result := False; Exit;
     end;
-    if Trim(DomainPage.Values[1]) = '' then begin
-      MsgBox('Nhập mật khẩu cấp domain.', mbError, MB_OK); Result := False; Exit;
-    end;
-    if not ChkDevice.Checked and not ChkPhone.Checked then begin
-      MsgBox('Chọn ít nhất một hình thức chấm công (máy hoặc điện thoại).', mbError, MB_OK); Result := False; Exit;
-    end;
-    Pass := Trim(DomainPage.Values[1]);
-    UseVps := ChkVps.Checked;
+    UseVps := False;
     WizardForm.NextButton.Enabled := False;
     try
-      { 0) VPS nhiều khách: lấy danh sách cổng đã cấp cho khách VPS khác để trang sau né }
-      if UseVps and not FetchVpsPorts(Slug, Pass, Err) then begin
-        if Pos('Sai mật khẩu', Err) > 0 then begin MsgBox(Err, mbError, MB_OK); Result := False; Exit; end;
-        if MsgBox('Không lấy được danh sách cổng của các khách VPS: ' + Err + #13#10 + #13#10 +
-                  'Vẫn tiếp tục (chỉ kiểm tra cổng trên máy này)?', mbConfirmation, MB_YESNO) <> IDYES then begin Result := False; Exit; end;
-        VpsList := #10;
-      end;
-      { 1) khách đã có → lấy cấu hình cũ (giữ cổng + lựa chọn cũ); trang sau cho đổi cổng nếu bị trùng }
-      if FetchConfig(Slug, Pass, FETCH_EXISTING, '', True, True, Cfg, Err, NotFound) then begin
+      { Đại lý tự cài: chỉ LẤY cấu hình của khách đã được Digiplus tạo tên miền (không cần mật khẩu, không tạo mới) }
+      if FetchConfig(Slug, '', FETCH_EXISTING, '', True, True, Cfg, Err, NotFound) then begin
         DomainIsNew := False; DomainCfg := Cfg; DomainPort := CfgVal(Cfg, 'PORT');
+        ListenCache := ListenPorts;
+        Why := PortProblem(DomainPort, ListenCache);
+        if Why <> '' then begin
+          MsgBox('Cổng ' + DomainPort + ' mà tên miền này dùng ' + Why + ' trên máy này.' + #13#10 + #13#10 +
+                 'Tắt chương trình đang chiếm cổng đó rồi cài lại, hoặc liên hệ Digiplus đổi cổng cho khách.', mbError, MB_OK);
+          Result := False;
+        end else NewConfig := DomainCfg;
       end
       else if NotFound then begin
-        { 2) chưa có → hỏi xác nhận (tránh gõ nhầm tên thành tạo tên miền thừa); tạo thật ở trang chọn cổng }
-        if MsgBox('Chưa có khách "' + Slug + '".' + #13#10 + #13#10 + 'Tạo MỚI tên miền ' + Slug + '.maychamcongcloud.com cho khách này?' + #13#10 +
-                  '(Nếu khách đã có mà hiện thông báo này thì có thể đã gõ sai tên — bấm Không để sửa.)', mbConfirmation, MB_YESNO) = IDYES then begin
-          DomainIsNew := True; DomainCfg := ''; DomainPort := '';
-        end else Result := False;
+        MsgBox('Chưa có tên miền "' + Slug + '.maychamcongcloud.com". Liên hệ Digiplus tạo tên miền cho khách trước rồi cài lại.' + #13#10 +
+               '(Nếu đã có mà vẫn báo thì có thể gõ sai tên — kiểm tra lại.)', mbError, MB_OK);
+        Result := False;
       end
       else begin MsgBox(Err, mbError, MB_OK); Result := False; end;
     finally
@@ -748,30 +737,8 @@ begin
       end else begin ShowPortStatus; Result := False; Exit; end;
     end;
 
-    if ModePage.SelectedValueIndex = MODE_LAN then begin NewConfig := LanConfig(P); Exit; end;
-
-    { bản tên miền }
-    Slug := Lowercase(Trim(DomainPage.Values[0]));
-    Pass := Trim(DomainPage.Values[1]);
-    if DomainIsNew then Kind := FETCH_CREATE
-    else if P = DomainPort then begin NewConfig := DomainCfg; Exit; end
-    else begin
-      if MsgBox('Khách "' + Slug + '" đang dùng cổng ' + DomainPort + '. Đổi sang cổng ' + P + '?' + #13#10 + #13#10 +
-                'Tên miền ' + Slug + '.maychamcongcloud.com sẽ trỏ về cổng mới. Nếu phần mềm của khách này còn chạy ở máy khác thì máy đó sẽ không vào được bằng tên miền nữa.',
-                mbConfirmation, MB_YESNO) <> IDYES then begin Result := False; Exit; end;
-      Kind := FETCH_SETPORT;
-    end;
-    WizardForm.NextButton.Enabled := False;
-    try
-      if FetchConfig(Slug, Pass, Kind, P, ChkDevice.Checked, ChkPhone.Checked, Cfg, Err, NotFound) then begin
-        NewConfig := Cfg;
-        { đã tạo / đã đổi trên máy chủ → quay lại trang này thì coi như khách đã có, cổng mới }
-        DomainIsNew := False; DomainCfg := Cfg; DomainPort := P;
-      end
-      else begin MsgBox(Err, mbError, MB_OK); Result := False; end;
-    finally
-      WizardForm.NextButton.Enabled := True;
-    end;
+    { Chỉ còn bản LAN đi qua trang Cổng (bản tên miền dùng cổng cố định của khách, đã bỏ qua trang này) }
+    NewConfig := LanConfig(P);
   end;
 end;
 
@@ -781,7 +748,7 @@ begin
   S := 'Thư mục cài đặt:' + NewLine + Space + WizardDirValue + NewLine + NewLine + 'Kiểu cài đặt:' + NewLine + Space;
   case ModePage.SelectedValueIndex of
     MODE_KEEP: S := S + 'Giữ cấu hình đang có (cổng ' + ReadCfg(OldConfigPath, 'PORT') + ')';
-    MODE_DOMAIN: S := S + 'Bản có tên miền: ' + Lowercase(Trim(DomainPage.Values[0])) + '.maychamcongcloud.com, cổng ' + Trim(PortPage.Values[0]);
+    MODE_DOMAIN: S := S + 'Bản có tên miền: ' + Lowercase(Trim(DomainPage.Values[0])) + '.maychamcongcloud.com, cổng ' + DomainPort;
     MODE_LAN: S := S + 'Bản LAN, cổng ' + Trim(PortPage.Values[0]);
   end;
   Result := S;

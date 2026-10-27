@@ -306,6 +306,35 @@ async function handleProvision(request, env) {
   }
 }
 
+// Setup.exe (link 01 — đại lý tự cài): chỉ ĐỌC cấu hình của khách ĐÃ TẠO bằng tên miền, KHÔNG cần mật khẩu.
+// Khách phải được tạo trước ở trang Tạo khách (bước đó vẫn cần mật khẩu). Chỉ trả config, KHÔNG tạo mới / không ghi DNS / không đổi cổng.
+// Token đường hầm là bí mật nhưng chỉ lộ cho khách đã được tạo (biết đúng tên miền); đây là đánh đổi để đại lý khỏi gõ mật khẩu.
+async function handleInstallConfig(request, env) {
+  if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
+  if (!env.CF_PROVISION_TOKEN) return jsonRes({ error: "Máy chủ chưa cấu hình cấp domain." }, 503);
+  let b;
+  try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
+  const slug = String((b && b.slug) || "").toLowerCase().trim();
+  if (!slugOkProv(slug)) return jsonRes({ error: "Tên miền không hợp lệ (chỉ chữ thường, số, gạch ngang; vd: congtyabc)." }, 400);
+  try {
+    const token = env.CF_PROVISION_TOKEN;
+    const { zoneName, zoneId, accountId } = await zoneAndAccount(token, env);
+    const list = await listCustomers(token, accountId, zoneId, zoneName);
+    const existing = list.find((c) => c.slug === slug);
+    if (!existing) return jsonRes({ error: `Chưa có khách "${slug}". Liên hệ Digiplus tạo tên miền trước rồi cài lại.` }, 404);
+    const tunnelToken = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel/${existing.tunnelId}/token`);
+    const configTxt = `PORT=${existing.port || 8686}
+CUSTOMER=${slug}
+TUNNEL_TOKEN=${tunnelToken}
+USE_DEVICE=${existing.useDevice ? "1" : "0"}
+USE_PHONE=${existing.usePhone ? "1" : "0"}
+`;
+    return new Response(configTxt, { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  } catch (e) {
+    return jsonRes({ error: "Lỗi lấy cấu hình: " + e.message }, 500);
+  }
+}
+
 // Cổng "Nội bộ" (/noibo): kiểm tra mật khẩu trước khi hiện link công cụ. Nhận mật khẩu cấp domain HOẶC cấp license.
 // Chỉ để gom link + đỡ gõ địa chỉ; bảo vệ thật vẫn là mật khẩu riêng của từng công cụ.
 async function handleNoiBo(request, env) {
@@ -415,6 +444,7 @@ export default {
     if (url.pathname === "/api/gen-license") return handleSign(request, env, "license");
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
     if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
+    if (url.pathname === "/api/cai-config") return handleInstallConfig(request, env);   // đại lý tự cài: lấy config bằng tên miền, không mật khẩu
     if (url.pathname === "/api/ds-khach") return handleListCustomers(request, env);
     if (url.pathname === "/api/noibo") return handleNoiBo(request, env);
     if (url.pathname === "/api/base-zip") return handleBaseZip(request, env);
