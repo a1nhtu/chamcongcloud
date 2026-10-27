@@ -215,7 +215,12 @@ async function handleListCustomers(request, env) {
 async function handleProvision(request, env) {
   const { b, res } = await readProvBody(request, env);
   if (res) return res;
+  return provisionCore(b, env);
+}
 
+// Lõi cấp / lấy domain (đã tách khỏi kiểm mật khẩu để install không mật khẩu dùng lại).
+async function provisionCore(b, env) {
+  if (!env.CF_PROVISION_TOKEN) return jsonRes({ error: "Máy chủ chưa cấu hình cấp domain (đặt Secret CF_PROVISION_TOKEN)." }, 503);
   const slug = String(b.slug || "").toLowerCase().trim();
   if (!slugOkProv(slug)) return jsonRes({ error: "Tên công ty không hợp lệ (chỉ chữ thường, số, gạch ngang; vd: congtyabc)." }, 400);
   let mode = b.mode === "vps" ? "vps" : "office";
@@ -306,33 +311,28 @@ async function handleProvision(request, env) {
   }
 }
 
-// Setup.exe (link 01 — đại lý tự cài): chỉ ĐỌC cấu hình của khách ĐÃ TẠO bằng tên miền, KHÔNG cần mật khẩu.
-// Khách phải được tạo trước ở trang Tạo khách (bước đó vẫn cần mật khẩu). Chỉ trả config, KHÔNG tạo mới / không ghi DNS / không đổi cổng.
-// Token đường hầm là bí mật nhưng chỉ lộ cho khách đã được tạo (biết đúng tên miền); đây là đánh đổi để đại lý khỏi gõ mật khẩu.
+// Setup.exe (link 01 — đại lý tự cài): tạo MỚI hoặc lấy cấu hình khách bằng tên miền, KHÔNG cần mật khẩu.
+// Trả config.txt (kèm TUNNEL_TOKEN) đúng như trang Tạo khách, nhưng không bảo vệ bằng mật khẩu — đánh đổi để đại lý tự cài.
+// vpsPorts: chỉ trả các dòng "cổng slug" của khách VPS để Setup né cổng (không lộ toàn bộ danh sách khách).
 async function handleInstallConfig(request, env) {
   if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
   if (!env.CF_PROVISION_TOKEN) return jsonRes({ error: "Máy chủ chưa cấu hình cấp domain." }, 503);
   let b;
   try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
-  const slug = String((b && b.slug) || "").toLowerCase().trim();
-  if (!slugOkProv(slug)) return jsonRes({ error: "Tên miền không hợp lệ (chỉ chữ thường, số, gạch ngang; vd: congtyabc)." }, 400);
-  try {
-    const token = env.CF_PROVISION_TOKEN;
-    const { zoneName, zoneId, accountId } = await zoneAndAccount(token, env);
-    const list = await listCustomers(token, accountId, zoneId, zoneName);
-    const existing = list.find((c) => c.slug === slug);
-    if (!existing) return jsonRes({ error: `Chưa có khách "${slug}". Liên hệ Digiplus tạo tên miền trước rồi cài lại.` }, 404);
-    const tunnelToken = await cfProv(token, "GET", `/accounts/${accountId}/cfd_tunnel/${existing.tunnelId}/token`);
-    const configTxt = `PORT=${existing.port || 8686}
-CUSTOMER=${slug}
-TUNNEL_TOKEN=${tunnelToken}
-USE_DEVICE=${existing.useDevice ? "1" : "0"}
-USE_PHONE=${existing.usePhone ? "1" : "0"}
-`;
-    return new Response(configTxt, { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
-  } catch (e) {
-    return jsonRes({ error: "Lỗi lấy cấu hình: " + e.message }, 500);
+  if (!b) return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400);
+  if (b.vpsPorts) {
+    try {
+      const token = env.CF_PROVISION_TOKEN;
+      const { zoneName, zoneId, accountId } = await zoneAndAccount(token, env);
+      const list = await listCustomers(token, accountId, zoneId, zoneName);
+      const me = String(b.slug || "").toLowerCase().trim();
+      const lines = list.filter((c) => c.port && c.slug !== me && (c.mode === "vps" || !c.mode)).map((c) => `${c.port} ${c.slug}`);
+      return new Response(lines.join("\n"), { status: 200, headers: { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+    } catch (e) {
+      return jsonRes({ error: "Lỗi đọc cổng: " + e.message }, 500);
+    }
   }
+  return provisionCore(b, env);
 }
 
 // Cổng "Nội bộ" (/noibo): kiểm tra mật khẩu trước khi hiện link công cụ. Nhận mật khẩu cấp domain HOẶC cấp license.
