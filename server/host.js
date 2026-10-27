@@ -22,7 +22,7 @@ export const TENANTS_DIR = process.env.TENANTS_DIR || join(ROOT, 'data', 'tenant
 export const HOST_DOMAIN = String(process.env.HOST_DOMAIN || 'maychamcongcloud.com').toLowerCase();
 // Mã công ty = phần đầu tên miền (<mã>.maychamcongcloud.com): chữ thường không dấu, số, gạch ngang
 export const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
-const RESERVED = new Set(['www', 'huongdan', 'app', 'api', 'admin', 'mail', 'ctl', 'host']);
+const RESERVED = new Set(['www', 'huongdan', 'app', 'api', 'admin', 'mail', 'ctl', 'host', 'noibo']);
 
 const metaFile = (slug) => join(TENANTS_DIR, slug, 'tenant.json');
 function readMeta(slug) {
@@ -85,7 +85,7 @@ const newPass = () => Array.from({ length: 8 }, () => PASS_CH[randomInt(PASS_CH.
 // Tạo công ty mới. opts: { slug, name, env:{USE_DEVICE,USE_PHONE}, phone, email }. Trả { slug, name, admin_user, admin_pass, machine_id }.
 export function createTenant(opts = {}) {
   const slug = String(opts.slug || '').trim().toLowerCase();
-  if (!SLUG_RE.test(slug) || RESERVED.has(slug)) throw Object.assign(new Error('Mã công ty không hợp lệ'), { status: 400 });
+  if (!SLUG_RE.test(slug) || RESERVED.has(slug) || slug.startsWith('ctl-')) throw Object.assign(new Error('Mã công ty không hợp lệ'), { status: 400 });
   if (tenantBySlug(slug) || existsSync(metaFile(slug))) throw Object.assign(new Error(`Công ty "${slug}" đã có trên máy chủ`), { status: 409 });
   const name = String(opts.name || slug).trim().slice(0, 120) || slug;
   const env = {};

@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Digiplus — Máy chủ nhiều công ty</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap">
+<style>
+:root{--paper:#FBF4EF;--surface:#fff;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;--brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--ok:#15803D;--shadow-sm:0 4px 14px rgba(80,30,10,.08)}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--paper:#191210;--surface:#241A15;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;--brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--ok:#4ADE80}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.55}
+.top{background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:20px 0}
+.wrap{max-width:960px;margin:0 auto;padding:0 16px}
+.top h1{margin:0;font-size:21px;font-weight:800}.top p{margin:3px 0 0;font-size:13.5px;opacity:.92}
+.top a{color:#fff}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow-sm);padding:18px;margin:16px 0}
+.card h2{margin:0 0 4px;font-size:17px}.sub{color:var(--muted);font-size:13.5px;margin:0 0 12px}
+label{display:block;font-size:12.5px;font-weight:600;color:var(--muted);margin:0 0 4px}
+input,select{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:10px;font-size:15px;background:var(--surface);color:var(--ink);outline:none;font-family:inherit}
+input:focus,select:focus{border-color:var(--brand)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end}
+.btn{background:var(--brand);color:#fff;border:none;border-radius:10px;padding:10px 14px;font-size:14.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap}
+.btn.sec{background:var(--surface);color:var(--brand-ink);border:1px solid var(--line)}
+.btn.sm{padding:5px 9px;font-size:13px;font-weight:600}
+.btn[disabled]{opacity:.6;cursor:default}
+.err{color:var(--brand-2);font-size:13.5px;margin-top:8px;min-height:1em}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tblw{overflow-x:auto}
+.tbl th{text-align:left;color:var(--muted);font-weight:600;font-size:12.5px;border-bottom:1px solid var(--line);padding:6px 8px;white-space:nowrap}
+.tbl td{border-bottom:1px solid var(--line);padding:8px;vertical-align:top}
+.tbl td.act{white-space:nowrap}
+.tag{display:inline-block;padding:1px 8px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid var(--line)}
+.tag.on{color:var(--ok);border-color:currentColor}.tag.off{color:var(--brand-2);border-color:currentColor}
+.mono{font-family:ui-monospace,Consolas,monospace;font-size:13px;word-break:break-all}
+pre{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:10px;white-space:pre-wrap;word-break:break-all;font-size:12.5px;margin:10px 0 0}
+.hide{display:none}
+.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="top"><div class="wrap"><h1>🖥️ Máy chủ nhiều công ty</h1><p>1 VPS chạy cho nhiều công ty · link tạo công ty cho đại lý · <a href="/noibo">← Nội bộ</a></p></div></div>
+<div class="wrap">
+  <div class="card" id="gate">
+    <label for="pass">Mật khẩu cấp domain</label>
+    <div class="grid" style="grid-template-columns:1fr auto"><input id="pass" type="password" autocomplete="current-password"><button class="btn" id="goPass">Mở</button></div>
+    <div class="err" id="gateErr"></div>
+  </div>
+
+  <div id="main" class="hide">
+    <div class="card">
+      <h2>Máy chủ</h2>
+      <p class="sub">Mỗi máy chủ chạy 1 phần mềm + 1 đường hầm cho mọi công ty của nó.</p>
+      <div class="tblw"><table class="tbl" id="hosts"></table></div>
+      <div class="grid" style="margin-top:14px">
+        <div><label for="hName">Tên máy chủ</label><input id="hName" placeholder="vps1"></div>
+        <div><label for="hPort">Cổng phần mềm</label><input id="hPort" type="number" value="8600"></div>
+        <div><button class="btn sec" id="hCfg">Thêm / lấy cấu hình máy chủ</button></div>
+      </div>
+      <div class="err" id="hErr"></div>
+      <div class="hide" id="hOut"><pre id="hTxt"></pre><button class="btn sm sec" id="hDl" style="margin-top:8px">Tải config.txt</button>
+        <span class="muted" style="font-size:13px">Chép vào thư mục cài máy chủ. Giữ kín: có mã điều khiển máy chủ.</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Link tạo công ty (đại lý)</h2>
+      <p class="sub">Gửi link cho đại lý/kỹ thuật: mở trên điện thoại, điền tên công ty là xong (dùng thử 30 ngày). Khoá = link chết ngay.</p>
+      <div class="tblw"><table class="tbl" id="dls"></table></div>
+      <div class="grid" style="margin-top:14px">
+        <div><label for="dCode">Mã (không dấu)</label><input id="dCode" placeholder="skytech"></div>
+        <div><label for="dTen">Tên hiện trên trang</label><input id="dTen" placeholder="Skytech"></div>
+        <div><label for="dHost">Tạo trên máy chủ</label><select id="dHost"></select></div>
+        <div><button class="btn sec" id="dSave">Thêm / sửa link</button></div>
+      </div>
+      <div class="err" id="dErr"></div>
+    </div>
+
+    <div class="card">
+      <h2>Công ty trên máy chủ</h2>
+      <div class="grid" style="grid-template-columns:minmax(150px,240px) auto 1fr">
+        <div><label for="tHost">Máy chủ</label><select id="tHost"></select></div>
+        <div><button class="btn sec" id="tLoad">Xem</button></div>
+      </div>
+      <div class="err" id="tErr"></div>
+      <div class="tblw"><table class="tbl" id="tens"></table></div>
+    </div>
+  </div>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const vn = (d) => d ? String(d).slice(0, 10).split('-').reverse().join('/') : '';
+let PASS = '';
+try { PASS = sessionStorage.getItem('dp_dom_pass') || ''; } catch {}
+
+async function api(body) {
+  const r = await fetch('/api/may-chu', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass: PASS, ...body }) });
+  let d = {}; try { d = await r.json(); } catch {}
+  if (!r.ok) throw new Error(d.error || ('Lỗi ' + r.status));
+  return d;
+}
+async function busy(btn, errEl, fn) {
+  btn.disabled = true; $(errEl).textContent = '';
+  try { await fn(); } catch (e) { $(errEl).textContent = e.message; }
+  btn.disabled = false;
+}
+
+let HOSTS = [];
+async function loadAll() {
+  const d = await api({ action: 'hosts' });
+  HOSTS = d.hosts;
+  $('hosts').innerHTML = '<tr><th>Máy chủ</th><th>Trạng thái</th><th>Phiên bản</th><th>Công ty</th><th>RAM</th></tr>' +
+    (HOSTS.length ? HOSTS.map((h) => `<tr><td><b>${esc(h.name)}</b><div class="mono muted">ctl-${esc(h.name)}.${esc(d.zone)}</div></td>
+      <td>${h.online ? '<span class="tag on">Đang chạy</span>' : `<span class="tag off">Không trả lời</span><div class="muted" style="font-size:12.5px">${esc(h.error)}</div>`}</td>
+      <td>${esc(h.version || '')}</td><td>${h.tenants ?? ''}</td><td>${h.rss_mb ? h.rss_mb + ' MB' : ''}</td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">Chưa có máy chủ nào — điền tên bên dưới để tạo.</td></tr>');
+  const opts = HOSTS.map((h) => `<option value="${esc(h.name)}">${esc(h.name)}</option>`).join('');
+  $('dHost').innerHTML = '<option value="">(máy chủ đầu tiên)</option>' + opts;
+  $('tHost').innerHTML = opts;
+  $('dls').innerHTML = '<tr><th>Mã</th><th>Tên</th><th>Máy chủ</th><th>Link</th><th></th></tr>' +
+    (d.dealers.length ? d.dealers.map((x) => `<tr><td><b>${esc(x.code)}</b></td><td>${esc(x.ten)}</td><td>${esc(x.host || '(đầu tiên)')}</td>
+      <td class="mono">${esc(x.link)}</td>
+      <td class="act"><button class="btn sm sec" onclick="copy('${esc(x.link)}', this)">Chép</button>
+        <button class="btn sm sec" onclick="dl('dl-renew','${esc(x.code)}', this)" title="Link cũ hết hiệu lực">Cấp lại</button>
+        <button class="btn sm sec" onclick="dl('dl-lock','${esc(x.code)}', this)">Khoá</button></td></tr>`).join('')
+      : '<tr><td colspan="5" class="muted">Chưa có link nào.</td></tr>');
+  if (HOSTS.length && !$('tens').innerHTML) loadTenants();
+}
+
+window.copy = async (t, btn) => { try { await navigator.clipboard.writeText(t); btn.textContent = '✓'; } catch { prompt('Sao chép:', t); } };
+window.dl = (action, code, btn) => {
+  if (action === 'dl-lock' && !confirm(`Khoá link "${code}"? Đại lý sẽ không tạo công ty được nữa.`)) return;
+  if (action === 'dl-renew' && !confirm(`Cấp link mới cho "${code}"? Link cũ hết hiệu lực.`)) return;
+  busy(btn, 'dErr', async () => { await api({ action, code }); await loadAll(); });
+};
+$('dSave').onclick = () => busy($('dSave'), 'dErr', async () => {
+  const d = await api({ action: 'dl-save', code: $('dCode').value.trim(), ten: $('dTen').value.trim(), host: $('dHost').value });
+  $('dCode').value = ''; $('dTen').value = '';
+  await loadAll();
+  try { await navigator.clipboard.writeText(d.link); $('dErr').textContent = '✓ Đã chép link: ' + d.link; } catch { $('dErr').textContent = 'Link: ' + d.link; }
+});
+
+let CFG = '';
+$('hCfg').onclick = () => busy($('hCfg'), 'hErr', async () => {
+  const d = await api({ action: 'host-config', name: $('hName').value.trim(), port: $('hPort').value });
+  CFG = d.configTxt;
+  $('hTxt').textContent = CFG.replace(/(HOST_TOKEN|TUNNEL_TOKEN)=(.{6}).*/g, '$1=$2… (đầy đủ trong file tải về)');
+  $('hOut').classList.remove('hide');
+  await loadAll();
+});
+$('hDl').onclick = () => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([CFG.replace(/\n/g, '\r\n')], { type: 'text/plain' }));
+  a.download = 'config.txt'; a.click();
+};
+
+let TENANTS = [];
+async function loadTenants() {
+  const host = $('tHost').value;
+  if (!host) return;
+  const d = await api({ action: 'tenants', host });
+  TENANTS = d.tenants;
+  $('tens').innerHTML = '<tr><th>Công ty</th><th>Địa chỉ</th><th>NV</th><th>Bản quyền</th><th>Tạo</th><th></th></tr>' +
+    (TENANTS.length ? TENANTS.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.disabled ? ' <span class="tag off">Đã khoá</span>' : ''}${t.dns ? '' : ' <span class="tag off">Chưa trỏ tên miền</span>'}</td>
+      <td class="mono"><a href="${esc(t.domain)}/admin" target="_blank" rel="noopener">${esc(t.slug)}</a></td>
+      <td>${t.employees}</td>
+      <td>${t.activated ? (t.exp ? `tới ${vn(t.exp)} <span class="muted">(${t.days_left} ngày)</span>` : 'vĩnh viễn') : `<span class="tag off">Chưa / hết hạn</span>`}</td>
+      <td>${vn(t.created)}<div class="muted" style="font-size:12.5px">${esc(t.by)}</div></td>
+      <td class="act"><button class="btn sm sec" onclick="renew('${esc(t.slug)}', this)">Gia hạn</button>
+        <button class="btn sm sec" onclick="tog('${esc(t.slug)}', ${t.disabled ? 'false' : 'true'}, this)">${t.disabled ? 'Mở khoá' : 'Khoá'}</button></td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">Chưa có công ty nào.</td></tr>');
+}
+$('tLoad').onclick = () => busy($('tLoad'), 'tErr', loadTenants);
+window.tog = (slug, off, btn) => {
+  if (off && !confirm(`Khoá "${slug}"? Công ty sẽ không vào được phần mềm (dữ liệu giữ nguyên).`)) return;
+  busy(btn, 'tErr', async () => { await api({ action: off ? 'disable' : 'enable', host: $('tHost').value, slug }); await loadTenants(); });
+};
+window.renew = (slug, btn) => {
+  const t = TENANTS.find((x) => x.slug === slug);
+  const next = new Date(Date.now() + 365 * 86400000).toISOString().slice(0, 10);
+  const exp = prompt(`Gia hạn "${t ? t.name : slug}" tới ngày (YYYY-MM-DD).\nĐể trống = vĩnh viễn.`, next);
+  if (exp === null) return;
+  busy(btn, 'tErr', async () => { await api({ action: 'renew', host: $('tHost').value, slug, exp: exp.trim() }); await loadTenants(); });
+};
+
+async function open_() {
+  $('gateErr').textContent = '';
+  try { await loadAll(); $('gate').classList.add('hide'); $('main').classList.remove('hide'); try { sessionStorage.setItem('dp_dom_pass', PASS); } catch {} }
+  catch (e) { $('gateErr').textContent = e.message; $('gate').classList.remove('hide'); }
+}
+$('goPass').onclick = () => { PASS = $('pass').value.trim(); open_(); };
+$('pass').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('goPass').click(); });
+if (PASS) open_();
+</script>
+</body>
+</html>
