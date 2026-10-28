@@ -5,6 +5,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { connect } from 'node:net';
+import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
 import { ingestAttlog, ingestUserData } from './device-sync.js';
@@ -23,13 +24,119 @@ function psExe() {
   return 'powershell.exe';
 }
 
-// Cổng máy có mở không (hỏi nhanh trước, khỏi chờ SDK ~15 giây mới báo lỗi)
-export function tcpProbe(ip, port, ms = 3000) {
+// Gõ cửa 1 cổng TCP, trả rõ kết quả: 'open' | 'refused' (máy bật nhưng từ chối = cổng tắt thật) | 'timeout' (không ai trả lời) | 'unreach'
+export function tcpKnock(ip, port, ms = 3000) {
   return new Promise((ok) => {
     const s = connect({ host: ip, port, timeout: ms });
     const end = (v) => { s.destroy(); ok(v); };
-    s.once('connect', () => end(true)); s.once('timeout', () => end(false)); s.once('error', () => end(false));
+    s.once('connect', () => end('open')); s.once('timeout', () => end('timeout'));
+    s.once('error', (e) => end(e.code === 'ECONNREFUSED' || e.code === 'ECONNRESET' ? 'refused' : /UNREACH/.test(e.code || '') ? 'unreach' : 'timeout'));
   });
+}
+// Cổng máy có mở không (hỏi nhanh trước, khỏi chờ SDK ~15 giây mới báo lỗi)
+export const tcpProbe = (ip, port, ms = 3000) => tcpKnock(ip, port, ms).then((r) => r === 'open');
+
+/* ---------- bắt tay giao thức ZK (không cần SDK) ----------
+ * Làm đúng như SDK lúc kết nối: CMD_CONNECT (1000); máy đáp "cần xác thực" (CMD_ACK_UNAUTH 2005) thì gửi CMD_AUTH (1102) kèm mật khẩu
+ * kết nối đã mã hoá (Comm Key, mặc định 0 — nhiều máy như Ronald Jack 3315 FW 6.60 LUÔN đòi bước này dù không đặt mật khẩu); xong gửi
+ * CMD_EXIT (1001) trả máy ngay. Gói tin + cách mã hoá theo thư viện pyzk (MakeKey của commpro.c): TCP có thêm 8 byte đầu 5050 827D + độ dài.
+ * Trả 'ok' (vào được với mật khẩu này) | 'need_key' (máy không nhận mật khẩu này) | 'refused' (máy đáp lỗi) | 'silent' (kết nối được mà
+ * máy không đáp — máy đang bận với phần mềm khác, hoặc cổng này không phải cổng ZK) | 'closed' (không kết nối được cổng TCP). */
+const ZK = { CONNECT: 1000, EXIT: 1001, AUTH: 1102, ACK_OK: 2000, ACK_UNAUTH: 2005 };
+function zkSum(buf) {
+  let s = 0;
+  for (let i = 0; i + 1 < buf.length; i += 2) { s += buf.readUInt16LE(i); if (s > 65535) s -= 65535; }
+  if (buf.length % 2) s += buf[buf.length - 1];
+  while (s > 65535) s -= 65535;
+  s = ~s; while (s < 0) s += 65535;
+  return s & 0xffff;
+}
+export function zkPacket(cmd, session = 0, reply = 65534, tcp = false, data = Buffer.alloc(0)) {
+  const h = Buffer.concat([Buffer.alloc(8), data]);
+  h.writeUInt16LE(cmd, 0); h.writeUInt16LE(session, 4); h.writeUInt16LE(reply, 6);
+  h.writeUInt16LE(zkSum(h), 2);
+  h.writeUInt16LE((reply + 1) % 65535, 6);   // như pyzk: tổng kiểm tính trước khi tăng số thứ tự
+  if (!tcp) return h;
+  const t = Buffer.alloc(8); t.writeUInt16LE(0x5050, 0); t.writeUInt16LE(0x7d82, 2); t.writeUInt32LE(h.length, 4);
+  return Buffer.concat([t, h]);
+}
+// Mã hoá mật khẩu kết nối cho CMD_AUTH (đảo bit mật khẩu + phiên, trộn chữ "ZKSO", trộn số 50) — y như pyzk make_commkey
+export function zkCommKey(key, session, ticks = 50) {
+  let k = 0;
+  for (let i = 0; i < 32; i++) k = ((k << 1) | ((Number(key) >>> i) & 1)) >>> 0;
+  const b = Buffer.alloc(4); b.writeUInt32LE((k + session) >>> 0, 0);
+  const x = [b[0] ^ 0x5a, b[1] ^ 0x4b, b[2] ^ 0x53, b[3] ^ 0x4f];   // 'Z' 'K' 'S' 'O'
+  const y = [x[2], x[3], x[0], x[1]], t = ticks & 0xff;              // đổi chỗ 2 nửa 16 bit
+  return Buffer.from([y[0] ^ t, y[1] ^ t, t, y[3] ^ t]);
+}
+// Đọc đầu gói máy trả về → { cmd, session, reply, size (độ dài cả gói) } (null = chưa đủ / không phải gói ZK)
+export function zkReply(buf, tcp = false) {
+  const o = tcp ? 8 : 0;
+  if (buf.length < o + 8 || (tcp && (buf.readUInt16LE(0) !== 0x5050 || buf.readUInt16LE(2) !== 0x7d82))) return null;
+  const size = tcp ? 8 + buf.readUInt32LE(4) : buf.length;
+  if (buf.length < size) return null;
+  return { cmd: buf.readUInt16LE(o), session: buf.readUInt16LE(o + 4), reply: buf.readUInt16LE(o + 6), size };
+}
+export function zkHello(ip, port = 4370, { udp = false, ms = 2500, key = 0 } = {}) {
+  return new Promise((ok) => {
+    let done = false, buf = Buffer.alloc(0), timer = null, close = () => {}, send = () => {}, authed = false;
+    const end = (v) => { if (done) return; done = true; clearTimeout(timer); close(); ok(v); };
+    timer = setTimeout(() => end('silent'), ms);
+    // máy đáp 1 gói: vào được → trả máy; đòi xác thực (lần đầu) → gửi mật khẩu; còn lại → kết luận
+    const onReply = (r) => {
+      if (r.cmd === ZK.ACK_UNAUTH && !authed) { authed = true; return send(zkPacket(ZK.AUTH, r.session, r.reply, !udp, zkCommKey(key, r.session))); }
+      try { send(zkPacket(ZK.EXIT, r.session, r.reply, !udp)); } catch {}
+      end(r.cmd === ZK.ACK_OK ? 'ok' : r.cmd === ZK.ACK_UNAUTH ? 'need_key' : 'refused');
+    };
+    if (udp) {
+      const u = dgram.createSocket('udp4');
+      close = () => setTimeout(() => { try { u.close(); } catch {} }, 50);
+      send = (pk) => u.send(pk, port, ip, (e) => { if (e) end('silent'); });
+      u.on('error', () => end('silent'));
+      u.on('message', (m) => { const r = zkReply(m); if (r) onReply(r); });
+      send(zkPacket(ZK.CONNECT));
+      return;
+    }
+    const s = connect({ host: ip, port });
+    let joined = false;
+    close = () => setTimeout(() => s.destroy(), 50);
+    send = (pk) => s.write(pk);
+    s.once('connect', () => { joined = true; send(zkPacket(ZK.CONNECT, 0, 65534, true)); });
+    s.on('data', (d) => {
+      buf = Buffer.concat([buf, d]);
+      for (let r; !done && (r = zkReply(buf, true));) { buf = buf.subarray(r.size); onReply(r); }
+    });
+    s.once('error', () => end(joined ? 'silent' : 'closed'));
+    s.once('close', () => end('silent'));
+  });
+}
+
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const retryMs = () => (process.env.ZK_RETRY_MS != null ? +process.env.ZK_RETRY_MS : 2500);   // ZK_RETRY_MS: chỉ dùng khi kiểm thử
+const connErr = (e) => /^CONNECT/.test(e.code || '');
+// Chạy 1 thao tác SDK (VD đọc / ghi cài đặt Cloud Server) mà KHÔNG kết luận vội: bắt tay ZK trước để biết máy có nhận mật khẩu kết nối /
+// đang bận không, kết nối hỏng thì chờ chút thử lại 1 lần, vẫn hỏng thì báo ĐÚNG nguyên nhân (mã lỗi riêng cho giao diện).
+// c = { tcp_ip, tcp_port, tcp_key, udp (máy chỉ trả lời UDP) }.
+export async function zkCareful(c, fn) {
+  const keyGiven = Number(c.tcp_key) > 0, where = `${c.tcp_ip}:${c.tcp_port}${c.udp ? ' (UDP)' : ''}`;
+  const hi = () => zkHello(c.tcp_ip, c.tcp_port, { udp: !!c.udp, key: Number(c.tcp_key) || 0 });
+  let hello = await hi();
+  if (hello === 'silent') { await sleep(retryMs()); hello = await hi(); }
+  const explain = (e) => {
+    if (hello === 'need_key') return keyGiven
+      ? Object.assign(new Error(`Sai mật khẩu kết nối (Comm Key): máy ${where} không nhận mật khẩu vừa nhập. Xem trên máy: Menu → Comm (Truyền thông) → PC Connection → Comm Key.`), { code: 'WRONGKEY' })
+      : Object.assign(new Error(`Máy ${where} có đặt mật khẩu kết nối (Comm Key) — nhập đúng mật khẩu để kết nối (xem trên máy: Menu → Comm → PC Connection → Comm Key).`), { code: 'NEEDKEY' });
+    if (hello === 'silent') return Object.assign(new Error(`Máy ${where} nhận kết nối nhưng không trả lời — thường do máy đang kết nối với phần mềm khác (Wise Eye, Ronald Jack…) hoặc đang mở menu trên màn hình máy. Tắt phần mềm kia / thoát menu trên máy rồi bấm Tìm lại.`), { code: 'BUSY' });
+    if (hello === 'closed') return Object.assign(new Error(`Không tới được cổng ${where} — máy vừa tắt, đổi IP hoặc mất mạng. Bấm Tìm lại.`), { code: 'UNREACH' });
+    if (hello === 'ok') e.message += ' (Máy vẫn trả lời giao thức chấm công bình thường — thử lại sau ít phút; vẫn lỗi thì chạy lại bộ cài bằng quyền Administrator để đăng ký lại SDK.)';
+    return e;
+  };
+  // bắt tay chỉ để GIẢI THÍCH lỗi — luôn để SDK thử thật (máy lạ có thể khác pyzk), không chặn trước
+  try { return await fn(c); } catch (e) {
+    if (!connErr(e) || hello === 'need_key') throw connErr(e) ? explain(e) : e;
+    await sleep(retryMs());   // máy vừa bận (vừa bị dò / phần mềm khác vừa nhả) → thử lại 1 lần
+    try { return await fn(c); } catch (e2) { throw connErr(e2) ? explain(e2) : e2; }
+  }
 }
 
 let chain = Promise.resolve();   // hàng đợi: mỗi lúc chỉ 1 thao tác SDK
@@ -39,6 +146,7 @@ export function zkRun(dev, action, args = {}, onLine = null) {
     const exe = psExe();
     if (!exe) return reject(Object.assign(new Error('Kết nối TCP/IP chỉ chạy khi phần mềm cài trên máy tính Windows (cùng mạng LAN với máy chấm công).'), { code: 'NOWIN' }));
     const a = ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT, '-Ip', dev.tcp_ip, '-Port', String(dev.tcp_port || 4370), '-Key', String(dev.tcp_key || 0), '-Action', action];
+    if (dev.udp) a.push('-Proto', 'udp');   // máy chỉ trả lời UDP 4370 (dò thấy khi bắt tay)
     if (args.from) a.push('-From', args.from);
     if (args.to) a.push('-To', args.to);
     const p = spawn(exe, a, { windowsHide: true });
@@ -84,9 +192,11 @@ export function saveInfo(id, info) {
 // Dò cả lớp mạng /24 của từng IP LAN máy tính: cổng 4370 (SDK) + cổng 8818, rồi đọc bảng ARP tìm MAC 00:17:… (ZKTeco)
 // → bắt được cả máy tắt cổng 4370. Chỉ mở/đóng kết nối TCP (chưa gọi SDK) → vài giây / lớp mạng.
 // ZK_SCAN_HOSTS="ip[:cổng],…" thay danh sách dò (chỉ dùng khi kiểm thử).
-// Trả [{ ip, port (cổng SDK mở, null = không mở), ports: [cổng mở], mac }].
+// Trả [{ ip, port (cổng SDK nói chuyện được, null = không), ports: [cổng mở], mac, udp, tcp, offline }].
 const extraPort = () => +process.env.ZK_SCAN_EXTRA_PORT || 8818;   // ZK_SCAN_EXTRA_PORT: chỉ dùng khi kiểm thử
-export const isZkMac = (mac) => /^00[:-]17[:-]/i.test(mac || '');
+// 00:17:… (dải phổ biến của ZKTeco / Ronald Jack) + các dải MAC khác của ZKTeco (như tool Tìm máy chấm công)
+const ZK_OUI = new Set(['0017A1', '00661B', '68175A', 'F44932', '88A9A7', '341513', '607EA4']);
+export const isZkMac = (mac) => /^00[:-]17[:-]/i.test(mac || '') || ZK_OUI.has(String(mac || '').replace(/[:-]/g, '').slice(0, 6).toUpperCase());
 // "arp -a" của Windows → [{ ip, mac 'AA:BB:…' }]
 export function parseArp(text) {
   const out = [];
@@ -94,9 +204,42 @@ export function parseArp(text) {
   return out;
 }
 const arpTable = () => new Promise((ok) => {
+  if (process.env.ZK_SCAN_HOSTS) return ok(parseArp(process.env.ZK_SCAN_ARP));   // ZK_SCAN_ARP="ip mac,…": bảng ARP giả, chỉ dùng khi kiểm thử
   if (process.platform !== 'win32') return ok([]);
   execFile('arp', ['-a'], { windowsHide: true, timeout: 10000 }, (e, out) => ok(e ? [] : parseArp(out)));
 });
+// Gửi bắt tay ZK (CMD_CONNECT) qua UDP tới mọi máy bằng 1 socket, máy nào đáp → Map(ip → cổng); đáp xong gửi CMD_EXIT trả máy ngay
+function udpSweep(hosts, ms) {
+  return new Promise((ok) => {
+    const seen = new Map(), u = dgram.createSocket('udp4');
+    u.on('error', () => {});
+    u.on('message', (m, from) => {
+      const r = zkReply(m); if (!r || seen.has(from.address)) return;
+      seen.set(from.address, from.port);
+      try { u.send(zkPacket(ZK.EXIT, r.session, r.reply), from.port, from.address); } catch {}
+    });
+    u.bind(0, () => { for (const h of hosts) try { u.send(zkPacket(ZK.CONNECT), h.port, h.ip); } catch {} });
+    setTimeout(() => { setTimeout(() => { try { u.close(); } catch {} }, 100); ok(seen); }, ms);
+  });
+}
+const ping = (ip) => new Promise((ok) => {
+  const win = process.platform === 'win32';
+  execFile('ping', win ? ['-n', '1', '-w', '1000', ip] : ['-c', '1', '-W', '1', ip], { windowsHide: true, timeout: 5000 }, (e, out) => ok(/TTL=/i.test(String(out || ''))));
+});
+// Hỏi lại TỪ TỪ 1 máy mà lượt dò nhanh chưa thấy cổng SDK: TCP chờ lâu × 2 lần → bắt tay ZK qua UDP → ping.
+// Ghi vào x: tcp ('open' | 'refused' | 'timeout' | 'unreach'), port (+ udp = máy chỉ trả lời UDP), offline (máy không còn trả lời gì).
+const recheckMs = () => +process.env.ZK_RECHECK_MS || 3000;   // ZK_RECHECK_MS: chỉ dùng khi kiểm thử
+export async function recheckHost(x, port = 4370) {
+  let tcp = 'timeout';
+  for (let i = 0; i < 2 && (tcp === 'timeout' || tcp === 'unreach'); i++) tcp = await tcpKnock(x.ip, port, recheckMs());
+  x.tcp = tcp;
+  if (tcp === 'open') { x.port = port; if (!x.ports.includes(port)) x.ports.unshift(port); return x; }
+  const u = await zkHello(x.ip, port, { udp: true, ms: Math.min(2500, recheckMs()) });
+  if (u !== 'silent') { x.port = port; x.udp = true; return x; }   // máy đời cũ: chỉ nói chuyện qua UDP 4370
+  // máy từ chối TCP (gửi lại RST) / mở cổng khác / trả lời ping = đang bật; im hết = chỉ còn MAC trong bộ nhớ ARP của Windows
+  if (!(tcp === 'refused' || x.ports.length || await ping(x.ip))) x.offline = true;
+  return x;
+}
 export async function scanLan(ips, port = 4370, ms = 800) {
   const test = !!process.env.ZK_SCAN_HOSTS;
   const nets = [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.')))];
@@ -106,17 +249,23 @@ export async function scanLan(ips, port = 4370, ms = 800) {
   const probes = hosts.flatMap((h) => [{ ...h, sdk: true }, { ip: h.ip, port: extraPort() }]);
   const byIp = new Map();
   const hit = (ip) => byIp.get(ip) || byIp.set(ip, { ip, port: null, ports: [], mac: '' }).get(ip);
+  const udpSeen = udpSweep(hosts, Math.max(ms, 1500));   // cùng lúc: bắt tay ZK qua UDP (máy đời cũ chỉ nói UDP 4370)
   for (let i = 0; i < probes.length; i += 256) {
     const part = probes.slice(i, i + 256);
     const ok = await Promise.all(part.map((h) => tcpProbe(h.ip, h.port, ms)));
     part.forEach((h, j) => { if (!ok[j]) return; const x = hit(h.ip); x.ports.push(h.port); if (h.sdk) x.port = h.port; });
   }
-  // dò xong thì bảng ARP đã có MAC mọi máy đang bật trong lớp mạng (kể cả máy đóng hết cổng)
-  if (!test) for (const a of await arpTable()) {
-    if (!nets.includes(a.ip.split('.').slice(0, 3).join('.'))) continue;
+  for (const [ip, p] of await udpSeen) { const x = hit(ip); if (!x.port) { x.port = p; x.udp = true; } }
+  // dò xong thì bảng ARP đã có MAC mọi máy đang bật trong lớp mạng (kể cả máy đóng hết cổng) — nhưng cũng còn MAC của máy
+  // vừa tắt / vừa đổi IP (Windows nhớ vài phút), nên máy chỉ thấy qua MAC phải hỏi lại mới biết còn sống không
+  for (const a of await arpTable()) {
+    if (!test && !nets.includes(a.ip.split('.').slice(0, 3).join('.'))) continue;
     if (byIp.has(a.ip)) byIp.get(a.ip).mac = a.mac;
     else if (isZkMac(a.mac)) hit(a.ip).mac = a.mac;
   }
+  // Lượt dò nhanh bắn hàng trăm kết nối cùng lúc, chờ 0,8 giây → máy chậm trả lời (đang bận, mạng Wi-Fi, ARP chậm) bị lỡ.
+  // Máy nào chưa thấy cổng 4370 thì hỏi lại từng máy một trước khi kết luận "đóng cổng".
+  for (const x of byIp.values()) if (!x.port) await recheckHost(x, port);
   const num = (ip) => ip.split('.').reduce((n, p) => n * 256 + +p, 0);
   return [...byIp.values()].sort((a, b) => num(a.ip) - num(b.ip));
 }

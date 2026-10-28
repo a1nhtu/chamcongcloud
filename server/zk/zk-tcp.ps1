@@ -5,7 +5,7 @@
 #   OK <ghi chú>            xong                     ERR <mã> <lỗi>          thất bại
 param(
   [string]$Ip, [int]$Port = 4370, [int]$Key = 0, [string]$Action = 'info',
-  [string]$From = '', [string]$To = '', [int]$Machine = 1
+  [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = ''
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch {}
@@ -23,9 +23,15 @@ try { $z = New-Object -ComObject zkemkeeper.ZKEM }
 catch { Fail 'NOSDK' 'Máy tính này chưa có SDK máy chấm công (zkemkeeper). Chạy lại bộ cài DigiplusChamCong-Setup.exe (bản 1.19.1 trở lên) bằng quyền Administrator để tự đăng ký.' }
 
 if ($Key -gt 0) { [void]$z.SetCommPassword($Key) }
+# SetCommProType: 0 = TCP, 1 = UDP. Máy đời cũ chỉ trả lời UDP 4370 → phần mềm dò thấy thì gọi với -Proto udp;
+# không chỉ định mà kết nối hỏng thì thử thêm UDP 1 lần trước khi báo lỗi (máy không nói UDP thì lỗi y như cũ)
+function Proto($t) { try { [void]$z.SetCommProType($t) } catch {} }
+if ($Proto -eq 'udp') { Proto 1 }
 if (-not $z.Connect_Net($Ip, $Port)) {
   $e = 0; $z.GetLastError([ref]$e)
-  Fail "CONNECT$e" "Không kết nối được máy $Ip`:$Port (mã lỗi $e). Kiểm tra IP, dây mạng, mật mã kết nối (Comm Key)."
+  $ok = $false
+  if ($Proto -ne 'udp') { Proto 1; $ok = [bool]$z.Connect_Net($Ip, $Port) }
+  if (-not $ok) { Fail "CONNECT$e" "Không kết nối được máy $Ip`:$Port (mã lỗi $e). Kiểm tra IP, dây mạng, mật mã kết nối (Comm Key)." }
 }
 $m = $Machine
 $locked = $false

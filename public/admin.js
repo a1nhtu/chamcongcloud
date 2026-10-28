@@ -6365,18 +6365,22 @@ function lanScanModal() {
     : x.svr_mode === '1' ? 'Tên miền: ' + (x.svr_url || '(trống)') + (x.svr_port ? ' · cổng ' + x.svr_port : '') + (x.svr_ssl === '1' ? ' · HTTPS' : x.svr_ssl === '0' ? ' · HTTPS tắt' : '') : 'Theo IP' + (x.svr_url ? ': ' + x.svr_url : '') + (x.svr_port ? ' · cổng ' + x.svr_port : '');
   const point = async (x, r, cell) => {
     let key = '';
-    if (String(x.code || '').startsWith('CONNECT')) {   // không đọc được bằng mật mã 0 → máy có đặt Comm Key
-      key = prompt(`Máy ${x.ip} không cho kết nối — có thể máy đặt mật mã kết nối (Menu → Comm → PC Connection → Comm Key).\nNhập mật mã:`, '');
+    // máy báo cần mật khẩu kết nối (bắt tay ZK) / SDK không vào được bằng mật mã 0 → hỏi Comm Key
+    if (/^(NEEDKEY|WRONGKEY|CONNECT)/.test(String(x.code || ''))) {
+      key = prompt(`${x.code === 'NEEDKEY' ? `Máy ${x.ip} có đặt mật khẩu kết nối` : `Máy ${x.ip} không cho kết nối — có thể máy đặt mật khẩu kết nối`} (Menu → Comm → PC Connection → Comm Key).\nNhập mật khẩu:`, '');
       if (key == null) return;
     }
     if (!confirm(`Trỏ máy ${x.model || ''} ${x.serial || x.ip} về ${r.domain}?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Nếu máy đang gửi dữ liệu cho phần mềm khác thì sẽ chuyển sang gửi về phần mềm này.`)) return;
     cell.innerHTML = ''; cell.append(el('span', { class: 'muted' }, 'Đang ghi vào máy…'));
     try {
-      const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key } });
+      const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key, udp: !!x.udp } });
       changed = true;
       cell.innerHTML = ''; cell.append(el('span', { class: 'pill ok' }, '✓ Đã trỏ — máy đang khởi động lại'));
       toast(`Đã trỏ máy ${o.serial || x.ip} về ${o.domain}. Khoảng 1 phút sau máy hiện ở danh sách (Chờ duyệt).`, 'ok');
-    } catch (e) { cell.innerHTML = ''; cell.append(el('span', { style: 'color:#b91c1c' }, '❌ ' + e.message)); toast(e.message, 'err'); }
+    } catch (e) {
+      cell.innerHTML = ''; cell.append(el('span', { style: 'color:#b91c1c' }, '❌ ' + e.message)); toast(e.message, 'err');
+      if (/^(NEEDKEY|WRONGKEY)$/.test(e.code || '')) cell.append(' ', btnSm('🔑 Nhập lại mật khẩu', () => point({ ...x, code: 'NEEDKEY' }, r, cell), 'ghost'));
+    }
   };
   const render = (r) => {
     box.innerHTML = '';
@@ -6402,11 +6406,15 @@ function lanScanModal() {
       const mono = (t) => el('div', { class: 'muted', style: 'font-size:12px;font-family:monospace' }, t);
       // thấy máy qua cổng 8818 / MAC 00:17 nhưng không kết nối SDK được (4370 đóng, 8818 không nhận) → chỉ báo, cài Cloud Server tay trên máy
       const seen = x.no_sdk && [(x.ports || []).length ? 'cổng ' + x.ports.join(', ') : '', x.mac ? 'MAC ' + x.mac : ''].filter(Boolean).join(' · ');
-      const noSdk = x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, `⚠️ Thấy máy (${seen}) nhưng máy đóng cổng 4370${x.sdk_tried ? `, thử kết nối qua cổng ${x.sdk_tried} máy cũng không nhận` : ''} — phần mềm không đọc / trỏ tự động được.`),
-        warn(r.domain ? `Ra máy chấm công: Comm → Cloud Server → bật chế độ tên miền, điền ${r.domain} rồi khởi động lại máy.` : 'Ra máy chấm công cài Cloud Server theo IP + Port ("Cách A").'));
+      // 3 trường hợp khác nhau, báo đúng từng cái: máy đã tắt / đổi IP (chỉ còn MAC trong bộ nhớ ARP) · máy từ chối cổng 4370 · máy im ở 4370
+      const why = x.offline ? `⚠️ Máy không trả lời (${seen}) — chỉ còn địa chỉ MAC trong bộ nhớ mạng của máy tính: máy vừa TẮT, rút dây mạng hoặc đã ĐỔI IP. Bật máy / xem IP trên máy (Menu → Comm → Ethernet) rồi bấm Tìm lại.`
+        : x.closed ? `⚠️ Máy đang bật (${seen}) nhưng TỪ CHỐI kết nối ở cổng 4370 — cổng SDK đang tắt trên máy${x.sdk_tried ? `, cổng ${x.sdk_tried} cũng không nhận` : ''}. Phần mềm không đọc / trỏ tự động được.`
+        : `⚠️ Thấy máy (${seen}) nhưng máy không trả lời ở cổng 4370 (đã thử TCP chờ lâu 2 lần + UDP${x.sdk_tried ? ` + cổng ${x.sdk_tried}` : ''}). Kiểm tra IP máy cùng lớp mạng với máy tính rồi bấm Tìm lại.`;
+      const noSdk = x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, why),
+        x.offline ? '' : warn(r.domain ? `Hoặc ra máy chấm công: Comm → Cloud Server → bật chế độ tên miền, điền ${r.domain} rồi khởi động lại máy.` : 'Ra máy chấm công cài Cloud Server theo IP + Port ("Cách A").'));
       tb.append(el('tr', {},
-        el('td', {}, el('b', {}, x.model || (x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip + (x.port && x.port !== 4370 && !x.no_sdk ? ' · cổng ' + x.port : '')), x.mac ? mono('MAC ' + x.mac) : ''),
-        el('td', { style: 'font-size:13px' }, x.no_sdk ? noSdk : x.error ? el('span', { style: 'color:#b45309' }, '⚠️ Không đọc được: ' + x.error) : svrText(x), x.no_sdk ? '' : act)));
+        el('td', {}, el('b', {}, x.model || (x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip + (x.port && x.port !== 4370 && !x.no_sdk ? ' · cổng ' + x.port : '') + (x.udp ? ' · UDP' : '')), x.mac ? mono('MAC ' + x.mac) : ''),
+        el('td', { style: 'font-size:13px' }, x.no_sdk ? noSdk : x.error ? el('span', { style: 'color:#b45309' }, (x.code === 'NEEDKEY' ? '🔑 ' : '⚠️ Không đọc được: ') + x.error) : svrText(x), x.no_sdk ? '' : act)));
     }
     tbl.append(tb);
     box.append(el('div', { class: 'tbl-scroll' }, tbl),

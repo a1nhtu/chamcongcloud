@@ -5,7 +5,7 @@ import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList,
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
-  scanLan, tcpServerInfo, tcpSetServer } from '../../zk-tcp.js';
+  scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful } from '../../zk-tcp.js';
 import { buildSched, schedLabel } from '../../reboot-schedule.js';
 import { setSetting } from '../../db.js';
 import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, guardOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
@@ -289,7 +289,7 @@ export function registerDeviceRoutes(r, { need }) {
     if (c.error) return res.status(400).json({ error: c.error });
     try {
       if (!(await tcpProbe(c.tcp_ip, c.tcp_port))) return res.status(400).json({ error: `Không thấy máy ở ${c.tcp_ip}:${c.tcp_port}. Kiểm tra: máy đã bật, cắm dây mạng, IP đúng và máy tính này CÙNG lớp mạng với máy chấm công.` });
-      const info = await tcpInfo(c);
+      const info = await zkCareful(c, tcpInfo);   // báo đúng: cần / sai mật khẩu kết nối, máy bận…
       if (!info.serial) return res.status(400).json({ error: 'Kết nối được nhưng không đọc được Serial của máy.' });
       const name = String(b.name || '').trim();
       const old = db.prepare('SELECT * FROM push_devices WHERE serial=?').get(info.serial);
@@ -302,7 +302,9 @@ export function registerDeviceRoutes(r, { need }) {
   });
   /* -------- TÌM MÁY TRONG MẠNG LAN + TRỎ MÁY PUSH VỀ TÊN MIỀN (khỏi gõ tay Cloud Server trên máy) --------
      Không cần bật chế độ TCP/IP: chỉ mượn SDK cổng 4370 để đọc / ghi cài đặt máy chủ, máy vẫn chạy kiểu Push.
-     Dò thêm cổng 8818 (thử SDK qua cổng này — trỏ được nếu máy nhận) + MAC 00:17:… để thấy cả máy đóng cổng 4370. */
+     Dò thêm cổng 8818 (thử SDK qua cổng này — trỏ được nếu máy nhận) + MAC 00:17:… để thấy cả máy đóng cổng 4370.
+     Không kết luận vội: máy chưa thấy 4370 thì hỏi lại từ từ (TCP lâu hơn, UDP, ping — xem scanLan); gọi SDK qua zkCareful
+     (bắt tay ZK trước, thử lại 1 lần, báo đúng: cần / sai mật khẩu kết nối, máy bận, máy tắt cổng, máy đã tắt / đổi IP). */
   const winOnly = (req, res, next) => (process.platform === 'win32' || process.env.ZK_SCAN_HOSTS ? next()
     : res.status(400).json({ error: 'Tìm máy trong mạng LAN chỉ chạy khi phần mềm cài trên máy tính Windows cùng mạng với máy chấm công.' }));
   const isLan = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip);
@@ -314,14 +316,17 @@ export function registerDeviceRoutes(r, { need }) {
       for (const h of found) {   // SDK: TUẦN TỰ từng máy
         // cổng 4370 đóng mà mở cổng 8818 → thử SDK qua 8818 (máy đổi Comm Port); chỉ thấy MAC 00:17 → không đọc được cài đặt
         const row = { ip: h.ip, port: h.port || h.ports[0] || null, ports: h.ports, mac: h.mac };
-        if (!row.port) { row.no_sdk = true; rows.push(row); continue; }
+        if (h.udp) row.udp = true;
+        // 4370: 'refused' = máy bật mà từ chối (cổng SDK tắt trên máy) · offline = chỉ còn MAC trong bộ nhớ ARP (máy đã tắt / đổi IP)
+        if (h.offline) { Object.assign(row, { no_sdk: true, offline: true }); rows.push(row); continue; }
+        if (!row.port) { Object.assign(row, { no_sdk: true, closed: h.tcp === 'refused' }); rows.push(row); continue; }
         try {
-          Object.assign(row, await tcpServerInfo({ tcp_ip: h.ip, tcp_port: row.port, tcp_key: 0 }));
+          Object.assign(row, await zkCareful({ tcp_ip: h.ip, tcp_port: row.port, tcp_key: 0, udp: !!h.udp }, tcpServerInfo));
           row.points_here = !!domain && row.svr_fun === '1' && row.svr_mode === '1' && (row.svr_url || '').toLowerCase() === domain;
           const k = row.serial && db.prepare('SELECT id, name, active, last_seen FROM push_devices WHERE serial=?').get(row.serial);
           if (k) row.known = { id: k.id, name: k.name, active: !!k.active, last_seen: k.last_seen };
         } catch (e) {
-          if (h.port) { row.error = e.message; row.code = e.code || ''; } else { row.no_sdk = true; row.sdk_tried = row.port; }   // 8818 không nói SDK
+          if (h.port) { row.error = e.message; row.code = e.code || ''; } else { Object.assign(row, { no_sdk: true, sdk_tried: row.port, closed: h.tcp === 'refused' }); }   // 8818 không nói SDK
         }
         rows.push(row);
       }
@@ -334,10 +339,13 @@ export function registerDeviceRoutes(r, { need }) {
     const c = connOf(req.body || {});
     if (c.error) return res.status(400).json({ error: c.error });
     if (!isLan(c.tcp_ip)) return res.status(400).json({ error: 'Chỉ trỏ được máy chấm công trong mạng nội bộ (192.168.x · 10.x · 172.16–31.x).' });
+    c.udp = !!req.body?.udp;   // máy chỉ trả lời UDP 4370 (lúc dò đã biết) → không có cổng TCP để hỏi trước
     try {
-      if (!(await tcpProbe(c.tcp_ip, c.tcp_port))) return res.status(400).json({ error: `Không thấy máy ở ${c.tcp_ip}:${c.tcp_port} — máy đã tắt hoặc đổi IP, bấm Tìm lại.` });
-      const before = await tcpServerInfo(c);
-      const info = await tcpSetServer(c, domain, before.svr_port);
+      const k = c.udp ? 'open' : await tcpKnock(c.tcp_ip, c.tcp_port);
+      if (k === 'refused') return res.status(400).json({ code: 'CLOSED', error: `Máy ${c.tcp_ip} đang bật nhưng từ chối kết nối ở cổng ${c.tcp_port} (cổng SDK đang tắt trên máy) — bấm Tìm lại; vẫn vậy thì đặt Cloud Server tay trên máy.` });
+      if (k !== 'open') return res.status(400).json({ code: 'UNREACH', error: `Không thấy máy ở ${c.tcp_ip}:${c.tcp_port} — máy đã tắt hoặc đổi IP, bấm Tìm lại.` });
+      const before = await zkCareful(c, tcpServerInfo);
+      const info = await zkCareful(c, (cc) => tcpSetServer(cc, domain, before.svr_port));
       res.json({ ok: true, domain, serial: before.serial || '', before, info });
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });
