@@ -5,7 +5,7 @@
 #   OK <ghi chú>            xong                     ERR <mã> <lỗi>          thất bại
 param(
   [string]$Ip, [int]$Port = 4370, [int]$Key = 0, [string]$Action = 'info',
-  [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = ''
+  [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = '', [string]$Opt = ''
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch {}
@@ -118,8 +118,13 @@ try {
     }
     'logs' {
       Lock
-      $ranged = $false
-      if ($From -and $To) { try { $ranged = [bool]$z.ReadTimeGLogData($m, "$From 00:00:00", "$To 23:59:59") } catch { $ranged = $false } }
+      # $Opt = 'norange': máy này đã biết là KHÔNG lọc được theo ngày → khỏi thử lại (firmware cũ có khi treo chờ lâu mới trả false)
+      # In 'R <0|1|-> <ms>' = lọc theo ngày được / không / không thử, và 'B <ms>' = thời gian máy gửi dữ liệu → phần mềm biết chậm ở đâu
+      $ranged = $false; $sw = [Diagnostics.Stopwatch]::StartNew()
+      if ($From -and $To -and $Opt -ne 'norange') {
+        try { $ranged = [bool]$z.ReadTimeGLogData($m, "$From 00:00:00", "$To 23:59:59") } catch { $ranged = $false }
+        Out ("R`t" + $(if ($ranged) { 1 } else { 0 }) + "`t" + $sw.ElapsedMilliseconds)
+      } elseif ($From -and $To) { Out "R`t-`t0" }
       if (-not $ranged) {
         if (-not $z.ReadGeneralLogData($m)) {
           $e = 0; $z.GetLastError([ref]$e)
@@ -128,6 +133,7 @@ try {
           if (-not $new) { [void]$z.EnableDevice($m, $true); $z.Disconnect(); Fail "READLOG$e" "Máy không trả dữ liệu chấm công (mã lỗi $e)." }
         }
       }
+      Out ("B`t" + $sw.ElapsedMilliseconds)
       $pin = ''; $vm = 0; $io = 0; $y = 0; $mo = 0; $d = 0; $h = 0; $mi = 0; $se = 0; $wc = 0; $n = 0; $all = 0
       $sb = New-Object System.Text.StringBuilder
       while ($z.SSR_GetGeneralLogData($m, [ref]$pin, [ref]$vm, [ref]$io, [ref]$y, [ref]$mo, [ref]$d, [ref]$h, [ref]$mi, [ref]$se, [ref]$wc)) {

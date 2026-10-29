@@ -151,6 +151,7 @@ export function zkRun(dev, action, args = {}, onLine = null) {
     if (dev.udp) a.push('-Proto', 'udp');   // máy chỉ trả lời UDP 4370 (dò thấy khi bắt tay)
     if (args.from) a.push('-From', args.from);
     if (args.to) a.push('-To', args.to);
+    if (args.opt) a.push('-Opt', args.opt);
     const p = spawn(exe, a, { windowsHide: true });
     let buf = '', errTxt = '', done = null, fail = null;
     const timer = setTimeout(() => { fail = { code: 'TIMEOUT', msg: 'Máy không phản hồi (quá thời gian chờ).' }; p.kill(); }, args.timeoutMs || 15 * 60000);
@@ -349,12 +350,22 @@ export async function tcpPushUsers(dev, pins, { withBio = false } = {}, prog = (
 }
 
 // Tải LƯỢT CHẤM trong [from, to] (rỗng = toàn bộ) → lưu lượt quẹt + dựng công. Lượt đã có thì tự bỏ qua (không trùng).
+// Máy firmware cũ không lọc được theo ngày (ReadTimeGLogData trả false, có máy chờ lâu mới trả) → nhớ lại (tcp_no_range),
+// lần sau đọc thẳng toàn bộ rồi lọc, khỏi chờ lần thử hỏng. ms = thời gian từng bước, báo người dùng chậm ở đâu.
 export async function tcpLogs(dev, from, to, prog = () => {}) {
-  const lines = [];
-  const r = await zkRun(dev, 'logs', { from, to }, (k, c) => {
+  const lines = [], ms = {};
+  const t0 = Date.now();
+  const r = await zkRun(dev, 'logs', { from, to, opt: from && to && dev.tcp_no_range ? 'norange' : '' }, (k, c) => {
     if (k === 'L' && c[0] && c[1]) lines.push(`${c[0]}\t${c[1]}\t${c[2] || 0}\t${c[3] || 0}`);
     else if (k === 'P') prog(`Đã đọc ${Number(c[0]).toLocaleString('vi')} lượt chấm từ máy…`);
+    else if (k === 'R') {
+      ms.range_try = Number(c[1]) || 0;
+      if (c[0] === '0' || c[0] === '1') db.prepare('UPDATE push_devices SET tcp_no_range=? WHERE id=?').run(c[0] === '0' ? 1 : 0, dev.id);
+      if (c[0] === '0') prog('Máy không lọc được theo ngày → đọc toàn bộ lượt chấm trên máy rồi lọc…');
+    } else if (k === 'B') ms.device_send = Number(c[0]) || 0;
   });
+  ms.read = Date.now() - t0;
+  const t1 = Date.now();
   const before = db.prepare('SELECT COUNT(*) c FROM device_punches WHERE serial=?').get(dev.serial).c;
   const CH = 2000;
   for (let i = 0; i < lines.length; i += CH) {
@@ -368,7 +379,8 @@ export async function tcpLogs(dev, from, to, prog = () => {}) {
   const after = db.prepare('SELECT COUNT(*) c FROM device_punches WHERE serial=?').get(dev.serial).c;
   const unmatched = db.prepare('SELECT COUNT(DISTINCT pin) c FROM device_punches WHERE serial=? AND employee_id IS NULL').get(dev.serial).c;
   db.prepare('UPDATE push_devices SET tcp_sync_at=? WHERE id=?').run(new Date().toISOString(), dev.id);
-  return { read: lines.length, added: after - before, onDevice: Number(r.note[1]) || lines.length, ranged: r.note[2] === 'range', unmatched };
+  ms.save = Date.now() - t1;
+  return { read: lines.length, added: after - before, onDevice: Number(r.note[1]) || lines.length, ranged: r.note[2] === 'range', unmatched, ms };
 }
 
 /* ---------- việc chạy nền (giao diện hỏi tiến độ) ---------- */

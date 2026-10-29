@@ -23,20 +23,30 @@ const NEWZ = 'try { $z = New-Object -ComObject zkemkeeper.ZKEM }';
 assert.ok(real.includes(NEWZ), 'script thật phải còn dòng tạo SDK');
 writeFileSync(SCRIPT, real.replace(NEWZ, 'try { . $env:FAKE_SDK }'));
 writeFileSync(SDK, '﻿' + `
-$global:S = Get-Content $env:FAKE_SDK_STATE -Raw -Encoding UTF8 | ConvertFrom-Json
+$global:FakeDev = Get-Content $env:FAKE_SDK_STATE -Raw -Encoding UTF8 | ConvertFrom-Json
 $global:it = 0; $global:cardBuf = ''
-function global:SaveFake { $global:S | ConvertTo-Json -Depth 8 | Set-Content $env:FAKE_SDK_STATE -Encoding UTF8 }
-function global:FindU($p) { @($global:S.users) | Where-Object { $_.pin -eq [string]$p } | Select-Object -First 1 }
+function global:SaveFake { $global:FakeDev | ConvertTo-Json -Depth 8 | Set-Content $env:FAKE_SDK_STATE -Encoding UTF8 }
+function global:FindU($p) { @($global:FakeDev.users) | Where-Object { $_.pin -eq [string]$p } | Select-Object -First 1 }
 $z = New-Object PSObject
 foreach ($n in 'Connect_Net', 'SetCommPassword', 'SetCommProType', 'Disconnect', 'EnableDevice', 'RefreshData', 'ReadAllUserID', 'ReadAllTemplate') { $z | Add-Member ScriptMethod $n { $true } }
-foreach ($n in 'GetFirmwareVersion', 'GetPlatform', 'GetDeviceMAC', 'GetProductCode', 'GetDeviceTime', 'GetDeviceStatus') { $z | Add-Member ScriptMethod $n { $false } }
+foreach ($n in 'GetFirmwareVersion', 'GetPlatform', 'GetDeviceMAC', 'GetProductCode', 'GetDeviceTime') { $z | Add-Member ScriptMethod $n { $false } }
+$z | Add-Member ScriptMethod GetDeviceStatus { param($m, $c, $v) if ($c -eq 2) { $v.Value = @($global:FakeDev.users).Count; return $true }; $false }
+# lượt chấm: S.range = máy lọc được theo ngày không; S.rangeCalls = số lần phần mềm thử lọc (để test "nhớ máy không lọc được")
+$global:logs = @(); $global:li = 0
+$z | Add-Member ScriptMethod ReadTimeGLogData { param($m, $a, $b) $global:FakeDev.rangeCalls = [int]$global:FakeDev.rangeCalls + 1; SaveFake; if (-not $global:FakeDev.range) { return $false }
+  $global:logs = @($global:FakeDev.logs | Where-Object { $_.at -ge $a -and $_.at -le $b }); $global:li = 0; $true }
+$z | Add-Member ScriptMethod ReadGeneralLogData { param($m) $global:logs = @($global:FakeDev.logs); $global:li = 0; $true }
+$z | Add-Member ScriptMethod SSR_GetGeneralLogData { param($m, $pin, $vm, $io, $y, $mo, $d, $h, $mi, $se, $wc)
+  if ($global:li -ge $global:logs.Count) { return $false }
+  $l = $global:logs[$global:li]; $global:li++; $t = [datetime]$l.at
+  $pin.Value = $l.pin; $vm.Value = 1; $io.Value = 0; $y.Value = $t.Year; $mo.Value = $t.Month; $d.Value = $t.Day; $h.Value = $t.Hour; $mi.Value = $t.Minute; $se.Value = $t.Second; $wc.Value = 0; $true }
 $z | Add-Member ScriptMethod GetLastError { param($e) $e.Value = 0; $true }
-$z | Add-Member ScriptMethod GetSerialNumber { param($m, $v) $v.Value = $global:S.serial; $true }
-$z | Add-Member ScriptMethod GetSysOption { param($m, $k, $v) if ($k -eq '~ZKFPVersion') { $v.Value = $global:S.fpver; return $true }; $false }
+$z | Add-Member ScriptMethod GetSerialNumber { param($m, $v) $v.Value = $global:FakeDev.serial; $true }
+$z | Add-Member ScriptMethod GetSysOption { param($m, $k, $v) if ($k -eq '~ZKFPVersion') { $v.Value = $global:FakeDev.fpver; return $true }; $false }
 $z | Add-Member ScriptMethod GetStrCardNumber { param($c) $c.Value = $global:cardBuf; $true }
 $z | Add-Member ScriptMethod SetStrCardNumber { param($c) $global:cardBuf = $c; $true }
 $z | Add-Member ScriptMethod SSR_GetAllUserInfo { param($m, $pin, $name, $pw, $pri, $en)
-  $a = @($global:S.users); if ($global:it -ge $a.Count) { return $false }
+  $a = @($global:FakeDev.users); if ($global:it -ge $a.Count) { return $false }
   $u = $a[$global:it]; $global:it++
   $pin.Value = $u.pin; $name.Value = $u.name; $pw.Value = $u.pw; $pri.Value = [int]$u.pri; $en.Value = $true; $global:cardBuf = $u.card; $true }
 $z | Add-Member ScriptMethod SSR_GetUserInfo { param($m, $p, $name, $pw, $pri, $en)
@@ -44,7 +54,7 @@ $z | Add-Member ScriptMethod SSR_GetUserInfo { param($m, $p, $name, $pw, $pri, $
   $name.Value = $u.name; $pw.Value = $u.pw; $pri.Value = [int]$u.pri; $en.Value = $true; $global:cardBuf = $u.card; $true }
 $z | Add-Member ScriptMethod SSR_SetUserInfo { param($m, $p, $name, $pw, $pri, $en)
   $u = FindU $p
-  if (-not $u) { $u = [pscustomobject]@{ pin = [string]$p; name = ''; pw = ''; pri = 0; card = ''; fps = [pscustomobject]@{} }; $global:S.users = @($global:S.users) + $u }
+  if (-not $u) { $u = [pscustomobject]@{ pin = [string]$p; name = ''; pw = ''; pri = 0; card = ''; fps = [pscustomobject]@{} }; $global:FakeDev.users = @($global:FakeDev.users) + $u }
   $u.name = $name; $u.pw = $pw; $u.pri = [int]$pri; $u.card = $(if ($global:cardBuf -eq '0') { '' } else { [string]$global:cardBuf }); SaveFake; $true }
 $z | Add-Member ScriptMethod GetUserTmpExStr { param($m, $p, $f, $flag, $tmp, $len)
   $u = FindU $p; $t = $u.fps."$f"; if (-not $t) { return $false }
@@ -54,7 +64,9 @@ $z | Add-Member ScriptMethod SetUserTmpExStr { param($m, $p, $f, $flag, $tmp)
   $u.fps | Add-Member -Force NoteProperty ([string]$f) $tmp; SaveFake; $true }
 `);
 // Máy giả: Serial TCP9, vân tay ZKFinger 10. NV 5 là QUẢN TRỊ trên máy, có thẻ + 1 vân tay; NV 8 có mật mã
-writeFileSync(STATE, JSON.stringify({ serial: 'TCP9', fpver: '10', users: [
+writeFileSync(STATE, JSON.stringify({ serial: 'TCP9', fpver: '10', range: false, rangeCalls: 0, logs: [
+  { pin: '8', at: '2026-10-27 08:00:00' }, { pin: '8', at: '2026-10-28 08:01:00' }, { pin: '8', at: '2026-10-28 17:30:00' }, { pin: '77', at: '2026-10-28 09:00:00' },
+], users: [
   { pin: '5', name: 'Ten cu tren may', pw: '', pri: 14, card: '777', fps: { 0: 'FPDEV5' } },
   { pin: '8', name: 'Pham Van Tam', pw: '99', pri: 0, card: '', fps: {} },
 ] }));
@@ -117,4 +129,36 @@ test('Nút "Đẩy NV xuống máy" chọn máy TCP/IP → chạy nền ghi th�
   }
   assert.equal(j.state, 'done', j.msg);
   assert.deepEqual(j.result.devices.map((x) => [x.device, x.ok, x.tcp, x.pushed]), [['Máy quầy', true, true, 1]]);
+});
+
+test('Tải chấm công 1 ngày máy TCP/IP: KHÔNG đọc lại NV khi số NV không đổi; máy không lọc được theo ngày → nhớ, lần sau khỏi thử; báo thời gian từng bước; mã chưa khớp xem được là Số ID nào', { skip: !WIN && 'cần PowerShell' }, async () => {
+  const run = async () => {
+    let out = null;
+    await routes['POST /devices/:id/tcp/:action']({ body: { from: '2026-10-28', to: '2026-10-28' }, params: { id: tcp().id, action: 'logs' }, query: {} }, { status() { return this; }, json(o) { out = o; return this; } });
+    assert.ok(out.job, JSON.stringify(out));
+    let j;
+    for (let i = 0; i < 200; i++) { j = Z.getJob(out.job); if (j.state !== 'run') break; await new Promise((ok) => setTimeout(ok, 50)); }
+    assert.equal(j.state, 'done', j.msg);
+    return j.result;
+  };
+  const r1 = await run();
+  assert.deepEqual([r1.read, r1.added, r1.users, r1.ranged], [3, 3, null, false], 'chỉ lấy 3 lượt ngày 28; NV trên máy = 4 = phần mềm đã biết → bỏ đọc NV');
+  assert.equal(dev().rangeCalls, 1);
+  assert.equal(tcp().tcp_no_range, 1);
+  for (const k of ['connect', 'read', 'save']) assert.ok(r1.ms[k] >= 0, k);
+  assert.equal(r1.ms.users, null);
+  const r2 = await run();
+  assert.equal(dev().rangeCalls, 1, 'đã biết máy không lọc được → không thử lại');
+  assert.deepEqual([r2.read, r2.added], [3, 0]);
+  assert.ok(!r2.ms.range_try, 'không tốn thời gian thử lọc');
+  // có người mới đăng ký trên máy → số NV đổi → đọc NV lại
+  const st = dev(); st.users.push({ pin: '77', name: 'Moi Dang Ky', pw: '', pri: 0, card: '', fps: {} }); writeFileSync(STATE, JSON.stringify(st));
+  const r3 = await run();
+  assert.equal(r3.users, 5);
+  // Số ID chưa khớp: danh sách ở trang Máy chấm công
+  let list = null;
+  db.prepare("INSERT INTO device_punches(serial,pin,punch_at,work_date) VALUES('TCP9','555','2026-10-28T01:00:00.000Z','2026-10-28')").run();
+  await routes['GET /devices']({ query: {}, params: {} }, { status() { return this; }, json(o) { list = o; return this; } });
+  const m = list.rows.find((x) => x.serial === 'TCP9');
+  assert.ok(m.unmatched_pins.some((x) => x.pin === '555' && x.n === 1), JSON.stringify(m.unmatched_pins));
 });

@@ -740,6 +740,7 @@ function migrateColumns() {
   add('push_devices', 'tcp_auto_ok',    'INTEGER NOT NULL DEFAULT 1');
   add('push_devices', 'tcp_auto_logs',  'INTEGER NOT NULL DEFAULT -1');   // số lượt chấm trên máy ở lần tự tải gần nhất (không đổi → khỏi tải)
   add('push_devices', 'tcp_auto_users', 'INTEGER NOT NULL DEFAULT -1');
+  add('push_devices', 'tcp_no_range', 'INTEGER NOT NULL DEFAULT 0');   // máy TCP/IP không lọc lượt chấm theo ngày được (zk-tcp.js tcpLogs)
   // Máy HÃNG KHÁC (công tắc riêng, mặc định TẮT): conn_type 'ai' (máy AI tự nối WebSocket về — server/ai-ws.js)
   // | 'hik' (Hikvision, phần mềm gọi ISAPI vào máy — server/hik-isapi.js; dùng chung tcp_ip/tcp_port/tcp_info/tcp_auto_*)
   // | 'union' (Union / Virdi tự nối về cổng 9870 qua SDK UCS — server/union.js; Serial = UNION-<Terminal ID>, dùng chung tcp_info/tcp_sync_at)

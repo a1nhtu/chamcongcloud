@@ -1,5 +1,5 @@
 import {
-  api, getToken, setToken, clearToken, toast, $, el, deviceId,
+  api, getToken, setToken, clearToken, tokenFromOtherTab, rememberLogin, toast, $, el, deviceId,
   isoToHM, isoToHMS, humanMinutes, humanDistance, todayMonth, ensureLicensed,
 } from '/common.js';
 
@@ -125,6 +125,8 @@ async function init() {
     try { ver = (await fetch('/api/version').then(r => r.json())).version; } catch {}
     $('#side-brand').innerHTML = `${c.company_name}<small>Chấm công${ver ? ' · v' + ver : ''}</small>`;
   } catch {}
+  $('#li-remember').checked = rememberLogin();
+  await tokenFromOtherTab();
   if (getToken()) { try { const r = await api('/auth/me'); ME = r.user; return afterLogin(); } catch { clearToken(); } }
 }
 
@@ -135,7 +137,7 @@ $('#login-form').addEventListener('submit', async (e) => {
     const r = await api('/auth/login', { method: 'POST', body: { username: $('#li-user').value, password: $('#li-pass').value } });
     ME = r.user;
     if (ME.role === 'employee') { toast('Tài khoản nhân viên — vui lòng dùng app chấm công', 'err'); btn.disabled = false; btn.textContent = 'Đăng nhập'; return; }
-    setToken(r.token); afterLogin();
+    setToken(r.token, $('#li-remember').checked); afterLogin();
   } catch (err) { toast(err.message, 'err'); btn.disabled = false; btn.textContent = 'Đăng nhập'; }
 });
 $('#btn-logout').addEventListener('click', () => { clearToken(); location.reload(); });
@@ -1203,17 +1205,11 @@ async function empDeviceRoles(e) {
 async function toggleEmp(e) {
   if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return;
   await api('/admin/employees/' + e.id, { method: 'DELETE' });
-  // Có Số ID máy → hỏi xoá luôn trên tất cả máy chấm công (khoá rồi thì không bị đồng bộ lại)
-  if (e.device_pin && hasPerm('devices') && deviceEnabled() && confirm(`Đã khoá. Xoá luôn ${e.full_name} (Số ID ${e.device_pin}) trên TẤT CẢ máy chấm công?
-
-Vân tay / thẻ / khuôn mặt trên máy bị xoá, dữ liệu công trong phần mềm giữ nguyên.`)) {
-    try { const r = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins: [e.device_pin] } });
-      toast(`Đã gửi lệnh xoá trên ${r.push.length + r.tcp.length} máy` + (r.tcpNote ? ' — ' + r.tcpNote : ''), r.tcpNote ? 'err' : 'ok'); }
-    catch (err) { toast(err.message, 'err'); }
-  }
+  // CHỈ khoá — không hỏi xoá trên máy nữa (Anh 29/10/2026: dễ bấm nhầm xoá luôn trên máy). Muốn xoá: Máy chấm công → 🗑 Xóa NV trên máy
+  toast('Đã khoá', 'ok');
   pageEmployees();
 }
-// Khoá / mở khoá NHIỀU NV đã tích chọn (1 lần cho cả lô). Khoá xong: NV có Số ID máy → hỏi xoá luôn trên tất cả máy (như khoá từng người)
+// Khoá / mở khoá NHIỀU NV đã tích chọn (1 lần cho cả lô). Chỉ khoá, không đụng máy chấm công (như khoá từng người)
 async function lockEmpBulk(list, lock) {
   const todo = list.filter((e) => !!e.active === lock);
   if (!todo.length) return;
@@ -1225,14 +1221,6 @@ async function lockEmpBulk(list, lock) {
       r.overLimit ? `${r.overLimit} người chưa mở được vì bản quyền giới hạn ${r.max} nhân viên` : ''].filter(Boolean).join(', ');
     toast(`Đã ${lock ? 'khoá' : 'mở khoá'} ${r.changed} nhân viên` + (skip ? ' (' + skip + ')' : ''), 'ok');
     empPicked.clear();
-    const pins = lock ? todo.map((e) => e.device_pin).filter(Boolean) : [];
-    if (pins.length && hasPerm('devices') && deviceEnabled() && confirm(`Đã khoá. Xoá luôn ${pins.length} người có Số ID máy trên TẤT CẢ máy chấm công?
-
-Vân tay / thẻ / khuôn mặt trên máy bị xoá, dữ liệu công trong phần mềm giữ nguyên.`)) {
-      try { const d = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins } });
-        toast(`Đã gửi lệnh xoá trên ${d.push.length + d.tcp.length} máy` + (d.tcpNote ? ' — ' + d.tcpNote : ''), d.tcpNote ? 'err' : 'ok'); }
-      catch (err) { toast(err.message, 'err'); }
-    }
   } catch (err) { toast(err.message, 'err'); }
   pageEmployees();
 }
@@ -5944,7 +5932,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       el('td', {}, el('div', { class: 'dv-ip' }, direct ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—')), seen ? el('div', { class: 'dv-sub' }, seen) : '',
         direct && m.tcp_auto_at && m.tcp_auto && autoMin > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
-        m.unmatched ? el('div', { class: 'dv-warn', title: 'Số ID trên máy chưa khớp với nhân viên nào trong phần mềm' }, m.unmatched + ' mã chưa khớp') : ''),
+        m.unmatched ? el('div', { class: 'dv-warn', style: 'cursor:pointer;text-decoration:underline dotted', title: 'Bấm để xem Số ID nào chưa khớp nhân viên', onclick: () => unmatchedModal(m) }, m.unmatched + ' mã chưa khớp') : ''),
       el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : isHik || isUnion ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m, m.conn_type)) : null, doorBtn] : [doorBtn, timeBtn]), logBtn, moreBtn)),
     ));
   }
@@ -6097,6 +6085,19 @@ async function pinConflictModal(after) {
   };
   openModal('Số ID nghi trùng giữa các máy', [box], [el('button', { class: 'btn ghost', onclick: () => { closeModal(); after && after(); } }, 'Đóng')]);
   load();
+}
+
+// "N mã chưa khớp": liệt kê Số ID có lượt quẹt mà chưa khớp NV nào (kèm tên trên máy nếu đã tải NV) → biết điền "Số ID máy" cho ai
+function unmatchedModal(m) {
+  const rows = m.unmatched_pins || [];
+  const d = (t) => t ? isoToHMS(t) + ' ' + t.slice(8, 10) + '/' + t.slice(5, 7) + '/' + t.slice(0, 4) : '';
+  openModal('Mã chưa khớp · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint' }, 'Các Số ID dưới đây có lượt quẹt trên máy nhưng chưa thuộc nhân viên nào trong phần mềm. Vào Nhân viên → sửa người đó → điền ô "Số ID máy chấm công" đúng số này, lượt quẹt cũ tự khớp và tính công lại.'),
+    el('div', { class: 'table-wrap', style: 'margin-top:10px' }, el('table', { class: 'data' },
+      el('thead', {}, el('tr', {}, ...['Số ID', 'Tên trên máy', 'Số lượt quẹt', 'Lần đầu', 'Lần cuối'].map((h) => el('th', {}, h)))),
+      el('tbody', {}, ...rows.map((x) => el('tr', {}, el('td', {}, el('b', {}, x.pin)), el('td', {}, x.name || el('span', { class: 'muted' }, '(máy không có tên / đã xoá trên máy)')),
+        el('td', {}, String(x.n)), el('td', {}, d(x.first)), el('td', {}, d(x.last))))))),
+  ], [el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
 }
 
 // ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY (bấm tay): chọn máy + chọn NV (đang làm, có Số ID), tuỳ chọn kèm sinh trắc phần mềm đang có
@@ -6298,7 +6299,10 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
     const n = (v) => Number(v || 0).toLocaleString('vi');
     if (action === 'logs' || action === 'new-logs') {
       msg.textContent = action === 'new-logs' ? '✅ Đã tải các lượt chấm mới' : `✅ Đã tải xong${r.from ? ` ${r.from} → ${r.to}` : ' toàn bộ'}`;
-      out.append(line('Lượt chấm đọc từ máy', n(r.read)), line('Lượt chấm MỚI thêm vào phần mềm', n(r.added)), line('Đã có sẵn (bỏ qua, không trùng)', n(r.read - r.added)), line('Nhân viên trên máy', n(r.users)));
+      out.append(line('Lượt chấm đọc từ máy', n(r.read)), line('Lượt chấm MỚI thêm vào phần mềm', n(r.added)), line('Đã có sẵn (bỏ qua, không trùng)', n(r.read - r.added)), line('Nhân viên trên máy', r.users == null && kind === 'tcp' ? 'không đổi (không cần đọc lại)' : n(r.users)));
+      if (r.ms && kind === 'tcp') { const sec = (v) => (v / 1000).toLocaleString('vi', { maximumFractionDigits: 1 }) + ' giây';
+        out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Thời gian: ' + [r.ms.connect != null && 'kiểm tra máy ' + sec(r.ms.connect), r.ms.users != null && 'đọc NV ' + sec(r.ms.users),
+          r.ms.range_try && 'thử lọc theo ngày ' + sec(r.ms.range_try), r.ms.read != null && 'đọc chấm công ' + sec(r.ms.read), r.ms.save != null && 'lưu + tính công ' + sec(r.ms.save)].filter(Boolean).join(' · '))); }
       if (r.unmatched) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${r.unmatched} Số ID trên máy chưa khớp nhân viên nào — vào Nhân viên điền "Số ID máy" cho khớp.`));
       if (!r.ranged && r.from && kind === 'tcp') out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, `Máy này (firmware cũ) không lọc được theo ngày nên phần mềm đã đọc cả ${n(r.onDevice)} lượt trên máy rồi lọc lại.`));
       out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Công đã tự tính cho các ngày có lượt chấm mới. Xem ở menu Tính công.'));

@@ -2,9 +2,36 @@
 export const TK = 'digiplus_token';
 const DEV = 'digiplus_device_id';
 
-export function getToken() { return localStorage.getItem(TK); }
-export function setToken(t) { localStorage.setItem(TK, t); }
-export function clearToken() { localStorage.removeItem(TK); }
+// "Tự động đăng nhập" (ô tích ở màn đăng nhập trang quản lý — Anh 29/10/2026: nhân viên mở máy tính văn phòng là vào thẳng phần mềm):
+// tích = nhớ phiên như cũ (localStorage); bỏ tích = phiên chỉ sống khi cửa sổ còn mở (sessionStorage) + nhịp "còn mở" mỗi 20 giây —
+// trình duyệt khôi phục tab cũ sau khi tắt máy (Chrome "tiếp tục nơi đã dừng") mà nhịp đã ngừng quá 2 phút thì vẫn phải đăng nhập lại.
+// Tab mới (Ctrl/chuột giữa mở menu) không được chép sessionStorage → hỏi tab đang mở qua BroadcastChannel (cùng trang mới nghe được).
+const REM = 'digiplus_remember', ALIVE = 'digiplus_alive';
+const SS = (() => { try { return sessionStorage; } catch { return null; } })();
+const beat = () => { if (SS?.getItem(TK)) localStorage.setItem(ALIVE, String(Date.now())); };
+if (SS?.getItem(TK) && Date.now() - (+localStorage.getItem(ALIVE) || 0) > 120000) SS.removeItem(TK);
+setInterval(beat, 20000);
+const bc = typeof BroadcastChannel !== 'undefined' ? new BroadcastChannel('digiplus_auth') : null;
+if (bc) bc.addEventListener('message', (e) => { if (e.data === 'ask' && SS?.getItem(TK)) bc.postMessage({ token: SS.getItem(TK) }); });
+export const rememberLogin = () => localStorage.getItem(REM) !== '0';
+export function getToken() { return SS?.getItem(TK) || localStorage.getItem(TK); }
+export function setToken(t, remember) {   // remember bỏ trống (app nhân viên) = nhớ phiên, không đổi lựa chọn của trang quản lý
+  if (remember !== undefined) localStorage.setItem(REM, remember ? '1' : '0');
+  if (remember !== false || !SS) { localStorage.setItem(TK, t); SS?.removeItem(TK); return; }
+  SS.setItem(TK, t); localStorage.removeItem(TK); beat();
+}
+export function clearToken() { localStorage.removeItem(TK); SS?.removeItem(TK); }
+// Chưa có phiên + đang chế độ không tự đăng nhập → xin phiên từ tab khác đang mở (chờ tối đa ~0,4 giây)
+export function tokenFromOtherTab(ms = 400) {
+  return new Promise((ok) => {
+    if (!bc || !SS || getToken() || rememberLogin()) return ok();
+    const done = () => { clearTimeout(t); bc.removeEventListener('message', h); ok(); };
+    const h = (e) => { if (e.data && e.data.token) { SS.setItem(TK, e.data.token); beat(); done(); } };
+    const t = setTimeout(done, ms);
+    bc.addEventListener('message', h);
+    bc.postMessage('ask');
+  });
+}
 
 // Mã định danh thiết bị (ổn định trên 1 điện thoại) — dùng để khoá thiết bị chấm công.
 export function deviceId() {

@@ -49,6 +49,9 @@ export function registerDeviceRoutes(r, { need }) {
     for (const d of rows) {
       d.punch_count = db.prepare('SELECT COUNT(*) c FROM device_punches WHERE serial=?').get(d.serial).c;
       d.unmatched = db.prepare('SELECT COUNT(DISTINCT pin) c FROM device_punches WHERE serial=? AND employee_id IS NULL').get(d.serial).c;
+      // "N mã chưa khớp" bấm vào xem được là Số ID nào (trước chỉ có con số)
+      if (d.unmatched) d.unmatched_pins = db.prepare(`SELECT p.pin, COUNT(*) n, MIN(p.punch_at) first, MAX(p.punch_at) last, MAX(u.name) name FROM device_punches p
+        LEFT JOIN device_users_serial u ON u.serial=p.serial AND u.pin=p.pin WHERE p.serial=? AND p.employee_id IS NULL GROUP BY p.pin ORDER BY n DESC LIMIT 50`).all(d.serial);
       d.emp_count = db.prepare('SELECT COUNT(*) c FROM (SELECT pin FROM device_users_serial WHERE serial=? UNION SELECT pin FROM device_bio_templates WHERE serial=?)').get(d.serial, d.serial).c;
       d.fp_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type=1').get(d.serial).c;
       d.face_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)').get(d.serial).c;
@@ -422,16 +425,23 @@ export function registerDeviceRoutes(r, { need }) {
     const j = startJob(action, d.name || d.serial, async (prog) => {
       // luôn đọc Serial trước: chặn trường hợp IP này giờ là MÁY KHÁC (đổi máy / trùng IP) → không ghi nhầm dữ liệu, không xoá nhầm máy
       prog('Đang kết nối máy…');
+      const tStart = Date.now();
       const info = await tcpInfo(d);
       if (info.serial && info.serial !== d.serial) throw new Error(`Máy ở ${d.tcp_ip} có Serial ${info.serial}, KHÁC máy đã khai (${d.serial}). Dừng lại để tránh nhầm máy — sửa lại IP hoặc thêm máy mới.`);
       saveInfo(d.id, info);
       if (action === 'info') return { info };
       if (action === 'users') { prog('Đang đọc nhân viên + vân tay từ máy…'); return await tcpUsers(d, prog, { fp: true }); }
       if (action === 'logs') {
-        prog('Đang đọc nhân viên từ máy…');
-        const u = await tcpUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
+        // Tải NV trước (để lượt chấm khớp được người) CHỈ khi số NV trên máy khác số phần mềm đã biết — trước lần nào cũng đọc lại
+        // toàn bộ NV, thêm 1 lần kết nối máy (nhahanggiadinh 29/10/2026: "chọn 1 ngày mà tải lâu quá")
+        const t0 = Date.now();
+        const known = db.prepare('SELECT COUNT(*) c FROM device_users_serial WHERE serial=?').get(d.serial).c;
+        let users = null;
+        if (!(info.users >= 0) || info.users !== known) { prog('Đang đọc nhân viên từ máy (có người mới)…'); users = (await tcpUsers(d, prog)).read; }
+        const msUsers = users == null ? null : Date.now() - t0;
         prog('Đang đọc dữ liệu chấm công từ máy…');
-        return { ...(await tcpLogs(d, from, to, prog)), users: u.read, from, to };
+        const r = await tcpLogs(d, from, to, prog);
+        return { ...r, ms: { connect: t0 - tStart, users: msUsers, ...r.ms }, users, from, to };
       }
       if (action === 'delete-users') {   // xoá từng NV đã chọn (VD NV đã khoá) — trước chỉ máy đẩy (ADMS) làm được
         prog(`Đang xoá ${pins.length} nhân viên trên máy…`);
