@@ -343,7 +343,7 @@ function symbolOf(ctx, empId, date) {
   if (ctx.leaveDays.has(empId + '|' + date)) return 'P';
   if (ctx.holidays.has(date)) return ctx.compOff.has(date) && c && ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) ? 'NN' : 'L';   // NN = đi làm ngày nghỉ bù lễ
   if (!c) return ctx.isScheduled(empId, date) ? 'V' : '';
-  if (c.day_status === 'thieu_ra' || !c.check_out_at) return 'O';
+  if (c.day_status === 'thieu_ra' || (!c.check_out_at && c.day_status !== 'mot_lan')) return 'O';   // mot_lan = ca "chấm 1 lần là đủ công"
   if (!ctx.hourly && ((c.late_min || 0) > 0 || (c.early_min || 0) > 0)) return 'T';   // theo giờ: không có trễ/sớm
   if ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) return 'X';   // ca tính cả ca là tăng ca: công 0 nhưng có làm
   return 'V';
@@ -351,7 +351,7 @@ function symbolOf(ctx, empId, date) {
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
 const OT_LABEL = { thuong: 'Ngày thường', cuoi_tuan: 'Cuối tuần', le: 'Ngày lễ' };
 const DS_LABEL = {
-  lam_viec: 'Đủ công', thieu_ra: 'Thiếu ra', vang: 'Vắng',
+  lam_viec: 'Đủ công', mot_lan: 'Đủ công', thieu_ra: 'Thiếu ra', vang: 'Vắng',
   nghi_le: 'Nghỉ lễ', nghi_phep: 'Nghỉ phép',
 };
 
@@ -711,7 +711,7 @@ function buildReportRaw(type, from, to, filter) {
         _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         late: c.late_min || 0, early: c.early_min || 0, ot: r1(c.ot_min || 0), gio: round2((c.work_minutes || 0) / 60),
         cong: round2(c.work_unit),
-        status: !c.check_out_at ? 'Thiếu ra' : HOURLY ? 'Đủ' : c.late_min > 0 ? 'Đi muộn' : c.early_min > 0 ? 'Về sớm' : 'Đủ công',
+        status: !c.check_out_at && c.day_status !== 'mot_lan' ? 'Thiếu ra' : HOURLY ? 'Đủ' : c.late_min > 0 ? 'Đi muộn' : c.early_min > 0 ? 'Về sớm' : 'Đủ công',
       }));
       return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
     }

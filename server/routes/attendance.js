@@ -5,9 +5,9 @@ import { authRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv } from '../attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
-import { otRoundingFrom } from '../day-metrics.js';
+import { otRoundingFrom, payrollCtx, computeDayMetrics } from '../day-metrics.js';
 import { otRegCapper } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
 import { dayRules } from '../swap.js';
@@ -187,7 +187,9 @@ r.post('/check-in', (req, res) => {
     return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần một định vị được phép để chấm công.` });
   }
 
-  const late = shift ? (() => { const f = dayFlags(date, req.user.id); return computeLate(shift, at, date, f.lateBlock, halfLeavePriv(shift, date, f.half, f.priv)); })() : 0;
+  // Ca "Chấm 1 lần: có mặt là tính đủ công": vào ca là đủ công luôn (không đi muộn); chấm ra sau đó thì tính lại như thường
+  const single = shift && singlePunchFull(shift) ? computeDayMetrics(payrollCtx(getSetting, db), shift, date, at, null, null, { empId: req.user.id }) : null;
+  const late = single ? single.late : shift ? (() => { const f = dayFlags(date, req.user.id); return computeLate(shift, at, date, f.lateBlock, halfLeavePriv(shift, date, f.half, f.priv)); })() : 0;
   const otType = otTypeOf(date, req.user.id);
 
   let photoPath;
@@ -212,6 +214,7 @@ r.post('/check-in', (req, res) => {
            shift?.id ?? null, rs.source);
     rowId = info.lastInsertRowid;
   }
+  if (single) db.prepare('UPDATE attendance SET work_minutes=?, work_unit=?, day_status=?, ot_type=? WHERE id=?').run(single.work_minutes, single.work_unit, single.day_status, single.ot_type, rowId);
 
   const row = db.prepare('SELECT * FROM attendance WHERE id = ?').get(rowId);
   res.json({ ok: true, attendance: row, meta: { distance, outside: !!outside, late } });
@@ -342,7 +345,7 @@ r.get('/calendar', (req, res) => {
     else if (holidays.has(d)) status = 'le';
     else if (offDays.has(d)) status = 'nghi';
     else if (c) {
-      if (!c.check_out_at) status = 'thieu_ra';
+      if (!c.check_out_at && c.day_status !== 'mot_lan') status = 'thieu_ra';   // mot_lan = ca "chấm 1 lần là đủ công"
       else if ((c.late_min || 0) > 0 || (c.early_min || 0) > 0) status = 'muon_som';
       else if ((c.work_unit || 0) > 0) status = 'du_cong';
       else status = 'vang';

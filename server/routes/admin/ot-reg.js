@@ -41,7 +41,7 @@ function buildAbnormal(q) {
   const today = vnDateStr();
   const required = otRegRequired();
   const att = db.prepare(`SELECT a.employee_id, a.work_date, a.check_in_at, a.check_out_at, a.late_min, a.early_min, a.ot_min,
-      COALESCE(a.ot_raw_min, a.ot_min, 0) raw, a.manual, s.name shift_name, s.start_time, s.end_time, g.minutes reg,
+      COALESCE(a.ot_raw_min, a.ot_min, 0) raw, a.manual, a.day_status, s.name shift_name, s.start_time, s.end_time, g.minutes reg,
       e.code, e.full_name, e.department
     FROM attendance a JOIN employees e ON e.id=a.employee_id LEFT JOIN shifts s ON s.id=a.shift_id
       LEFT JOIN ot_registrations g ON g.employee_id=a.employee_id AND g.work_date=a.work_date
@@ -58,7 +58,7 @@ function buildAbnormal(q) {
     const k = a.employee_id + '|' + a.work_date, kinds = [];
     if ((a.late_min || 0) >= minLate) kinds.push('late');
     if ((a.early_min || 0) >= minEarly) kinds.push('early');
-    if (a.check_in_at && !a.check_out_at && a.work_date < today) kinds.push('no_out');
+    if (a.check_in_at && !a.check_out_at && a.day_status !== 'mot_lan' && a.work_date < today) kinds.push('no_out');
     let raw = null, reg = null, ot = null;
     if (!seenDay.has(k)) {   // phần tăng ca: 1 lần cho mỗi NV-ngày (ghi ở dòng đầu)
       seenDay.add(k);

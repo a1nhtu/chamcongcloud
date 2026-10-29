@@ -7,7 +7,7 @@ import { ADMIN_DEPT } from '../../seed.js';
 const SHIFT_EXTRA = {
   ot_before: 'bool', ot_before_min: 'int', ot_tier1_min: 'int', ot_tier2_min: 'int', ot_tier3_min: 'int',
   ot_tier2_rate: 'num', ot_tier3_rate: 'num', ot_tier4_rate: 'num',
-  weekend_as_ot: 'bool', holiday_as_ot: 'bool', compensate_late: 'bool', no_out_credit: 'bool',
+  weekend_as_ot: 'bool', holiday_as_ot: 'bool', compensate_late: 'bool', no_out_credit: 'noout',
   grace_deduct: 'bool', shift_as_ot: 'bool', break_start: 'hhmm',
 };
 function saveShiftExtra(id, b, old) {
@@ -16,6 +16,7 @@ function saveShiftExtra(id, b, old) {
   const val = (k) => {
     const t = SHIFT_EXTRA[k], v = b[k];
     if (t === 'bool') return v ? 1 : 0;
+    if (t === 'noout') return Number(v) === 2 ? 2 : v && v !== '0' ? 1 : 0;   // 0 không tính · 1 đủ công trừ đi trễ · 2 có mặt là đủ công
     if (t === 'hhmm') return /^\d{2}:\d{2}$/.test(String(v || '')) ? String(v) : '';
     const n = Number(v);
     if (!Number.isFinite(n) || n < 0) return old[k] ?? 0;

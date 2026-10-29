@@ -1,7 +1,7 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, computeNoOut, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
+import { computeLate, computeCheckout, computeNoOut, computeSinglePunch, singlePunchFull, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
 import { privilegeLookup, halfLeaveLookup } from './privilege.js';
 import { otRegCapper } from './ot-cap.js';
 import { dayRules } from './swap.js';
@@ -87,10 +87,14 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   // nghỉ phép nửa ngày: nửa nghỉ không tính trễ / sớm (giờ công vẫn tính theo flags.priv gốc = đúng phần đã làm)
   const half = shift && opts.empId && ctx.halfOf ? ctx.halfOf(opts.empId, workDate) : '';
   const lePriv = half ? halfLeavePriv(shift, workDate, half, flags.priv) : flags.priv;
-  const late = (shift && inIso) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, lePriv) : 0;
+  // Ca chọn "Chấm 1 lần: có mặt là tính đủ công": chỉ có giờ vào hoặc chỉ có giờ ra → đủ công, không đi muộn
+  const single = !!shift && singlePunchFull(shift) && !inIso !== !outIso;
+  const late = (shift && inIso && !single) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, lePriv) : 0;
 
   let c;
-  if (inIso && outIso) {
+  if (single) {
+    c = computeSinglePunch(shift, workDate, flags);
+  } else if (inIso && outIso) {
     if (shift) {
       c = computeCheckout(shift, inIso, outIso, workDate, flags);
       if (half) c.early_min = computeCheckout(shift, inIso, outIso, workDate, { ...flags, priv: lePriv }).early_min;
@@ -110,6 +114,8 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   if (flags.isWeekend && ctx.weekendNeedPairs && shift && shift.break_start && pairs && pairs.length === 1 && c.work_minutes) c = { ...c, work_minutes: 0, work_unit: 0 };
   const beforeWk = c;
   if ((ctx.weekendOt || compOff) && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
+  // chấm 1 lần ngày nghỉ (đi làm tính tăng ca): không có giờ ra → không tính tăng ca
+  if (single && c !== beforeWk) c = { ...c, ot_min: 0, day_status: 'thieu_ra' };
   const wkExact = c !== beforeWk ? (beforeWk.work_minutes || 0) : 0;   // giờ làm trong ca vừa chuyển thành tăng ca ngày nghỉ
   // làm tròn tăng ca (quy tắc chung) — từng đoạn trước ca / sau ca làm tròn riêng
   if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtParts(c.ot_min, c.ot_parts, r.decimals ?? 2, r.mode || 0, r.block || 0, ctx.weekendWorkExact ? wkExact : 0) }; }

@@ -293,6 +293,20 @@ export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
   return { ...base, work_minutes, work_unit };
 }
 
+// Ca chọn "Chấm 1 lần: có mặt là tính đủ công" (no_out_credit = 2; 1 = kiểu cũ "đủ công trừ phần đi trễ").
+export const singlePunchFull = (shift) => Number(shift?.no_out_credit) === 2;
+// Ngày chỉ có giờ vào HOẶC chỉ có giờ ra: đủ giờ chuẩn + đủ công của ca; không đi muộn / về sớm / tăng ca.
+// Ca tính cả ca là tăng ca (ca tăng ca, ngày lễ của ca bật tùy chọn) → không có giờ ra nên không tính gì.
+// day_status 'mot_lan' = báo cáo hiện "Đủ công" (không phải "Thiếu ra").
+export function computeSinglePunch(shift, workDate, opts = {}) {
+  const { isHoliday = false, isWeekend = false } = opts;
+  const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
+  if (!shift || shiftIsOt(shift, isHoliday, isWeekend)) return { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type, day_status: 'thieu_ra' };
+  const { start, end } = shiftBounds(workDate, shift);
+  const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
+  return { early_min: 0, ot_min: 0, work_minutes: standard, work_unit: shift.work_unit_value ?? 1.0, ot_type, day_status: 'mot_lan' };
+}
+
 // Chia số phút tăng ca NGÀY THƯỜNG thành 4 mức TC1→TC4 theo giới hạn của ca (như Ronald Jack):
 // TC1 tối đa ot_tier1_min phút, tiếp theo TC2 tối đa ot_tier2_min, TC3 tối đa ot_tier3_min, còn dư → TC4.
 // Giới hạn = 0 nghĩa là mức đó nhận hết phần còn lại. Ca không đặt giới hạn → tất cả là TC1.

@@ -1827,9 +1827,11 @@ function shiftForm(s, can) {
       R('Kết thúc vào', ph(time24('s-ciEnd', s?.check_in_end || ''), '(tự động)')),
       R('Bắt đầu ra', ph(time24('s-coStart', s?.check_out_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm RA'),
       R('Kết thúc ra', ph(time24('s-coEnd', s?.check_out_end || ''), '(tự động)')),
-      R('Khi có giờ vào, thiếu giờ ra', el('select', { id: 's-noout' },
+      R('Khi chỉ chấm 1 lần (thiếu giờ ra)', el('select', { id: 's-noout' },
         el('option', { value: '0', ...(!s?.no_out_credit ? { selected: '' } : {}) }, 'Không tính công'),
-        el('option', { value: '1', ...(s?.no_out_credit ? { selected: '' } : {}) }, 'Tính đủ công, trừ phần đi trễ'))),
+        el('option', { value: '1', ...(+s?.no_out_credit === 1 ? { selected: '' } : {}) }, 'Tính đủ công, trừ phần đi trễ'),
+        el('option', { value: '2', ...(+s?.no_out_credit === 2 ? { selected: '' } : {}) }, 'Có mặt là tính đủ công')), '',
+        'Có mặt là tính đủ công: chỉ chấm vào hoặc chỉ chấm ra vẫn đủ công của ca, không tính đi muộn, không tính tăng ca'),
       C('s-comp', s?.compensate_late, 'Tính bù trừ cho ca này', '(đi làm trễ thì về trễ bù lại để không bị trừ giờ; phần bù không tính tăng ca)'),
       el('label', { class: 'fchk' }, actChk, el('span', {}, 'Đang dùng ca này', el('span', { class: 'fhint2' }, ' (bỏ tích = tắt ca, ẩn khỏi danh sách chọn)')))),
     el('div', { class: 'sh-col' },
@@ -1890,7 +1892,7 @@ function shiftForm(s, can) {
       ot_tier1_min: +$('#s-t1').value || 0, ot_tier2_min: +$('#s-t2').value || 0, ot_tier3_min: +$('#s-t3').value || 0,
       ot_tier2_rate: +$('#s-r2').value || 0, ot_tier3_rate: +$('#s-r3').value || 0, ot_tier4_rate: +$('#s-r4').value || 0,
       holiday_as_ot: $('#s-holidayot').checked, shift_as_ot: $('#s-shiftot').checked,
-      compensate_late: $('#s-comp').checked, no_out_credit: $('#s-noout').value === '1',
+      compensate_late: $('#s-comp').checked, no_out_credit: +$('#s-noout').value,
       grace_deduct: $('#s-gracededuct').checked,
     };
     if (!b.name) { toast('Nhập tên ca', 'err'); showTab(0); nameI.focus(); return; }

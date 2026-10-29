@@ -196,7 +196,7 @@ export function registerAttendanceRoutes(r, { need }) {
         punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || ((a.check_in_photo || a.check_out_photo) ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean).map((t) => t + '📱') : [])),   // công ảo: chỉ giờ vào · ra ảo; 📱 = chấm bằng điện thoại
         late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
         cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: lv ? lv.sym : '',
-        status: a.check_out_at ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
+        status: a.check_out_at || a.day_status === 'mot_lan' ? (a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
         att_id: a.id,
       });
     }

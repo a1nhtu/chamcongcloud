@@ -38,7 +38,7 @@ const SHIFT_F = {
   work_unit_value: ['Số công của ca'], allow_ot: ['Tính tăng ca', 'yn'], ot_start_after_min: ['Ở lại tối thiểu mới tính tăng ca', 'phút'],
   check_in_start: ['Bắt đầu vào'], check_in_end: ['Kết thúc vào'], check_out_start: ['Bắt đầu ra'], check_out_end: ['Kết thúc ra'],
   ot_before: ['Tăng ca trước giờ vào', 'yn'], ot_before_min: ['Đến sớm tối thiểu', 'phút'], holiday_as_ot: ['Cả ca là tăng ca ngày lễ', 'yn'],
-  shift_as_ot: ['Ca tăng ca', 'yn'], compensate_late: ['Tính bù trừ', 'yn'], no_out_credit: ['Thiếu giờ ra vẫn tính công', 'yn'],
+  shift_as_ot: ['Ca tăng ca', 'yn'], compensate_late: ['Tính bù trừ', 'yn'], no_out_credit: ['Chấm 1 lần (thiếu giờ ra)', 'noout'],
   grace_deduct: ['Chỉ tính phần vượt mức cho phép', 'yn'], ot_tier1_min: ['Giới hạn TC1', 'phút'], ot_tier2_min: ['Giới hạn TC2', 'phút'],
   ot_tier3_min: ['Giới hạn TC3', 'phút'], ot_tier2_rate: ['Hệ số TC2'], ot_tier3_rate: ['Hệ số TC3'], ot_tier4_rate: ['Hệ số TC4'],
   active: ['Đang dùng', 'yn'],
@@ -61,6 +61,7 @@ const WD_VI = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 function fmtVal(v, kind) {
   if (v == null || v === '') return '(trống)';
   if (kind === 'yn') return yes(v);
+  if (kind === 'noout') return +v === 2 ? 'Có mặt là tính đủ công' : +v ? 'Tính đủ công, trừ phần đi trễ' : 'Không tính công';
   if (kind === 'phút') return v + ' phút';
   if (kind === 'role') return ROLE_VI[v] || v;
   if (kind === 'att') return v === 'hourly' ? 'Theo giờ' : v === 'shift' ? 'Theo ca' : 'Theo cài đặt chung';
