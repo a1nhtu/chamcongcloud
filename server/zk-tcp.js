@@ -3,13 +3,15 @@
 // Quy tắc SDK: làm TUẦN TỰ từng máy (không chạy song song), đọc xong luôn bật lại máy + ngắt kết nối (script lo).
 // Dữ liệu tải về đi chung đường với máy Push: lượt chấm → ingestAttlog, nhân viên → ingestUserData (tự tạo NV, tự tính công).
 import { execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { connect } from 'node:net';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
-import { ingestAttlog, ingestUserData } from './device-sync.js';
-import { guardIncoming } from './pin-guard.js';
+import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates } from './device-sync.js';
+import { guardIncoming, heldSet } from './pin-guard.js';
 import { vnDateStr } from './util.js';
 import { busyFlag, eachTenant, tenantKey } from './tenant.js';
 
@@ -285,19 +287,65 @@ export async function tcpSetServer(c, domain, port = '') {
   return info;
 }
 
-// Tải NHÂN VIÊN từ máy về phần mềm (tên, quyền, thẻ) → tự tạo / cập nhật NV như máy Push
-export async function tcpUsers(dev, prog = () => {}) {
-  const lines = [];
-  await zkRun(dev, 'users', {}, (k, c) => {
+// Tải NHÂN VIÊN từ máy về phần mềm (tên, quyền, thẻ, mật mã) → tự tạo / cập nhật NV như máy Push.
+// fp = kèm VÂN TAY (bấm "Tải nhân viên"; trước không tải vân tay — khách nhahanggiadinh 29/10/2026): lưu như vân tay máy đẩy gửi về
+// → hiện ở Sinh trắc của NV, đẩy được sang máy khác. Tự tải theo chu kỳ thì không đọc vân tay (chậm, máy đứng "Đang làm việc").
+export async function tcpUsers(dev, prog = () => {}, { fp = false } = {}) {
+  const lines = [], fp9 = [], fp10 = [];
+  await zkRun(dev, 'users', fp ? { to: 'fp' } : {}, (k, c) => {
+    if (k === 'F' && c[0] && c[4]) {
+      const [pin, idx, flag, ver, tmp] = c;
+      if (ver === '10') fp10.push(`BIODATA Pin=${pin}\tNo=${idx}\tIndex=${idx}\tValid=1\tDuress=${flag === '3' ? 1 : 0}\tType=1\tMajorVer=10\tMinorVer=0\tFormat=0\tTmp=${tmp}`);
+      else fp9.push(`FP PIN=${pin}\tFID=${idx}\tSize=${tmp.length}\tValid=1\tTMP=${tmp}`);
+      return;
+    }
     if (k !== 'U' || !c[0]) return;
-    lines.push(`USER PIN=${c[0]}\tName=${c[1] || ''}\tPri=${c[2] || 0}\tCard=${c[4] || ''}`);
+    lines.push(`USER PIN=${c[0]}\tName=${c[1] || ''}\tPri=${c[2] || 0}\tCard=${c[4] || ''}${c[5] ? `\tPasswd=${c[5]}` : ''}`);
     if (lines.length % 200 === 0) prog(`Đã đọc ${lines.length} nhân viên…`);
   });
   prog(`Đang lưu ${lines.length} nhân viên…`);
   // Cảnh báo trùng Số ID (nếu bật): chỉ so tên (máy TCP/IP không báo đăng ký mới theo thời gian thực)
   if (lines.length) { try { guardIncoming(dev.serial, 'USER', lines.join('\n'), { realtime: false }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); } }
   const seen = lines.length ? ingestUserData(dev.serial, 'USER', lines.join('\n')) : new Set();
-  return { read: lines.length, saved: seen.size };
+  if (fp9.length) storeTemplates(dev.serial, 'FP', fp9.join('\n'));
+  if (fp10.length) storeTemplates(dev.serial, 'BIODATA', fp10.join('\n'));
+  return { read: lines.length, saved: seen.size, ...(fp ? { fps: fp9.length + fp10.length } : {}) };
+}
+
+// ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY TCP/IP (bấm "Đẩy NV xuống máy"; trước chỉ máy đẩy ADMS nhận được — khách nhahanggiadinh 29/10/2026).
+// Số ID + tên + mật mã + thẻ lấy y như lệnh gửi máy đẩy (buildUserCommand); withBio = kèm vân tay phần mềm đang có (từ máy khác).
+// Chỉ NV đang làm, có Số ID, không đang nghi trùng ở máy này. Xong đọc lại NV trên máy → danh sách "có trên máy" đúng thực tế.
+const SAFE = (v) => String(v ?? '').replace(/[\t\r\n]/g, ' ').trim();
+export async function tcpPushUsers(dev, pins, { withBio = false } = {}, prog = () => {}) {
+  const held = heldSet();
+  const active = db.prepare('SELECT 1 FROM employees WHERE device_pin=? AND active=1');
+  const lines = [], sent = [];
+  for (const p of new Set((pins || []).map((x) => String(x || '').trim()).filter(Boolean))) {
+    if (!/^[0-9A-Za-z_-]{1,20}$/.test(p) || !active.get(p) || held.has(dev.serial + '|' + p)) continue;
+    const f = Object.fromEntries(buildUserCommand(p, dev.serial, null, true).replace(/^DATA UPDATE USERINFO /, '').split('\t').map((kv) => [kv.slice(0, kv.indexOf('=')), kv.slice(kv.indexOf('=') + 1)]));
+    lines.push(['U', p, SAFE(f.Name).slice(0, 24), SAFE(f.Passwd), +f.Pri || 0, SAFE(f.Card)].join('\t'));
+    sent.push(p);
+    if (!withBio) continue;
+    const fps = new Map();   // ngón → mẫu mới nhất (phần mềm có thể giữ mẫu cùng ngón từ nhiều máy)
+    for (const t of db.prepare('SELECT idx, major_ver, tmp FROM device_bio_templates WHERE pin=? AND serial<>? AND bio_type=1 AND valid=1 ORDER BY id').all(p, dev.serial)) fps.set(t.idx, t);
+    for (const t of fps.values()) if (t.tmp) lines.push(['F', p, t.idx, (t.major_ver || 10) < 10 ? 9 : 10, SAFE(t.tmp)].join('\t'));
+  }
+  if (!sent.length) return { pushed: 0, failed: 0, fps: 0, skipped: (pins || []).length };
+  const file = join(tmpdir(), `dgp-push-${process.pid}-${Date.now()}.txt`);
+  writeFileSync(file, lines.join('\r\n'), 'utf8');
+  const ok = [], bad = [];
+  let fps = 0, fpFail = 0, fpVer = '';
+  try {
+    prog(`Đang ghi ${sent.length} NV xuống máy ${dev.name || dev.serial}…`);
+    const r = await zkRun(dev, 'set-users', { from: file, timeoutMs: 15 * 60000 }, (k, c) => {
+      if (k === 'S') (c[1] === '1' ? ok : bad).push(c[0]);
+      else if (k === 'T') { if (c[2] === '1') fps++; else fpFail++; }
+    });
+    fpVer = r.note?.[1] || '';
+  } finally { rmSync(file, { force: true }); }
+  prog('Đang đọc lại nhân viên trên máy…');
+  try { await tcpUsers(dev, prog); } catch { /* ghi xong rồi, đọc lại lỗi thì lần Tải nhân viên sau sẽ cập nhật */ }
+  return { pushed: ok.length, failed: bad.length, failed_pins: bad, fps, fp_failed: fpFail, fp_version: fpVer, skipped: (pins || []).length - sent.length };
 }
 
 // Tải LƯỢT CHẤM trong [from, to] (rỗng = toàn bộ) → lưu lượt quẹt + dựng công. Lượt đã có thì tự bỏ qua (không trùng).

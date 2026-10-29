@@ -4,7 +4,7 @@ import { db, getSetting } from '../../db.js';
 import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
-import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
+import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
   scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful } from '../../zk-tcp.js';
 import { buildSched, schedLabel } from '../../reboot-schedule.js';
 import { setSetting } from '../../db.js';
@@ -426,7 +426,7 @@ export function registerDeviceRoutes(r, { need }) {
       if (info.serial && info.serial !== d.serial) throw new Error(`Máy ở ${d.tcp_ip} có Serial ${info.serial}, KHÁC máy đã khai (${d.serial}). Dừng lại để tránh nhầm máy — sửa lại IP hoặc thêm máy mới.`);
       saveInfo(d.id, info);
       if (action === 'info') return { info };
-      if (action === 'users') { prog('Đang đọc nhân viên từ máy…'); return await tcpUsers(d, prog); }
+      if (action === 'users') { prog('Đang đọc nhân viên + vân tay từ máy…'); return await tcpUsers(d, prog, { fp: true }); }
       if (action === 'logs') {
         prog('Đang đọc nhân viên từ máy…');
         const u = await tcpUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
@@ -548,23 +548,33 @@ export function registerDeviceRoutes(r, { need }) {
     if (!serials.length) return res.status(400).json({ error: 'Chưa chọn máy' });
     // máy Hikvision: phần mềm ghi thẳng vào máy (chạy nền); máy ZKTeco / AI: xếp lệnh, máy nhận khi kết nối
     const hikDevs = hikEnabled() ? db.prepare(`SELECT * FROM push_devices WHERE active=1 AND conn_type='hik' AND serial IN (${serials.map(() => '?').join(',')})`).all(...serials) : [];
-    const hikSet = new Set(hikDevs.map((h) => h.serial));
-    const r2 = pushEmployees(pins, { serials: serials.filter((s) => !hikSet.has(s)), withBio: !!b.with_bio });
-    for (const s of serials) if (!hikSet.has(s)) aiPoke(s);
+    // máy TCP/IP: phần mềm kết nối vào máy ghi thẳng qua SDK (chạy nền, tuần tự từng máy — tcpPushUsers)
+    const tcpDevs = tcpEnabled() ? db.prepare(`SELECT * FROM push_devices WHERE active=1 AND conn_type='tcp' AND serial IN (${serials.map(() => '?').join(',')})`).all(...serials) : [];
+    const direct = [...hikDevs, ...tcpDevs];
+    const directSet = new Set(direct.map((h) => h.serial));
+    const r2 = pushEmployees(pins, { serials: serials.filter((s) => !directSet.has(s)), withBio: !!b.with_bio });
+    for (const s of serials) if (!directSet.has(s)) aiPoke(s);
     let job = null;
-    if (hikDevs.length) {
+    if (direct.length) {
       const okPins = db.prepare(`SELECT device_pin p FROM employees WHERE active=1 AND device_pin IN (${pins.map(() => '?').join(',')})`).all(...pins).map((x) => String(x.p));
-      if (okPins.length) job = startJob('hik-push', hikDevs.length + ' máy Hikvision', async (prog) => {
+      if (okPins.length) job = startJob('direct-push', direct.length + ' máy kết nối trực tiếp', async (prog) => {
         const out = [];
-        for (const h of hikDevs) {
-          try { prog(`Đang ghi NV xuống máy ${h.name || h.serial}…`); out.push({ device: h.name || h.serial, ok: true, ...(await hikPushUsers(h, okPins, prog, { withFace: !!b.with_bio })) }); }
-          catch (e) { out.push({ device: h.name || h.serial, ok: false, error: e.message }); }
+        for (const h of direct) {
+          const name = h.name || h.serial;
+          try {
+            prog(`Đang ghi NV xuống máy ${name}…`);
+            if (h.conn_type === 'hik') { out.push({ device: name, ok: true, ...(await hikPushUsers(h, okPins, prog, { withFace: !!b.with_bio })) }); continue; }
+            if (!(await tcpProbe(h.tcp_ip, h.tcp_port))) throw new Error(`Không thấy máy ở ${h.tcp_ip}:${h.tcp_port} — kiểm tra máy đã bật và cùng mạng LAN.`);
+            const info = await tcpInfo(h);
+            if (info.serial && info.serial !== h.serial) throw new Error(`IP ${h.tcp_ip} giờ là máy khác (Serial ${info.serial}) — bỏ qua cho an toàn`);
+            out.push({ device: name, ok: true, tcp: true, ...(await tcpPushUsers(h, okPins, { withBio: !!b.with_bio }, prog)) });
+          } catch (e) { out.push({ device: name, ok: false, error: e.message }); }
         }
         return { devices: out };
       }).id;
     }
     const any = r2.users || job;
-    res.json({ ok: true, ...r2, job, msg: any ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy${job ? ` + đang ghi xuống ${hikDevs.length} máy Hikvision` : ''}. Máy nhận dần khi kết nối.` : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
+    res.json({ ok: true, ...r2, job, msg: any ? (r2.users ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy. Máy nhận dần khi kết nối.` : '') + (job ? ` Đang ghi thẳng xuống ${direct.length} máy kết nối trực tiếp…` : '') : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
   });
 
   /* -------- Xóa nhân viên trên TẤT CẢ máy 1 lần (khỏi vào từng máy) -------- */

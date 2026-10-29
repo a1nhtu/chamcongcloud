@@ -92,14 +92,26 @@ try {
       }
       Done 'info'
     }
-    'users' {
+    'users' {           # $To = 'fp' → kèm VÂN TAY: 'F <pin> <ngón> <cờ> <9|10> <mẫu>' (bấm Tải nhân viên; tự tải theo chu kỳ thì không, cho nhanh)
       Lock
       [void]$z.ReadAllUserID($m)
+      $fp = 0
+      if ($To -eq 'fp') {
+        $v = ''; [void]$z.GetSysOption($m, '~ZKFPVersion', [ref]$v); $fp = $(if ((Clean $v) -eq '10') { 10 } else { 9 })
+        [void]$z.ReadAllTemplate($m)   # 1 lần cho cả máy, sau đó đọc từng NV từ bộ đệm (gọi theo từng NV rất chậm, dễ quá giờ)
+      }
       $pin = ''; $name = ''; $pw = ''; $pri = 0; $en = $false; $n = 0
       while ($z.SSR_GetAllUserInfo($m, [ref]$pin, [ref]$name, [ref]$pw, [ref]$pri, [ref]$en)) {
         $card = ''; try { [void]$z.GetStrCardNumber([ref]$card) } catch {}
         if ($card -eq '0') { $card = '' }
-        Out ("U`t" + (Clean $pin) + "`t" + (Clean $name) + "`t$pri`t" + $(if ($en) { 1 } else { 0 }) + "`t" + (Clean $card))
+        Out ("U`t" + (Clean $pin) + "`t" + (Clean $name) + "`t$pri`t" + $(if ($en) { 1 } else { 0 }) + "`t" + (Clean $card) + "`t" + (Clean $pw))
+        if ($fp) {
+          for ($f = 0; $f -le 9; $f++) {
+            $tmp = ''; $len = 0; $flag = 1; $ok = $false
+            try { $ok = $(if ($fp -eq 10) { [bool]$z.GetUserTmpExStr($m, $pin, $f, [ref]$flag, [ref]$tmp, [ref]$len) } else { [bool]$z.SSR_GetUserTmpStr($m, $pin, $f, [ref]$tmp, [ref]$len) }) } catch {}
+            if ($ok -and $tmp) { Out ("F`t" + (Clean $pin) + "`t$f`t$flag`t$fp`t" + (Clean $tmp)) }
+          }
+        }
         $n++
       }
       Done "$n"
@@ -162,6 +174,37 @@ try {
         Out ("D`t$p`t" + (DeleteOne $p))
       }
       [void]$z.RefreshData($m); Done 'delete-users'
+    }
+    'set-users' {       # GHI NV xuống máy (bấm "Đẩy NV xuống máy"); $From = file UTF-8, mỗi dòng:
+                        #   U <pin> <tên> <mật mã> <quyền> <thẻ>   ·   F <pin> <ngón> <bản vân tay 9|10> <mẫu base64>
+                        # Đã có trên máy: GIỮ quyền quản trị + thẻ / mật mã máy đang có nếu phần mềm không có. Vân tay chỉ ghi
+                        # khi đúng thuật toán của máy (~ZKFPVersion 10 / 9). In 'S <pin> <1|0>' từng NV, 'T <pin> <ngón> <1|0>' từng mẫu.
+      Lock
+      $v = ''; [void]$z.GetSysOption($m, '~ZKFPVersion', [ref]$v); $fp = $(if ((Clean $v) -eq '10') { 10 } else { 9 })
+      $okPins = @{}
+      foreach ($l in (Get-Content -LiteralPath $From -Encoding UTF8)) {
+        $c = $l -split "`t"
+        if ($c[0] -eq 'U' -and $c.Count -ge 6) {
+          $pin = $c[1]; $name = $c[2]; $pw = $c[3]; $pri = [int]$c[4]; $card = $c[5]
+          $n0 = ''; $pw0 = ''; $pri0 = 0; $en0 = $true
+          if ($z.SSR_GetUserInfo($m, $pin, [ref]$n0, [ref]$pw0, [ref]$pri0, [ref]$en0)) {
+            if ($pri0 -gt $pri) { $pri = $pri0 }
+            if (-not $pw) { $pw = $pw0 }
+            if (-not $card) { $c0 = ''; try { [void]$z.GetStrCardNumber([ref]$c0) } catch {}; if ($c0 -and $c0 -ne '0') { $card = $c0 } }
+          }
+          try { [void]$z.SetStrCardNumber($(if ($card) { $card } else { '0' })) } catch {}   # thẻ dùng chung bộ đệm → luôn đặt lại, không dính thẻ người trước
+          $ok = $false; try { $ok = [bool]$z.SSR_SetUserInfo($m, $pin, $name, $pw, $pri, $true) } catch {}
+          if ($ok) { $okPins[$pin] = 1 }
+          Out ("S`t$pin`t" + $(if ($ok) { 1 } else { 0 }))
+        } elseif ($c[0] -eq 'F' -and $c.Count -ge 5) {
+          $pin = $c[1]; $idx = [int]$c[2]
+          if (-not $okPins.ContainsKey($pin) -or [int]$c[3] -ne $fp) { continue }
+          $ok = $false
+          try { $ok = $(if ($fp -eq 10) { [bool]$z.SetUserTmpExStr($m, $pin, $idx, 1, $c[4]) } else { [bool]$z.SSR_SetUserTmpStr($m, $pin, $idx, $c[4]) }) } catch {}
+          Out ("T`t$pin`t$idx`t" + $(if ($ok) { 1 } else { 0 }))
+        }
+      }
+      [void]$z.RefreshData($m); Done "set-users`t$fp"
     }
     'set-time' {        # đặt giờ máy = giờ máy tính đang chạy phần mềm
       [void]$z.SetDeviceTime($m); [void]$z.RefreshData($m); Done ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))

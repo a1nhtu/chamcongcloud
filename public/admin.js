@@ -6101,14 +6101,14 @@ async function pinConflictModal(after) {
 
 // ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY (bấm tay): chọn máy + chọn NV (đang làm, có Số ID), tuỳ chọn kèm sinh trắc phần mềm đang có
 async function pushEmpModal(devRows, after) {
-  const devs = (devRows || []).filter((m) => m.active && m.conn_type !== 'tcp' && m.conn_type !== 'union');
+  const devs = (devRows || []).filter((m) => m.active && m.conn_type !== 'union');
   const devBox = el('div', { style: 'display:flex;gap:6px 14px;flex-wrap:wrap;margin:6px 0 10px' });
   const devChk = devs.map((m) => {
     const c = el('input', { type: 'checkbox', style: 'width:auto', checked: '', value: m.serial });
-    devBox.append(el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0;font-weight:500;color:var(--ink)' }, c, (m.name || m.serial) + (m.sync_group ? ' · 🔁' + m.sync_group : '')));
+    devBox.append(el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0;font-weight:500;color:var(--ink)' }, c, (m.name || m.serial) + (m.conn_type === 'tcp' ? ' · TCP/IP' : '') + (m.sync_group ? ' · 🔁' + m.sync_group : '')));
     return c;
   });
-  if (!devs.length) devBox.append(el('div', { class: 'dv-warn' }, 'Chưa có máy đẩy (ADMS) nào đã duyệt. Máy TCP/IP chưa hỗ trợ đẩy NV.'));
+  if (!devs.length) devBox.append(el('div', { class: 'dv-warn' }, 'Chưa có máy nào đã duyệt.'));
   const bioChk = el('input', { type: 'checkbox', class: 'sw sm', checked: '' });
   const searchI = el('input', { type: 'search', placeholder: '🔍 Tìm Số ID, tên, mã, bộ phận…', style: 'flex:1;min-width:200px' });
   const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
@@ -6304,6 +6304,7 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
       out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Công đã tự tính cho các ngày có lượt chấm mới. Xem ở menu Tính công.'));
     } else if (action === 'users') {
       msg.textContent = '✅ Đã tải nhân viên'; out.append(line('Nhân viên đọc từ máy', n(r.read)), line('Đã lưu / cập nhật', n(r.saved)));
+      if (r.fps != null) out.append(line('Mẫu vân tay đọc từ máy', n(r.fps)));
     } else if (action === 'info') { msg.textContent = '✅ Đã đọc thông tin máy'; out.append(tcpInfoBox(r.info || {})); }
     else if (action === 'delete-users') {
       msg.textContent = `✅ Đã xoá ${n(r.deleted?.length)} nhân viên trên máy`;
@@ -6607,11 +6608,11 @@ function hikPushModal(m, d) {
 }
 // Tiến độ ghi NV (+ ảnh khuôn mặt) xuống máy Hikvision sau khi bấm "Đẩy NV xuống máy"
 async function hikPushJobModal(job, withFace, after) {
-  const msg = el('div', { style: 'font-size:15px;font-weight:600' }, '⏳ Đang ghi xuống máy Hikvision…');
+  const msg = el('div', { style: 'font-size:15px;font-weight:600' }, '⏳ Đang ghi xuống máy…');
   const out = el('div', { style: 'margin-top:12px' });
   const closeB = el('button', { class: 'btn', disabled: '' }, 'Đóng');
   closeB.onclick = () => { closeModal(); after && after(); };
-  openModal('Ghi nhân viên xuống máy Hikvision', [msg, out], [closeB]);
+  openModal('Ghi nhân viên xuống máy', [msg, out], [closeB]);
   for (;;) {
     await new Promise((ok) => setTimeout(ok, 1000));
     let j; try { j = await api('/admin/devices/tcp-jobs/' + job); } catch (e) { msg.textContent = '❌ ' + e.message; closeB.disabled = false; return; }
@@ -6621,10 +6622,13 @@ async function hikPushJobModal(job, withFace, after) {
     msg.textContent = '✅ Đã xong'; msg.style.color = '#15803d';
     for (const x of (j.result && j.result.devices) || []) {
       out.append(el('div', { style: 'display:flex;justify-content:space-between;gap:16px;padding:6px 0;border-bottom:1px dashed var(--line,#eee)' }, el('b', {}, x.device),
-        el('span', {}, x.ok ? `Ghi ${x.pushed} NV${withFace ? ` · ${x.faces || 0} ảnh khuôn mặt` : ''}${x.failed || x.face_failed ? ` · lỗi ${(x.failed || 0) + (x.face_failed || 0)}` : ''}` : '❌ ' + x.error)));
+        el('span', {}, !x.ok ? '❌ ' + x.error : x.tcp
+          ? `Ghi ${x.pushed} NV${withFace ? ` · ${x.fps || 0} mẫu vân tay` : ''}${x.failed ? ` · lỗi ${x.failed}` : ''}${x.fp_failed ? ` · ${x.fp_failed} vân tay không ghi được` : ''}`
+          : `Ghi ${x.pushed} NV${withFace ? ` · ${x.faces || 0} ảnh khuôn mặt` : ''}${x.failed || x.face_failed ? ` · lỗi ${(x.failed || 0) + (x.face_failed || 0)}` : ''}`)));
+      if (x.tcp && x.failed_pins?.length) out.append(el('div', { class: 'dv-warn', style: 'margin-top:4px' }, 'Máy không nhận Số ID: ' + x.failed_pins.slice(0, 30).join(', ')));
       for (const er of x.errors || []) out.append(el('div', { class: 'dv-warn', style: 'margin-top:4px;white-space:normal' }, er));
     }
-    if (withFace) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Ảnh khuôn mặt lấy từ ảnh phần mềm đã có (ảnh máy khác gửi về). NV chưa có ảnh thì chỉ ghi Số ID + tên — đăng ký mặt trực tiếp trên máy.'));
+    if (withFace && (j.result?.devices || []).some((x) => !x.tcp)) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Ảnh khuôn mặt lấy từ ảnh phần mềm đã có (ảnh máy khác gửi về). NV chưa có ảnh thì chỉ ghi Số ID + tên — đăng ký mặt trực tiếp trên máy.'));
     return;
   }
 }
