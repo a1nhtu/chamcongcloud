@@ -109,16 +109,20 @@ export const updateStatus = () => progress;
 // Sinh nội dung CapNhat.bat (khởi động lại app với code mới). Toàn bộ dùng đường dẫn tuyệt đối.
 // Bat chạy trong cửa sổ console ẨN (qua CapNhat.vbs) → các lệnh con dùng chung cửa sổ ẩn đó, không bật cửa sổ đen nào.
 // Chờ bằng ping thay cho timeout (timeout đứng đợi phím, người dùng phải bấm Ctrl+C).
-function buildBat({ appDir, staged, prev, workRoot, config, vbsPath, runVbs }) {
+// Ghi từng bước vào CapNhat.log (cạnh thư mục cài) — cập nhật hỏng giữa chừng thì mở file này biết hỏng ở đâu.
+export function buildBat({ appDir, staged, prev, workRoot, config, vbsPath, runVbs, pid }) {
+  const log = join(INSTALL_ROOT, 'CapNhat.log');
   return `@echo off
 chcp 65001 >nul
 cd /d "${INSTALL_ROOT}"
+echo ==== %date% %time% bat dau cap nhat (pid node ${pid}) >> "${log}"
 rem --- Doc PORT tu config.txt (can cho ca buoc kill dung cong + khoi dong lai) ---
 set "PORT=8686"
 if exist "${config}" for /f "usebackq tokens=1,* delims==" %%a in ("${config}") do set "%%a=%%b"
 ping -n 4 127.0.0.1 >nul
-rem --- Dung app cu: CHI kill tien trinh Node dang giu dung PORT (khong dung Node khac) ---
-for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
+rem --- Dung app cu: kill dung tien trinh Node dang chay (pid truyen vao) + tien trinh giu PORT (neu khac) ---
+taskkill /f /pid ${pid} >> "${log}" 2>&1
+for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do if not "%%p"=="${pid}" taskkill /f /pid %%p >> "${log}" 2>&1
 ping -n 3 127.0.0.1 >nul
 rem --- Sao luu ban dang chay de co the khoi phuc ---
 robocopy "${appDir}\\server" "${prev}\\server" /MIR /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
@@ -126,10 +130,13 @@ robocopy "${appDir}\\public" "${prev}\\public" /MIR /NFL /NDL /NJH /NJS /R:1 /W:
 copy /y "${appDir}\\package.json" "${prev}\\package.json" >nul 2>&1
 rem --- Chep ban moi de len ---
 robocopy "${staged}\\server" "${appDir}\\server" /MIR /NFL /NDL /NJH /NJS /R:2 /W:1 >nul
+echo chep server: robocopy ma %errorlevel% (0-7 = OK) >> "${log}"
 robocopy "${staged}\\public" "${appDir}\\public" /MIR /NFL /NDL /NJH /NJS /R:2 /W:1 >nul
-copy /y "${staged}\\package.json" "${appDir}\\package.json" >nul
+echo chep public: robocopy ma %errorlevel% (0-7 = OK) >> "${log}"
+copy /y "${staged}\\package.json" "${appDir}\\package.json" >> "${log}" 2>&1
 if exist "${staged}\\node_modules" robocopy "${staged}\\node_modules" "${appDir}\\node_modules" /E /NFL /NDL /NJH /NJS /R:1 /W:1 >nul
 rem --- Khoi dong lai app AN (qua VBS, khong hien cua so den) ---
+echo khoi dong lai >> "${log}"
 wscript "${vbsPath}"
 rem --- Don dep + tu xoa an toan ---
 rmdir /s /q "${workRoot}" >nul 2>&1
@@ -161,7 +168,10 @@ function swapInPlaceLinux({ staged, prev }) {
 
 // Bắt đầu cập nhật: kiểm tra xong là trả lời ngay, phần tải + cài chạy nền và báo tiến độ qua updateStatus().
 export async function startUpdate() {
-  if (progress.state === 'run' || progress.state === 'restart')
+  // Đang chạy thật thì không chạy chồng. Trạng thái 'restart' mà tiến trình này vẫn sống quá 2 phút = bước thay code + khởi động
+  // lại đã hỏng (watchdog ở applyUpdate đổi sang 'error') → cho bấm lại từ đầu. Trước đây kẹt 'restart' mãi: bấm Cập nhật
+  // bao nhiêu lần cũng chỉ đứng chờ (Letefe Bistro / nhahanggiadinh 29/10/2026).
+  if (updateBusy())
     return { ok: true, started: true, running: true, current: progress.current, latest: progress.latest };
   const info = await checkUpdate();
   if (!info.hasUpdate) return { ok: false, reason: 'latest', ...info };
@@ -268,12 +278,24 @@ async function applyUpdate(info) {
     config: join(INSTALL_ROOT, 'config.txt'),
     vbsPath,
     runVbs,
+    pid: process.pid,
   });
   writeFileSync(batPath, bat, 'latin1');
   writeFileSync(runVbs, 'Set sh = CreateObject("WScript.Shell")\r\n' + `sh.Run "cmd /c """"${batPath}""""", 0, False\r\n`, 'latin1');
-  progress = { ...progress, state: 'restart', pct: 90, step: 'Đang cài bản mới & khởi động lại phần mềm…' };
+  progress = { ...progress, state: 'restart', pct: 90, step: 'Đang cài bản mới & khởi động lại phần mềm…', restartAt: Date.now() };
   const child = spawn('wscript.exe', ['//B', '//Nologo', runVbs], {
     detached: true, stdio: 'ignore', windowsHide: true, cwd: INSTALL_ROOT,
   });
+  child.on('error', (e) => console.error('[update] không chạy được wscript:', e.message));
   child.unref();
+  // Cập nhật chạy đúng thì tiến trình này bị CapNhat.bat tắt trong vài giây. Còn sống sau RESTART_WAIT_MS = bat không chạy /
+  // không tắt được app (máy chặn wscript, phần mềm diệt virus…) → báo lỗi rõ để bấm lại, thay vì giao diện chờ mãi.
+  const t = setTimeout(() => {
+    console.error(`[update] sau ${RESTART_WAIT_MS / 1000} giây phần mềm vẫn chưa được khởi động lại — xem ${join(INSTALL_ROOT, 'CapNhat.log')}`);
+    progress = { ...progress, state: 'error', error: 'Chưa thay được bản mới (phần mềm không tự khởi động lại). Bấm Cập nhật lại; vẫn lỗi thì khởi động lại máy tính rồi thử lại.' };
+  }, RESTART_WAIT_MS);
+  t.unref?.();
 }
+const RESTART_WAIT_MS = 120000;
+export const updateBusy = (p = progress, now = Date.now()) =>
+  p.state === 'run' || (p.state === 'restart' && now - (p.restartAt || 0) < RESTART_WAIT_MS);

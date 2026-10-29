@@ -285,9 +285,12 @@ async function runUpdateProgress(box, { onFail, onLatest }) {
     try {
       const v = await fetch('/api/version', { cache: 'no-store' }).then((x) => x.json());
       if (v && v.version === target) { set(100, `✓ Đã cập nhật lên bản ${v.version} — đang tải lại trang…`); await wait(1200); location.reload(); return; }
+      // máy chủ CŨ vẫn chạy và tự báo không thay được bản mới (sau 2 phút) → báo lỗi để bấm lại, khỏi chờ mãi
+      const s = await api('/admin/update/status');
+      if (s && s.state === 'error') { onFail(s.error || 'Cập nhật bị lỗi'); return; }
     } catch { /* đang khởi động lại */ }
     set(p < 97 ? p + 0.7 : p + 0.05);   // nhích dần trong lúc chờ khởi động lại (thường 10–30 giây)
-    if (Date.now() - restartAt > 150000) { stepT.textContent = 'Phần mềm khởi động lại lâu hơn bình thường — đợi thêm rồi tải lại trang (F5).'; return; }
+    if (Date.now() - restartAt > 180000) { stepT.textContent = 'Phần mềm khởi động lại lâu hơn bình thường — đợi thêm rồi tải lại trang (F5).'; return; }
   }
 }
 
