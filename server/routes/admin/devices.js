@@ -435,10 +435,17 @@ export function registerDeviceRoutes(r, { need }) {
     res.json({ rows: deviceUserList(serial) });
   });
   r.post('/devices/:id/query-users', need('devices'), (req, res) => {
-    const serial = serialOfDevice(req.params.id);
-    if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
-    queryDeviceUsers(serial);
-    res.json({ ok: true, msg: 'Đã gửi lệnh tải nhân viên từ máy. Máy sẽ đẩy danh sách NV + vân tay lên khi có kết nối (chờ chút rồi làm mới).' });
+    const d = db.prepare('SELECT serial, active, last_seen FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    // Lệnh chỉ tới được máy khi bật "Dùng máy chấm công" + máy đã duyệt — trước đây vẫn báo "đã gửi" mà máy không bao giờ nhận
+    if (getSetting('device_enabled', '0') !== '1') return res.status(400).json({ error: 'Chưa bật "Dùng máy chấm công" — máy không nhận được lệnh.' });
+    if (d.active !== 1) return res.status(400).json({ error: 'Máy đang chờ duyệt — bấm Duyệt máy trước rồi mới tải nhân viên được.' });
+    const gen = queryDeviceUsers(d.serial);
+    const off = !d.last_seen || Date.now() - Date.parse(d.last_seen) > 3 * 60000;
+    const how = gen === 'old' ? ' (máy đời cũ: máy gửi lại toàn bộ người dùng + vân tay)' : '';
+    res.json({ ok: true, gen, msg: off
+      ? `Đã xếp lệnh tải nhân viên${how}, nhưng máy đang MẤT KẾT NỐI — máy nối lại mới nhận lệnh.`
+      : `Đã gửi lệnh tải nhân viên từ máy${how}. Chờ 1–2 phút rồi bấm Làm mới; vẫn chưa thấy thì bấm "🕒 Đồng bộ giờ" (máy khởi động lại rồi gửi lên).` });
   });
   // Tải lại log chấm công cũ từ máy theo khoảng ngày (DATA QUERY ATTLOG)
   r.post('/devices/:id/query-attlog', need('devices'), (req, res) => {

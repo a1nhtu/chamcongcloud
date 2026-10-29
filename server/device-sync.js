@@ -1,6 +1,6 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
-import { db, getSetting, empHourly } from './db.js';
+import { db, getSetting, setSetting, empHourly } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
@@ -80,6 +80,7 @@ export function ingestUserData(serial, table, rawBody) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const seen = new Set();
   const held = heldSet();
+  const force = pullRequested(serial);   // vừa bấm "Tải nhân viên từ máy" → tạo NV dù tắt tự tạo
   // Cả khối (VD máy gửi 600 NV một lần) ghi trong MỘT giao dịch — nhanh hơn nhiều so với ghi từng dòng
   db.exec('SAVEPOINT ingest_users');
   try {
@@ -103,7 +104,7 @@ export function ingestUserData(serial, table, rawBody) {
     if (held.has(serial + '|' + pin)) { upsertDeviceUserSerial(serial, pin, name, card, pri); continue; }
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
-    const id = upsertEmployeeFromDevice(pin, name);
+    const id = upsertEmployeeFromDevice(pin, name, force);
     if (id) seen.add(pin);
   }
     db.exec('RELEASE ingest_users');
@@ -165,6 +166,7 @@ export function storeTemplates(serial, table, rawBody) {
   const isFinger9 = /FINGERTMP|FP/i.test(table);
   const pins = new Set();
   const held = heldSet();
+  const force = pullRequested(serial);
   const up = db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
     VALUES(?,?,?,?,?,?,?,?,?)
     ON CONFLICT(serial,pin,bio_type,idx) DO UPDATE SET valid=excluded.valid,duress=excluded.duress,
@@ -184,7 +186,7 @@ export function storeTemplates(serial, table, rawBody) {
     try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
     upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
     if (held.has(serial + '|' + pin)) continue;   // nghi trùng: giữ template theo máy, không tạo NV / không đồng bộ
-    upsertEmployeeFromDevice(pin, '');   // đăng ký vân tay-only vẫn tạo NV nháp
+    upsertEmployeeFromDevice(pin, '', force);   // đăng ký vân tay-only vẫn tạo NV nháp
     pins.add(pin);
   }
   return pins;
@@ -262,13 +264,41 @@ export function resendLostAttlogQueries(serial) {
       AND trans_time < datetime('now','-5 minutes') AND trans_time > datetime('now','-1 day')`).run(serial).changes;
 }
 // Kéo (tải) danh sách nhân viên + vân tay/khuôn mặt TỪ MÁY về phần mềm.
-// Gửi lệnh ADMS DATA QUERY để máy đẩy toàn bộ USERINFO + FINGERTMP + BIODATA lên;
-// server nhận sẽ tự tạo/cập nhật NV (upsertEmployeeFromDevice). Dùng khi cần tải lại NV từ máy.
+// - Máy ĐỜI MỚI (bắt tay có khai pushver): lệnh DATA QUERY → máy đẩy toàn bộ USERINFO + FINGERTMP + BIODATA lên.
+// - Máy ĐỜI CŨ không hiểu DATA QUERY (nhahanggiadinh 29/10/2026: bấm tải báo đã gửi mà không ra NV) → đặt mốc
+//   OPERLOGStamp về 0 + lệnh CHECK: máy hỏi lại cấu hình, thấy mốc 0 thì gửi lại TOÀN BỘ người dùng + vân tay qua OPERLOG.
+//   Mốc chấm công (ATTLOGStamp) giữ nguyên → không tải lại log chấm công.
+// - Chưa rõ đời (máy chưa bắt tay lại từ khi phần mềm biết phân biệt): làm cả hai.
+// NV về trong 2 giờ sau khi bấm luôn được tạo, kể cả khi tắt "Tự tạo NV khi đăng ký trên máy" (pullRequested).
+// Trả 'new' | 'old' | 'unknown' = cách đã dùng.
 export function queryDeviceUsers(serial) {
-  queueCmd(serial, 'DATA QUERY USERINFO');
-  queueCmd(serial, 'DATA QUERY FINGERTMP');
-  queueCmd(serial, 'DATA QUERY BIODATA');
-  return 1;
+  const gen = queueUserQuery(serial);
+  setSetting(PULL_KEY + serial, new Date().toISOString());
+  return gen;
+}
+// Vừa bấm "Tải nhân viên từ máy" (trong 2 giờ) → NV máy gửi lên được tạo dù tắt tự tạo NV
+const PULL_KEY = 'device_pull_at:';
+export function pullRequested(serial) {
+  const at = Date.parse(getSetting(PULL_KEY + serial, '') || '');
+  return !isNaN(at) && Date.now() - at < 2 * 3600e3;
+}
+// Xếp lệnh để máy gửi lại toàn bộ người dùng + vân tay/khuôn mặt, đúng cách theo đời máy
+function queueUserQuery(serial) {
+  const d = db.prepare('SELECT push_ver FROM push_devices WHERE serial=?').get(serial) || {};
+  const gen = !d.push_ver ? 'unknown' : d.push_ver === '-' ? 'old' : 'new';
+  // Lệnh tải cũ còn chờ gửi → bỏ, xếp lại → mốc "vừa bấm tải" luôn mới (queueCmd chống trùng sẽ giữ lệnh cũ)
+  db.prepare(`DELETE FROM push_device_commands WHERE serial=? AND trans_time IS NULL
+    AND content IN ('CHECK','DATA QUERY USERINFO','DATA QUERY FINGERTMP','DATA QUERY BIODATA')`).run(serial);
+  if (gen !== 'new') {
+    db.prepare("UPDATE push_devices SET oper_stamp='0' WHERE serial=?").run(serial);
+    queueCmd(serial, 'CHECK');
+  }
+  if (gen !== 'old') {
+    queueCmd(serial, 'DATA QUERY USERINFO');
+    queueCmd(serial, 'DATA QUERY FINGERTMP');
+    queueCmd(serial, 'DATA QUERY BIODATA');
+  }
+  return gen;
 }
 // Máy đẩy lượt quẹt của Số ID chưa có NV nào (thường do đăng ký vân tay TRƯỚC khi máy nối phần mềm):
 // hỏi máy gửi lại thông tin + vân tay của đúng người đó → upsertEmployeeFromDevice tự tạo NV nháp và gán lượt quẹt cũ.
@@ -553,10 +583,8 @@ export function relearnDevice(serial) {
   db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(serial);
   // bỏ các lệnh đồng bộ CHƯA gửi (tránh sau đó lại cộng số khống)
   db.prepare("DELETE FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial);
-  // yêu cầu máy đẩy lại thực tế
-  queueCmd(serial, 'DATA QUERY USERINFO');
-  queueCmd(serial, 'DATA QUERY FINGERTMP');
-  queueCmd(serial, 'DATA QUERY BIODATA');
+  // yêu cầu máy đẩy lại thực tế (đời cũ: mốc 0 + CHECK, đời mới: DATA QUERY)
+  queueUserQuery(serial);
   return true;
 }
 

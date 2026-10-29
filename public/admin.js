@@ -5913,6 +5913,8 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
       m.pin_range ? el('span', { class: 'chip', title: 'Dải Số ID của máy' }, '🔢 ' + m.pin_range) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
+      // Đời máy ADMS (máy tự khai lúc bắt tay): đời cũ không hiểu lệnh hỏi danh sách NV → phần mềm tải theo cách khác
+      !direct && !isAi && !isUnion && m.push_ver ? el('span', { class: 'chip', title: (m.push_ver === '-' ? 'Máy đời cũ (không khai phiên bản giao thức đẩy)' : 'Máy đời mới — giao thức đẩy ' + m.push_ver) + (m.firmware ? ' · ' + m.firmware : '') }, m.push_ver === '-' ? '🕰 Đời cũ' : '✨ Đời mới') : '',
       m.reboot_sched ? el('span', { class: 'chip', title: 'Tự khởi động lại theo giờ hẹn' + (m.reboot_note ? ' — lần gần nhất: ' + m.reboot_note : '') }, '⏰ ' + rebootSchedLabel(m.reboot_sched)) : '',
     ].filter(Boolean);
     const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';

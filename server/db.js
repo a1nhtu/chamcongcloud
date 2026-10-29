@@ -722,6 +722,10 @@ function migrateColumns() {
   add('push_devices', 'clock_text', "TEXT DEFAULT ''");
   add('push_devices', 'clock_at',   "TEXT DEFAULT ''");
   add('push_devices', 'clock_raw',  "TEXT DEFAULT ''");
+  // Đời máy ADMS: push_ver = phiên bản giao thức máy khai lúc bắt tay (pushver=2.4.1 → đời mới, hiểu lệnh DATA QUERY);
+  // '-' = đã bắt tay mà KHÔNG khai (đời cũ); '' = chưa bắt tay lại từ khi có cột này. firmware = 'Ver ...' máy gửi kèm INFO.
+  add('push_devices', 'push_ver', "TEXT DEFAULT ''");
+  add('push_devices', 'firmware', "TEXT DEFAULT ''");
   // Máy kết nối TRỰC TIẾP TCP/IP (SDK zkemkeeper, cổng 4370): conn_type 'push' (máy tự đẩy, mặc định) | 'tcp' (phần mềm chủ động kết nối)
   add('push_devices', 'conn_type',   "TEXT NOT NULL DEFAULT 'push'");
   add('push_devices', 'tcp_ip',      "TEXT DEFAULT ''");
