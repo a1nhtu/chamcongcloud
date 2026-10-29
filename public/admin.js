@@ -6787,56 +6787,6 @@ function legacyImportModal() {
     } catch (e) { fail(e.message); }
     finally { fileI.value = ''; }   // chọn lại đúng file đó vẫn đọc lại được
   };
-  // Đọc thẳng file theo đường dẫn trên máy cài Digiplus (phần mềm cũ thường cùng máy) — không cần mở hộp chọn file của trình duyệt
-  const pathI = el('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', style: 'margin:0;flex:1;min-width:260px;font-family:monospace;font-size:12px' });
-  const readPath = async () => {
-    const p = pathI.value.trim();
-    if (!p) return fail('Nhập đường dẫn file .mdb');
-    busy(`Đang đọc ${p}…`);
-    try {
-      const r = await api('/admin/legacy/parse-path', { method: 'POST', body: { path: p, kind, password: kind !== 'rj' ? pass.value.trim() : '' } });
-      preview(r);
-    } catch (e) { fail(e.message); }
-  };
-  const pathBtn = el('button', { class: 'btn' }, '⚡ Đọc file ở đường dẫn này');
-  pathBtn.onclick = readPath;
-  // Chọn file NGAY TRÊN MÁY CÀI DIGIPLUS (không mở hộp chọn file của trình duyệt): tự tìm trên mọi ổ / duyệt thư mục → bấm file là đọc
-  const pickArea = el('div', { style: 'margin:8px 0 0' });
-  const fileRow = (f) => {
-    const b = el('button', { type: 'button', style: 'display:flex;justify-content:space-between;gap:10px;width:100%;text-align:left;padding:6px 8px;border:0;border-bottom:1px dashed var(--line,#eee);background:none;color:inherit;cursor:pointer;font-size:13px' },
-      el('span', { style: 'font-family:monospace;word-break:break-all' }, '📄 ' + (f.name || f.path)),
-      el('span', { class: 'muted', style: 'white-space:nowrap' }, fmtSize(f.size) + (f.mtime ? ' · sửa ' + f.mtime.slice(8, 10) + '/' + f.mtime.slice(5, 7) + '/' + f.mtime.slice(0, 4) : '')));
-    b.onclick = () => { pathI.value = f.path; pickArea.replaceChildren(); readPath(); };
-    return b;
-  };
-  const listBox = (...kids) => el('div', { style: 'max-height:260px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:2px 6px' }, ...kids);
-  const findBtn = el('button', { class: 'btn ghost', type: 'button' }, '🔍 Tìm file trên máy');
-  findBtn.onclick = async () => {
-    findBtn.disabled = true;
-    pickArea.replaceChildren(el('div', { class: 'map-hint' }, '⏳ Đang tìm file .mdb của Wise Eye / Ronald Jack trên các ổ đĩa (tối đa ~20 giây)…'));
-    try {
-      const r = await api('/admin/legacy/find-files', { method: 'POST' });
-      pickArea.replaceChildren(r.files.length
-        ? el('div', {}, el('div', { class: 'map-hint', style: 'margin:0 0 4px' }, `Thấy ${r.files.length} file (mới sửa gần nhất ở trên) — bấm vào file cần lấy:`), listBox(...r.files.map((f) => fileRow(f))))
-        : el('div', { class: 'dv-warn' }, 'Không tìm thấy file của Wise Eye / Ronald Jack' + (r.timedOut ? ' (quét chưa hết ổ đĩa)' : '') + ' — bấm 📁 Duyệt thư mục để tự chọn.'));
-    } catch (e) { pickArea.replaceChildren(el('div', { class: 'dv-warn' }, e.message)); }
-    finally { findBtn.disabled = false; }
-  };
-  const browse = async (dir, first = false) => {
-    let r;
-    try { r = await api('/admin/legacy/browse?dir=' + encodeURIComponent(dir || '')); }
-    catch (e) { return dir && first ? browse('') : pickArea.replaceChildren(el('div', { class: 'dv-warn' }, e.message)); }   // thư mục mặc định không có trên máy này → về danh sách ổ đĩa
-    const dirRow = (name, path) => {
-      const b = el('button', { type: 'button', style: 'display:block;width:100%;text-align:left;padding:5px 8px;border:0;border-bottom:1px dashed var(--line,#eee);background:none;color:inherit;cursor:pointer;font-size:13px' }, name);
-      b.onclick = () => browse(path);
-      return b;
-    };
-    pickArea.replaceChildren(el('div', { class: 'map-hint', style: 'margin:0 0 4px;font-family:monospace' }, '📁 ' + (r.dir || 'Các ổ đĩa trên máy cài phần mềm')),
-      listBox(...(r.parent !== null ? [dirRow('⬆ Lên thư mục trên', r.parent)] : []), ...r.dirs.map((d) => dirRow('📁 ' + d.name, d.path)), ...r.files.map((f) => fileRow(f)),
-        ...(!r.dirs.length && !r.files.length ? [el('div', { class: 'map-hint', style: 'padding:6px' }, 'Thư mục trống (không có thư mục con / file .mdb).')] : [])));
-  };
-  const browseBtn = el('button', { class: 'btn ghost', type: 'button' }, '📁 Duyệt thư mục');
-  browseBtn.onclick = () => { const v = pathI.value.trim(); browse(v ? v.replace(/[\\/][^\\/]*\.(mdb|accdb)$/i, '') : '', true); };
   const fileI = el('input', { type: 'file', accept: '.mdb,.accdb', style: 'display:none' });
   fileI.onchange = () => upload(fileI.files[0]);
   const pickBtn = el('button', { class: 'btn' }, '📂 Chọn file .mdb…');
@@ -6845,11 +6795,7 @@ function legacyImportModal() {
   const passRow = el('div', { style: 'display:flex;gap:8px;align-items:center;margin:10px 0 0;flex-wrap:wrap' }, el('span', {}, 'Mật khẩu file Access:'), pass);
   const fileSec = el('div', { style: 'display:none;margin:14px 0 0;padding-top:10px;border-top:1px solid #f0efec' },
     el('div', { style: 'font-weight:700' }, '2) Chọn file dữ liệu'), where, passRow,
-    el('div', { style: 'display:flex;gap:8px;align-items:center;margin:12px 0 0;flex-wrap:wrap' }, pathI, pathBtn),
-    el('div', { style: 'display:flex;gap:8px;margin:8px 0 0;flex-wrap:wrap' }, findBtn, browseBtn),
-    el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Phần mềm cũ cài cùng máy với Digiplus → 🔍 tìm / 📁 duyệt rồi bấm vào file (file để ổ D, E… cũng được). Khác máy thì chép file sang rồi bấm Chọn file:'),
-    pickArea,
-    el('div', { style: 'margin-top:8px' }, pickBtn, fileI));
+    el('div', { style: 'margin-top:12px' }, pickBtn, fileI));
   // 2 ô chọn phần mềm: bấm ô nào thì hiện đúng chỗ để file + mật khẩu của phần mềm đó
   const cards = {};
   const choose = (k) => {
@@ -6858,7 +6804,6 @@ function legacyImportModal() {
     where.replaceChildren('File dữ liệu thường nằm ở: ', el('code', { style: 'font-size:12px' }, SOFT[k].path),
       k === 'on39' ? ' (bản dùng SQL Server thì không có file .mdb)' : '');
     pass.value = SOFT[k].pass;
-    pathI.value = SOFT[k].path;
     passRow.style.display = k !== 'rj' ? 'flex' : 'none';
     fileSec.style.display = '';
     pickBtn.textContent = '📂 Chọn file .mdb của ' + SOFT[k].name + '…';
