@@ -1,4 +1,4 @@
-// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CHẤM CÔNG CŨ sang Digiplus: Wise Eye On39 / Ronald Jack Pro (file Access .mdb).
+// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CHẤM CÔNG CŨ sang Digiplus: Wise Eye On39 / V5.1 / Ronald Jack Pro (file Access .mdb).
 // Lấy 3 thứ: BỘ PHẬN (cây cha – con) · NHÂN VIÊN (mã, tên, Số ID máy, bộ phận, chức danh, SĐT, ngày vào làm, thẻ…) · LƯỢT CHẤM.
 //  - Đọc file bằng mdb-reader (JS thuần, server/vendor) → chạy được cả Windows lẫn VPS Linux, không cần cài Access/ODBC.
 //    Mật khẩu Access (On39 mặc định 12112009) chỉ là lớp khoá ngoài, dữ liệu không mã hoá nên đọc được cả khi không nhập.
@@ -11,7 +11,8 @@ import { db } from './db.js';
 import { ingestAttlog } from './device-sync.js';
 import { defaultPasswordHash } from './auth.js';
 
-export const LEGACY_LABEL = { on39: 'Wise Eye On39', rj: 'Ronald Jack Pro' };
+// Wise Eye V5.1 (we51) cùng cấu trúc bảng + mật khẩu file với On39 → đọc chung, chỉ khác tên hiện ra
+export const LEGACY_LABEL = { on39: 'Wise Eye On39', we51: 'Wise Eye V5.1', rj: 'Ronald Jack Pro' };
 
 /* ------------------------------ đọc file ------------------------------ */
 // mdb-reader trả ngày giờ Access thành Date "UTC" mang đúng giờ đồng hồ ghi trong file (= giờ VN) → lấy thẳng các số
@@ -140,9 +141,12 @@ export function normalizeRj(table) {
 // expect: 'on39' | 'rj' = phần mềm người dùng đã chọn → file của phần mềm kia thì báo chọn lại (không đọc nhầm)
 export function readLegacy(buf, password = '', expect = '') {
   const { kind, table } = openMdb(buf, password);
-  if (expect && LEGACY_LABEL[expect] && expect !== kind)
-    throw new Error(`File này là dữ liệu ${LEGACY_LABEL[kind]}, không phải ${LEGACY_LABEL[expect]} — chọn lại đúng phần mềm hoặc đúng file`);
-  return kind === 'on39' ? normalizeOn39(table) : normalizeRj(table);
+  const want = expect === 'we51' ? 'on39' : expect;
+  if (want && LEGACY_LABEL[want] && want !== kind)
+    throw new Error(`File này là dữ liệu ${kind === 'on39' ? 'Wise Eye (On39 / V5.1)' : LEGACY_LABEL[kind]}, không phải ${LEGACY_LABEL[expect]} — chọn lại đúng phần mềm hoặc đúng file`);
+  if (kind !== 'on39') return normalizeRj(table);
+  const data = normalizeOn39(table);
+  return expect === 'we51' ? { ...data, kind: 'we51' } : data;
 }
 
 /* ------------------------------ xem trước ------------------------------ */
@@ -162,6 +166,8 @@ export function summarize(data) {
     kind: data.kind, label: LEGACY_LABEL[data.kind], company: data.company,
     depts: data.depts.length, depts_new: data.depts.filter((d) => !hasDept.has(d.name.toLowerCase())).length,
     dept_names: data.depts.map((d) => d.name).slice(0, 30),
+    // Từng bộ phận + số NV → giao diện cho bỏ tick bộ phận không lấy (VD "Nghỉ việc")
+    dept_list: data.depts.map((d) => ({ key: d.key, name: d.name, emps: data.emps.filter((e) => e.dept === d.key).length })),
     emps: data.emps.length, emps_existing: existing, emps_new: data.emps.length - existing,
     emps_no_dept: data.emps.filter((e) => !e.dept).length,
     punches: data.punches.length, first_date: first.slice(0, 10), last_date: last.slice(0, 10),
@@ -182,10 +188,22 @@ function tx(fn) {
   try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; }
 }
 
-// opts: { depts, emps, punches (true/false), overwrite (ghi đè thông tin NV đã có), from, to ('YYYY-MM-DD', rỗng = tất cả) }
+// Bỏ bộ phận không lấy (skip_depts: mảng key) + NV của bộ phận đó; skip_no_dept: bỏ NV chưa có bộ phận.
+// Lượt chấm chỉ giữ của NV còn lại. Không bỏ gì → trả nguyên dữ liệu (như cũ).
+export function filterLegacy(data, skipDepts = [], skipNoDept = false) {
+  const skip = new Set(skipDepts);
+  if (!skip.size && !skipNoDept) return data;
+  const emps = data.emps.filter((e) => (e.dept ? !skip.has(e.dept) : !skipNoDept));
+  const pins = new Set(emps.map((e) => e.pin));
+  return { ...data, depts: data.depts.filter((d) => !skip.has(d.key)), emps, punches: data.punches.filter((p) => pins.has(p.pin)) };
+}
+
+// opts: { depts, emps, punches (true/false), overwrite (ghi đè thông tin NV đã có), from, to ('YYYY-MM-DD', rỗng = tất cả),
+//         skip_depts (key bộ phận không lấy), skip_no_dept (bỏ NV chưa có bộ phận) }
 // prog(%, chữ). Trả số liệu đã làm.
 export async function applyLegacy(data, opts = {}, prog = () => {}) {
   const o = { depts: true, emps: true, punches: true, overwrite: false, from: '', to: '', ...opts };
+  data = filterLegacy(data, o.skip_depts || [], !!o.skip_no_dept);
   const out = { depts_created: 0, emps_created: 0, emps_updated: 0, emps_linked: 0, punches_read: 0, punches_new: 0 };
 
   // 1) BỘ PHẬN — cha trước con; trùng tên (không phân biệt hoa thường) thì dùng bộ phận có sẵn, không đổi chỗ trong cây

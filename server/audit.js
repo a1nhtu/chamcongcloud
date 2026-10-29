@@ -77,7 +77,7 @@ const LABELS = {
   'POST /devices/rebuild': 'Dựng lại ngày công từ máy',
   'POST /devices/import-usb': 'Nhập dữ liệu chấm công từ USB',
   'POST /legacy/parse-upload': 'Chuyển dữ liệu phần mềm cũ: tải file .mdb lên',
-  'POST /legacy/apply': 'Chuyển dữ liệu từ Wise Eye On39 / Ronald Jack Pro',
+  'POST /legacy/apply': 'Chuyển dữ liệu từ Wise Eye On39 / V5.1 / Ronald Jack Pro',
   'POST /devices/:id/query-users': 'Tải nhân viên từ máy',
   'POST /devices/:id/query-attlog': 'Tải lại log chấm công từ máy',
   'POST /devices/:id/clear-log': 'Xóa log chấm công trên máy',

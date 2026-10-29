@@ -1,5 +1,5 @@
-// Nhóm route CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / Ronald Jack Pro) — xem server/legacy-import.js.
-// Bước 1: chọn phần mềm (On39 / Ronald Jack) + tải file .mdb lên → đọc + trả bản XEM TRƯỚC (giữ dữ liệu đã đọc 30 phút theo mã token).
+// Nhóm route CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / V5.1 / Ronald Jack Pro) — xem server/legacy-import.js.
+// Bước 1: chọn phần mềm (On39 / V5.1 / Ronald Jack) + tải file .mdb lên → đọc + trả bản XEM TRƯỚC (giữ dữ liệu đã đọc 30 phút theo mã token).
 // Bước 2: chọn phần cần chuyển + khoảng ngày → chạy NỀN (job), giao diện hỏi tiến độ tới khi xong.
 import express from 'express';
 import { randomBytes } from 'node:crypto';
@@ -20,7 +20,7 @@ function keep(data) {
 }
 
 export function registerLegacyImportRoutes(r, { need }) {
-  // Tải file lên: thân yêu cầu = nội dung file; ?kind=on39|rj (phần mềm đã chọn) &password=
+  // Tải file lên: thân yêu cầu = nội dung file; ?kind=on39|we51|rj (phần mềm đã chọn) &password=
   r.post('/legacy/parse-upload', need('devices'), express.raw({ type: () => true, limit: '1024mb' }), (req, res) => {
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length < 4096) return res.status(400).json({ error: 'File rỗng hoặc không đọc được' });
@@ -28,7 +28,7 @@ export function registerLegacyImportRoutes(r, { need }) {
     catch (e) { res.status(400).json({ error: e.message }); }
   });
 
-  // Chạy chuyển: body { token, depts, emps, punches, overwrite, from, to } → { job }
+  // Chạy chuyển: body { token, depts, emps, punches, overwrite, from, to, skip_depts, skip_no_dept } → { job }
   r.post('/legacy/apply', need('devices'), (req, res) => {
     const b = req.body || {};
     const c = cache.get(String(b.token || ''));
@@ -36,7 +36,8 @@ export function registerLegacyImportRoutes(r, { need }) {
     if (busy) return res.status(409).json({ error: 'Đang chuyển dữ liệu — chờ lượt trước xong' });
     const ISO = /^\d{4}-\d{2}-\d{2}$/;
     const opts = { depts: b.depts !== false, emps: b.emps !== false, punches: b.punches !== false, overwrite: !!b.overwrite,
-      from: ISO.test(b.from || '') ? b.from : '', to: ISO.test(b.to || '') ? b.to : '' };
+      from: ISO.test(b.from || '') ? b.from : '', to: ISO.test(b.to || '') ? b.to : '',
+      skip_depts: Array.isArray(b.skip_depts) ? b.skip_depts.map(String) : [], skip_no_dept: !!b.skip_no_dept };
     if (!opts.depts && !opts.emps && !opts.punches) return res.status(400).json({ error: 'Chưa chọn phần nào để chuyển' });
     const id = randomBytes(6).toString('hex');
     const j = { state: 'run', pct: 0, msg: 'Bắt đầu…', result: null, at: Date.now() };

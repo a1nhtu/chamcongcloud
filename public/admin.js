@@ -5982,7 +5982,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
   resyncBtn.className = 'btn';   // nút chính (không phải kiểu mờ)
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
   usbBtn.onclick = usbImportModal;
-  const legacyBtn = el('button', { class: 'btn', title: 'Lấy bộ phận + nhân viên + dữ liệu chấm công từ Wise Eye On39 / Ronald Jack Pro (file .mdb)' }, '⇄ Chuyển từ On39 / Ronald Jack');
+  const legacyBtn = el('button', { class: 'btn', title: 'Lấy bộ phận + nhân viên + dữ liệu chấm công từ Wise Eye On39 / Wise Eye V5.1 / Ronald Jack Pro (file .mdb)' }, '⇄ Chuyển từ Wise Eye / Ronald Jack');
   legacyBtn.onclick = legacyImportModal;
   const delAllBtn = el('button', { class: 'btn ghost', title: 'Xoá nhân viên nghỉ việc trên tất cả máy chấm công 1 lần' }, '🗑 Xóa NV trên tất cả máy');
   delAllBtn.onclick = () => deleteUsersAllModal(pageDevices);
@@ -6689,11 +6689,12 @@ function usbImportModal() {
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
 
-// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / Ronald Jack Pro, file .mdb): bộ phận + nhân viên + lượt chấm.
-// Bước 1 chọn phần mềm cũ (On39 có mật khẩu file / Ronald Jack không) + chọn file .mdb → bước 2 xem trước + chọn phần cần chuyển → bước 3 chạy nền, hiện tiến độ.
+// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / V5.1 / Ronald Jack Pro, file .mdb): bộ phận + nhân viên + lượt chấm.
+// Bước 1 chọn phần mềm cũ (On39 / V5.1 có mật khẩu file, Ronald Jack không) + chọn file .mdb → bước 2 xem trước + chọn phần cần chuyển → bước 3 chạy nền, hiện tiến độ.
 function legacyImportModal() {
   const SOFT = {
     on39: { name: 'Wise Eye On39', path: 'C:\\WiseEyeOn39\\Data\\WiseEyeOn39.mdb', pass: '12112009' },
+    we51: { name: 'Wise Eye V5.1', path: 'C:\\Program Files\\WiseEyeV5.1\\Data\\WiseEyeV5.1.mdb', pass: '12112009' },   // cùng cấu trúc file với On39
     rj: { name: 'Ronald Jack Pro', path: 'C:\\Program Files (x86)\\RonaldJackVN\\Ronald Jack Pro\\Data\\RJData.mdb', pass: '' },
   };
   let kind = '';
@@ -6707,7 +6708,7 @@ function legacyImportModal() {
     if (!/\.(mdb|accdb)$/i.test(file.name)) return fail('Chọn file .mdb của ' + SOFT[kind].name);
     busy(`Đang đọc ${file.name} (${fmtSize(file.size)})…`);
     try {
-      const q = `?kind=${kind}&password=${encodeURIComponent(kind === 'on39' ? pass.value.trim() : '')}`;
+      const q = `?kind=${kind}&password=${encodeURIComponent(kind !== 'rj' ? pass.value.trim() : '')}`;
       const res = await fetch('/api/admin/legacy/parse-upload' + q, {
         method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'X-Device-Id': deviceId(), 'Content-Type': 'application/octet-stream' }, body: file });
       const r = await res.json().catch(() => ({ error: 'Máy chủ trả lỗi ' + res.status }));
@@ -6731,23 +6732,23 @@ function legacyImportModal() {
     where.replaceChildren('File dữ liệu thường nằm ở: ', el('code', { style: 'font-size:12px' }, SOFT[k].path),
       k === 'on39' ? ' (bản dùng SQL Server thì không có file .mdb)' : '');
     pass.value = SOFT[k].pass;
-    passRow.style.display = k === 'on39' ? 'flex' : 'none';
+    passRow.style.display = k !== 'rj' ? 'flex' : 'none';
     fileSec.style.display = '';
     pickBtn.textContent = '📂 Chọn file .mdb của ' + SOFT[k].name + '…';
   };
   for (const [k, s] of Object.entries(SOFT)) {
     cards[k] = el('button', { type: 'button', style: 'flex:1;min-width:180px;padding:14px;border:2px solid #e5e7eb;border-radius:12px;background:#fff;color:inherit;cursor:pointer;text-align:left' },
-      el('div', { style: 'font-weight:700;font-size:15px' }, s.name), el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, k === 'on39' ? 'File có mật khẩu' : 'File không có mật khẩu'));
+      el('div', { style: 'font-weight:700;font-size:15px' }, s.name), el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, k !== 'rj' ? 'File có mật khẩu' : 'File không có mật khẩu'));
     cards[k].onclick = () => choose(k);
   }
   const step1 = [
     el('div', { class: 'map-hint' }, 'Lấy BỘ PHẬN + NHÂN VIÊN + DỮ LIỆU CHẤM CÔNG từ phần mềm cũ sang Digiplus. Phần mềm cũ không bị thay đổi gì. Nhập lại nhiều lần cũng không bị trùng.'),
     el('div', { style: 'margin:14px 0 0;font-weight:700' }, '1) Chọn phần mềm đang dùng'),
-    el('div', { style: 'display:flex;gap:10px;margin-top:8px;flex-wrap:wrap' }, cards.on39, cards.rj),
+    el('div', { style: 'display:flex;gap:10px;margin-top:8px;flex-wrap:wrap' }, cards.on39, cards.we51, cards.rj),
     fileSec,
   ];
   box.append(...step1);
-  openModal('Chuyển dữ liệu từ Wise Eye On39 / Ronald Jack Pro', [box, status], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+  openModal('Chuyển dữ liệu từ Wise Eye On39 / V5.1 / Ronald Jack Pro', [box, status], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 
   // Bước 2: XEM TRƯỚC + chọn phần cần chuyển
   function preview({ token, summary: s }) {
@@ -6760,6 +6761,17 @@ function legacyImportModal() {
     const [cD, lD] = chk(s.depts > 0, `Bộ phận: ${s.depts} (${s.depts_new} chưa có trong Digiplus)`, s.dept_names.join(' · ') || 'Phần mềm cũ chưa khai báo bộ phận');
     const [cE, lE] = chk(s.emps > 0, `Nhân viên: ${s.emps} (${s.emps_new} NV mới · ${s.emps_existing} đã có)`,
       'NV đã có khớp theo Số ID máy (hoặc mã NV) → chỉ điền ô đang trống, không tạo trùng. NV mới mật khẩu app mặc định 123456.' + (s.emps_no_dept ? ` ${s.emps_no_dept} NV chưa có bộ phận.` : ''));
+    // Chọn bộ phận cần lấy: bỏ tick (VD "Nghỉ việc") → không tạo bộ phận đó, không lấy NV + lượt chấm của NV đó
+    const pick = (label, n) => {
+      const c = el('input', { type: 'checkbox', checked: '', style: 'width:auto;margin:0;flex:none' });
+      return [c, el('label', { style: 'display:flex;gap:8px;align-items:center;margin:0;cursor:pointer;font-weight:400;font-size:13px' }, c, el('span', {}, label), el('span', { class: 'map-hint', style: 'margin:0' }, `(${n} NV)`))];
+    };
+    const deptPicks = (s.dept_list || []).map((d) => [d.key, ...pick(d.name, d.emps)]);
+    const [cNo, lNo] = pick('NV chưa có bộ phận', s.emps_no_dept || 0);
+    const pickBox = deptPicks.length ? el('div', { style: 'margin:0 0 8px 24px' },
+      el('div', { class: 'map-hint', style: 'margin:0 0 4px' }, 'Chỉ lấy bộ phận được tick (bỏ tick bộ phận như "Nghỉ việc" → không lấy bộ phận + NV + lượt chấm của NV đó):'),
+      el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:4px 12px;max-height:180px;overflow:auto' },
+        ...deptPicks.map((x) => x[2]), ...(s.emps_no_dept ? [lNo] : []))) : '';
     const dmy = (d) => d.split('-').reverse().join('/');
     const [cP, lP] = chk(s.punches > 0, `Dữ liệu chấm công: ${s.punches.toLocaleString('vi')} lượt` + (s.first_date ? ` (từ ${dmy(s.first_date)} đến ${dmy(s.last_date)})` : ''),
       'Lượt trùng tự bỏ qua; công các ngày được tính lại theo ca đang cài ở Digiplus.');
@@ -6774,7 +6786,8 @@ function legacyImportModal() {
       if (cP.checked && fromI.value && toI.value && toI.value < fromI.value) return toast('Khoảng ngày không hợp lệ', 'err');
       go.disabled = true;
       try {
-        const r = await api('/admin/legacy/apply', { method: 'POST', body: { token, depts: cD.checked, emps: cE.checked, punches: cP.checked, overwrite: cO.checked, from: fromI.value, to: toI.value } });
+        const r = await api('/admin/legacy/apply', { method: 'POST', body: { token, depts: cD.checked, emps: cE.checked, punches: cP.checked, overwrite: cO.checked, from: fromI.value, to: toI.value,
+          skip_depts: deptPicks.filter((x) => !x[1].checked).map((x) => x[0]), skip_no_dept: !cNo.checked } });
         run(r.job);
       } catch (e) { go.disabled = false; toast(e.message, 'err'); }
     };
@@ -6784,7 +6797,7 @@ function legacyImportModal() {
       el('div', { class: 'panel', style: 'padding:10px 14px;margin:0 0 10px;background:#f8fafc' },
         el('div', {}, el('b', {}, s.label), s.company ? ' · ' + s.company : ''),
         s.machines.length ? el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Máy chấm công: ' + s.machines.map((m) => `${m.name || 'Máy'} (${m.serial})`).join(' · ')) : ''),
-      lD, lE, lP, range, lO, back);
+      lD, lE, pickBox, lP, range, lO, back);
     $('#modal .m-foot').replaceChildren(el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go);
   }
 
