@@ -4,7 +4,8 @@
 import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { readLegacy, summarize, applyLegacy } from '../../legacy-import.js';
-import { tenantKey } from '../../tenant.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { tenantKey, MULTI } from '../../tenant.js';
 
 const cache = new Map();   // token → { data, summary, at }
 const jobs = new Map();    // id → { state: run|done|err, pct, msg, result }
@@ -25,6 +26,18 @@ export function registerLegacyImportRoutes(r, { need }) {
     const buf = req.body;
     if (!Buffer.isBuffer(buf) || buf.length < 4096) return res.status(400).json({ error: 'File rỗng hoặc không đọc được' });
     try { res.json({ ok: true, ...keep(readLegacy(buf, String(req.query.password || ''), String(req.query.kind || ''))) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Đọc thẳng file theo đường dẫn TRÊN MÁY CÀI PHẦN MỀM (phần mềm cũ thường cùng máy) — khỏi mở hộp chọn file của trình duyệt
+  // (máy khách nhahanggiadinh 29/10/2026: hộp chọn file treo cả trang qua UltraViewer). Body { path, kind, password }.
+  // Máy chủ nhiều công ty thì không cho: ổ đĩa máy chủ không phải máy của khách.
+  r.post('/legacy/parse-path', need('devices'), (req, res) => {
+    if (MULTI) return res.status(400).json({ error: 'Máy chủ nhiều công ty không đọc được file trên máy khách — dùng nút Chọn file' });
+    const p = String(req.body?.path || '').trim().replace(/^"(.*)"$/, '$1');
+    if (!/\.(mdb|accdb)$/i.test(p)) return res.status(400).json({ error: 'Đường dẫn phải là file .mdb' });
+    if (!existsSync(p)) return res.status(400).json({ error: `Không thấy file ${p} trên máy cài phần mềm Digiplus — kiểm tra lại đường dẫn` });
+    try { res.json({ ok: true, ...keep(readLegacy(readFileSync(p), String(req.body?.password || ''), String(req.body?.kind || ''))) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
   });
 

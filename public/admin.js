@@ -6234,7 +6234,7 @@ async function deleteUsersAllModal(after) {
         if (j.state === 'err') { st.textContent = '❌ ' + j.msg; break; }
         st.textContent = '✅ Máy kết nối trực tiếp:';
         for (const x of (j.result?.devices || [])) result.append(el('div', { class: x.ok ? 'map-hint' : 'dv-warn', style: 'margin:2px 0' },
-          x.ok ? `• ${x.device}: đã xoá ${x.deleted} người (người không có trên máy này thì bỏ qua)` : `• ${x.device}: ${x.error}`));
+          x.ok ? `• ${x.device}: đã xoá ${x.deleted} người (người không có trên máy này thì bỏ qua)` + (x.failed?.length ? ` — ⚠ máy không cho xoá: ${x.failed.slice(0, 20).join(', ')} (thử lại / xoá tay trên máy)` : '') : `• ${x.device}: ${x.error}`));
         break;
       }
     }
@@ -6305,6 +6305,13 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
     } else if (action === 'users') {
       msg.textContent = '✅ Đã tải nhân viên'; out.append(line('Nhân viên đọc từ máy', n(r.read)), line('Đã lưu / cập nhật', n(r.saved)));
     } else if (action === 'info') { msg.textContent = '✅ Đã đọc thông tin máy'; out.append(tcpInfoBox(r.info || {})); }
+    else if (action === 'delete-users') {
+      msg.textContent = `✅ Đã xoá ${n(r.deleted?.length)} nhân viên trên máy`;
+      if (r.absent?.length) out.append(line('Không có trên máy (bỏ qua)', n(r.absent.length)));
+      if (r.failed?.length) { msg.textContent = `⚠ Xoá được ${n(r.deleted?.length)} / ${n(r.deleted?.length + r.failed.length)} nhân viên`; msg.style.color = '#b45309';
+        out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `Máy không cho xoá ${r.failed.length} Số ID: ${r.failed.slice(0, 30).join(', ')}${r.failed.length > 30 ? '…' : ''}. Thử lại lần nữa; vẫn không được thì xoá tay trên máy (Menu → Quản lý người dùng).`)); }
+      if (r.info) out.append(tcpInfoBox(r.info));
+    }
     else { msg.textContent = '✅ Xong' + (action === 'set-time' && r.note ? (kind === 'hik' ? ` — ${r.note[0]}` : ` — giờ máy: ${r.note[0]}`) : ''); if (r.info) out.append(tcpInfoBox(r.info)); }
     return;
   }
@@ -6494,6 +6501,54 @@ function tcpLogsModal(m, kind = 'tcp') {
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go]);
 }
 // Xóa dữ liệu TRÊN MÁY (không xóa dữ liệu đã tải về phần mềm)
+// Máy TCP/IP: chọn từng NV để xoá trên máy (danh sách theo lần "Tải nhân viên" gần nhất) — chạy nền qua SDK
+async function tcpDeleteUsersModal(m) {
+  const name = m.name || m.serial;
+  const searchI = el('input', { type: 'search', placeholder: '🔍 Tìm Số ID, tên…', style: 'flex:1;min-width:180px' });
+  const onlyLocked = el('input', { type: 'checkbox', style: 'width:auto' });
+  const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
+  const box = el('div', { style: 'max-height:340px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:6px 10px;margin-top:8px' }, loading());
+  const goBtn = el('button', { class: 'btn', style: 'background:#c0392b;border-color:#c0392b' });
+  const picked = new Set();
+  let rows = [];
+  const shown = () => { const q = searchI.value.trim().toLowerCase(); return rows.filter((u) => (!onlyLocked.checked || u.active === false) && (!q || [u.pin, u.name].some((v) => String(v || '').toLowerCase().includes(q)))); };
+  const upd = () => { goBtn.textContent = `🗑 Xóa trên máy (${picked.size})`; goBtn.disabled = !picked.size; };
+  const render = () => {
+    const list = shown();
+    box.innerHTML = '';
+    selAll.checked = list.length > 0 && list.every((u) => picked.has(u.pin));
+    if (!list.length) { box.append(el('div', { class: 'map-hint' }, rows.length ? 'Không có ai khớp bộ lọc.' : 'Chưa có danh sách nhân viên của máy — bấm "⬇ Tải nhân viên" của máy trước.')); return; }
+    for (const u of list.slice(0, 1500)) {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(u.pin) ? { checked: '' } : {}) });
+      cb.onchange = () => { cb.checked ? picked.add(u.pin) : picked.delete(u.pin); upd(); };
+      box.append(el('label', { style: 'display:flex;align-items:center;gap:8px;padding:4px 0;border-bottom:1px dashed var(--line,#eee);font-weight:500;color:var(--ink)' }, cb,
+        el('span', {}, el('b', {}, u.pin), ' · ', u.name || el('i', { class: 'muted' }, '(chưa có tên)')),
+        u.active === false ? el('span', { class: 'pill bad' }, 'Đã khoá') : u.active == null ? el('span', { class: 'pill warn' }, 'Chưa gắn NV') : '',
+        u.privilege > 0 ? el('span', { class: 'pill' }, 'Quản trị') : ''));
+    }
+    if (list.length > 1500) box.append(el('div', { class: 'map-hint' }, `…còn ${list.length - 1500} người — gõ tìm để thu gọn.`));
+  };
+  searchI.oninput = render; onlyLocked.onchange = render;
+  selAll.onchange = () => { for (const u of shown()) selAll.checked ? picked.add(u.pin) : picked.delete(u.pin); render(); upd(); };
+  goBtn.onclick = () => {
+    const pins = [...picked];
+    if (!pins.length || !confirm(`Xóa ${pins.length} nhân viên trên máy "${name}"?
+
+Vân tay / thẻ / mật mã của họ trên máy sẽ bị xoá. Dữ liệu công trong phần mềm GIỮ NGUYÊN.`)) return;
+    tcpJob(m, 'delete-users', { pins }, pageDevices);
+  };
+  upd();
+  openModal('Xóa nhân viên trên máy · ' + name, [
+    el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, 'Danh sách theo lần tải nhân viên gần nhất từ máy. Sau khi xoá phần mềm đọc lại máy để báo đúng ai đã xoá được.'),
+    el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, searchI,
+      el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)' }, onlyLocked, 'Chỉ NV đã khoá'),
+      el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, selAll, 'Chọn tất cả (theo lọc)')),
+    box,
+  ], [goBtn, el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+  try { rows = (await api('/admin/devices/' + m.id + '/users')).rows; } catch (e) { box.innerHTML = ''; box.append(el('div', { class: 'dv-warn' }, e.message)); return; }
+  if (rows.some((u) => u.active === false)) onlyLocked.checked = true;
+  render();
+}
 function tcpClearModal(m) {
   const today = todayVN();
   const fromI = el('input', { type: 'date', value: today.slice(0, 4) + '-01-01' }), toI = el('input', { type: 'date', value: today });
@@ -6506,6 +6561,7 @@ function tcpClearModal(m) {
     row('Xóa lượt chấm theo khoảng ngày', 'Chỉ máy firmware mới hỗ trợ; máy cũ sẽ báo không hỗ trợ.', btnSm('Xóa khoảng ngày', ask('delete-logs', `Xóa lượt chấm trên máy từ ${fromI.value} đến ${toI.value}?`, () => ({ from: fromI.value, to: toI.value })), 'ghost'),
       el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:8px' }, el('span', {}, 'Từ'), fromI, el('span', {}, 'đến'), toI)),
     row('Xóa TOÀN BỘ lượt chấm', 'Giải phóng bộ nhớ lượt chấm khi máy sắp đầy. Nhân viên + vân tay giữ nguyên.', btnSm('Xóa lượt chấm', ask('clear-logs', 'Xóa TOÀN BỘ lượt chấm công trên máy?'), 'ghost')),
+    row('Xóa nhân viên đã chọn', 'Chọn từng người (VD nhân viên đã khoá / nghỉ việc) → xoá vân tay + thẻ + mật mã của họ trên máy. Người khác giữ nguyên.', btnSm('Chọn nhân viên…', () => tcpDeleteUsersModal(m), 'ghost')),
     row('Xóa toàn bộ nhân viên + vân tay', 'Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt chấm giữ nguyên.', btnSm('Xóa nhân viên', ask('clear-users', 'Xóa TOÀN BỘ nhân viên + vân tay trên máy?'), 'ghost')),
     row('Xóa sạch máy', 'Lượt chấm + nhân viên + vân tay. Dùng khi chuyển máy sang nơi khác.', btnSm('Xóa sạch', ask('clear-all', 'Xóa SẠCH máy (lượt chấm + nhân viên + vân tay)?'), 'danger')),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
@@ -6718,6 +6774,19 @@ function legacyImportModal() {
     } catch (e) { fail(e.message); }
     finally { fileI.value = ''; }   // chọn lại đúng file đó vẫn đọc lại được
   };
+  // Đọc thẳng file theo đường dẫn trên máy cài Digiplus (phần mềm cũ thường cùng máy) — không cần mở hộp chọn file của trình duyệt
+  const pathI = el('input', { type: 'text', autocomplete: 'off', spellcheck: 'false', style: 'margin:0;flex:1;min-width:260px;font-family:monospace;font-size:12px' });
+  const readPath = async () => {
+    const p = pathI.value.trim();
+    if (!p) return fail('Nhập đường dẫn file .mdb');
+    busy(`Đang đọc ${p}…`);
+    try {
+      const r = await api('/admin/legacy/parse-path', { method: 'POST', body: { path: p, kind, password: kind !== 'rj' ? pass.value.trim() : '' } });
+      preview(r);
+    } catch (e) { fail(e.message); }
+  };
+  const pathBtn = el('button', { class: 'btn' }, '⚡ Đọc file ở đường dẫn này');
+  pathBtn.onclick = readPath;
   const fileI = el('input', { type: 'file', accept: '.mdb,.accdb', style: 'display:none' });
   fileI.onchange = () => upload(fileI.files[0]);
   const pickBtn = el('button', { class: 'btn' }, '📂 Chọn file .mdb…');
@@ -6725,7 +6794,10 @@ function legacyImportModal() {
   const where = el('div', { class: 'map-hint', style: 'margin:4px 0 0' });
   const passRow = el('div', { style: 'display:flex;gap:8px;align-items:center;margin:10px 0 0;flex-wrap:wrap' }, el('span', {}, 'Mật khẩu file Access:'), pass);
   const fileSec = el('div', { style: 'display:none;margin:14px 0 0;padding-top:10px;border-top:1px solid #f0efec' },
-    el('div', { style: 'font-weight:700' }, '2) Chọn file dữ liệu'), where, passRow, el('div', { style: 'margin-top:12px' }, pickBtn, fileI));
+    el('div', { style: 'font-weight:700' }, '2) Chọn file dữ liệu'), where, passRow,
+    el('div', { style: 'display:flex;gap:8px;align-items:center;margin:12px 0 0;flex-wrap:wrap' }, pathI, pathBtn),
+    el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Phần mềm cũ cài cùng máy với Digiplus → bấm ⚡ đọc thẳng (nhanh, không phải tìm file). Khác máy thì chép file sang rồi bấm Chọn file:'),
+    el('div', { style: 'margin-top:8px' }, pickBtn, fileI));
   // 2 ô chọn phần mềm: bấm ô nào thì hiện đúng chỗ để file + mật khẩu của phần mềm đó
   const cards = {};
   const choose = (k) => {
@@ -6734,6 +6806,7 @@ function legacyImportModal() {
     where.replaceChildren('File dữ liệu thường nằm ở: ', el('code', { style: 'font-size:12px' }, SOFT[k].path),
       k === 'on39' ? ' (bản dùng SQL Server thì không có file .mdb)' : '');
     pass.value = SOFT[k].pass;
+    pathI.value = SOFT[k].path;
     passRow.style.display = k !== 'rj' ? 'flex' : 'none';
     fileSec.style.display = '';
     pickBtn.textContent = '📂 Chọn file .mdb của ' + SOFT[k].name + '…';

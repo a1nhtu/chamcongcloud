@@ -32,6 +32,35 @@ function nodeExe() {
   return existsSync(p) ? p : process.execPath;
 }
 
+// BÀN GIAO khi cập nhật (lớp dự phòng cho CapNhat.bat): bản cũ ghi CapNhat.pid (pid + giờ) trước khi chạy bat. Bản mới bật lên
+// mà bản cũ VẪN sống (bat không tắt được: diệt virus, quyền…) → bản mới tự tắt bản cũ rồi mới mở cổng. Trước đây bản cũ cứ chạy
+// tiếp, bản mới báo "cổng bị chiếm" rồi thoát, cập nhật kẹt — phải vào tận máy tắt node.exe (nhahanggiadinh 29/10/2026).
+const handoffFile = () => join(INSTALL_ROOT, 'CapNhat.pid');
+const HANDOFF_MAX_MS = 15 * 60000;   // dấu cũ quá 15 phút = cập nhật đã hỏng từ lâu → bỏ qua, không tắt nhầm
+export function oldPidToReplace(raw, now = Date.now(), self = process.pid) {
+  try {
+    const { pid, at } = JSON.parse(raw);
+    if (Number.isInteger(pid) && pid > 0 && pid !== self && now - at >= 0 && now - at < HANDOFF_MAX_MS) return pid;
+  } catch {}
+  return 0;
+}
+export function takeOverFromOldApp() {
+  if (!IS_WIN || !existsSync(handoffFile())) return false;
+  let raw = '';
+  try { raw = readFileSync(handoffFile(), 'utf8'); } catch {}
+  const pid = oldPidToReplace(raw);
+  if (!pid) return false;
+  let out = '';
+  try { out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'], { encoding: 'utf8', windowsHide: true }); } catch {}
+  if (!/node\.exe/i.test(out)) return false;   // bản cũ đã tắt (bình thường) hoặc pid giờ là chương trình khác → không đụng
+  try { execFileSync('taskkill', ['/f', '/pid', String(pid)], { stdio: 'ignore', windowsHide: true }); }
+  catch (e) { console.error(`[update] không tắt được bản cũ (pid ${pid}):`, e.message); return false; }
+  console.log(`[update] bản cũ (pid ${pid}) vẫn chạy sau khi cập nhật → đã tự tắt để bản mới chạy`);
+  return true;
+}
+// Bản mới đã mở được cổng → xoá dấu (lần sau người dùng lỡ mở thêm app thì không tắt bản đang chạy)
+export function clearHandoff() { try { rmSync(handoffFile(), { force: true }); } catch {} }
+
 // Tạo VBS khởi động lại app ẩn hoàn toàn (không hiện cửa sổ đen), giống start-hidden.vbs lúc cài.
 // Node phải được chạy qua đây (không dùng "start /b") để khi bat thoát không bị Windows cấp console mới.
 function writeHiddenLauncher() {
@@ -298,6 +327,7 @@ async function applyUpdate(info) {
   });
   writeFileSync(batPath, bat, 'latin1');
   writeFileSync(runVbs, 'Set sh = CreateObject("WScript.Shell")\r\n' + `sh.Run "cmd /c """"${batPath}""""", 0, False\r\n`, 'latin1');
+  try { writeFileSync(handoffFile(), JSON.stringify({ pid: process.pid, at: Date.now() })); } catch {}
   progress = { ...progress, state: 'restart', pct: 90, step: 'Đang cài bản mới & khởi động lại phần mềm…', restartAt: Date.now() };
   const child = spawn('wscript.exe', ['//B', '//Nologo', runVbs], {
     detached: true, stdio: 'ignore', windowsHide: true, cwd: INSTALL_ROOT,

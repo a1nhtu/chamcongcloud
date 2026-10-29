@@ -57,3 +57,14 @@ test('Bản tải về chưa mới hơn bản đang chạy → không cài đè'
   assert.equal(U.stagedIsNewer('1.25.4', '1.25.3'), true);
   assert.equal(U.stagedIsNewer('1.26.0', '1.25.10'), true);
 });
+
+test('Bản cũ không tắt được sau khi cập nhật → bản mới nhận ra đúng pid bản cũ để tự tắt (dấu mới, không phải chính mình)', () => {
+  const now = 1_000_000_000;
+  const mark = (pid, at) => JSON.stringify({ pid, at });
+  assert.equal(U.oldPidToReplace(mark(4321, now - 60000), now, 999), 4321);          // vừa cập nhật 1 phút trước
+  assert.equal(U.oldPidToReplace(mark(4321, now - 16 * 60000), now, 999), 0);        // dấu cũ quá 15 phút → bỏ qua
+  assert.equal(U.oldPidToReplace(mark(999, now - 1000), now, 999), 0);               // pid chính mình
+  assert.equal(U.oldPidToReplace(mark(-1, now), now, 999), 0);
+  assert.equal(U.oldPidToReplace('', now, 999), 0);                                  // không có file
+  assert.equal(U.oldPidToReplace('rác', now, 999), 0);
+});

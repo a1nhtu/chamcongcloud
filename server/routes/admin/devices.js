@@ -273,6 +273,8 @@ export function registerDeviceRoutes(r, { need }) {
 
   /* -------- MÁY KẾT NỐI TRỰC TIẾP TCP/IP (SDK zkemkeeper, cổng 4370) — xem server/zk-tcp.js -------- */
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
+  // Số ID gửi lên để xoá trên máy: bỏ trùng, chỉ nhận ký tự an toàn (truyền xuống script SDK)
+  const cleanPins = (v) => [...new Set((Array.isArray(v) ? v : []).map((p) => String(p).trim()).filter((p) => /^[0-9A-Za-z_-]{1,20}$/.test(p)))];
   const tcpOn = (req, res, next) => (tcpEnabled() ? next() : res.status(400).json({ error: 'Chưa bật "Dùng máy chấm công kết nối TCP/IP" (trang Máy chấm công / Cài đặt).' }));
   const connOf = (b, old = {}) => {
     const ip = String(b.ip ?? old.tcp_ip ?? '').trim();
@@ -386,11 +388,22 @@ export function registerDeviceRoutes(r, { need }) {
     if (!j) return res.status(404).json({ error: 'Không còn thông tin việc này (máy chủ vừa khởi động lại?)' });
     res.json(j);
   });
+  // Xoá NV trên máy TCP/IP qua SDK: script in 'D <pin> <1 đã xoá | 0 vẫn còn | - không có trên máy>'.
+  // Người còn trên máy (xoá không được) thì GIỮ trong danh sách máy, để biết mà xoá tay trên máy.
+  const zkDeleteUsers = async (d, pins) => {
+    const deleted = [], failed = [], absent = [];
+    await zkRun(d, 'delete-users', { from: pins.join(','), timeoutMs: 5 * 60000 }, (k, c) => {
+      if (k === 'D') (c[1] === '1' ? deleted : c[1] === '0' ? failed : absent).push(c[0]);
+    });
+    forgetDeviceUsers(d.serial, pins.filter((p) => !failed.includes(p)));
+    dropConflicts(d.serial, deleted);
+    return { deleted, failed, absent };
+  };
   // Chạy 1 thao tác trên máy (chạy nền, giao diện hỏi tiến độ ở /devices/tcp-jobs/:job)
   const TCP_ACTIONS = {
     info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy',
     'clear-admins': 'Xóa quyền quản trị', 'clear-logs': 'Xóa toàn bộ dữ liệu chấm công trên máy', 'delete-logs': 'Xóa dữ liệu chấm công theo khoảng ngày',
-    'clear-users': 'Xóa toàn bộ nhân viên + vân tay trên máy', 'clear-all': 'Xóa sạch máy',
+    'clear-users': 'Xóa toàn bộ nhân viên + vân tay trên máy', 'clear-all': 'Xóa sạch máy', 'delete-users': 'Xóa nhân viên đã chọn trên máy',
   };
   r.post('/devices/:id/tcp/:action', need('devices'), tcpOn, async (req, res) => {
     const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
@@ -403,6 +416,8 @@ export function registerDeviceRoutes(r, { need }) {
     if (action === 'delete-logs' || (action === 'logs' && (from || to))) {
       if (!ISO.test(from) || !ISO.test(to) || to < from) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
     }
+    const pins = action === 'delete-users' ? cleanPins(b.pins) : [];
+    if (action === 'delete-users' && !pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) return res.status(400).json({ error: `Không thấy máy ở ${d.tcp_ip}:${d.tcp_port} — kiểm tra máy đã bật và cùng mạng LAN.` });
     const j = startJob(action, d.name || d.serial, async (prog) => {
       // luôn đọc Serial trước: chặn trường hợp IP này giờ là MÁY KHÁC (đổi máy / trùng IP) → không ghi nhầm dữ liệu, không xoá nhầm máy
@@ -418,6 +433,12 @@ export function registerDeviceRoutes(r, { need }) {
         prog('Đang đọc dữ liệu chấm công từ máy…');
         return { ...(await tcpLogs(d, from, to, prog)), users: u.read, from, to };
       }
+      if (action === 'delete-users') {   // xoá từng NV đã chọn (VD NV đã khoá) — trước chỉ máy đẩy (ADMS) làm được
+        prog(`Đang xoá ${pins.length} nhân viên trên máy…`);
+        const st = await zkDeleteUsers(d, pins);
+        let i2 = null; try { i2 = await tcpInfo(d); saveInfo(d.id, i2); } catch { /* máy đang bận sau khi xoá */ }
+        return { ...st, info: i2 };
+      }
       prog(TCP_ACTIONS[action] + '…');
       const r2 = await zkRun(d, action, { from, to, timeoutMs: 5 * 60000 });
       if (action !== 'restart') { try { const i2 = await tcpInfo(d); saveInfo(d.id, i2); return { info: i2, note: r2.note }; } catch { /* máy đang bận sau khi xoá */ } }
@@ -432,7 +453,9 @@ export function registerDeviceRoutes(r, { need }) {
   r.get('/devices/:id/users', need('devices'), (req, res) => {
     const serial = serialOfDevice(req.params.id);
     if (!serial) return res.status(404).json({ error: 'Không tìm thấy máy' });
-    res.json({ rows: deviceUserList(serial) });
+    // kèm NV trong phần mềm (đã khoá chưa) → lọc "Chỉ NV đã khoá" khi xoá trên máy
+    const emp = new Map(db.prepare("SELECT device_pin, full_name, active FROM employees WHERE device_pin IS NOT NULL AND device_pin<>''").all().map((e) => [String(e.device_pin).trim(), e]));
+    res.json({ rows: deviceUserList(serial).map((u) => { const e = emp.get(String(u.pin).trim()); return { ...u, name: u.name || e?.full_name || '', active: e ? !!e.active : null }; }) });
   });
   r.post('/devices/:id/query-users', need('devices'), (req, res) => {
     const d = db.prepare('SELECT serial, active, last_seen FROM push_devices WHERE id=?').get(req.params.id);
@@ -566,7 +589,7 @@ export function registerDeviceRoutes(r, { need }) {
   });
   // Xóa các Số ID đã chọn trên MỌI máy đang dùng: máy đẩy (ADMS) xếp lệnh chờ máy lấy; máy TCP/IP chạy nền qua SDK
   r.post('/devices/delete-users-all', need('devices'), (req, res) => {
-    const pins = [...new Set((Array.isArray(req.body?.pins) ? req.body.pins : []).map((p) => String(p).trim()).filter((p) => /^[0-9A-Za-z_-]{1,20}$/.test(p)))];
+    const pins = cleanPins(req.body?.pins);
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all();
     const push = devs.filter((d) => (d.conn_type || 'push') === 'push' || d.conn_type === 'ai');
@@ -598,10 +621,8 @@ export function registerDeviceRoutes(r, { need }) {
             if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) throw new Error(`Không thấy máy ở ${d.tcp_ip}:${d.tcp_port}`);
             const info = await tcpInfo(d);
             if (info.serial && info.serial !== d.serial) throw new Error(`IP ${d.tcp_ip} giờ là máy khác (Serial ${info.serial}) — bỏ qua cho an toàn`);
-            const gone = [];
-            await zkRun(d, 'delete-users', { from: pins.join(','), timeoutMs: 5 * 60000 }, (k, c) => { if (k === 'D' && c[1] === '1') gone.push(c[0]); });
-            forgetDeviceUsers(d.serial, pins);
-            out.push({ device: name, ok: true, deleted: gone.length });
+            const st = await zkDeleteUsers(d, pins);
+            out.push({ device: name, ok: true, deleted: st.deleted.length, failed: st.failed });
           } catch (e) { out.push({ device: name, ok: false, error: e.message }); }
         }
         return { devices: out };

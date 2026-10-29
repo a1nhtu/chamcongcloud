@@ -44,6 +44,29 @@ if (-not $z.Connect_Net($Ip, $Port)) {
 }
 $m = $Machine
 $locked = $false
+# Số ID còn trên máy không (đọc thẳng máy). Vài firmware đời cũ đọc lỗi → coi như không thấy (khi đó tin kết quả lệnh xoá)
+function UserOnDevice($p) {
+  $n = ''; $pw = ''; $pri = 0; $en = $false
+  try { return [bool]$z.SSR_GetUserInfo($m, $p, [ref]$n, [ref]$pw, [ref]$pri, [ref]$en) } catch { return $false }
+}
+# Xoá 1 NV (vân tay + thẻ + mật mã + khuôn mặt) → '1' đã xoá · '0' vẫn còn trên máy · '-' không có trên máy.
+# Firmware khác nhau nhận lệnh khác nhau (máy TCP/IP khách 29/10/2026 không xoá được NV đã khoá bằng 1 lệnh duy nhất):
+# thử lần lượt SSR_DeleteEnrollData(12) → SSR_DeleteEnrollDataExt(13) → DeleteEnrollData đời cũ (Số ID dạng số), mỗi lần
+# đọc lại máy xem người đó đã mất chưa — không tin mỗi giá trị trả về (nhiều firmware trả false dù đã xoá và ngược lại).
+function DeleteOne($p) {
+  $had = UserOnDevice $p
+  $ok = $false; try { $ok = [bool]$z.SSR_DeleteEnrollData($m, $p, 12) } catch {}
+  if ($ok -and -not (UserOnDevice $p)) { return '1' }
+  $ok = $false; try { $ok = [bool]$z.SSR_DeleteEnrollDataExt($m, $p, 13) } catch {}
+  if ($ok -and -not (UserOnDevice $p)) { return '1' }
+  if ($p -match '^\d{1,9}$') {
+    $ok = $false; try { $ok = [bool]$z.DeleteEnrollData($m, [int]$p, $m, 12) } catch {}
+    if ($ok -and -not (UserOnDevice $p)) { return '1' }
+  }
+  if (-not $had) { return '-' }
+  if (UserOnDevice $p) { return '0' }
+  return '1'
+}
 function Lock { [void]$z.EnableDevice($m, $false); $script:locked = $true }
 function Done($note) {
   if ($script:locked) { [void]$z.EnableDevice($m, $true) }
@@ -128,16 +151,15 @@ try {
       [void]$z.ClearGLog($m); [void]$z.ClearData($m, 2); [void]$z.ClearData($m, 5); [void]$z.RefreshData($m); Done 'clear-all'
     }
     'delete-user' {     # xoá 1 NV trên máy (vân tay + thẻ + mật mã); $From = Số ID
-      $ok = [bool]$z.SSR_DeleteEnrollData($m, $From, 12); [void]$z.RefreshData($m)
-      if (-not $ok) { $e = 0; $z.GetLastError([ref]$e); $z.Disconnect(); Fail "DELUSER$e" "Không xoá được Số ID $From trên máy (mã lỗi $e)." }
+      Lock; $r = DeleteOne $From.Trim(); [void]$z.RefreshData($m)
+      if ($r -eq '0') { $e = 0; $z.GetLastError([ref]$e); [void]$z.EnableDevice($m, $true); $z.Disconnect(); Fail "DELUSER$e" "Không xoá được Số ID $From trên máy (mã lỗi $e)." }
       Done 'delete-user'
     }
-    'delete-users' {    # xoá NHIỀU NV trên máy; $From = các Số ID cách nhau dấu phẩy. In 'D <pin> <1|0>' từng người
+    'delete-users' {    # xoá NHIỀU NV trên máy; $From = các Số ID cách nhau dấu phẩy. In 'D <pin> <1|0|->' từng người (xem DeleteOne)
       Lock
       foreach ($p in ($From -split ',')) {
         $p = $p.Trim(); if (-not $p) { continue }
-        $ok = $false; try { $ok = [bool]$z.SSR_DeleteEnrollData($m, $p, 12) } catch {}
-        Out ("D`t$p`t" + ($(if ($ok) { 1 } else { 0 })))
+        Out ("D`t$p`t" + (DeleteOne $p))
       }
       [void]$z.RefreshData($m); Done 'delete-users'
     }

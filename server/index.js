@@ -26,7 +26,7 @@ import { mealStaticGate } from './meal.js';
 import iclockRoutes from './routes/iclock.js';
 import hikEventRoutes from './routes/hik-event.js';
 import { isActivated } from './license.js';
-import { currentVersion } from './update.js';
+import { currentVersion, takeOverFromOldApp, clearHandoff } from './update.js';
 import { offload } from './heavy.js';
 import { startTcpScheduler } from './zk-tcp.js';
 import { attachAiWs } from './ai-ws.js';
@@ -166,6 +166,8 @@ function lanIPs() {
 }
 
 // HTTP (localhost trên máy này + Cloudflare Tunnel ra internet) — BẮT BUỘC phải mở được
+// Vừa cập nhật mà bản cũ còn giữ cổng → tự tắt bản cũ, chờ cổng nhả rồi mới mở (xem update.js takeOverFromOldApp)
+if (takeOverFromOldApp()) await new Promise((ok) => setTimeout(ok, 2000));
 const httpServer = createHttp(app);
 attachAiWs(httpServer);   // máy chấm công AI kết nối WebSocket vào CHÍNH cổng này (tắt công tắc "Dùng máy AI" → từ chối)
 httpServer.on('error', (e) => {
@@ -174,6 +176,7 @@ httpServer.on('error', (e) => {
   process.exit(1);
 });
 httpServer.listen(PORT, '0.0.0.0', () => {
+  clearHandoff();
   console.log(`\n  === Digiplus Chấm công ===`);
   console.log(`  HTTP  (máy này):  http://localhost:${PORT}/  |  /admin`);
   // Bản cài của khách: tự bảo đảm app tự bật khi mở máy/đăng nhập (khách cũ bấm Cập nhật là được sửa, khỏi chạy lại CaiDat.bat)
