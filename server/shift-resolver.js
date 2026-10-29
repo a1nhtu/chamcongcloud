@@ -62,12 +62,12 @@ function deptChain(name) {
   }
   return out;
 }
-// Lịch trình gán cho PHÒNG BAN phủ ngày này: phòng của NV trước, rồi tới phòng cấp trên có bật "bao gồm cấp dưới".
+// Lịch trình gán cho PHÒNG BAN phủ ngày này: phòng của NV trước, rồi tới phòng cấp trên có bật "bao gồm cấp dưới",
+// cuối cùng là lịch "Tất cả phòng ban" (department = '*', áp cả NV chưa có phòng ban).
 export function deptShiftAssignment(employeeId, workDate) {
   const e = q('SELECT department FROM employees WHERE id = ?').get(employeeId);
   const dept = (e?.department || '').trim();
-  if (!dept) return null;
-  const chain = deptChain(dept);
+  const chain = dept ? deptChain(dept) : [];
   for (let i = 0; i < chain.length; i++) {
     const r = q(`SELECT * FROM dept_shift_assignments
       WHERE department = ? AND active = 1 AND from_date <= ? AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
@@ -75,7 +75,9 @@ export function deptShiftAssignment(employeeId, workDate) {
       ORDER BY id DESC LIMIT 1`).get(chain[i], workDate, workDate);
     if (r) return r;
   }
-  return null;
+  return q(`SELECT * FROM dept_shift_assignments
+    WHERE department = '*' AND active = 1 AND from_date <= ? AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
+    ORDER BY id DESC LIMIT 1`).get(workDate, workDate) || null;
 }
 
 // Phân ca theo KHOẢNG NGÀY phủ ngày này — lịch RIÊNG của NV (shift_assignments, bản ghi mới nhất thắng);

@@ -5,7 +5,7 @@ import { authRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull } from '../attendance-calc.js';
+import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom, payrollCtx, computeDayMetrics } from '../day-metrics.js';
 import { otRegCapper } from '../ot-cap.js';
@@ -276,8 +276,14 @@ r.post('/check-out', (req, res) => {
     const wm = Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
     calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate, req.user.id)), ot_type: otTypeOf(wdate, req.user.id), day_status: 'lam_viec' };
   }
-  const calcBeforeWk = calc;
-  if (!hourly) calc = weekendToOt(calc, dayFlags(wdate, req.user.id));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
+  // Ca "Có mặt là tính đủ công": đủ công của ca, không về sớm (ngày nghỉ đi làm tính tăng ca: tăng ca theo giờ thực)
+  const calcReal = calc;
+  if (shift && singlePunchFull(shift)) calc = presenceFull(calc, shift, wdate, dayFlags(wdate, req.user.id));
+  let calcBeforeWk = calc;
+  if (!hourly) {
+    calc = weekendToOt(calc, dayFlags(wdate, req.user.id));   // đi làm ngày cuối tuần = tăng ca (Cài đặt)
+    if (calc !== calcBeforeWk && calcBeforeWk !== calcReal) { calcBeforeWk = calcReal; calc = weekendToOt(calcReal, dayFlags(wdate, req.user.id)); }
+  }
   const wkExact = calc !== calcBeforeWk ? (calcBeforeWk.work_minutes || 0) : 0;
   if (calc.ot_min) { const r = otRoundingFrom(getSetting); calc = { ...calc, ot_min: roundOtParts(calc.ot_min, calc.ot_parts, r.decimals, r.mode, r.block, getSetting('weekend_work_exact', '0') === '1' ? wkExact : 0) }; }
   delete calc.ot_parts;
@@ -287,7 +293,7 @@ r.post('/check-out', (req, res) => {
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');
-  const finalLate = shift ? (() => { const f = dayFlags(wdate, req.user.id); return computeLate(shift, row.check_in_at, wdate, f.lateBlock, halfLeavePriv(shift, wdate, f.half, f.priv)); })() : row.late_min;
+  const finalLate = shift && singlePunchFull(shift) ? 0 : shift ? (() => { const f = dayFlags(wdate, req.user.id); return computeLate(shift, row.check_in_at, wdate, f.lateBlock, halfLeavePriv(shift, wdate, f.half, f.priv)); })() : row.late_min;
 
   db.prepare(`UPDATE attendance SET check_out_at=?, check_out_lat=?, check_out_lng=?,
     check_out_photo=?, check_out_distance_m=?, work_minutes=?, early_min=?, ot_min=?, ot_raw_min=?,

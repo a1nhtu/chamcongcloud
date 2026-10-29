@@ -37,10 +37,15 @@ test('kiểu 2: ca nửa công → đủ 0,5 công', () => {
   assert.equal(m.work_unit, 0.5); assert.equal(m.work_minutes, 240); assert.equal(m.late, 0);
 });
 
-test('kiểu 2: đủ vào + ra → tính bình thường như mọi ca (vẫn trừ đi muộn, có tăng ca)', () => {
-  for (const [i, o] of [['08:20', '17:00'], ['08:00', '18:30'], ['09:00', '15:00']]) {
-    assert.deepEqual(computeDayMetrics(ctx(), sh(2), WD, iso(WD, i), iso(WD, o)), computeDayMetrics(ctx(), sh(0), WD, iso(WD, i), iso(WD, o)), `${i}-${o}`);
-  }
+test('kiểu 2: đủ vào + ra (muộn / về sớm) → vẫn đủ công, không trừ; ở lại sau ca vẫn có tăng ca', () => {
+  const one = (i, o) => pick(computeDayMetrics(ctx(), sh(2), WD, iso(WD, i), iso(WD, o)));
+  assert.deepEqual(one('08:20', '10:06'), { late: 0, early: 0, ot: 0, wm: 480, wu: 1, st: 'lam_viec' });
+  assert.deepEqual(one('09:00', '15:00'), { late: 0, early: 0, ot: 0, wm: 480, wu: 1, st: 'lam_viec' });
+  assert.deepEqual(one('08:00', '18:30'), { late: 0, early: 0, ot: 90, wm: 480, wu: 1, st: 'lam_viec' });
+  // chủ nhật đi làm tính tăng ca: tăng ca theo giờ làm THỰC (08–12 = 4 tiếng), không phải đủ ca
+  const sun = computeDayMetrics(ctx({ weekendOt: true }), sh(2), SUN, iso(SUN, '08:00'), iso(SUN, '12:00'));
+  assert.deepEqual([sun.work_unit, sun.ot_min, sun.ot_type], [0, 240, 'cuoi_tuan']);
+  assert.deepEqual(sun, computeDayMetrics(ctx({ weekendOt: true }), sh(0), SUN, iso(SUN, '08:00'), iso(SUN, '12:00')));
 });
 
 test('kiểu 2: ngày nghỉ đi làm tính tăng ca → chấm 1 lần không tính tăng ca, không tính công', () => {

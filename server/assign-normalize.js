@@ -38,6 +38,14 @@ export function overrideAssignRanges(table, keyVal, from, to, exceptId = null, o
   return n;
 }
 
+// Lịch trình gán cho TẤT CẢ PHÒNG BAN (cả công ty, kể cả phòng ban thêm sau / NV chưa có phòng ban): dòng department = '*'
+export const ALL_DEPTS = '*';
+// Gán "tất cả phòng ban" = lịch mới thắng: lịch riêng của MỌI phòng ban trong khoảng [from, to] bị cắt / thay
+export function overrideAllDepts(from, to) {
+  for (const { department } of db.prepare('SELECT DISTINCT department FROM dept_shift_assignments WHERE active = 1 AND department <> ?').all(ALL_DEPTS))
+    overrideAssignRanges('dept_shift_assignments', department, from, to);
+}
+
 // Dọn 1 lần các lịch chồng ngày đã có từ trước (bản cũ cho gán đè mà không cắt lịch cũ): duyệt theo thứ tự tạo, dòng sau đè dòng trước.
 export function fixOverlappingAssignmentsOnce() {
   if (getSetting('assign_overlap_fixed') === '1') return;

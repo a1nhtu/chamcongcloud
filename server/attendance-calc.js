@@ -293,8 +293,16 @@ export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
   return { ...base, work_minutes, work_unit };
 }
 
-// Ca chọn "Chấm 1 lần: có mặt là tính đủ công" (no_out_credit = 2; 1 = kiểu cũ "đủ công trừ phần đi trễ").
+// Ca chọn "Có mặt là tính đủ công" (no_out_credit = 2; 1 = kiểu cũ "thiếu giờ ra: đủ công trừ phần đi trễ").
 export const singlePunchFull = (shift) => Number(shift?.no_out_credit) === 2;
+// Ca "Có mặt là tính đủ công" + ngày có ĐỦ vào và ra: đủ giờ chuẩn + đủ công của ca, không tính về sớm
+// (đi muộn do nơi gọi bỏ). Tăng ca vẫn giữ như tính thường. Ca tính cả ca là tăng ca → giữ nguyên.
+export function presenceFull(c, shift, workDate, opts = {}) {
+  if (!c || !singlePunchFull(shift) || shiftIsOt(shift, !!opts.isHoliday, !!opts.isWeekend)) return c;
+  const { start, end } = shiftBounds(workDate, shift);
+  const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
+  return { ...c, early_min: 0, work_minutes: standard, work_unit: shift.work_unit_value ?? 1.0 };
+}
 // Ngày chỉ có giờ vào HOẶC chỉ có giờ ra: đủ giờ chuẩn + đủ công của ca; không đi muộn / về sớm / tăng ca.
 // Ca tính cả ca là tăng ca (ca tăng ca, ngày lễ của ca bật tùy chọn) → không có giờ ra nên không tính gì.
 // day_status 'mot_lan' = báo cáo hiện "Đủ công" (không phải "Thiếu ra").

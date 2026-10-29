@@ -1,7 +1,7 @@
 // Nhóm route PHÂN CA — theo ngày (lịch tuần), theo khoảng ngày (shift_assignments) và phân ca bằng Excel.
 import ExcelJS from 'exceljs';
 import { db, adminAttWhere, getSetting } from '../../db.js';
-import { overrideAssignRanges } from '../../assign-normalize.js';
+import { overrideAssignRanges, overrideAllDepts, ALL_DEPTS } from '../../assign-normalize.js';
 import { resolveShift, schedDay } from '../../shift-resolver.js';
 import { vnWeekday } from '../../attendance-calc.js';
 import { sendCaughtError } from '../../util.js';
@@ -361,8 +361,9 @@ export function registerAssignmentRoutes(r, { need }) {
   // { departments: ['Kế toán', …], include_children, mode, shift_id | work_schedule_id, from_date, to_date }
   r.post('/dept-shift-assignments', need('assignments'), (req, res) => {
     const b = req.body || {};
-    const depts = [...new Set((Array.isArray(b.departments) ? b.departments : []).map((x) => String(x || '').trim()).filter(Boolean))];
+    let depts = [...new Set((Array.isArray(b.departments) ? b.departments : []).map((x) => String(x || '').trim()).filter(Boolean))];
     if (!depts.length) return res.status(400).json({ error: 'Chưa chọn phòng ban' });
+    if (depts.includes(ALL_DEPTS)) depts = [ALL_DEPTS];   // tất cả phòng ban: 1 dòng '*' cho cả công ty
     const mode = b.mode === 'schedule' ? 'schedule' : 'shift';
     const from = (b.from_date || '').slice(0, 10), to = (b.to_date || '').slice(0, 10) || null;
     if (!from) return res.status(400).json({ error: 'Thiếu ngày bắt đầu' });
@@ -376,6 +377,8 @@ export function registerAssignmentRoutes(r, { need }) {
       (department, include_children, mode, shift_id, work_schedule_id, from_date, to_date, merge_rule, note, inout_schedule_id) VALUES (?,?,?,?,?,?,?,?,?,?)`);
     db.exec('BEGIN');
     try {
+      // Tất cả phòng ban: lịch mới thắng — lịch riêng của từng phòng ban trong khoảng ngày này bị cắt / thay
+      if (depts[0] === ALL_DEPTS) overrideAllDepts(from, to);
       for (const d of depts) { overrideAssignRanges('dept_shift_assignments', d, from, to); ins.run(d, b.include_children === false ? 0 : 1, mode, shiftId, scheduleId, from, to, b.merge_rule || 'default', String(b.note || '').slice(0, 500), ioId); }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); throw e; }

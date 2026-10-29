@@ -38,7 +38,7 @@ const SHIFT_F = {
   work_unit_value: ['Số công của ca'], allow_ot: ['Tính tăng ca', 'yn'], ot_start_after_min: ['Ở lại tối thiểu mới tính tăng ca', 'phút'],
   check_in_start: ['Bắt đầu vào'], check_in_end: ['Kết thúc vào'], check_out_start: ['Bắt đầu ra'], check_out_end: ['Kết thúc ra'],
   ot_before: ['Tăng ca trước giờ vào', 'yn'], ot_before_min: ['Đến sớm tối thiểu', 'phút'], holiday_as_ot: ['Cả ca là tăng ca ngày lễ', 'yn'],
-  shift_as_ot: ['Ca tăng ca', 'yn'], compensate_late: ['Tính bù trừ', 'yn'], no_out_credit: ['Chấm 1 lần (thiếu giờ ra)', 'noout'],
+  shift_as_ot: ['Ca tăng ca', 'yn'], compensate_late: ['Tính bù trừ', 'yn'], no_out_credit: ['Chấm thiếu / có mặt', 'noout'],
   grace_deduct: ['Chỉ tính phần vượt mức cho phép', 'yn'], ot_tier1_min: ['Giới hạn TC1', 'phút'], ot_tier2_min: ['Giới hạn TC2', 'phút'],
   ot_tier3_min: ['Giới hạn TC3', 'phút'], ot_tier2_rate: ['Hệ số TC2'], ot_tier3_rate: ['Hệ số TC3'], ot_tier4_rate: ['Hệ số TC4'],
   active: ['Đang dùng', 'yn'],
@@ -61,7 +61,7 @@ const WD_VI = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 function fmtVal(v, kind) {
   if (v == null || v === '') return '(trống)';
   if (kind === 'yn') return yes(v);
-  if (kind === 'noout') return +v === 2 ? 'Có mặt là tính đủ công' : +v ? 'Tính đủ công, trừ phần đi trễ' : 'Không tính công';
+  if (kind === 'noout') return +v === 2 ? 'Có mặt là tính đủ công' : +v ? 'Thiếu giờ ra: đủ công, trừ phần đi trễ' : 'Thiếu giờ ra: không tính công';
   if (kind === 'phút') return v + ' phút';
   if (kind === 'role') return ROLE_VI[v] || v;
   if (kind === 'att') return v === 'hourly' ? 'Theo giờ' : v === 'shift' ? 'Theo ca' : 'Theo cài đặt chung';
@@ -115,8 +115,8 @@ const RULES = [
   ['POST', /^\/shift-assignments$/, (r) => { const b = r.body || {}; const io = b.inout_schedule_id ? ioLabel(b.inout_schedule_id) : ''; return join([`Gán ${what(b)}`, 'cho ' + (b.scope === 'all' ? 'tất cả nhân viên' : b.scope === 'dept' ? 'phòng ' + b.department : empNames(b.employee_ids?.length ? b.employee_ids : b.employee_id)), range(b.from_date, b.to_date), io ? 'vào ra: ' + io : '']); }],
   ['POST', /^\/shift-assignments\/delete$/, (r) => describeRangedDelete(ids(r.body?.ids))],
   ['DELETE', /^\/shift-assignments\/(\d+)$/, (r, m) => describeRangedDelete([+m[1]])],
-  ['POST', /^\/dept-shift-assignments$/, (r) => { const b = r.body || {}; const io = b.inout_schedule_id ? ioLabel(b.inout_schedule_id) : ''; return join([`Gán ${what(b)}`, 'cho phòng ban: ' + listShort(b.departments || []) + (b.include_children === false ? '' : ' (kèm cấp dưới)'), range(b.from_date, b.to_date), io ? 'vào ra: ' + io : '']); }],
-  ['POST', /^\/dept-shift-assignments\/delete$/, (r) => { const a = ids(r.body?.ids); const rows = a.length ? all(`SELECT department, shift_id, work_schedule_id, mode, from_date FROM dept_shift_assignments WHERE id IN (${a.map(() => '?').join(',')})`, ...a) : []; return `Xoá ${a.length} dòng gán ca phòng ban: ` + listShort(rows.map((x) => `${x.department} – ${what(x)} (từ ${dmy(x.from_date)})`), 3); }],
+  ['POST', /^\/dept-shift-assignments$/, (r) => { const b = r.body || {}; const io = b.inout_schedule_id ? ioLabel(b.inout_schedule_id) : ''; return join([`Gán ${what(b)}`, 'cho phòng ban: ' + listShort((b.departments || []).map((d) => (d === '*' ? 'Tất cả phòng ban' : d))) + (b.include_children === false ? '' : ' (kèm cấp dưới)'), range(b.from_date, b.to_date), io ? 'vào ra: ' + io : '']); }],
+  ['POST', /^\/dept-shift-assignments\/delete$/, (r) => { const a = ids(r.body?.ids); const rows = a.length ? all(`SELECT department, shift_id, work_schedule_id, mode, from_date FROM dept_shift_assignments WHERE id IN (${a.map(() => '?').join(',')})`, ...a) : []; return `Xoá ${a.length} dòng gán ca phòng ban: ` + listShort(rows.map((x) => `${x.department === '*' ? 'Tất cả phòng ban' : x.department} – ${what(x)} (từ ${dmy(x.from_date)})`), 3); }],
 
   // ----- Nhân viên -----
   ['POST', /^\/employees$/, (r) => { const b = r.body || {}; return join([`${b.full_name || ''} (mã ${b.code || ''})`, b.department ? 'Bộ phận: ' + b.department : '', b.role ? 'Vai trò: ' + (ROLE_VI[b.role] || b.role) : '', b.device_pin ? 'Số ID máy: ' + b.device_pin : '']); }],

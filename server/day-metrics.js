@@ -1,7 +1,7 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, computeNoOut, computeSinglePunch, singlePunchFull, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
+import { computeLate, computeCheckout, computeNoOut, computeSinglePunch, singlePunchFull, presenceFull, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
 import { privilegeLookup, halfLeaveLookup } from './privilege.js';
 import { otRegCapper } from './ot-cap.js';
 import { dayRules } from './swap.js';
@@ -87,9 +87,10 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   // nghỉ phép nửa ngày: nửa nghỉ không tính trễ / sớm (giờ công vẫn tính theo flags.priv gốc = đúng phần đã làm)
   const half = shift && opts.empId && ctx.halfOf ? ctx.halfOf(opts.empId, workDate) : '';
   const lePriv = half ? halfLeavePriv(shift, workDate, half, flags.priv) : flags.priv;
-  // Ca chọn "Chấm 1 lần: có mặt là tính đủ công": chỉ có giờ vào hoặc chỉ có giờ ra → đủ công, không đi muộn
-  const single = !!shift && singlePunchFull(shift) && !inIso !== !outIso;
-  const late = (shift && inIso && !single) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, lePriv) : 0;
+  // Ca chọn "Có mặt là tính đủ công": có chấm (1 hay nhiều lần) là đủ công, không đi muộn / về sớm
+  const present = !!shift && singlePunchFull(shift) && !!(inIso || outIso);
+  const single = present && !inIso !== !outIso;
+  const late = (shift && inIso && !present) ? computeLate(shift, inIso, workDate, ctx.lateBlock || 0, lePriv) : 0;
 
   let c;
   if (single) {
@@ -112,8 +113,13 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   }
   // Ngày nghỉ + ca nghỉ trưa cố định + chỉ 1 cặp quẹt (2 lần): HR-ERP không tính giờ làm trong ca (chỉ tăng ca ngoài ca) — cài đặt weekend_need_pairs
   if (flags.isWeekend && ctx.weekendNeedPairs && shift && shift.break_start && pairs && pairs.length === 1 && c.work_minutes) c = { ...c, work_minutes: 0, work_unit: 0 };
-  const beforeWk = c;
-  if ((ctx.weekendOt || compOff) && !opts.hourly) c = weekendToOt(c, { ...flags, weekendOt: true });
+  const real = c;   // giờ làm THỰC (ngày nghỉ đi làm tính tăng ca: tăng ca theo giờ thực, không theo "đủ công")
+  if (present && !single) c = presenceFull(c, shift, workDate, flags);
+  let beforeWk = c;
+  if ((ctx.weekendOt || compOff) && !opts.hourly) {
+    c = weekendToOt(c, { ...flags, weekendOt: true });
+    if (c !== beforeWk && beforeWk !== real) { beforeWk = real; c = weekendToOt(real, { ...flags, weekendOt: true }); }
+  }
   // chấm 1 lần ngày nghỉ (đi làm tính tăng ca): không có giờ ra → không tính tăng ca
   if (single && c !== beforeWk) c = { ...c, ot_min: 0, day_status: 'thieu_ra' };
   const wkExact = c !== beforeWk ? (beforeWk.work_minutes || 0) : 0;   // giờ làm trong ca vừa chuyển thành tăng ca ngày nghỉ

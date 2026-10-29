@@ -1827,11 +1827,11 @@ function shiftForm(s, can) {
       R('Kết thúc vào', ph(time24('s-ciEnd', s?.check_in_end || ''), '(tự động)')),
       R('Bắt đầu ra', ph(time24('s-coStart', s?.check_out_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm RA'),
       R('Kết thúc ra', ph(time24('s-coEnd', s?.check_out_end || ''), '(tự động)')),
-      R('Khi chỉ chấm 1 lần (thiếu giờ ra)', el('select', { id: 's-noout' },
-        el('option', { value: '0', ...(!s?.no_out_credit ? { selected: '' } : {}) }, 'Không tính công'),
-        el('option', { value: '1', ...(+s?.no_out_credit === 1 ? { selected: '' } : {}) }, 'Tính đủ công, trừ phần đi trễ'),
+      R('Chấm thiếu / có mặt', el('select', { id: 's-noout' },
+        el('option', { value: '0', ...(!s?.no_out_credit ? { selected: '' } : {}) }, 'Thiếu giờ ra: không tính công'),
+        el('option', { value: '1', ...(+s?.no_out_credit === 1 ? { selected: '' } : {}) }, 'Thiếu giờ ra: đủ công, trừ phần đi trễ'),
         el('option', { value: '2', ...(+s?.no_out_credit === 2 ? { selected: '' } : {}) }, 'Có mặt là tính đủ công')), '',
-        'Có mặt là tính đủ công: chỉ chấm vào hoặc chỉ chấm ra vẫn đủ công của ca, không tính đi muộn, không tính tăng ca'),
+        'Có mặt là tính đủ công: có chấm (1 hay nhiều lần) là đủ công của ca, không trừ đi muộn / về sớm. Chỉ chấm 1 lần thì không tính tăng ca'),
       C('s-comp', s?.compensate_late, 'Tính bù trừ cho ca này', '(đi làm trễ thì về trễ bù lại để không bị trừ giờ; phần bù không tính tăng ca)'),
       el('label', { class: 'fchk' }, actChk, el('span', {}, 'Đang dùng ca này', el('span', { class: 'fhint2' }, ' (bỏ tích = tắt ca, ẩn khỏi danh sách chọn)')))),
     el('div', { class: 'sh-col' },
@@ -2441,11 +2441,16 @@ async function pageAssignments() {
       var getBody = () => ({ url: '/admin/assignments/bulk', body: { employee_ids: [...sel.keys()].filter((k) => typeof k === 'number'), departments: [...sel.keys()].filter((k) => typeof k === 'string').map((k) => k.slice(2)), include_children: incl.checked } });
     } else if (isDept) {
       const incl = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
+      // TẤT CẢ PHÒNG BAN = cả công ty: kể cả phòng ban thêm sau này và nhân viên chưa xếp phòng ban (lưu là '*')
+      const allCb = el('input', { type: 'checkbox', style: 'width:auto', ...(sel.has('*') ? { checked: '' } : {}) });
+      allCb.onchange = () => { sel.clear(); if (allCb.checked) sel.set('*', 'Tất cả phòng ban (kể cả phòng ban thêm sau)'); renderSel(); drawTree(); };
       const treeBox = el('div', { class: 'emp-tree', style: 'padding:0' });
       const drawTree = () => {
         treeBox.innerHTML = '';
+        allCb.checked = sel.has('*');
+        treeBox.style.opacity = sel.has('*') ? '.45' : '';
         for (const n of nodes) {
-          const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(sel.has(n.name) ? { checked: '' } : {}) });
+          const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(sel.has(n.name) ? { checked: '' } : {}), ...(sel.has('*') ? { disabled: '' } : {}) });
           cb.onchange = () => {
             const names = incl.checked ? [...descOf(n.name)] : [n.name];
             for (const nm of names) { if (cb.checked) sel.set(nm, nm); else sel.delete(nm); }
@@ -2457,6 +2462,7 @@ async function pageAssignments() {
       };
       syncLeft = drawTree; drawTree();
       leftCols = [el('div', { class: 'as-col', style: 'flex:1.4' },
+        el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);margin-bottom:4px', title: 'Áp cho cả công ty: mọi phòng ban, kể cả phòng ban thêm sau này và nhân viên chưa xếp phòng ban. Phòng ban đã có lịch trình trong khoảng ngày này sẽ theo lịch mới.' }, allCb, '🏢 Tất cả phòng ban', el('span', { class: 'fhint2' }, ' (kể cả phòng ban thêm sau)')),
         el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);margin-bottom:8px' }, incl, 'Bao gồm cấp dưới'),
         treeBox), selCol];
       var getBody = () => ({ url: '/admin/dept-shift-assignments', body: { departments: [...sel.keys()], include_children: incl.checked } });
@@ -2904,7 +2910,8 @@ async function pageAssignments() {
     const selAll = el('input', { type: 'checkbox', style: 'width:auto' });
     tbl.append(el('thead', {}, el('tr', {}, el('th', {}, selAll), el('th', {}, 'Phòng ban'), el('th', {}, 'Ca / lịch trình ca làm việc'), el('th', {}, 'Lịch trình vào ra'), el('th', {}, 'Ngày bắt đầu'), el('th', {}, 'Ngày kết thúc'), el('th', {}, 'Áp dụng'), el('th', {}, 'Thao tác'))));
     const tb = el('tbody'); tbl.append(tb);
-    const rows = deptRows.filter((r) => !selSet || selSet.has(r.department));
+    const rows = deptRows.filter((r) => !selSet || r.department === '*' || selSet.has(r.department));   // '*' = tất cả phòng ban: hiện ở mọi phòng
+    const dName = (d) => (d === '*' ? 'Tất cả phòng ban' : d);
     if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Trống — chưa phòng ban nào ở đây được gán ca. Bấm "+ Thêm" để gán.'))));
     const delIds = async (ids, msg) => {
       if (!confirm(msg)) return;
@@ -2913,13 +2920,13 @@ async function pageAssignments() {
     for (const r of rows) {
       const expired = r.to_date && r.to_date < today, future = r.from_date > today;
       tb.append(el('tr', {}, el('td', {}, el('input', { type: 'checkbox', class: 'as-pick', style: 'width:auto', 'data-id': r.id })),
-        el('td', {}, el('b', {}, '📁 ' + r.department)),
+        el('td', {}, el('b', {}, (r.department === '*' ? '🏢 ' : '📁 ') + dName(r.department))),
         el('td', {}, el('span', { style: expired ? 'color:#9ca3af' : 'color:#0f766e;font-weight:700' }, r.mode === 'schedule' ? '📋 ' + (r.schedule_name || 'Lịch trình') : (r.shift_name || 'Ca')),
           expired ? el('span', { class: 'chip', style: 'margin-left:6px' }, 'đã hết hạn') : future ? el('span', { class: 'chip', style: 'margin-left:6px;background:#eff6ff;color:#1d4ed8' }, 'sắp áp dụng') : ''),
         el('td', { style: 'color:var(--muted)' }, r.inout_name || 'Mặc định'),
         el('td', {}, fmtD(r.from_date)), el('td', {}, r.to_date ? fmtD(r.to_date) : '—'),
-        el('td', { style: 'color:var(--muted);font-size:13px' }, r.include_children ? 'cả phòng ban cấp dưới' : 'chỉ phòng này'),
-        el('td', { style: 'white-space:nowrap' }, ...(canEdit ? [btnSm('Sửa', () => editAssignModal('dept', r, data.shifts)), ' ', btnSm('Xoá', () => delIds([r.id], `Xoá lịch trình "${r.mode === 'schedule' ? r.schedule_name : r.shift_name}" của phòng "${r.department}"?`), 'ghost')] : []))));
+        el('td', { style: 'color:var(--muted);font-size:13px' }, r.department === '*' ? 'cả công ty, kể cả phòng ban thêm sau' : r.include_children ? 'cả phòng ban cấp dưới' : 'chỉ phòng này'),
+        el('td', { style: 'white-space:nowrap' }, ...(canEdit ? [btnSm('Sửa', () => editAssignModal('dept', r, data.shifts)), ' ', btnSm('Xoá', () => delIds([r.id], `Xoá lịch trình "${r.mode === 'schedule' ? r.schedule_name : r.shift_name}" của "${dName(r.department)}"?`), 'ghost')] : []))));
     }
     selAll.onchange = () => { tb.querySelectorAll('.as-pick').forEach((c) => { c.checked = selAll.checked; }); };
     const addBtn = canEdit ? el('button', { class: 'btn' }, '+ Thêm') : null;
@@ -3026,7 +3033,7 @@ async function editAssignModal(kind, r, shifts) {
   const fromI = el('input', { type: 'date', value: r.from_date || todayVN() });
   const toI = el('input', { type: 'date', value: r.to_date || '' });
   const incl = kind === 'dept' ? el('input', { type: 'checkbox', style: 'width:auto', ...(r.include_children ? { checked: '' } : {}) }) : null;
-  const who = kind === 'dept' ? '📁 ' + r.department : `${r.emp_name || ''} (${r.emp_code || ''})`;
+  const who = kind === 'dept' ? (r.department === '*' ? '🏢 Tất cả phòng ban' : '📁 ' + r.department) : `${r.emp_name || ''} (${r.emp_code || ''})`;
   const save = el('button', { class: 'btn' }, 'Lưu');
   save.onclick = async () => {
     if (!pickSel.value) return toast('Chọn ca hoặc lịch trình', 'err');
