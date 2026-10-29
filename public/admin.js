@@ -5915,6 +5915,8 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
       // Đời máy ADMS (máy tự khai lúc bắt tay): đời cũ không hiểu lệnh hỏi danh sách NV → phần mềm tải theo cách khác
       !direct && !isAi && !isUnion && m.push_ver ? el('span', { class: 'chip', title: (m.push_ver === '-' ? 'Máy đời cũ (không khai phiên bản giao thức đẩy)' : 'Máy đời mới — giao thức đẩy ' + m.push_ver) + (m.firmware ? ' · ' + m.firmware : '') }, m.push_ver === '-' ? '🕰 Đời cũ' : '✨ Đời mới') : '',
+      // Chưa bắt tay lại từ khi phần mềm biết phân biệt đời máy (máy nối liên tục từ trước khi cập nhật)
+      !direct && !isAi && !isUnion && !m.push_ver && m.active ? el('span', { class: 'chip', title: 'Máy chưa kết nối lại từ khi cập nhật phần mềm nên chưa biết đời cũ hay đời mới. Bấm "🕒 Đồng bộ giờ" (máy khởi động lại ~30 giây) rồi Làm mới để biết. Tải nhân viên vẫn làm được: phần mềm dùng cả hai cách.' + (m.firmware ? ' · ' + m.firmware : '') }, '❔ Chưa rõ đời') : '',
       m.reboot_sched ? el('span', { class: 'chip', title: 'Tự khởi động lại theo giờ hẹn' + (m.reboot_note ? ' — lần gần nhất: ' + m.reboot_note : '') }, '⏰ ' + rebootSchedLabel(m.reboot_sched)) : '',
     ].filter(Boolean);
     const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';

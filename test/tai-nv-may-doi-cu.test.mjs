@@ -38,6 +38,8 @@ test('bắt tay: máy khai pushver → đời mới; không khai → đời cũ;
   assert.equal(dev('SN_CU').push_ver, '-');
   getreq('SN_CU', { INFO: 'Ver 6.60 Apr 28 2016,12,10,345,192.168.1.201' });
   assert.equal(dev('SN_CU').firmware, 'Ver 6.60 Apr 28 2016');
+  addDev('SN_PV'); handshake('SN_PV', { PushVersion: '2.2.14' });
+  assert.equal(dev('SN_PV').push_ver, '2.2.14', 'firmware khai PushVersion (viết hoa) cũng nhận');
 });
 
 test('máy đời cũ: tải NV = mốc OPERLOGStamp về 0 + lệnh CHECK (không gửi DATA QUERY), mốc chấm công giữ nguyên', () => {

@@ -89,7 +89,7 @@ function handleCData(req, res) {
   if (req.method === 'GET') {
     if (options.toLowerCase() === 'all') {
       // Bắt tay: máy đời mới khai pushver, đời cũ không khai → ghi lại để chọn đúng cách tải NV (xem queryDeviceUsers)
-      if (sn) db.prepare('UPDATE push_devices SET push_ver=? WHERE serial=?').run(queryParam(req, 'pushver').slice(0, 20) || '-', sn);
+      if (sn) db.prepare('UPDATE push_devices SET push_ver=? WHERE serial=?').run(queryParam(req, 'pushver', 'pushversion').slice(0, 20) || '-', sn);
       if (enabled() && isActive(sn)) {
         try { syncFillDevice(sn); } catch (e) { console.error('[device] fill lỗi:', e.message); } // xếp lệnh đồng bộ khi máy kết nối
         return res.type('text/plain').send(initInfo(sn));
