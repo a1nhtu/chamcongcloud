@@ -12,6 +12,15 @@ try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } 
 function Out($s) { [Console]::Out.WriteLine($s) }
 function Clean($s) { if ($null -eq $s) { return '' }; return (([string]$s) -replace "[`t`r`n`0]", ' ').Trim() }
 function Fail($code, $msg) { Out ("ERR`t$code`t" + (Clean $msg)); exit 1 }
+# 1 dòng lượt chấm "L <pin> <yyyy-MM-dd HH:mm:ss> <vào/ra> <kiểu>". Định dạng giờ TÁCH RIÊNG: viết '..' -f $h, $mi, $se
+# ngay trong .Append(...) thì PowerShell coi dấu phẩy là tách tham số của Append → -f chỉ nhận 1 số → lỗi
+# "Error formatting a string" (Letefe Bistro / nhahanggiadinh 29/10/2026: tải NV được, tải log chấm công lỗi).
+function LogLine($pin, $y, $mo, $d, $h, $mi, $se, $io, $vm) {
+  $at = '{0:D4}-{1:D2}-{2:D2} {3:D2}:{4:D2}:{5:D2}' -f [int]$y, [int]$mo, [int]$d, [int]$h, [int]$mi, [int]$se
+  return "L`t$(Clean $pin)`t$at`t$([int]$io)`t$([int]$vm)`n"
+}
+# Tự kiểm (test gọi, không cần SDK / máy): in 1 dòng lượt chấm mẫu
+if ($Action -eq 'selftest') { [Console]::Out.Write((LogLine ' 15 ' 2026 10 9 7 5 3 1 15)); exit 0 }
 
 # Thư mục chứa SDK đang đăng ký → thêm vào PATH để zkemkeeper nạp được các DLL đi kèm (commpro, tcpcomm…) khi SDK không nằm trong thư mục Windows
 try {
@@ -88,10 +97,10 @@ try {
       $sb = New-Object System.Text.StringBuilder
       while ($z.SSR_GetGeneralLogData($m, [ref]$pin, [ref]$vm, [ref]$io, [ref]$y, [ref]$mo, [ref]$d, [ref]$h, [ref]$mi, [ref]$se, [ref]$wc)) {
         $all++
-        $day = '{0:D4}-{1:D2}-{2:D2}' -f $y, $mo, $d
+        $day = '{0:D4}-{1:D2}-{2:D2}' -f [int]$y, [int]$mo, [int]$d
         if ($From -and $day -lt $From) { continue }
         if ($To -and $day -gt $To) { continue }
-        [void]$sb.Append("L`t").Append((Clean $pin)).Append("`t").Append($day).Append(' {0:D2}:{1:D2}:{2:D2}' -f $h, $mi, $se).Append("`t$io`t$vm`n")
+        [void]$sb.Append((LogLine $pin $y $mo $d $h $mi $se $io $vm))
         $n++
         if ($n % 2000 -eq 0) { [Console]::Out.Write($sb.ToString()); [void]$sb.Clear(); Out "P`t$n" }
       }
