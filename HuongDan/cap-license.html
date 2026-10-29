@@ -40,6 +40,21 @@ textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius
 .passbar{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px 16px;box-shadow:var(--shadow-sm);margin:18px 0}
 .passbar label{margin-top:0}
 .rowck{display:flex;align-items:center;gap:8px;margin-top:10px;font-size:13.5px;color:var(--muted)}
+.hits{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+.hit{border:1px solid var(--line);border-radius:12px;padding:10px 12px;background:var(--surface-2)}
+.hit .nm{font-weight:700}
+.hit .sm{font-size:12.5px;color:var(--muted)}
+.hit .acts{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}
+.mini{background:var(--brand);color:#fff;border:none;border-radius:9px;padding:7px 12px;font-weight:700;cursor:pointer;font-family:inherit;font-size:13.5px}
+.mini.ghost{background:var(--surface);color:var(--ink);border:1px solid var(--line)}
+.hist{margin-top:8px;font-size:12.5px;border-top:1px dashed var(--line);padding-top:6px;display:none}
+.hist div{padding:2px 0;overflow-wrap:anywhere}
+.reissue{display:none;background:var(--brand-wash);border:1px solid var(--brand);border-radius:11px;padding:10px 12px;font-size:13.5px;margin-top:8px}
+.reissue b{color:var(--brand-ink)}
+.tag{display:inline-block;border-radius:6px;padding:0 6px;font-size:11.5px;font-weight:700;background:var(--surface);border:1px solid var(--line);margin-right:4px}
+details summary{cursor:pointer;font-weight:700}
+.okmsg{color:var(--green);font-size:13.5px;margin-top:8px}
+@media (max-width:480px){.row{flex-direction:column;gap:0}}
 </style>
 </head>
 <body>
@@ -50,12 +65,24 @@ textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius
     <label>Mật khẩu cấp license</label>
     <input id="pass" type="password" placeholder="Nhập mật khẩu (chỉ Anh biết)" autocomplete="current-password">
     <div class="rowck"><input type="checkbox" id="remember" style="width:auto"> <label for="remember" style="margin:0;font-weight:500">Nhớ trong phiên này</label></div>
+    <label style="margin-top:12px">Người cấp (ghi vào lịch sử)</label>
+    <input id="by" placeholder="VD: Anh Tú" maxlength="30">
+  </div>
+
+  <!-- CẤP LẠI CHO KHÁCH CŨ -->
+  <div class="card">
+    <h2>🔁 Cấp lại cho khách cũ</h2>
+    <div class="hint">Khách cài lại Win / đổi máy → Mã máy đổi. Gõ tên khách, bấm <b>Cấp lại</b>: hạn và số NV cũ tự điền sẵn, chỉ cần dán Mã máy mới.</div>
+    <input id="q" placeholder="Gõ tên khách (có dấu hay không đều được) hoặc mã máy cũ" autocomplete="off">
+    <div class="err" id="q-err"></div>
+    <div class="hits" id="hits"></div>
   </div>
 
   <!-- LICENSE PHẦN MỀM -->
-  <div class="card">
+  <div class="card" id="l-card">
     <h2>🖥️ Cấp License phần mềm</h2>
     <div class="hint">Gắn theo Mã máy của khách (khách gửi từ màn Kích hoạt).</div>
+    <div class="reissue" id="l-re"></div>
     <label>Mã máy của khách</label>
     <input id="l-machine" class="mono" placeholder="VD: 103B-E555-114A-6CD3" style="font-weight:700">
     <label>Tên công ty khách</label>
@@ -72,6 +99,7 @@ textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius
     <div class="out" id="l-out">
       <span class="pill">✓ Đã tạo license</span>
       <div class="meta" id="l-meta"></div>
+      <div class="meta" id="l-log"></div>
       <textarea id="l-res" rows="5" readonly></textarea>
       <button class="copy" id="l-copy">📋 Copy license</button>
     </div>
@@ -98,6 +126,23 @@ textarea{width:100%;padding:11px 13px;border:1px solid var(--line);border-radius
       <textarea id="d-res" rows="5" readonly></textarea>
       <button class="copy" id="d-copy">📋 Copy key</button>
     </div>
+  </div>
+
+  <!-- NHẬP BÙ LỊCH SỬ CŨ -->
+  <div class="card">
+    <details id="imp">
+      <summary>📥 Nhập bù các lần cấp trước đây</summary>
+      <div class="hint" style="margin-top:8px">Các lần cấp trước ngày có lịch sử không được lưu. Có 2 cách lấy lại:</div>
+      <label>① Quét khách có tên miền riêng đang mở máy (đọc hạn + số NV + Mã máy đang dùng)</label>
+      <button class="mini" id="scan">Quét khách đang chạy</button>
+      <div class="meta" id="scan-out"></div>
+      <label>② Dán chuỗi license cũ (tìm trong Zalo/Telegram) hoặc dán bảng từ Excel — mỗi dòng 1 lần cấp</label>
+      <div class="hint">Cột bảng: <b>Tên công ty | Mã máy | Hạn (dd/mm/yyyy, trống = vĩnh viễn) | Số NV | Ngày cấp</b> (cách nhau bằng Tab, ; hoặc |)</div>
+      <textarea id="imp-lines" rows="6" placeholder="eyJjIjoi....xxxx&#10;Công ty ABC	103B-E555-114A-6CD3	31/12/2027	50	15/03/2026"></textarea>
+      <button class="mini" id="imp-go" style="margin-top:8px">Nhập vào lịch sử</button>
+      <div class="err" id="imp-err"></div>
+      <div class="okmsg" id="imp-ok"></div>
+    </details>
   </div>
 
   <div class="note"><span>🔒</span><div>Nếu báo "Máy chủ chưa cấu hình khoá/mật khẩu": vào Cloudflare Pages (project huongdan) → Settings → Variables and Secrets, thêm 2 secret <b>LICENSE_PRIVATE_KEY</b> (nội dung file private.pem) và <b>LICENSE_ADMIN_PASS</b> (mật khẩu) rồi deploy lại.</div></div>
@@ -134,11 +179,15 @@ $('l-go').onclick = async () => {
   if (!machine || !company) { $('l-err').textContent = 'Nhập Mã máy và Tên công ty.'; return; }
   const exp = $('l-type').value === 'exp' ? $('l-exp').value : '';
   if ($('l-type').value === 'exp' && !exp) { $('l-err').textContent = 'Chọn ngày hết hạn.'; return; }
-  const d = await call('/api/gen-license', { machine, company, exp, max: $('l-max').value }, $('l-go'), $('l-err'));
+  if (re && normMid(machine) === normMid(re.last.m) &&
+    !confirm('Mã máy này GIỐNG mã máy lần cấp trước. Khách cài lại Win / đổi máy thì Mã máy phải khác.\nVẫn cấp?')) return;
+  const d = await call('/api/gen-license', { machine, company, exp, max: $('l-max').value, rid: re ? re.id : '', by: $('by').value.trim() }, $('l-go'), $('l-err'));
   if (!d) return;
   $('l-res').value = d.license;
-  $('l-meta').textContent = 'Công ty: ' + d.payload.c + ' · Máy: ' + d.payload.m + ' · Hạn: ' + (d.payload.e || 'vĩnh viễn') + ' · Tối đa NV: ' + (d.payload.n || 'không giới hạn');
+  $('l-meta').textContent = 'Công ty: ' + d.payload.c + ' · Máy: ' + d.payload.m + ' · Hạn: ' + (d.payload.e ? vn(d.payload.e) : 'vĩnh viễn') + ' · Tối đa NV: ' + (d.payload.n || 'không giới hạn');
+  $('l-log').textContent = d.logged ? '✓ Đã ghi vào lịch sử cấp (' + (re ? 'cấp lại' : 'cấp mới') + ')' : '⚠ Chưa ghi được lịch sử: ' + (d.logError || '?');
   $('l-out').style.display = 'block'; $('l-out').scrollIntoView({ behavior: 'smooth' });
+  setReissue(null); hist = null;
 };
 $('d-go').onclick = async () => {
   const serial = $('d-serial').value.trim();
@@ -158,6 +207,139 @@ function copyBox(taId, btn, label) {
   const old = btn.textContent; btn.textContent = '✓ Đã copy'; setTimeout(() => btn.textContent = old, 1500);
 }
 $('l-copy').onclick = () => copyBox('l-res', $('l-copy'));
+
+/* ---------- Lịch sử cấp + cấp lại khách cũ ---------- */
+try { $('by').value = localStorage.getItem('dp_lic_by') || ''; } catch {}
+$('by').onchange = () => { try { localStorage.setItem('dp_lic_by', $('by').value.trim()); } catch {} };
+const esc = (s) => String(s == null ? '' : s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const norm = (s) => String(s || '').toLowerCase().replace(/đ/g, 'd').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+const normMid = (s) => String(s || '').replace(/[-\s]/g, '').toUpperCase();
+const fmtMid = (s) => (s && s !== '*') ? (normMid(s).match(/.{1,4}/g) || []).join('-') : 'không gắn máy';
+const vn = (d) => d ? d.split('-').reverse().join('/') : '';
+const today = () => new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+const KIND = { 'moi': 'Cấp mới', 'cap-lai': 'Cấp lại', 'nhap-bu': 'Nhập bù', 'quet': 'Quét' };
+let hist = null, re = null, loading = null;
+
+async function loadHist(force) {
+  if (hist && !force) return hist;
+  if (loading) return loading;
+  const pass = $('pass').value.trim();
+  if (!pass) { $('q-err').textContent = 'Nhập mật khẩu ở trên trước.'; return null; }
+  savePass();
+  $('q-err').textContent = '';
+  loading = (async () => {
+    try {
+      const r = await fetch('/api/lic-lich-su', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass, a: 'list' }) });
+      const d = await r.json();
+      if (!r.ok) { $('q-err').textContent = d.error || ('Lỗi ' + r.status); return null; }
+      return (hist = d.items || []);
+    } catch (e) { $('q-err').textContent = 'Không gọi được máy chủ: ' + e.message; return null; }
+    finally { loading = null; }
+  })();
+  return loading;
+}
+function lastOf(it) { return it.h[0] || {}; }
+function entryLine(x) {
+  return '<span class="tag">' + esc(KIND[x.t] || x.t || '') + '</span>' +
+    (x.i ? 'Cấp ' + vn(x.i) : 'Không rõ ngày cấp') + ' · Máy <span class="mono">' + esc(fmtMid(x.m)) + '</span>' +
+    ' · Hạn ' + (x.e ? vn(x.e) : 'vĩnh viễn') + ' · ' + (x.n ? x.n + ' NV' : 'không giới hạn NV') +
+    (x.by ? ' · ' + (x.t === 'quet' ? 'từ ' : 'bởi ') + esc(x.by) : '');
+}
+async function search() {
+  const q = norm($('q').value), qm = normMid($('q').value);
+  if (!q) { $('hits').innerHTML = ''; return; }
+  const items = await loadHist();
+  if (!items) return;
+  const words = q.split(' ');
+  const found = items.filter((it) => {
+    const n = norm(it.c);
+    return words.every((w) => n.includes(w)) || (qm.length >= 4 && it.h.some((x) => normMid(x.m).includes(qm)));
+  }).sort((a, b) => String(lastOf(b).i || '').localeCompare(String(lastOf(a).i || ''))).slice(0, 20);
+  $('hits').innerHTML = found.length ? found.map((it) => {
+    const L = lastOf(it), expired = L.e && L.e < today();
+    return '<div class="hit"><div class="nm">' + esc(it.c) + '</div>' +
+      '<div class="sm">Lần gần nhất: ' + entryLine(L) + (expired ? ' <b style="color:var(--brand-2)">(đã hết hạn)</b>' : '') + '</div>' +
+      '<div class="acts"><button class="mini" data-re="' + it.id + '">Cấp lại</button>' +
+      '<button class="mini ghost" data-h="' + it.id + '">Xem ' + it.h.length + ' lần cấp</button></div>' +
+      '<div class="hist" id="h-' + it.id + '">' + it.h.map((x) => '<div>' + entryLine(x) + '</div>').join('') + '</div></div>';
+  }).join('') : '<div class="hint">Không thấy khách nào khớp. Khách cấp trước khi có lịch sử thì nhập bù ở mục 📥 cuối trang.</div>';
+}
+let qt = null;
+$('q').oninput = () => { clearTimeout(qt); qt = setTimeout(search, 200); };
+$('q').onfocus = () => { if ($('pass').value.trim()) loadHist(); };
+$('hits').onclick = (ev) => {
+  const b = ev.target.closest('button'); if (!b) return;
+  if (b.dataset.h) { const el = $('h-' + b.dataset.h); el.style.display = el.style.display === 'block' ? 'none' : 'block'; return; }
+  const it = (hist || []).find((x) => x.id === b.dataset.re);
+  if (it) setReissue(it);
+};
+function setReissue(it) {
+  re = it ? { id: it.id, c: it.c, last: lastOf(it) } : null;
+  if (!re) { $('l-re').style.display = 'none'; $('l-re').innerHTML = ''; return; }
+  const L = re.last;
+  $('l-company').value = it.c;
+  $('l-type').value = L.e ? 'exp' : 'perm'; $('l-exp').disabled = !L.e; $('l-exp').value = L.e || '';
+  $('l-max').value = L.n || '';
+  $('l-machine').value = '';
+  $('l-out').style.display = 'none'; $('l-err').textContent = '';
+  $('l-re').innerHTML = '🔁 Đang <b>cấp lại</b> cho <b>' + esc(it.c) + '</b> — giữ nguyên hạn <b>' + (L.e ? vn(L.e) : 'vĩnh viễn') +
+    '</b>, <b>' + (L.n ? L.n + ' NV' : 'không giới hạn NV') + '</b> như lần trước. Mã máy cũ: <span class="mono">' + esc(fmtMid(L.m)) + '</span>. ' +
+    (L.e && L.e < today() ? '<br><b style="color:var(--brand-2)">Hạn cũ đã qua — khách gia hạn thì sửa lại ngày.</b> ' : '') +
+    '<br>Dán <b>Mã máy MỚI</b> rồi bấm Tạo License. <a href="#" id="l-re-x">Bỏ chọn</a>';
+  $('l-re').style.display = 'block';
+  $('l-re-x').onclick = (e) => { e.preventDefault(); setReissue(null); };
+  $('l-card').scrollIntoView({ behavior: 'smooth' });
+  setTimeout(() => $('l-machine').focus(), 300);
+}
+
+/* ---------- Nhập bù ---------- */
+async function histCall(body) {
+  const pass = $('pass').value.trim();
+  if (!pass) throw new Error('Nhập mật khẩu ở trên trước.');
+  savePass();
+  const r = await fetch('/api/lic-lich-su', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pass, by: $('by').value.trim(), ...body }) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || ('Lỗi ' + r.status));
+  return d;
+}
+$('scan').onclick = async () => {
+  const btn = $('scan'), out = $('scan-out');
+  btn.disabled = true; out.innerHTML = 'Đang quét…';
+  let offset = 0, lines = [], added = 0;
+  try {
+    for (;;) {
+      const d = await histCall({ a: 'scan', offset });
+      for (const x of d.results) {
+        if (x.status === 'ok') { added += x.added || 0; lines.push('✓ ' + esc(x.slug) + ': ' + esc(x.c) + ' · hạn ' + (x.e ? vn(x.e) : 'vĩnh viễn') + ' · ' + (x.n ? x.n + ' NV' : 'không giới hạn') + (x.added ? ' — <b>đã thêm</b>' : ' — đã có')); }
+        else lines.push('· ' + esc(x.slug) + ': ' + esc(x.status));
+      }
+      out.innerHTML = 'Đã quét ' + d.next + '/' + d.total + ' khách…<br>' + lines.join('<br>');
+      if (d.done) break;
+      offset = d.next;
+    }
+    out.innerHTML = '<b>Xong: thêm ' + added + ' lần cấp vào lịch sử.</b> Khách đang tắt máy / bản LAN không quét được — nhập bằng cách ②.<br>' + lines.join('<br>');
+    hist = null;
+  } catch (e) { out.innerHTML = '<span style="color:var(--brand-2)">' + esc(e.message) + '</span><br>' + lines.join('<br>'); }
+  finally { btn.disabled = false; }
+};
+$('imp-go').onclick = async () => {
+  const all = $('imp-lines').value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+  $('imp-err').textContent = ''; $('imp-ok').textContent = '';
+  if (!all.length) { $('imp-err').textContent = 'Dán ít nhất 1 dòng.'; return; }
+  const btn = $('imp-go'); btn.disabled = true;
+  let added = 0, errs = [];
+  try {
+    for (let i = 0; i < all.length; i += 30) {
+      const d = await histCall({ a: 'import', lines: all.slice(i, i + 30).join('\n') });
+      added += d.added;
+      errs.push(...d.errors.map((e) => e.replace(/^Dòng (\d+)/, (m, n) => 'Dòng ' + (i + +n))));
+    }
+    $('imp-ok').textContent = '✓ Đã thêm ' + added + ' lần cấp (dòng trùng với lịch sử thì bỏ qua).';
+    $('imp-err').innerHTML = errs.map(esc).join('<br>');
+    hist = null;
+  } catch (e) { $('imp-err').textContent = e.message; }
+  finally { btn.disabled = false; }
+};
 $('d-copy').onclick = () => copyBox('d-res', $('d-copy'));
 </script>
 </body>

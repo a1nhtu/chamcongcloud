@@ -94,8 +94,225 @@ async function handleSign(request, env, kind) {
       n: b.max ? parseInt(b.max, 10) : null,
       i: todayStr(),
     };
-    return jsonRes({ ok: true, license: await signPayload(payload, key), payload });
+    const license = await signPayload(payload, key);
+    // Ghi lịch sử (để lần sau khách cài lại Win / đổi máy thì cấp lại đúng hạn + số NV). Lỗi ghi KHÔNG chặn việc cấp.
+    let logged = false, logError = "";
+    try {
+      await licAdd(env, { rid: b.rid, company: payload.c, entry: { m: payload.m, e: payload.e, n: payload.n, i: payload.i,
+        t: b.rid ? "cap-lai" : "moi", by: String(b.by || "").trim().slice(0, 30) || "web" } });
+      logged = true;
+    } catch (e) { logError = e.message; }
+    return jsonRes({ ok: true, license, payload, logged, logError });
   } catch (e) { return jsonRes({ error: "Lỗi ký: " + e.message }, 500); }
+}
+
+/* ============================================================
+   LỊCH SỬ CẤP LICENSE — để CẤP LẠI khi khách cài lại Win / đổi máy (Mã máy đổi)
+   • Lưu ở DNS TXT _lic-<mã>.<zone>: MỖI KHÁCH 1 bản ghi, giữ các lần cấp gần nhất (mới nhất đứng đầu).
+   • TXT ai cũng tra được qua DNS → nội dung MÃ HOÁ AES-GCM, tên bản ghi là HMAC của tên khách (không lộ tên).
+   • Khoá mã hoá suy ra từ KHOÁ KÝ license → tool CapLicense.bat trên máy Anh (có private.pem) dùng chung lịch sử này.
+   • t: "moi" cấp mới · "cap-lai" cấp lại · "nhap-bu" nhập tay/dán license cũ · "quet" quét từ khách đang chạy.
+   ============================================================ */
+const LIC_PREFIX = "_lic-";
+const LIC_MAX_CHARS = 1800;   // TXT Cloudflare tối đa 2048 ký tự → bớt lần cấp cũ nhất cho vừa
+const licNorm = (s) => String(s || "").toLowerCase().replace(/đ/g, "d").normalize("NFD").replace(/[̀-ͯ]/g, "")
+  .replace(/[^a-z0-9]+/g, " ").trim();
+// 32 byte "hạt giống" của khoá Ed25519 trong DER PKCS8 (đứng sau 04 22 04 20) — không phụ thuộc cách lưu PEM
+function licSeed(env) {
+  if (!env.LICENSE_PRIVATE_KEY) throw new Error("Chưa cấu hình LICENSE_PRIVATE_KEY");
+  const der = Uint8Array.from(atob(String(env.LICENSE_PRIVATE_KEY).replace(/-----[^-]+-----/g, "").replace(/\s+/g, "")), (c) => c.charCodeAt(0));
+  for (let i = 0; i + 36 <= der.length; i++)
+    if (der[i] === 0x04 && der[i + 1] === 0x22 && der[i + 2] === 0x04 && der[i + 3] === 0x20) return der.slice(i + 4, i + 36);
+  throw new Error("Khoá riêng không đúng dạng Ed25519 PKCS8");
+}
+const licSecretHex = (env) => [...licSeed(env)].map((x) => x.toString(16).padStart(2, "0")).join("");
+async function licAesKey(env) {
+  const raw = await crypto.subtle.digest("SHA-256", new TextEncoder().encode("lic-log|" + licSecretHex(env)));
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+const licIdOf = async (env, company) => (await hmacHex("lic-id|" + licSecretHex(env), licNorm(company))).slice(0, 16);
+async function licSeal(env, id, obj) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv, additionalData: new TextEncoder().encode(id) },
+    await licAesKey(env), new TextEncoder().encode(JSON.stringify(obj))));
+  const out = new Uint8Array(iv.length + ct.length); out.set(iv); out.set(ct, iv.length);
+  return b64u(out);
+}
+async function licOpen(env, id, sealed) {
+  try {
+    const b = unb64u(sealed);
+    const pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b.slice(0, 12), additionalData: new TextEncoder().encode(id) },
+      await licAesKey(env), b.slice(12));
+    return JSON.parse(new TextDecoder().decode(pt));
+  } catch { return null; }
+}
+// Bản ghi TXT dài bị Cloudflare tách thành nhiều chuỗi "..." "..." → ghép lại
+const txtJoin = (s) => String(s || "").replace(/"\s*"/g, "").replace(/^"|"$/g, "");
+async function licCtx(env) {
+  if (!env.CF_PROVISION_TOKEN) throw new Error("Chưa cấu hình CF_PROVISION_TOKEN (nơi lưu lịch sử)");
+  const token = env.CF_PROVISION_TOKEN;
+  return { token, ...(await zoneAndAccount(token, env)) };
+}
+async function licReadAll(env, ctx) {
+  const recs = await cfProv(ctx.token, "GET", `/zones/${ctx.zoneId}/dns_records?type=TXT&per_page=1000`);
+  const out = [];
+  for (const r of recs || []) {
+    if (!r.name.startsWith(LIC_PREFIX) || !r.name.endsWith("." + ctx.zoneName)) continue;
+    const id = r.name.slice(LIC_PREFIX.length, -(ctx.zoneName.length + 1));
+    const m = txtJoin(r.content).match(/^dgp-lic (\S+)$/);
+    const obj = m ? await licOpen(env, id, m[1]) : null;
+    if (obj && obj.c) out.push({ id, c: obj.c, h: Array.isArray(obj.h) ? obj.h : [], dnsId: r.id });
+  }
+  return out;
+}
+// Thêm các lần cấp vào lịch sử 1 khách (rid = mã khách đã có, bỏ trống = theo tên). Bỏ qua lần trùng y hệt.
+function licMerge(rec, entries) {
+  const key = (x) => [x.m || "", x.e || "", x.n || "", x.i || ""].join("|");
+  const seen = new Set(rec.h.map(key));
+  let added = 0;
+  for (const e of entries) {
+    // Quét lại / nhập lại cùng Mã máy + hạn + số NV đã có thì không thêm (dù không biết ngày cấp)
+    if (seen.has(key(e)) || ((e.t === "quet" || e.t === "nhap-bu") && rec.h.some((x) => x.m === e.m && (x.e || null) === (e.e || null) && (x.n || null) === (e.n || null)))) continue;
+    rec.h.unshift(e); seen.add(key(e)); added++;   // đứng đầu: cùng ngày cấp thì lần vừa ghi vẫn là mới nhất
+  }
+  // Mới nhất đứng đầu (lần không rõ ngày cấp xếp cuối)
+  rec.h.sort((a, b) => String(b.i || "").localeCompare(String(a.i || "")) || String(b.at || "").localeCompare(String(a.at || "")));
+  return added;
+}
+async function licWrite(env, ctx, rec) {
+  let h = rec.h.slice(), sealed;
+  for (;;) {
+    sealed = await licSeal(env, rec.id, { c: rec.c, h });
+    if (sealed.length <= LIC_MAX_CHARS || h.length <= 1) break;
+    h = h.slice(0, -1);
+  }
+  const body = { type: "TXT", name: `${LIC_PREFIX}${rec.id}.${ctx.zoneName}`, ttl: 300, content: `"dgp-lic ${sealed}"`, comment: "digiplus lịch sử cấp license" };
+  if (rec.dnsId) return cfProv(ctx.token, "PUT", `/zones/${ctx.zoneId}/dns_records/${rec.dnsId}`, body);
+  return cfProv(ctx.token, "POST", `/zones/${ctx.zoneId}/dns_records`, body);
+}
+async function licAdd(env, { rid, company, entry }, ctx, all) {
+  ctx = ctx || await licCtx(env);
+  all = all || await licReadAll(env, ctx);
+  const id = /^[0-9a-f]{16}$/.test(String(rid || "")) ? String(rid) : await licIdOf(env, company);
+  let rec = all.find((x) => x.id === id);
+  if (!rec) { rec = { id, c: company, h: [], dnsId: null }; all.push(rec); }
+  if (entry.t === "moi" || entry.t === "cap-lai") rec.c = company;   // tên mới nhất Anh gõ khi cấp
+  const added = licMerge(rec, [{ ...entry, at: new Date().toISOString().slice(0, 19) }]);
+  if (added) { const r = await licWrite(env, ctx, rec); rec.dnsId = rec.dnsId || (r && r.id); }
+  return { id, added };
+}
+
+// Đọc 1 chuỗi license cũ (Anh dán từ Zalo/Telegram) → kiểm chữ ký → nội dung
+const LIC_PUB_DER_B64 = "MCowBQYDK2VwAyEAF/1ATcAPsGqwXobiqTedXn/Nwt3VGy6gAtslKyD4yi8=";
+async function licDecode(str) {
+  const s = String(str || "").trim().replace(/\s+/g, "");
+  const m = s.match(/^([A-Za-z0-9+/=]{20,})\.([A-Za-z0-9+/=]{40,})$/);
+  if (!m) return null;
+  try {
+    const pub = await crypto.subtle.importKey("spki", Uint8Array.from(atob(LIC_PUB_DER_B64), (c) => c.charCodeAt(0)), { name: "Ed25519" }, false, ["verify"]);
+    const ok = await crypto.subtle.verify({ name: "Ed25519" }, pub, Uint8Array.from(atob(m[2]), (c) => c.charCodeAt(0)), new TextEncoder().encode(m[1]));
+    if (!ok) return { error: "chữ ký sai (không phải license Digiplus)" };
+    const p = JSON.parse(decodeURIComponent(escape(atob(m[1]))));
+    if (p.t === "dev") return { error: "đây là key máy chấm công, không phải license phần mềm" };
+    return { c: p.c || "", m: p.m || "*", e: p.e || null, n: p.n || null, i: p.i || null };
+  } catch { return { error: "không đọc được nội dung license" }; }
+}
+// Dòng nhập tay (dán từ Excel: cột cách bằng Tab, hoặc ; |): Tên công ty | Mã máy | Hạn | Số NV | Ngày cấp
+function licParseRow(line) {
+  const cols = line.split(/\t|;|\|/).map((x) => x.trim());
+  if (cols.length < 2 || !cols[0]) return null;
+  const day = (s) => {
+    s = String(s || "").trim();
+    if (!s || /^(vĩnh viễn|vinh vien|vv|-|0)$/i.test(s)) return null;
+    let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+    if (m) m = [m[0], m[1], m[2], m[3]];
+    else if ((m = s.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/))) m = [m[0], m[3], m[2], m[1]];
+    if (!m) return undefined;
+    const iso = `${m[1]}-${m[2].padStart(2, "0")}-${m[3].padStart(2, "0")}`;
+    const t = Date.parse(iso + "T00:00:00Z");
+    return !isNaN(t) && new Date(t).toISOString().slice(0, 10) === iso ? iso : undefined;   // chặn 31/02, tháng 13…
+  };
+  const e = day(cols[2]), i = day(cols[4]);
+  if (e === undefined) return { error: `hạn "${cols[2]}" không hiểu (dùng dd/mm/yyyy hoặc để trống = vĩnh viễn)` };
+  if (i === undefined) return { error: `ngày cấp "${cols[4]}" không hiểu (dùng dd/mm/yyyy hoặc để trống)` };
+  const n = parseInt(String(cols[3] || "").replace(/\D/g, ""), 10) || null;
+  return { c: cols[0].slice(0, 120), m: String(cols[1] || "").replace(/[-\s]/g, "").toUpperCase() || "*", e, n, i: i || null };
+}
+
+async function handleLicHistory(request, env) {
+  if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
+  if (!env.LICENSE_PRIVATE_KEY || !env.LICENSE_ADMIN_PASS) return jsonRes({ error: "Máy chủ chưa cấu hình khoá/mật khẩu cấp license." }, 503);
+  let b;
+  try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
+  if (!b || !safeEqual(b.pass || "", env.LICENSE_ADMIN_PASS)) return jsonRes({ error: "Sai mật khẩu cấp license" }, 401);
+  try {
+    const ctx = await licCtx(env);
+    const a = String(b.a || "list");
+    if (a === "list") {
+      const all = await licReadAll(env, ctx);
+      return jsonRes({ ok: true, items: all.map(({ dnsId, ...x }) => x) });
+    }
+    if (a === "import") {   // { lines: "..." } — mỗi dòng 1 chuỗi license cũ HOẶC 1 dòng bảng; tối đa 30 dòng / lần
+      const lines = String(b.lines || "").split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
+      if (lines.length > 30) return jsonRes({ error: "Mỗi lần tối đa 30 dòng" }, 400);
+      const all = await licReadAll(env, ctx);
+      const by = String(b.by || "").trim().slice(0, 30) || "web";
+      const touched = new Map(), errors = [];
+      let added = 0;
+      for (const [k, line] of lines.entries()) {
+        const p = (await licDecode(line)) || licParseRow(line);
+        if (!p || p.error) { errors.push(`Dòng ${k + 1}: ${p ? p.error : "không hiểu (cần: Tên công ty | Mã máy | Hạn | Số NV | Ngày cấp, hoặc dán chuỗi license)"}`); continue; }
+        if (!p.c) { errors.push(`Dòng ${k + 1}: thiếu tên công ty`); continue; }
+        const id = await licIdOf(env, p.c);
+        let rec = all.find((x) => x.id === id);
+        if (!rec) { rec = { id, c: p.c, h: [], dnsId: null }; all.push(rec); }
+        const n = licMerge(rec, [{ m: p.m, e: p.e, n: p.n, i: p.i, t: "nhap-bu", by, at: new Date().toISOString().slice(0, 19) }]);
+        if (n) { added += n; touched.set(id, rec); }
+      }
+      for (const rec of touched.values()) await licWrite(env, ctx, rec);
+      return jsonRes({ ok: true, added, customers: touched.size, errors });
+    }
+    if (a === "scan") {   // quét khách có tên miền riêng đang chạy: đọc /api/license/status (công khai, không mật khẩu)
+      const offset = Math.max(0, parseInt(b.offset, 10) || 0), step = 8;
+      const tunnels = (await allTunnels(ctx.token, ctx.accountId)).filter((t) => (t.name || "").startsWith("digiplus-"))
+        .sort((x, y) => x.name.localeCompare(y.name));
+      const part = tunnels.slice(offset, offset + step);
+      const res = await Promise.all(part.map(async (t) => {
+        const slug = t.name.slice("digiplus-".length);
+        try {
+          const r = await fetch(`https://${slug}.${ctx.zoneName}/api/license/status`, { signal: AbortSignal.timeout(8000), headers: { accept: "application/json" } });
+          const d = await r.json();
+          if (!d || !d.activated) return { slug, status: d && d.machineId ? "chưa kích hoạt" : "không đọc được" };
+          return { slug, status: "ok", c: d.company || slug, m: d.machineId || "", e: d.exp || null, n: d.maxEmp || null };
+        } catch { return { slug, status: "đang tắt" }; }
+      }));
+      const all = await licReadAll(env, ctx);
+      const touched = new Map();
+      for (const x of res.filter((x) => x.status === "ok")) {
+        const id = await licIdOf(env, x.c);
+        let rec = all.find((r) => r.id === id);
+        if (!rec) { rec = { id, c: x.c, h: [], dnsId: null }; all.push(rec); }
+        x.added = licMerge(rec, [{ m: x.m, e: x.e, n: x.n, i: null, t: "quet", by: x.slug, at: new Date().toISOString().slice(0, 19) }]);
+        if (x.added) touched.set(id, rec);
+      }
+      for (const rec of touched.values()) await licWrite(env, ctx, rec);
+      const next = offset + part.length;
+      return jsonRes({ ok: true, total: tunnels.length, next, done: next >= tunnels.length, results: res });
+    }
+    if (a === "delete") {   // xoá 1 lần cấp ghi nhầm (theo vị trí) — hết lần nào thì xoá bản ghi
+      const all = await licReadAll(env, ctx);
+      const rec = all.find((x) => x.id === String(b.id || ""));
+      const idx = parseInt(b.idx, 10);
+      if (!rec || !(idx >= 0 && idx < rec.h.length)) return jsonRes({ error: "Không thấy lần cấp này" }, 404);
+      rec.h.splice(idx, 1);
+      if (rec.h.length) await licWrite(env, ctx, rec);
+      else await cfProv(ctx.token, "DELETE", `/zones/${ctx.zoneId}/dns_records/${rec.dnsId}`);
+      return jsonRes({ ok: true });
+    }
+    return jsonRes({ error: "Thao tác không hợp lệ" }, 400);
+  } catch (e) {
+    return jsonRes({ error: e.message }, 500);
+  }
 }
 
 /* ============================================================
@@ -816,6 +1033,7 @@ export default {
     // API cấp license / key máy (ký số phía server)
     if (url.pathname === "/api/gen-license") return handleSign(request, env, "license");
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
+    if (url.pathname === "/api/lic-lich-su") return handleLicHistory(request, env);   // lịch sử cấp license + cấp lại khách cũ
     if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
     if (url.pathname === "/api/cai-config") return handleInstallConfig(request, env);   // đại lý tự cài: lấy config bằng tên miền, không mật khẩu
     if (url.pathname === "/api/ds-khach") return handleListCustomers(request, env);
