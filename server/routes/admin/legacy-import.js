@@ -5,6 +5,7 @@ import express from 'express';
 import { randomBytes } from 'node:crypto';
 import { readLegacy, summarize, applyLegacy } from '../../legacy-import.js';
 import { existsSync, readFileSync } from 'node:fs';
+import { listDir, findLegacyFiles } from '../../legacy-files.js';
 import { tenantKey, MULTI } from '../../tenant.js';
 
 const cache = new Map();   // token → { data, summary, at }
@@ -39,6 +40,18 @@ export function registerLegacyImportRoutes(r, { need }) {
     if (!existsSync(p)) return res.status(400).json({ error: `Không thấy file ${p} trên máy cài phần mềm Digiplus — kiểm tra lại đường dẫn` });
     try { res.json({ ok: true, ...keep(readLegacy(readFileSync(p), String(req.body?.password || ''), String(req.body?.kind || ''))) }); }
     catch (e) { res.status(400).json({ error: e.message }); }
+  });
+
+  // Chọn file ngay trên máy cài Digiplus (xem server/legacy-files.js): duyệt thư mục (?dir= rỗng = các ổ đĩa) / tự tìm trên mọi ổ
+  r.get('/legacy/browse', need('devices'), async (req, res) => {
+    if (MULTI) return res.status(400).json({ error: 'Máy chủ nhiều công ty không duyệt được ổ đĩa máy khách — dùng nút Chọn file' });
+    try { res.json({ ok: true, ...(await listDir(String(req.query.dir || ''))) }); }
+    catch (e) { res.status(e.status || 500).json({ error: e.message }); }
+  });
+  r.post('/legacy/find-files', need('devices'), async (req, res) => {
+    if (MULTI) return res.status(400).json({ error: 'Máy chủ nhiều công ty không tìm được file trên máy khách — dùng nút Chọn file' });
+    try { res.json({ ok: true, ...(await findLegacyFiles()) }); }
+    catch (e) { res.status(500).json({ error: e.message }); }
   });
 
   // Chạy chuyển: body { token, depts, emps, punches, overwrite, from, to, skip_depts, skip_no_dept } → { job }

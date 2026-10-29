@@ -622,7 +622,7 @@ export function registerDeviceRoutes(r, { need }) {
             const info = await tcpInfo(d);
             if (info.serial && info.serial !== d.serial) throw new Error(`IP ${d.tcp_ip} giờ là máy khác (Serial ${info.serial}) — bỏ qua cho an toàn`);
             const st = await zkDeleteUsers(d, pins);
-            out.push({ device: name, ok: true, deleted: st.deleted.length, failed: st.failed });
+            out.push({ device: name, ok: true, deleted: st.deleted.length, failed: st.failed, absent: st.absent.length });
           } catch (e) { out.push({ device: name, ok: false, error: e.message }); }
         }
         return { devices: out };

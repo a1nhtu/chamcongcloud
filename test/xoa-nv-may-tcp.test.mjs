@@ -118,5 +118,5 @@ test('Xoá trên TẤT CẢ máy: máy TCP/IP báo cả người máy không cho
   const { out } = await call('POST /devices/delete-users-all', { body: { pins: ['6'] } });
   const j = await waitJob(out.job);
   assert.equal(j.state, 'done', j.msg);
-  assert.deepEqual(j.result.devices, [{ device: 'Máy quầy', ok: true, deleted: 0, failed: ['6'] }]);
+  assert.deepEqual(j.result.devices, [{ device: 'Máy quầy', ok: true, deleted: 0, failed: ['6'], absent: 0 }]);
 });
