@@ -1,6 +1,6 @@
 {
   "name": "digiplus-chamcong",
-  "version": "1.24.9",
+  "version": "1.24.10",
   "description": "Digiplus - Hệ thống chấm công bằng điện thoại (ảnh + GPS) và quản lý web",
   "type": "module",
   "main": "server/index.js",
