@@ -1,7 +1,12 @@
 import {
-  api, getToken, setToken, clearToken, tokenFromOtherTab, rememberLogin, toast, $, el, deviceId,
+  api, getToken, setToken, clearToken, toast, $, el, deviceId,
   isoToHM, isoToHMS, humanMinutes, humanDistance, todayMonth, ensureLicensed,
 } from '/common.js';
+// Hàm MỚI của common.js lấy qua namespace: trình duyệt còn giữ common.js bản cũ thì chỉ thiếu hàm (dùng mặc định), KHÔNG
+// lỗi nạp cả trang (1.25.9: import tên mới + common.js cũ bị Cloudflare giữ 4 tiếng → trang đăng nhập chết)
+import * as COMMON from '/common.js';
+const rememberLogin = () => (COMMON.rememberLogin ? COMMON.rememberLogin() : true);
+const tokenFromOtherTab = () => (COMMON.tokenFromOtherTab ? COMMON.tokenFromOtherTab() : Promise.resolve());
 
 let ME = null;
 let SETTINGS = {};        // cache cấu hình (attendance_mode, geofence…)
@@ -125,7 +130,7 @@ async function init() {
     try { ver = (await fetch('/api/version').then(r => r.json())).version; } catch {}
     $('#side-brand').innerHTML = `${c.company_name}<small>Chấm công${ver ? ' · v' + ver : ''}</small>`;
   } catch {}
-  $('#li-remember').checked = rememberLogin();
+  if ($('#li-remember')) $('#li-remember').checked = rememberLogin();
   await tokenFromOtherTab();
   if (getToken()) { try { const r = await api('/auth/me'); ME = r.user; return afterLogin(); } catch { clearToken(); } }
 }
@@ -137,7 +142,7 @@ $('#login-form').addEventListener('submit', async (e) => {
     const r = await api('/auth/login', { method: 'POST', body: { username: $('#li-user').value, password: $('#li-pass').value } });
     ME = r.user;
     if (ME.role === 'employee') { toast('Tài khoản nhân viên — vui lòng dùng app chấm công', 'err'); btn.disabled = false; btn.textContent = 'Đăng nhập'; return; }
-    setToken(r.token, $('#li-remember').checked); afterLogin();
+    setToken(r.token, $('#li-remember') ? $('#li-remember').checked : true); afterLogin();
   } catch (err) { toast(err.message, 'err'); btn.disabled = false; btn.textContent = 'Đăng nhập'; }
 });
 $('#btn-logout').addEventListener('click', () => { clearToken(); location.reload(); });

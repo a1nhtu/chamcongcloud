@@ -2,7 +2,7 @@ import './logger.js';   // ghi log ra data/logs/server.log (phải import đầu
 import express from 'express';
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
-import { readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -128,11 +128,29 @@ app.use('/suatan', mealStaticGate);   // giao diện Suất ăn: tắt công t�
 app.use(express.static(PUBLIC_DIR, { index: false }));
 // Trả HTML kèm cache-busting: chèn ?v=<version> vào js/css nội bộ để trình duyệt/Cloudflare
 // tự lấy bản mới mỗi khi lên version (khỏi phải xoá cache tay khi cập nhật).
+// + IMPORT MAP: file js nạp qua `import … from '/common.js'` (không qua thẻ <script>) trước KHÔNG có ?v= → Cloudflare cho trình duyệt
+// giữ 4 tiếng (max-age=14400) → lên 1.25.9 thì admin.js mới + common.js cũ → lỗi nạp module, trang đăng nhập "chết" (bấm Đăng nhập
+// không báo gì — Anh 29/10/2026). Import map đổi mọi '/x.js' thành '/x.js?v=<version>' cho cả các import bên trong.
+let IMPORT_MAP = null;
+function importMap(v) {
+  if (IMPORT_MAP?.v === v) return IMPORT_MAP.tag;
+  const imports = {};
+  const walk = (dir, rel) => {
+    for (const f of readdirSync(dir, { withFileTypes: true })) {
+      if (f.isDirectory()) { if (!/^(node_modules|icons|uploads)$/.test(f.name)) walk(join(dir, f.name), rel + f.name + '/'); }
+      else if (f.name.endsWith('.js') && f.name !== 'sw.js') imports[rel + f.name] = rel + f.name + '?v=' + v;
+    }
+  };
+  try { walk(PUBLIC_DIR, '/'); } catch { /* không đọc được thư mục → bỏ map, vẫn chạy như cũ */ }
+  IMPORT_MAP = { v, tag: `<script type="importmap">${JSON.stringify({ imports })}</script>` };
+  return IMPORT_MAP.tag;
+}
 function sendHtmlNoCache(res, file) {
   try {
     const v = currentVersion();
     const html = readFileSync(join(PUBLIC_DIR, file), 'utf8')
-      .replace(/(src|href)="(\/[^"?]+\.(?:js|css))"/g, `$1="$2?v=${v}"`);
+      .replace(/(src|href)="(\/[^"?]+\.(?:js|css))"/g, `$1="$2?v=${v}"`)
+      .replace(/<script\b/, (m) => importMap(v) + '\n  ' + m);   // import map phải đứng TRƯỚC thẻ module đầu tiên
     res.setHeader('Cache-Control', 'no-cache');
     res.type('html').send(html);
   } catch { res.sendFile(join(PUBLIC_DIR, file)); }
