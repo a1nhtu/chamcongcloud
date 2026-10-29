@@ -254,8 +254,8 @@ async function afterLogin() {
 
 // Cập nhật phần mềm có thanh %: máy chủ báo tiến độ tải / giải nén / sao lưu (/admin/update/status);
 // tới bước khởi động lại thì máy chủ tắt → chờ /api/version ra bản mới rồi tải lại trang.
-// onFail(thông báo lỗi) · onLatest() khi máy đã ở bản mới nhất. Trả Promise xong khi kết thúc.
-async function runUpdateProgress(box, { onFail, onLatest }) {
+// onFail(thông báo lỗi) · onLatest() khi máy đã ở bản mới nhất · target = bản màn hình đang thấy. Trả Promise xong khi kết thúc.
+async function runUpdateProgress(box, { onFail, onLatest, target: seen = '' }) {
   const bar = el('div', { style: 'height:100%;width:0%;border-radius:99px;background:linear-gradient(90deg,#16a34a,#4ade80);transition:width .5s' });
   const pctT = el('b', { style: 'font-variant-numeric:tabular-nums' }, '0%');
   const stepT = el('span', {}, 'Đang bắt đầu…');
@@ -268,9 +268,9 @@ async function runUpdateProgress(box, { onFail, onLatest }) {
   const set = (v, t) => { p = Math.max(p, Math.min(100, v)); bar.style.width = p + '%'; pctT.textContent = Math.floor(p) + '%'; if (t) stepT.textContent = t; };
   set(1);
   let r;
-  try { r = await api('/admin/update/apply', { method: 'POST' }); } catch (e) { onFail(e.message); return; }
+  try { r = await api('/admin/update/apply', { method: 'POST', body: { target: seen } }); } catch (e) { onFail(e.message); return; }
   if (r && r.ok === false) { onLatest(); return; }
-  const target = r.latest, wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
+  const wait = (ms) => new Promise((ok) => setTimeout(ok, ms));
   let misses = 0, restartAt = 0;
   for (;;) {
     await wait(700);
@@ -284,7 +284,8 @@ async function runUpdateProgress(box, { onFail, onLatest }) {
     }
     try {
       const v = await fetch('/api/version', { cache: 'no-store' }).then((x) => x.json());
-      if (v && v.version === target) { set(100, `✓ Đã cập nhật lên bản ${v.version} — đang tải lại trang…`); await wait(1200); location.reload(); return; }
+      // đã đổi bản (có thể mới hơn bản đã thấy nếu vừa phát hành thêm)
+      if (v && v.version && v.version !== r.current) { set(100, `✓ Đã cập nhật lên bản ${v.version} — đang tải lại trang…`); await wait(1200); location.reload(); return; }
       // máy chủ CŨ vẫn chạy và tự báo không thay được bản mới (sau 2 phút) → báo lỗi để bấm lại, khỏi chờ mãi
       const s = await api('/admin/update/status');
       if (s && s.state === 'error') { onFail(s.error || 'Cập nhật bị lỗi'); return; }
@@ -309,6 +310,7 @@ async function checkUpdateBanner() {
     const box = el('div', { style: 'flex:1;min-width:260px;max-width:560px' });
     txt.replaceWith(box);
     await runUpdateProgress(box, {
+      target: r.latest,
       onLatest: () => { box.replaceWith(txt); txt.textContent = '✓ Máy đã ở bản mới nhất. Hãy tải lại trang (F5).'; laterBtn.style.display = ''; laterBtn.textContent = 'Đóng'; },
       onFail: (msg) => { toast(msg, 'err'); box.replaceWith(txt); txt.textContent = '⚠️ Cập nhật chưa xong: ' + msg; goBtn.style.display = laterBtn.style.display = ''; goBtn.textContent = '⬆ Thử lại'; },
     });
@@ -7918,11 +7920,13 @@ async function pageSettings() {
   const updStatus = el('div', { style: 'margin-top:6px;font-size:14px' });
   const checkBtn = el('button', { class: 'btn' }, '🔎 Kiểm tra cập nhật');
   const applyBtn = el('button', { class: 'btn', style: 'display:none' }, '⬇ Cập nhật ngay');
+  let seenLatest = '';
 
   applyBtn.onclick = async () => {
     if (!confirm('Cập nhật phần mềm lên bản mới nhất? App sẽ tự khởi động lại (khoảng 1 phút). Dữ liệu được giữ nguyên và tự sao lưu trước.')) return;
     applyBtn.disabled = checkBtn.disabled = true; applyBtn.style.display = 'none';
     await runUpdateProgress(updStatus, {
+      target: seenLatest,
       onLatest: () => { updStatus.innerHTML = ''; updStatus.append(el('b', { style: 'color:#1a7f37' }, '✓ Đang dùng bản mới nhất — tải lại trang (F5).')); checkBtn.disabled = false; },
       onFail: (msg) => { toast(msg, 'err'); updStatus.innerHTML = ''; updStatus.append(el('span', { style: 'color:#c0392b' }, '⚠️ ' + msg)); applyBtn.disabled = checkBtn.disabled = false; applyBtn.style.display = ''; },
     });
@@ -7933,6 +7937,7 @@ async function pageSettings() {
     try {
       const r = await api('/admin/update/check');
       if (r.hasUpdate) {
+        seenLatest = r.latest;
         updStatus.append(el('b', { style: 'color:#1a7f37' }, `Có bản mới: ${r.latest}`), el('span', { style: 'color:var(--muted)' }, ` (đang dùng ${r.current})`));
         applyBtn.style.display = '';
       } else {

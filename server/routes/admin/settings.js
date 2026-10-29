@@ -227,7 +227,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
   // Bắt đầu tải & áp dụng bản mới (chạy nền, tự khởi động lại) — tiến độ xem ở /update/status (chỉ admin)
   r.post('/update/apply', adminOnly, async (req, res) => {
     if (MULTI) return res.status(400).json({ error: 'Phần mềm đang chạy trên máy chủ của Digiplus — Digiplus tự cập nhật cho mọi công ty, không cần bấm cập nhật.' });
-    try { res.json(await startUpdate()); }
+    try { res.json(await startUpdate(req.body?.target)); }   // target = bản màn hình đang thấy
     catch (e) { res.status(400).json({ error: e.message }); }
   });
   r.get('/update/status', adminOnly, (req, res) => res.json(updateStatus()));

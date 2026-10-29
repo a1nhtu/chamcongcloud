@@ -77,7 +77,8 @@ export async function checkUpdate() {
   // File raw của GitHub bị lưu đệm ~5 phút (vừa đẩy bản mới mà bấm kiểm tra vẫn báo "đang dùng bản mới nhất").
   // → hỏi THÊM GitHub API (đệm ngắn hơn, nhưng giới hạn 60 lượt/giờ mỗi IP) rồi lấy số phiên bản CAO hơn;
   //   API lỗi/hết lượt thì vẫn còn kết quả từ file raw.
-  const url = `https://raw.githubusercontent.com/${repo}/${branch}/package.json`;
+  // ?t= mỗi lần 1 khác → không lấy bản lưu đệm cũ của CDN (vừa phát hành mà vẫn trả số cũ)
+  const url = `https://raw.githubusercontent.com/${repo}/${branch}/package.json?t=${Date.now()}`;
   const headers = { 'Cache-Control': 'no-cache', 'User-Agent': 'Digiplus-Updater' };
   const apiVersion = fetch(`https://api.github.com/repos/${repo}/contents/package.json?ref=${encodeURIComponent(branch)}`,
     { headers: { ...headers, Accept: 'application/vnd.github.raw' } })
@@ -167,13 +168,23 @@ function swapInPlaceLinux({ staged, prev }) {
 }
 
 // Bắt đầu cập nhật: kiểm tra xong là trả lời ngay, phần tải + cài chạy nền và báo tiến độ qua updateStatus().
-export async function startUpdate() {
+// Màn hình đã thấy bản mới (target) mà lúc bấm GitHub lại trả số cũ đang lưu đệm → vẫn cập nhật theo target
+// (trước: báo "đã ở bản mới nhất" mà không tải gì, thanh nhắc vẫn hiện — nhahanggiadinh 29/10/2026).
+export function pickTarget(info, target = '') {
+  const t = String(target || '').trim();
+  if (info.hasUpdate || !/^\d+(\.\d+){1,3}$/.test(t) || cmpVer(t, info.current) <= 0) return info;
+  return { ...info, latest: t, hasUpdate: true };
+}
+// Bản tải về không mới hơn bản đang chạy (GitHub chưa kịp có bản vừa phát hành) → không cài đè, báo thử lại sau
+export const stagedIsNewer = (stagedVer, current) => cmpVer(stagedVer || '0', current) > 0;
+
+export async function startUpdate(target = '') {
   // Đang chạy thật thì không chạy chồng. Trạng thái 'restart' mà tiến trình này vẫn sống quá 2 phút = bước thay code + khởi động
   // lại đã hỏng (watchdog ở applyUpdate đổi sang 'error') → cho bấm lại từ đầu. Trước đây kẹt 'restart' mãi: bấm Cập nhật
   // bao nhiêu lần cũng chỉ đứng chờ (Letefe Bistro / nhahanggiadinh 29/10/2026).
   if (updateBusy())
     return { ok: true, started: true, running: true, current: progress.current, latest: progress.latest };
-  const info = await checkUpdate();
+  const info = pickTarget(await checkUpdate(), target);
   if (!info.hasUpdate) return { ok: false, reason: 'latest', ...info };
   if (!isPackaged())
     throw new Error('Cập nhật tự động chỉ chạy trên bản cài cho khách (có runtime\\node.exe). Trên máy dev hãy dùng git pull.');
@@ -238,6 +249,11 @@ async function applyUpdate(info) {
   const src = subs[0];
   if (!src || !existsSync(join(src, 'server', 'index.js')))
     throw new Error('Bản tải về không đúng cấu trúc (thiếu server/index.js). Kiểm tra repo.');
+  let gotVer = '';
+  try { gotVer = JSON.parse(readFileSync(join(src, 'package.json'), 'utf8')).version || ''; } catch {}
+  if (!stagedIsNewer(gotVer, info.current))
+    throw new Error(`GitHub chưa kịp có bản ${info.latest} (vừa phát hành) — đợi khoảng 5 phút rồi bấm Cập nhật lại.`);
+  progress = { ...progress, latest: gotVer };
 
   // 4) Chuẩn bị các phần sẽ chép đè
   report(72, 'Đang chuẩn bị bản mới…');
