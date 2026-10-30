@@ -11,7 +11,7 @@ const DBP = join(tmpdir(), `dgp-dong-bo-mat-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
 process.env.DB_PATH = DBP;
 
-let db, setSetting, H;
+let db, setSetting, H, S;
 const resObj = () => ({ out: '', type() { return this; }, send(x) { this.out = String(x); return this; } });
 const post = (sn, table, body) => H.handleCData({ method: 'POST', query: { SN: sn, table, Stamp: '5' }, body, headers: {}, socket: {} }, resObj());
 const queryData = (sn, tablename, body) => H.handleQueryData({ query: { SN: sn, type: 'tabledata', tablename, cmdid: '1' }, body, headers: {}, socket: {} }, resObj());
@@ -25,6 +25,7 @@ before(async () => {
   const D = await import('../server/db.js');
   db = D.db; setSetting = D.setSetting; D.initSchema();
   H = await import('../server/routes/iclock.js');
+  S = await import('../server/device-sync.js');
   setSetting('device_enabled', '1');
   setSetting('device_auto_create', '1');
   addDev('M1'); addDev('M2');
@@ -62,4 +63,34 @@ test('đăng ký lại khuôn mặt (template khác) hoặc thêm thẻ trên m�
   sendAll('M2');
   post('M1', 'USERINFO', 'PIN=11\tName=Nguyen Van A\tPri=0\tCard=556677');
   assert.ok(pending('M2').some((c) => c.startsWith('DATA UPDATE USERINFO PIN=11') && c.includes('556677')));
+});
+
+// Máy mới thêm vào nhóm: phải nhận hàng trăm lệnh → máy đời mới nhận nhiều lệnh/lượt hỏi, báo kết quả nhiều dòng.
+const getreq = (sn) => { const r = resObj(); H.handleGetRequest({ query: { SN: sn }, headers: {}, socket: {} }, r); return r.out; };
+const devcmd = (sn, body) => H.handleDeviceCmd({ query: { SN: sn }, body, headers: {}, socket: {} }, resObj());
+
+test('máy đời mới: 1 lượt hỏi nhận nhiều lệnh ghi dữ liệu; lệnh điều khiển đi riêng; báo nhiều dòng → ghi nhận đủ', () => {
+  addDev('M3');
+  db.prepare("UPDATE push_devices SET push_ver='2.4.1' WHERE serial='M3'").run();
+  for (let i = 0; i < 14; i++) S.queueCmd('M3', `DATA UPDATE USERINFO PIN=${100 + i}\tName=NV${i}`);
+  S.queueCmd('M3', 'REBOOT');
+  S.queueCmd('M3', 'DATA UPDATE USERINFO PIN=999\tName=Sau');
+  const a = getreq('M3').split('\n');
+  assert.equal(a.length, 10, 'tối đa 10 lệnh/lượt');
+  assert.ok(a.every((l) => /^C:\d+:DATA UPDATE USERINFO /.test(l)));
+  devcmd('M3', a.map((l) => `ID=${l.split(':')[1]}&Return=0&CMD=DATA`).join('\n'));
+  const acked = db.prepare("SELECT COUNT(*) c FROM push_device_commands WHERE serial='M3' AND return_value='0'").get().c;
+  assert.equal(acked, 10);
+  const b = getreq('M3').split('\n');
+  assert.equal(b.length, 4, 'dừng trước REBOOT');
+  assert.match(getreq('M3'), /^C:\d+:REBOOT$/);
+  assert.match(getreq('M3'), /^C:\d+:DATA UPDATE USERINFO PIN=999/);
+});
+
+test('máy chưa rõ đời / đời cũ: vẫn 1 lệnh/lượt như trước', () => {
+  addDev('M4');
+  S.queueCmd('M4', 'DATA UPDATE USERINFO PIN=1\tName=A'); S.queueCmd('M4', 'DATA UPDATE USERINFO PIN=2\tName=B');
+  assert.equal(getreq('M4').split('\n').length, 1);
+  db.prepare("UPDATE push_devices SET push_ver='-' WHERE serial='M4'").run();
+  assert.equal(getreq('M4').split('\n').length, 1);
 });

@@ -561,12 +561,28 @@ export function resyncNow(force = false) {
 }
 
 // /getrequest: lấy lệnh kế tiếp cho máy (đánh dấu đã gửi). Trả 'C:<id>:<content>' hoặc ''.
+// Máy ĐỜI MỚI: gửi một lượt nhiều lệnh ghi dữ liệu (mỗi dòng 1 lệnh, tối đa BATCH_MAX lệnh / BATCH_BYTES) — trước
+// chỉ 1 lệnh/lượt hỏi (~10 giây) nên máy mới thêm vào nhóm phải chờ hàng giờ mới nhận đủ khuôn mặt (164, 30/10/2026).
+// Lệnh điều khiển (REBOOT, CHECK, CLEAR..., DATA QUERY) luôn đi riêng: máy khởi động lại giữa chừng sẽ làm mất lệnh sau.
+const BATCH_MAX = 10, BATCH_BYTES = 32 * 1024;
+const batchable = (c) => /^DATA (UPDATE|DELETE) /.test(c);
 export function nextCommand(serial) {
   // response_at IS NULL: lệnh chờ gửi lại mà máy báo kết quả muộn (đã chạy) thì thôi không gửi nữa
-  const cmd = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL ORDER BY id LIMIT 1').get(serial);
-  if (!cmd) return '';
-  db.prepare("UPDATE push_device_commands SET trans_time=datetime('now') WHERE id=?").run(cmd.id);
-  return `C:${cmd.id}:${cmd.content}`;
+  const d = db.prepare('SELECT push_ver FROM push_devices WHERE serial=?').get(serial) || {};
+  const max = d.push_ver && d.push_ver !== '-' ? BATCH_MAX : 1;
+  const rows = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL ORDER BY id LIMIT ?').all(serial, max);
+  if (!rows.length) return '';
+  const pick = [rows[0]];
+  let bytes = rows[0].content.length;
+  if (batchable(rows[0].content)) {
+    for (const r of rows.slice(1)) {
+      if (!batchable(r.content) || bytes + r.content.length > BATCH_BYTES) break;
+      pick.push(r); bytes += r.content.length;
+    }
+  }
+  const mark = db.prepare("UPDATE push_device_commands SET trans_time=datetime('now') WHERE id=?");
+  for (const r of pick) mark.run(r.id);
+  return pick.map((r) => `C:${r.id}:${r.content}`).join('\n');
 }
 
 // /devicecmd: máy báo kết quả thực hiện lệnh.

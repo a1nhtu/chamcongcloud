@@ -211,12 +211,16 @@ function handleGetRequest(req, res) {
 }
 
 // /devicecmd — máy báo kết quả thực hiện lệnh: body dạng 'ID=123&Return=0&Cmd=...'
+// Nhận nhiều lệnh một lượt (máy đời mới) thì máy báo mỗi lệnh 1 dòng.
 function handleDeviceCmd(req, res) {
   const body = typeof req.body === 'string' ? req.body : '';
-  const p = {};
-  for (const pair of body.split('&')) { const i = pair.indexOf('='); if (i > 0) p[pair.slice(0, i).trim()] = pair.slice(i + 1).trim(); }
-  const id = parseInt(p.ID || req.query.ID || '0', 10);
-  if (id) { try { ackCommand(id, p.Return ?? '?'); storeClockResult(id, body); } catch (e) { console.error('[device] ack lỗi:', e.message); } }
+  const lines = body.split('\n').filter((l) => /(^|&)ID=/.test(l.trim()));
+  for (const line of lines.length > 1 ? lines : [body]) {
+    const p = {};
+    for (const pair of line.split('&')) { const i = pair.indexOf('='); if (i > 0) p[pair.slice(0, i).trim()] = pair.slice(i + 1).trim(); }
+    const id = parseInt(p.ID || (lines.length > 1 ? '0' : req.query.ID) || '0', 10);
+    if (id) { try { ackCommand(id, p.Return ?? '?'); storeClockResult(id, line); } catch (e) { console.error('[device] ack lỗi:', e.message); } }
+  }
   res.type('text/plain').send('OK');
 }
 
