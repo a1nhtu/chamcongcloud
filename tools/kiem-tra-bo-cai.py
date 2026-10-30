@@ -112,9 +112,14 @@ def text_files(z):
         if 'node_modules/' in n or n.endswith(('.exe', '.dll', '.node', '.png', '.jpg', '.ico', '.woff', '.woff2', '.ttf')):
             continue
         try:
-            yield n, z.read(r).decode('utf-8', 'ignore')
+            raw = z.read(r)
         except Exception:
             continue
+        # File chạy Linux (node, cloudflared) không có đuôi: là ELF / có byte 0 → không phải file chữ.
+        # Trong đó có sẵn chuỗi "-----BEGIN EC PRIVATE KEY-----" của mã đọc khoá → trước đây báo nhầm "lộ khoá".
+        if raw[:4] == b'\x7fELF' or b'\x00' in raw[:8192]:
+            continue
+        yield n, raw.decode('utf-8', 'ignore')
 
 
 def check_zip(path, customers, secrets=None):

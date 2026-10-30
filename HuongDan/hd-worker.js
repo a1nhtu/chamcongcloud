@@ -884,7 +884,8 @@ async function handleTaoCongTy(request, env) {
 }
 
 // Trang nội bộ "Máy chủ nhiều công ty" (/may-chu): mật khẩu cấp domain. b.action:
-//   hosts | host-config {name,port} | tenants {host} | disable/enable {host,slug} | renew {host,slug,exp,max}
+//   hosts | host-config {name,port} | host-update / host-update-status {host}
+//   tenants {host} | disable/enable {host,slug} | renew {host,slug,exp,max}
 //   dl-save {code,ten,host} | dl-renew {code} | dl-lock {code}
 //   old-installs {host} | import-old {host,dir,force} | dns-to-host {host,slug} | dns-to-old {slug}
 async function handleMayChu(request, env) {
@@ -939,6 +940,18 @@ async function handleMayChu(request, env) {
         t.dns = !!m; t.by = (m && m.by) || "";
       }
       return jsonRes({ ok: true, tenants: d.tenants || [] });
+    }
+
+    // Cập nhật phần mềm cho cả máy chủ (mọi công ty dùng chung 1 bản code) — chỉ người có mật khẩu cấp domain bấm được,
+    // admin từng công ty không có nút. Trạng thái kèm phiên bản đang chạy để trang biết khi nào bản mới đã lên.
+    if (a === "host-update") {
+      if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
+      return jsonRes(await hostCall(env, zoneName, host, "POST", "/update"));
+    }
+    if (a === "host-update-status") {
+      if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
+      const [s, p] = await Promise.all([hostCall(env, zoneName, host, "GET", "/update"), hostCall(env, zoneName, host, "GET", "/ping")]);
+      return jsonRes({ ...s, version: p.version });
     }
 
     if (a === "disable" || a === "enable") {

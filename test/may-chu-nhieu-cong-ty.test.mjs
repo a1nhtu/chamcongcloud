@@ -43,6 +43,11 @@ test('đọc CSDL khi KHÔNG có ngữ cảnh công ty → báo lỗi, không đ
   assert.throws(() => T.dataDir(), /Không xác định được công ty/);
 });
 
+test('cập nhật phần mềm là việc của cả máy chủ: đọc cấu hình cập nhật KHÔNG cần ngữ cảnh công ty (lỗi "thiếu ngữ cảnh" 30/10/2026)', async () => {
+  const U = await import('../server/update.js');
+  assert.deepEqual(U.updateConfig(), { repo: 'a1nhtu/chamcongcloud', branch: 'main' });
+});
+
 test('tạo công ty: mã sai / mã dành riêng → 400, trùng → 409', () => {
   const a = H.createTenant({ slug: 'cta', name: 'Công ty A' });
   assert.equal(a.slug, 'cta');
@@ -226,6 +231,18 @@ test('máy chủ thật: khoá công ty → 403, mở lại → chạy lại; c�
 test('máy chủ thật: cập nhật phần mềm từ trang công ty bị chặn (chỉ máy chủ cập nhật)', async () => {
   const r = await call('GET', '/_host/update', { host: 'aa.localhost' });
   assert.equal(r.status, 401);
+});
+
+test('máy chủ thật: chủ máy chủ (đúng mã) bấm Cập nhật → không còn lỗi "thiếu ngữ cảnh"', { timeout: 60000 }, async () => {
+  assert.equal((await call('POST', '/_host/update', { host: 'aa.localhost' })).status, 401, 'admin công ty không cập nhật được');
+  const r = await call('POST', '/_host/update', { token: TOKEN });
+  // Có mạng: "đang mới nhất" hoặc "chỉ cập nhật bản cài cho khách" (máy test không có runtime); không mạng: báo lỗi tải.
+  // Trường hợp nào cũng KHÔNG được là lỗi đọc CSDL ngoài ngữ cảnh công ty.
+  assert.ok([200, 400].includes(r.status), r.text);
+  assert.doesNotMatch(r.text, /ngữ cảnh|Không xác định được công ty/);
+  const st = await call('GET', '/_host/update', { token: TOKEN });
+  assert.equal(st.status, 200);
+  assert.doesNotMatch(st.text, /ngữ cảnh/);
 });
 
 test('máy chủ thật: khởi động lại vẫn mở đủ công ty, không lỗi "thiếu ngữ cảnh"', { timeout: 60000 }, async () => {

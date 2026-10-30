@@ -55,6 +55,7 @@ pre{background:var(--paper);border:1px solid var(--line);border-radius:10px;padd
       <h2>Máy chủ</h2>
       <p class="sub">Mỗi máy chủ chạy 1 phần mềm + 1 đường hầm cho mọi công ty của nó.</p>
       <div class="tblw"><table class="tbl" id="hosts"></table></div>
+      <div class="err" id="uErr"></div>
       <div class="grid" style="margin-top:14px">
         <div><label for="hName">Tên máy chủ</label><input id="hName" placeholder="vps1"></div>
         <div><label for="hPort">Cổng phần mềm</label><input id="hPort" type="number" value="8600"></div>
@@ -132,11 +133,12 @@ let HOSTS = [];
 async function loadAll() {
   const d = await api({ action: 'hosts' });
   HOSTS = d.hosts;
-  $('hosts').innerHTML = '<tr><th>Máy chủ</th><th>Trạng thái</th><th>Phiên bản</th><th>Công ty</th><th>RAM</th></tr>' +
+  $('hosts').innerHTML = '<tr><th>Máy chủ</th><th>Trạng thái</th><th>Phiên bản</th><th>Công ty</th><th>RAM</th><th></th></tr>' +
     (HOSTS.length ? HOSTS.map((h) => `<tr><td><b>${esc(h.name)}</b><div class="mono muted">ctl-${esc(h.name)}.${esc(d.zone)}</div></td>
       <td>${h.online ? '<span class="tag on">Đang chạy</span>' : `<span class="tag off">Không trả lời</span><div class="muted" style="font-size:12.5px">${esc(h.error)}</div>`}</td>
-      <td>${esc(h.version || '')}</td><td>${h.tenants ?? ''}</td><td>${h.rss_mb ? h.rss_mb + ' MB' : ''}</td></tr>`).join('')
-      : '<tr><td colspan="5" class="muted">Chưa có máy chủ nào — điền tên bên dưới để tạo.</td></tr>');
+      <td>${esc(h.version || '')}</td><td>${h.tenants ?? ''}</td><td>${h.rss_mb ? h.rss_mb + ' MB' : ''}</td>
+      <td class="act">${h.online ? `<button class="btn sm sec" onclick="hostUpd('${esc(h.name)}', this)">Cập nhật</button>` : ''}</td></tr>`).join('')
+      : '<tr><td colspan="6" class="muted">Chưa có máy chủ nào — điền tên bên dưới để tạo.</td></tr>');
   const opts = HOSTS.map((h) => `<option value="${esc(h.name)}">${esc(h.name)}</option>`).join('');
   $('dHost').innerHTML = '<option value="">(máy chủ đầu tiên)</option>' + opts;
   $('tHost').innerHTML = opts;
@@ -232,6 +234,25 @@ window.imp = (i, btn) => {
     $('oErr').textContent = `✓ Đã chép "${r.name}" (${r.employees} NV). Bản quyền: ${r.activated ? (r.exp ? 'tới ' + vn(r.exp) : 'vĩnh viễn') : 'CHƯA hợp lệ — bấm Gia hạn ở bảng Công ty'}.`;
   });
 };
+// Cập nhật phần mềm cho cả máy chủ: bấm → máy chủ tự tải bản mới, sao lưu từng công ty, khởi động lại.
+// Trong lúc khởi động lại máy chủ không trả lời vài chục giây → cứ chờ tiếp, tới khi phiên bản đổi sang bản mới.
+window.hostUpd = async (name, btn) => {
+  if (!confirm(`Cập nhật phần mềm cho máy chủ "${name}"?\nMọi công ty trên máy chủ dùng chung 1 bản nên cùng lên bản mới; phần mềm khởi động lại khoảng 1 phút.`)) return;
+  await busy(btn, 'uErr', async () => {
+    const r = await api({ action: 'host-update', host: name });
+    if (!r.started) { btn.textContent = r.reason === 'latest' ? `Đã mới nhất (${r.current})` : 'Không cập nhật'; return; }
+    for (let i = 0; i < 120; i++) {
+      await new Promise((ok) => setTimeout(ok, 3000));
+      let s = null;
+      try { s = await api({ action: 'host-update-status', host: name }); } catch { btn.textContent = 'Đang khởi động lại…'; continue; }
+      if (s.version === r.latest) { btn.textContent = `Đã lên ${s.version}`; await loadAll(); return; }
+      if (s.state === 'error') throw new Error('Cập nhật lỗi: ' + (s.error || 'không rõ'));
+      btn.textContent = `${s.pct || 0}% ${s.step || ''}`;
+    }
+    throw new Error('Quá 6 phút chưa thấy bản mới — xem lại máy chủ (CapNhat.log trong thư mục cài).');
+  });
+};
+
 window.dnsTo = (action, slug, btn) => {
   const msg = action === 'dns-to-host'
     ? `Trỏ ${slug}.${'maychamcongcloud.com'} về máy chủ?

@@ -68,3 +68,12 @@ test('Bản cũ không tắt được sau khi cập nhật → bản mới nhậ
   assert.equal(U.oldPidToReplace('', now, 999), 0);                                  // không có file
   assert.equal(U.oldPidToReplace('rác', now, 999), 0);
 });
+
+test('bản 1 công ty: cấu hình cập nhật vẫn đọc từ Cài đặt như cũ (sửa cho máy chủ nhiều công ty không đổi gì ở đây)', async () => {
+  const D = await import('../server/db.js');
+  assert.deepEqual(U.updateConfig(), { repo: 'a1nhtu/chamcongcloud', branch: 'main' });
+  D.setSetting('update_repo', 'khach/rieng'); D.setSetting('update_branch', 'thu-nghiem');
+  try { assert.deepEqual(U.updateConfig(), { repo: 'khach/rieng', branch: 'thu-nghiem' }); }
+  finally { D.setSetting('update_repo', ''); D.setSetting('update_branch', ''); }
+  assert.deepEqual(U.updateConfig(), { repo: 'a1nhtu/chamcongcloud', branch: 'main' }, 'để trống → về mặc định');
+});
