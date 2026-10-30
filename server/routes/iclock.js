@@ -120,9 +120,14 @@ function handleCData(req, res) {
 }
 
 const USER_TABLES = ['USERINFO', 'OPERLOG', 'USER', 'FINGERTMP', 'FP', 'BIODATA', 'BIOPHOTO', 'USERPIC'];
-function ingestUserTables(sn, table, body, stamp) {
+// Chỉ PIN thực sự mới/đổi (track.changed) mới đồng bộ sang máy cùng nhóm. Trước đây đẩy MỌI PIN máy gửi lên:
+// máy gửi lại toàn bộ (trả lời DATA QUERY lúc bắt tay qua /querydata từ v1.25.0, hay OPERLOG khi mốc về 0) → mỗi máy
+// trong nhóm bị xếp hàng trăm lệnh trùng, máy nhận 1 lệnh/lượt hỏi → khuôn mặt mới đăng ký phải chờ sau hết (30/10/2026).
+// newOnly (trả lời DATA QUERY = phần mềm tự hỏi để học): chỉ đẩy PIN/template phần mềm CHƯA từng có; phần còn thiếu
+// ở máy khác do syncFillDevice bù lúc máy đó bắt tay.
+function ingestUserTables(sn, table, body, stamp, newOnly = false) {
     if (enabled() && isActive(sn)) {
-      const pins = new Set();
+      const track = { changed: new Set(), newOnly };
       try {
         // Cảnh báo trùng Số ID (nếu bật): kiểm TRƯỚC khi lưu để người lạ không đè dữ liệu / không bị đồng bộ đi
         try { guardIncoming(sn, table, body); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); }
@@ -133,19 +138,22 @@ function ingestUserTables(sn, table, body, stamp) {
           const tmplLines = lines.filter((l) => /^(FP|BIODATA|FINGERTMP)\b/i.test(l));
           const photoLines = lines.filter((l) => /^(USERPIC|BIOPHOTO)\b/i.test(l));
           const oplogLines = lines.filter((l) => /^OPLOG\b/i.test(l));   // nhật ký thao tác trên máy
-          if (userLines.length) for (const p of ingestUserData(sn, 'USER', userLines.join('\n'))) pins.add(p);
-          if (tmplLines.length) for (const p of storeTemplates(sn, 'FP', tmplLines.join('\n'))) pins.add(p);
-          if (photoLines.length) for (const p of storeUserPhotos(sn, photoLines.join('\n'))) pins.add(p);
+          if (userLines.length) ingestUserData(sn, 'USER', userLines.join('\n'), track);
+          // dòng BIODATA (vân tay 10 / khuôn mặt) lưu đúng loại, không gộp vào vân tay ZKFinger 9 như dòng FP
+          const bioLines = tmplLines.filter((l) => /^BIODATA\b/i.test(l)), fpLines = tmplLines.filter((l) => !/^BIODATA\b/i.test(l));
+          if (fpLines.length) storeTemplates(sn, 'FP', fpLines.join('\n'), track);
+          if (bioLines.length) storeTemplates(sn, 'BIODATA', bioLines.join('\n'), track);
+          if (photoLines.length) storeUserPhotos(sn, photoLines.join('\n'), track);
           if (oplogLines.length) storeDeviceOplogs(sn, oplogLines.join('\n'));
           if (sn) db.prepare('UPDATE push_devices SET oper_stamp=? WHERE serial=?').run(String(stamp), sn);
         } else if (table === 'BIOPHOTO' || table === 'USERPIC') {
-          for (const p of storeUserPhotos(sn, body)) pins.add(p);
+          storeUserPhotos(sn, body, track);
         } else if (table === 'BIODATA' || table === 'FINGERTMP' || table === 'FP') {
-          for (const p of storeTemplates(sn, table, body)) pins.add(p);
+          storeTemplates(sn, table, body, track);
         } else { // USERINFO / USER
-          for (const p of ingestUserData(sn, table, body)) pins.add(p);
+          ingestUserData(sn, table, body, track);
         }
-        if (pins.size) syncPinsToGroup(sn, pins);   // đẩy sang máy cùng nhóm
+        if (track.changed.size) syncPinsToGroup(sn, track.changed);   // đẩy sang máy cùng nhóm
       } catch (e) { console.error('[device] sync lỗi:', e.message); }
     }
 }
@@ -182,7 +190,7 @@ function handleQueryData(req, res) {
   const body = typeof req.body === 'string' ? req.body : '';
   const tablename = String(req.query.tablename || '');
   const c = queryDataToCData(tablename, body);
-  if (c) ingestUserTables(sn, c.table, c.body, null);
+  if (c) ingestUserTables(sn, c.table, c.body, null, true);
   else if (body.trim()) console.warn(`[device] ${sn} querydata bảng chưa hỗ trợ: ${tablename}`);
   res.type('text/plain').send(`${tablename}=${c ? c.count : 0}`);
 }

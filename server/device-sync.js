@@ -76,10 +76,12 @@ function relinkQuiet(empId, pin) {
 // Parse khối dữ liệu USER/USERINFO/FP (đăng ký vân tay real-time) → tạo/cập nhật NV.
 // Máy gửi các dòng: "USER PIN=1\tName=..\tPri=0\t..", "FP PIN=1\tFID=0\t..\tTMP=..", hoặc "PIN=1\tName=.." (bảng USERINFO).
 // Trả về số NV đã đụng tới.
-export function ingestUserData(serial, table, rawBody) {
+// track = { changed: Set, newOnly } (máy ADMS): ghi riêng PIN THỰC SỰ mới/đổi — chỉ những PIN này mới đồng bộ sang máy khác.
+export function ingestUserData(serial, table, rawBody, track = null) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const seen = new Set();
   const held = heldSet();
+  const prevUser = track && db.prepare('SELECT name,card,passwd,privilege FROM device_users WHERE pin=?');
   const force = pullRequested(serial);   // vừa bấm "Tải nhân viên từ máy" → tạo NV dù tắt tự tạo
   // Cả khối (VD máy gửi 600 NV một lần) ghi trong MỘT giao dịch — nhanh hơn nhiều so với ghi từng dòng
   db.exec('SAVEPOINT ingest_users');
@@ -102,10 +104,13 @@ export function ingestUserData(serial, table, rawBody) {
     const pri = kv.pri !== undefined ? (parseInt(kv.pri, 10) || 0) : null;   // null = dòng không ghi quyền → giữ nguyên
     // Số ID đang nghi trùng ở máy này: chỉ ghi theo máy, không đè dữ liệu chung / không tạo-sửa NV / không đồng bộ
     if (held.has(serial + '|' + pin)) { upsertDeviceUserSerial(serial, pin, name, card, pri); continue; }
+    const pu = prevUser ? prevUser.get(pin) : null;
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
     const id = upsertEmployeeFromDevice(pin, name, force);
     if (id) seen.add(pin);
+    if (id && track && (!pu || (!track.newOnly && ((name && name !== pu.name) || (card && card !== pu.card)
+      || (passwd && passwd !== pu.passwd) || (pri != null && pri !== pu.privilege))))) track.changed.add(pin);
   }
     db.exec('RELEASE ingest_users');
   } catch (e) { db.exec('ROLLBACK TO ingest_users'); db.exec('RELEASE ingest_users'); throw e; }
@@ -162,11 +167,13 @@ const kvOf = (line) => {
 
 // Nạp template sinh trắc từ máy đẩy về (bảng BIODATA / FINGERTMP / FP) → lưu + tạo NV nếu chưa có.
 // Trả về Set các PIN vừa đụng tới (để đồng bộ sang máy khác).
-export function storeTemplates(serial, table, rawBody) {
+// track: như ingestUserData — chỉ ghi PIN có template mới / khác bản đang lưu của máy này.
+export function storeTemplates(serial, table, rawBody, track = null) {
   const isFinger9 = /FINGERTMP|FP/i.test(table);
   const pins = new Set();
   const held = heldSet();
   const force = pullRequested(serial);
+  const prevTmp = track && db.prepare('SELECT tmp FROM device_bio_templates WHERE serial=? AND pin=? AND bio_type=? AND idx=?');
   const up = db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
     VALUES(?,?,?,?,?,?,?,?,?)
     ON CONFLICT(serial,pin,bio_type,idx) DO UPDATE SET valid=excluded.valid,duress=excluded.duress,
@@ -183,11 +190,13 @@ export function storeTemplates(serial, table, rawBody) {
     else { bioType = parseInt(kv.type || '1', 10) || 1; idx = parseInt(kv.no || kv.index || kv.fid || '0', 10) || 0; major = parseInt(kv.majorver || '10', 10) || 10; }
     const valid = parseInt(kv.valid ?? '1', 10); const duress = parseInt(kv.duress || '0', 10) || 0;
     const minor = parseInt(kv.minorver || '0', 10) || 0;
+    const pt = prevTmp ? prevTmp.get(serial, pin, bioType, idx) : null;
     try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
     upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
     if (held.has(serial + '|' + pin)) continue;   // nghi trùng: giữ template theo máy, không tạo NV / không đồng bộ
     upsertEmployeeFromDevice(pin, '', force);   // đăng ký vân tay-only vẫn tạo NV nháp
     pins.add(pin);
+    if (track && (!pt || (!track.newOnly && pt.tmp !== tmp))) track.changed.add(pin);
   }
   return pins;
 }
@@ -387,9 +396,10 @@ export function buildBioCommand(t) {
 }
 
 // Nạp ẢNH người dùng / ảnh khuôn mặt máy đẩy về (dòng USERPIC / BIOPHOTO, thường trong OPERLOG).
-export function storeUserPhotos(serial, rawBody) {
+export function storeUserPhotos(serial, rawBody, track = null) {
   const pins = new Set();
   const held = heldSet();
+  const prevPhoto = track && db.prepare('SELECT photo FROM device_user_photos WHERE pin=?');
   const up = db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo)
     VALUES(?,?,?,?)
     ON CONFLICT(pin) DO UPDATE SET kind=excluded.kind,face_type=excluded.face_type,photo=excluded.photo,updated_at=datetime('now')`);
@@ -403,9 +413,11 @@ export function storeUserPhotos(serial, rawBody) {
     if (!pin || content.length < 100) continue;   // ảnh phải có nội dung base64
     if (held.has(serial + '|' + pin)) continue;   // nghi trùng: ảnh đã ghi vào cảnh báo, không đè ảnh của Số ID
     const faceType = isFace ? (parseInt(kv.type || '9', 10) || 9) : 0;
+    const pp = prevPhoto ? prevPhoto.get(pin) : null;
     try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
     upsertEmployeeFromDevice(pin, '');
     pins.add(pin);
+    if (track && (!pp || (!track.newOnly && pp.photo !== content))) track.changed.add(pin);
   }
   return pins;
 }
