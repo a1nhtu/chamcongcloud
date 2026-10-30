@@ -10,6 +10,11 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getSetting, setSetting } from './db.js';
 import { doBackup } from './backup.js';
+import { MULTI, currentTenant, eachTenant } from './tenant.js';
+
+// Máy chủ nhiều công ty: lệnh cập nhật chung (/_host/update) chạy NGOÀI ngữ cảnh công ty → không có CSDL
+// cài đặt để đọc, dùng mặc định (trước đây báo "thiếu ngữ cảnh" → máy chủ không tự cập nhật được, 30/10/2026)
+const setting = (key, fallback) => (MULTI && !currentTenant() ? fallback : getSetting(key, fallback));
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const APP_DIR = join(__dirname, '..');        // thư mục chứa code (bản cài: <install>\app ; dev: gốc repo)
@@ -75,8 +80,8 @@ function writeHiddenLauncher() {
 }
 
 export function updateConfig() {
-  const repo = (getSetting('update_repo', DEFAULT_REPO) || DEFAULT_REPO).trim();
-  const branch = (getSetting('update_branch', DEFAULT_BRANCH) || DEFAULT_BRANCH).trim();
+  const repo = (setting('update_repo', DEFAULT_REPO) || DEFAULT_REPO).trim();
+  const branch = (setting('update_branch', DEFAULT_BRANCH) || DEFAULT_BRANCH).trim();
   return { repo, branch };
 }
 
@@ -237,7 +242,7 @@ async function applyUpdate(info) {
   try { res = await fetch(durl, { headers: { 'User-Agent': 'Digiplus-Updater' } }); }
   catch { throw new Error('Không tải được bản mới (kiểm tra Internet).'); }
   if (!res.ok) throw new Error('Tải bản mới lỗi ' + res.status);
-  const total = Number(res.headers.get('content-length')) || Number(getSetting('update_zip_size', '0')) || 7e6;
+  const total = Number(res.headers.get('content-length')) || Number(setting('update_zip_size', '0')) || 7e6;
   const chunks = [];
   let got = 0;
   try {
@@ -249,7 +254,7 @@ async function applyUpdate(info) {
   const buf = Buffer.concat(chunks);
   if (buf.length < 1000) throw new Error('File tải về rỗng/hỏng.');
   writeFileSync(zipPath, buf);
-  try { setSetting('update_zip_size', String(buf.length)); } catch {}
+  try { if (!MULTI || currentTenant()) setSetting('update_zip_size', String(buf.length)); } catch {}
 
   // 2) Giải nén (Windows 10+ có tar bsdtar giải được zip; dự phòng PowerShell)
   report(62, 'Đang giải nén…');
@@ -296,7 +301,7 @@ async function applyUpdate(info) {
 
   // 5) Sao lưu CSDL trước khi cập nhật (an toàn)
   report(80, 'Đang sao lưu dữ liệu…');
-  try { doBackup('preupdate'); } catch {}
+  try { await eachTenant(() => doBackup('preupdate')); } catch {}   // máy chủ nhiều công ty: sao lưu từng công ty
 
   // 6-Linux) Chép đè ngay trong tiến trình này (Linux cho thay file đang chạy) rồi thoát → systemd tự bật lại bằng code mới
   if (!IS_WIN) {
