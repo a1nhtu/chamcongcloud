@@ -5,7 +5,7 @@ import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList,
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
-  scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful } from '../../zk-tcp.js';
+  scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful, zkHello, isZkMac } from '../../zk-tcp.js';
 import { buildSched, schedLabel } from '../../reboot-schedule.js';
 import { setSetting } from '../../db.js';
 import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, guardOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
@@ -13,7 +13,7 @@ import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dr
 import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isFace } from '../../ai-device.js';
 import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
 import { hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
-  hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush } from '../../hik-isapi.js';
+  hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush, hikKnock } from '../../hik-isapi.js';
 import { unionEnabled, unionPort, unionStatus, unionOnline, unionInfo, unionUsers, unionLogs, unionSimple, unionDeleteUsers, unionClearUsers, syncUnion } from '../../union.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
@@ -319,7 +319,19 @@ export function registerDeviceRoutes(r, { need }) {
       const domain = tunnelDomain(), ips = lanIPs(true);
       const found = await scanLan(ips);
       const rows = [];
+      // máy MAC Hikvision: hỏi cổng web ISAPI cùng lúc (HTTP, không phải SDK nên không cần tuần tự)
+      const hikPort = +process.env.ZK_SCAN_HIK_PORT || 80;   // ZK_SCAN_HIK_PORT: chỉ dùng khi kiểm thử
+      const hikWeb = new Map(await Promise.all(found.filter((h) => h.hik).map(async (h) => [h.ip, await hikKnock(h.ip, hikPort)])));
       for (const h of found) {   // SDK: TUẦN TỰ từng máy
+        // MAC Hikvision: máy đáp bắt tay ZK lúc này → đọc như máy ZK. Im lặng → khỏi gọi SDK (chờ ~30 giây vô ích), báo:
+        //   - lúc dò ĐÃ có gói ZK hợp lệ từ IP này (h.port) mà MAC lại là Hikvision → gần như chắc IP bị TRÙNG: máy ZKTeco + 1 thiết bị
+        //     Hikvision (camera / đầu ghi) cùng giữ 1 IP, gói tin lúc tới máy này lúc tới máy kia (khách luckkyhouse 30/10/2026: máy
+        //     ZKTeco ở 192.168.1.201, ARP ra MAC Hikvision E0:CA:3C, bị báo nhầm "đang kết nối phần mềm khác / mở menu")
+        //   - không có gói ZK nào → thiết bị Hikvision thật (máy chấm công Hikvision đọc qua ISAPI, hoặc camera)
+        if (h.hik && !(h.port && await zkHello(h.ip, h.port, { udp: !!h.udp }) !== 'silent')) {
+          rows.push({ ip: h.ip, port: null, ports: h.ports, mac: h.mac, hik: true, conflict: !!h.port, web: hikWeb.get(h.ip) || false, web_port: hikPort, no_sdk: true });
+          continue;
+        }
         // cổng 4370 đóng mà mở cổng 8818 → thử SDK qua 8818 (máy đổi Comm Port); chỉ thấy MAC 00:17 → không đọc được cài đặt
         const row = { ip: h.ip, port: h.port || h.ports[0] || null, ports: h.ports, mac: h.mac };
         if (h.udp) row.udp = true;
@@ -332,11 +344,13 @@ export function registerDeviceRoutes(r, { need }) {
           const k = row.serial && db.prepare('SELECT id, name, active, last_seen FROM push_devices WHERE serial=?').get(row.serial);
           if (k) row.known = { id: k.id, name: k.name, active: !!k.active, last_seen: k.last_seen };
         } catch (e) {
+          // MAC không phải ZKTeco mà máy im ở 4370 → nhiều khả năng là hãng khác, nói rõ để khỏi đi tìm "phần mềm khác"
+          if (h.port && e.code === 'BUSY' && h.mac && !isZkMac(h.mac)) e.message += ` Địa chỉ MAC ${h.mac} không thuộc ZKTeco → hoặc máy hãng khác, hoặc IP ${h.ip} đang TRÙNG với thiết bị khác trong mạng: xem MAC trên máy (Menu → Comm → Ethernet / Thông tin hệ thống) — khác ${h.mac} là trùng IP, đổi IP máy chấm công sang IP trống rồi bấm Tìm lại.`;
           if (h.port) { row.error = e.message; row.code = e.code || ''; } else { Object.assign(row, { no_sdk: true, sdk_tried: row.port, closed: h.tcp === 'refused' }); }   // 8818 không nói SDK
         }
         rows.push(row);
       }
-      res.json({ domain, nets: [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.') + '.x'))], enabled: getSetting('device_enabled', '0') === '1', rows });
+      res.json({ domain, nets: [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.') + '.x'))], enabled: getSetting('device_enabled', '0') === '1', hik_enabled: hikEnabled(), rows });
     } catch (e) { sendCaughtError(res, 'POST /admin/devices/lan-scan', e); }
   });
   r.post('/devices/lan-point', need('devices'), winOnly, async (req, res) => {

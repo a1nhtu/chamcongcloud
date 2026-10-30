@@ -45,6 +45,10 @@ export const tcpProbe = (ip, port, ms = 3000) => tcpKnock(ip, port, ms).then((r)
  * Trả 'ok' (vào được với mật khẩu này) | 'need_key' (máy không nhận mật khẩu này) | 'refused' (máy đáp lỗi) | 'silent' (kết nối được mà
  * máy không đáp — máy đang bận với phần mềm khác, hoặc cổng này không phải cổng ZK) | 'closed' (không kết nối được cổng TCP). */
 const ZK = { CONNECT: 1000, EXIT: 1001, AUTH: 1102, ACK_OK: 2000, ACK_UNAUTH: 2005 };
+// Mã trả lời hợp lệ của máy ZK (CMD_ACK_OK…CMD_ACK_UNAUTH 2000–2005, CMD_ACK_ERROR_DATA…CMD_ACK_UNKNOWN 0xFFFB–0xFFFF).
+// Gói UDP không có đầu 5050 827D như TCP → phải lọc theo mã, không thì gói lạ bất kỳ ≥ 8 byte (VD máy Hikvision
+// trả lời gì đó ở UDP 4370 — khách luckkyhouse 30/10/2026) bị tưởng là máy ZK, rồi đọc thì báo nhầm "máy đang bận".
+const isZkAck = (cmd) => (cmd >= 2000 && cmd <= 2005) || cmd >= 0xfffb;
 function zkSum(buf) {
   let s = 0;
   for (let i = 0; i + 1 < buf.length; i += 2) { s += buf.readUInt16LE(i); if (s > 65535) s -= 65535; }
@@ -77,7 +81,9 @@ export function zkReply(buf, tcp = false) {
   if (buf.length < o + 8 || (tcp && (buf.readUInt16LE(0) !== 0x5050 || buf.readUInt16LE(2) !== 0x7d82))) return null;
   const size = tcp ? 8 + buf.readUInt32LE(4) : buf.length;
   if (buf.length < size) return null;
-  return { cmd: buf.readUInt16LE(o), session: buf.readUInt16LE(o + 4), reply: buf.readUInt16LE(o + 6), size };
+  const cmd = buf.readUInt16LE(o);
+  if (!tcp && !isZkAck(cmd)) return null;
+  return { cmd, session: buf.readUInt16LE(o + 4), reply: buf.readUInt16LE(o + 6), size };
 }
 export function zkHello(ip, port = 4370, { udp = false, ms = 2500, key = 0 } = {}) {
   return new Promise((ok) => {
@@ -128,7 +134,8 @@ export async function zkCareful(c, fn) {
     if (hello === 'need_key') return keyGiven
       ? Object.assign(new Error(`Sai mật khẩu kết nối (Comm Key): máy ${where} không nhận mật khẩu vừa nhập. Xem trên máy: Menu → Comm (Truyền thông) → PC Connection → Comm Key.`), { code: 'WRONGKEY' })
       : Object.assign(new Error(`Máy ${where} có đặt mật khẩu kết nối (Comm Key) — nhập đúng mật khẩu để kết nối (xem trên máy: Menu → Comm → PC Connection → Comm Key).`), { code: 'NEEDKEY' });
-    if (hello === 'silent') return Object.assign(new Error(`Máy ${where} nhận kết nối nhưng không trả lời — thường do máy đang kết nối với phần mềm khác (Wise Eye, Ronald Jack…) hoặc đang mở menu trên màn hình máy. Tắt phần mềm kia / thoát menu trên máy rồi bấm Tìm lại.`), { code: 'BUSY' });
+    // im lặng có 2 khả năng, không đoán bừa 1 cái: máy ZK đang bận, HOẶC máy không nói giao thức ZKTeco (hãng khác)
+    if (hello === 'silent') return Object.assign(new Error(`Máy ${where} không trả lời giao thức chấm công ZKTeco (đã thử 2 lần). Có thể: máy đang kết nối với phần mềm khác (Wise Eye, Ronald Jack…) / đang mở menu trên màn hình máy, HOẶC máy không phải dòng ZKTeco / Ronald Jack (hãng khác như Hikvision, Dahua… dùng giao thức riêng).`), { code: 'BUSY' });
     if (hello === 'closed') return Object.assign(new Error(`Không tới được cổng ${where} — máy vừa tắt, đổi IP hoặc mất mạng. Bấm Tìm lại.`), { code: 'UNREACH' });
     if (hello === 'ok') e.message += ' (Máy vẫn trả lời giao thức chấm công bình thường — thử lại sau ít phút; vẫn lỗi thì chạy lại bộ cài bằng quyền Administrator để đăng ký lại SDK.)';
     return e;
@@ -195,11 +202,17 @@ export function saveInfo(id, info) {
 // Dò cả lớp mạng /24 của từng IP LAN máy tính: cổng 4370 (SDK) + cổng 8818, rồi đọc bảng ARP tìm MAC 00:17:… (ZKTeco)
 // → bắt được cả máy tắt cổng 4370. Chỉ mở/đóng kết nối TCP (chưa gọi SDK) → vài giây / lớp mạng.
 // ZK_SCAN_HOSTS="ip[:cổng],…" thay danh sách dò (chỉ dùng khi kiểm thử).
-// Trả [{ ip, port (cổng SDK nói chuyện được, null = không), ports: [cổng mở], mac, udp, tcp, offline }].
+// Trả [{ ip, port (cổng SDK nói chuyện được, null = không), ports: [cổng mở], mac, udp, tcp, offline, hik (MAC Hikvision) }].
 const extraPort = () => +process.env.ZK_SCAN_EXTRA_PORT || 8818;   // ZK_SCAN_EXTRA_PORT: chỉ dùng khi kiểm thử
 // 00:17:… (dải phổ biến của ZKTeco / Ronald Jack) + các dải MAC khác của ZKTeco (như tool Tìm máy chấm công)
 const ZK_OUI = new Set(['0017A1', '00661B', '68175A', 'F44932', '88A9A7', '341513', '607EA4']);
 export const isZkMac = (mac) => /^00[:-]17[:-]/i.test(mac || '') || ZK_OUI.has(String(mac || '').replace(/[:-]/g, '').slice(0, 6).toUpperCase());
+// Dải MAC của Hikvision (đối chiếu maclookup.app 30/10/2026). Máy chấm công Hikvision KHÔNG nói giao thức ZK 4370 — đọc qua
+// cổng web ISAPI (server/hik-isapi.js, "Thêm máy Hikvision"). Camera / đầu ghi Hikvision cũng mang các dải này.
+const HIK_OUI = new Set(['E0CA3C', '4419B6', '4CBD8F', '54C415', '5803FB', '64DB8B', '686DBC', '8CE748', '98DF82', 'A41437', 'ACCB51', 'BCAD28',
+  'BCBAC2', 'C056E3', 'C42F90', 'E0BAAD', 'F84DFC', '1868CB', '2428FD', '2857BE', '2CA59C', '4C62DF', '0C75D2', '1012FB', '240F9B', '849A40',
+  'ACB92F', '08A189', '244845', 'B4A382', 'D4E853', '80489F', '94E1AC']);
+export const isHikMac = (mac) => HIK_OUI.has(String(mac || '').replace(/[:-]/g, '').slice(0, 6).toUpperCase());
 // "arp -a" của Windows → [{ ip, mac 'AA:BB:…' }]
 export function parseArp(text) {
   const out = [];
@@ -264,11 +277,12 @@ export async function scanLan(ips, port = 4370, ms = 800) {
   for (const a of await arpTable()) {
     if (!test && !nets.includes(a.ip.split('.').slice(0, 3).join('.'))) continue;
     if (byIp.has(a.ip)) byIp.get(a.ip).mac = a.mac;
-    else if (isZkMac(a.mac)) hit(a.ip).mac = a.mac;
+    else if (isZkMac(a.mac) || isHikMac(a.mac)) hit(a.ip).mac = a.mac;
+    if (isHikMac(a.mac)) byIp.get(a.ip).hik = true;   // Hikvision: phần mềm đọc qua ISAPI, không qua cổng 4370
   }
   // Lượt dò nhanh bắn hàng trăm kết nối cùng lúc, chờ 0,8 giây → máy chậm trả lời (đang bận, mạng Wi-Fi, ARP chậm) bị lỡ.
-  // Máy nào chưa thấy cổng 4370 thì hỏi lại từng máy một trước khi kết luận "đóng cổng".
-  for (const x of byIp.values()) if (!x.port) await recheckHost(x, port);
+  // Máy nào chưa thấy cổng 4370 thì hỏi lại từng máy một trước khi kết luận "đóng cổng" (máy Hikvision không cần: không dùng 4370).
+  for (const x of byIp.values()) if (!x.port && !x.hik) await recheckHost(x, port);
   const num = (ip) => ip.split('.').reduce((n, p) => n * 256 + +p, 0);
   return [...byIp.values()].sort((a, b) => num(a.ip) - num(b.ip));
 }

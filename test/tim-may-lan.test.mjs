@@ -297,3 +297,77 @@ test('nhận MAC ZKTeco cả các dải khác 00:17 (như tool Tìm máy chấm 
   assert.equal(isZkMac('68:17:5A:01:02:03'), true);
   assert.equal(isZkMac('14:49:BC:8C:02:38'), false);
 });
+
+test('gói UDP lạ (không phải mã trả lời ZK) KHÔNG bị tưởng là máy ZK', async () => {
+  const { zkReply } = await import('../server/zk-tcp.js');
+  assert.equal(zkReply(Buffer.from('0100000000000000', 'hex')), null, 'mã 1 không phải trả lời ZK');
+  assert.equal(zkReply(Buffer.from('3c3f786d6c207665', 'hex')), null, 'chữ "<?xml ve" (gói của hãng khác)');
+  assert.equal(zkReply(Buffer.from('d507000004d20000', 'hex')).cmd, 2005, 'CMD_ACK_UNAUTH vẫn nhận');
+  assert.equal(zkReply(Buffer.from('ffff000000000000', 'hex')).cmd, 0xffff, 'CMD_ACK_UNKNOWN vẫn nhận');
+});
+
+test('nhận MAC Hikvision (E0:CA:3C của khách luckkyhouse), không lẫn với ZKTeco', async () => {
+  const { isHikMac, isZkMac } = await import('../server/zk-tcp.js');
+  assert.equal(isHikMac('E0:CA:3C:5C:E7:AF'), true);
+  assert.equal(isZkMac('E0:CA:3C:5C:E7:AF'), false);
+  assert.equal(isHikMac('00:17:61:11:54:00'), false);
+});
+
+// Khách luckkyhouse 30/10/2026: máy MAC Hikvision E0:CA:3C trả 1 gói lạ ở UDP 4370 → bị coi là "máy ZK qua UDP",
+// đọc thì báo nhầm "máy đang kết nối phần mềm khác / mở menu". Giờ phải nhận ra Hikvision + báo cổng web ISAPI.
+test('thiết bị Hikvision thật (gói UDP lạ, không phải ZK): không báo "đang bận", báo đúng hãng + cổng web ISAPI, không gọi SDK', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({ busy: true });   // nếu lỡ gọi SDK giả thì sẽ ra BUSY
+  const u = dgram.createSocket('udp4');
+  u.on('message', (m, from) => u.send(Buffer.from('<?xml version="1.0"?><Probe/>'), from.port, from.address));
+  await new Promise((ok) => u.bind(0, '127.0.0.6', ok));
+  const web = (await import('node:http')).createServer((q, s) => { s.writeHead(q.url === '/ISAPI/System/deviceInfo' ? 401 : 404, { 'WWW-Authenticate': 'Digest realm="DS-K1T"' }); s.end(); });
+  await new Promise((ok) => web.listen(0, '127.0.0.6', ok));
+  const keep = process.env.ZK_SCAN_HOSTS;
+  process.env.ZK_SCAN_HOSTS = `127.0.0.6:${u.address().port},127.0.0.7:1`; process.env.ZK_SCAN_HIK_PORT = String(web.address().port);
+  process.env.ZK_SCAN_ARP = '127.0.0.6 e0-ca-3c-5c-e7-af,127.0.0.7 44-19-b6-00-00-01';
+  try {
+    const { out } = await call('POST /devices/lan-scan');
+    assert.equal(out.hik_enabled, false);
+    const r = out.rows.find((x) => x.ip === '127.0.0.6');
+    assert.ok(r, JSON.stringify(out.rows));
+    assert.equal(r.hik, true); assert.equal(r.web, true); assert.equal(r.no_sdk, true); assert.equal(r.conflict, false);
+    assert.equal(r.code, undefined); assert.equal(r.error, undefined); assert.equal(r.udp, undefined);
+    assert.equal(r.mac, 'E0:CA:3C:5C:E7:AF');
+    // chỉ thấy MAC Hikvision trong ARP, không có cổng web → vẫn hiện, web = false (không hỏi lại 4370 từng máy)
+    const r2 = out.rows.find((x) => x.ip === '127.0.0.7');
+    assert.ok(r2, JSON.stringify(out.rows));
+    assert.equal(r2.hik, true); assert.equal(r2.web, false); assert.equal(r2.offline, undefined);
+  } finally { process.env.ZK_SCAN_HOSTS = keep; delete process.env.ZK_SCAN_HIK_PORT; delete process.env.ZK_SCAN_ARP; u.close(); web.close(); }
+});
+
+test('máy im ở 4370 mà MAC không phải ZKTeco: báo rõ "MAC không thuộc ZKTeco", không chỉ đổ cho phần mềm khác', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({ busy: true });
+  process.env.ZK_SCAN_ARP = '127.0.0.1 14-49-bc-8c-02-38';
+  try {
+    const { out } = await call('POST /devices/lan-scan');
+    const r = out.rows[0];
+    assert.equal(r.code, 'BUSY');
+    assert.match(r.error, /không phải dòng ZKTeco/);
+    assert.match(r.error, /MAC 14:49:BC:8C:02:38 không thuộc ZKTeco/);
+  } finally { delete process.env.ZK_SCAN_ARP; }
+});
+
+// Khách luckkyhouse 30/10/2026 (Anh xác nhận máy là ZKTeco): máy ZK ở 192.168.1.201 đáp 1 lần lúc dò rồi im, ARP lại ra MAC
+// Hikvision E0:CA:3C → IP bị TRÙNG với camera / đầu ghi Hikvision. Phải báo "trùng IP", không báo "đang bận phần mềm khác".
+test('máy ZK trả lời lúc dò rồi im, MAC đang giữ IP là Hikvision → báo TRÙNG IP, không báo "đang bận"', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({});
+  let n = 0;
+  const u = dgram.createSocket('udp4');
+  u.on('message', (m, from) => { if (n++ > 0) return; const h = zkAnswer(m); if (h) u.send(h, from.port, from.address); });   // chỉ đáp gói đầu
+  await new Promise((ok) => u.bind(0, '127.0.0.8', ok));
+  const keep = process.env.ZK_SCAN_HOSTS;
+  process.env.ZK_SCAN_HOSTS = `127.0.0.8:${u.address().port}`; process.env.ZK_SCAN_HIK_PORT = '1';
+  process.env.ZK_SCAN_ARP = '127.0.0.8 e0-ca-3c-5c-e7-af';
+  try {
+    const { out } = await call('POST /devices/lan-scan');
+    const r = out.rows.find((x) => x.ip === '127.0.0.8');
+    assert.ok(r, JSON.stringify(out.rows));
+    assert.equal(r.conflict, true); assert.equal(r.hik, true); assert.equal(r.code, undefined); assert.equal(r.error, undefined);
+    assert.equal(dev().restarted, 0);
+  } finally { process.env.ZK_SCAN_HOSTS = keep; delete process.env.ZK_SCAN_HIK_PORT; delete process.env.ZK_SCAN_ARP; u.close(); }
+});

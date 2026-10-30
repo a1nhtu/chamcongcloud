@@ -6419,7 +6419,7 @@ function lanScanModal() {
   };
   const render = (r) => {
     box.innerHTML = '';
-    box.append(el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Đã dò mạng ${r.nets.join(', ') || '(không thấy mạng LAN)'} · cổng 4370, 8818 · địa chỉ MAC 00:17:…`));
+    box.append(el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Đã dò mạng ${r.nets.join(', ') || '(không thấy mạng LAN)'} · cổng 4370, 8818 · địa chỉ MAC 00:17:… · MAC Hikvision`));
     box.append(r.domain ? el('div', { style: 'font-size:13.5px;margin-bottom:6px' }, 'Tên miền của phần mềm này: ', el('b', { style: 'font-family:monospace;color:var(--brand-ink,#c0392b)' }, r.domain))
       : warn('Bản cài này chưa có tên miền (bản LAN) — chỉ xem được máy, chưa trỏ tự động được. Trên máy chấm công điền IP + Port theo "Cách A".'));
     if (!r.enabled) box.append(warn('Phần mềm đang TẮT dùng máy chấm công — máy trỏ về sẽ chưa hiện. Liên hệ Digiplus để bật.'));
@@ -6445,10 +6445,19 @@ function lanScanModal() {
       const why = x.offline ? `⚠️ Máy không trả lời (${seen}) — chỉ còn địa chỉ MAC trong bộ nhớ mạng của máy tính: máy vừa TẮT, rút dây mạng hoặc đã ĐỔI IP. Bật máy / xem IP trên máy (Menu → Comm → Ethernet) rồi bấm Tìm lại.`
         : x.closed ? `⚠️ Máy đang bật (${seen}) nhưng TỪ CHỐI kết nối ở cổng 4370 — cổng SDK đang tắt trên máy${x.sdk_tried ? `, cổng ${x.sdk_tried} cũng không nhận` : ''}. Phần mềm không đọc / trỏ tự động được.`
         : `⚠️ Thấy máy (${seen}) nhưng máy không trả lời ở cổng 4370 (đã thử TCP chờ lâu 2 lần + UDP${x.sdk_tried ? ` + cổng ${x.sdk_tried}` : ''}). Kiểm tra IP máy cùng lớp mạng với máy tính rồi bấm Tìm lại.`;
-      const noSdk = x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, why),
+      // MAC Hikvision ở IP này: conflict = lúc dò có máy ZK trả lời rồi im → IP trùng (máy ZKTeco + thiết bị Hikvision cùng 1 IP)
+      const zkTip = `Nếu máy chấm công của Anh/Chị là ZKTeco / Ronald Jack: xem MAC trên máy (Menu → Comm → Ethernet / Thông tin hệ thống) — khác ${x.mac} là IP ${x.ip} đang TRÙNG với camera / đầu ghi Hikvision. Đổi IP máy chấm công sang IP trống (VD ${x.ip.split('.').slice(0, 3).join('.')}.2xx chưa ai dùng) rồi bấm Tìm lại.`;
+      const noSdk = x.hik ? el('div', {},
+        el('span', { style: 'color:#b45309' }, x.conflict
+          ? `⚠️ IP ${x.ip} có máy chấm công ZKTeco trả lời lúc dò, nhưng ngay sau đó im — và địa chỉ MAC đang giữ IP này là của Hikvision (${x.mac}). Gần như chắc IP bị TRÙNG: máy chấm công và 1 thiết bị Hikvision (camera / đầu ghi) cùng dùng ${x.ip}, gói tin lúc tới máy này lúc tới máy kia → không đọc được. Máy KHÔNG bận phần mềm nào.`
+          : `IP ${x.ip} là thiết bị Hikvision (theo MAC ${x.mac}) — không trả lời giao thức ZKTeco cổng 4370.`),
+        warn(zkTip),
+        x.conflict ? '' : el('div', { style: 'font-size:12.5px;margin-top:4px' }, `Nếu đúng là máy chấm công Hikvision: phần mềm đọc qua cổng web ${x.web ? `(cổng ${x.web_port} đang trả lời ✓)` : `(cổng ${x.web_port} chưa trả lời)`} — bấm "Thêm máy Hikvision", nhập IP + tài khoản admin + mật khẩu kích hoạt máy. Là camera thì bỏ qua.`,
+          r.hik_enabled ? el('div', { style: 'margin-top:6px' }, btnSm('＋ Thêm máy Hikvision', () => hikAddModal(null, { ip: x.ip }))) : ''))
+        : x.no_sdk && el('div', {}, el('span', { style: 'color:#b45309' }, why),
         x.offline ? '' : warn(r.domain ? `Hoặc ra máy chấm công: Comm → Cloud Server → bật chế độ tên miền, điền ${r.domain} rồi khởi động lại máy.` : 'Ra máy chấm công cài Cloud Server theo IP + Port ("Cách A").'));
       tb.append(el('tr', {},
-        el('td', {}, el('b', {}, x.model || (x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip + (x.port && x.port !== 4370 && !x.no_sdk ? ' · cổng ' + x.port : '') + (x.udp ? ' · UDP' : '')), x.mac ? mono('MAC ' + x.mac) : ''),
+        el('td', {}, el('b', {}, x.model || (x.hik ? (x.conflict ? 'Máy chấm công — IP bị trùng?' : 'Thiết bị Hikvision (theo MAC)') : x.no_sdk ? 'Có thể là máy chấm công' : 'Máy chấm công')), x.serial ? mono(x.serial) : '', mono('IP ' + x.ip + (x.port && x.port !== 4370 && !x.no_sdk ? ' · cổng ' + x.port : '') + (x.udp ? ' · UDP' : '')), x.mac ? mono('MAC ' + x.mac) : ''),
         el('td', { style: 'font-size:13px' }, x.no_sdk ? noSdk : x.error ? el('span', { style: 'color:#b45309' }, (x.code === 'NEEDKEY' ? '🔑 ' : '⚠️ Không đọc được: ') + x.error) : svrText(x), x.no_sdk ? '' : act)));
     }
     tbl.append(tb);
@@ -6642,9 +6651,10 @@ async function hikPushJobModal(job, withFace, after) {
   }
 }
 // Thêm máy (m = null) / sửa kết nối (m = máy)
-function hikAddModal(m) {
+// pre = { ip } điền sẵn (bấm từ "Tìm máy LAN")
+function hikAddModal(m, pre = {}) {
   const nameI = el('input', { placeholder: 'VD Máy cổng chính', value: m ? (m.name || '') : '' });
-  const ipI = el('input', { placeholder: '192.168.1.64', value: m ? (m.tcp_ip || '') : '', style: 'font-family:monospace' });
+  const ipI = el('input', { placeholder: '192.168.1.64', value: m ? (m.tcp_ip || '') : (pre.ip || ''), style: 'font-family:monospace' });
   const portI = el('input', { type: 'number', value: m ? (m.tcp_port || 80) : 80, style: 'width:100px' });
   const userI = el('input', { value: m ? (m.dev_user || 'admin') : 'admin', style: 'width:140px' });
   const passI = el('input', { type: 'password', placeholder: m && m.has_pass ? '(giữ nguyên)' : 'Mật khẩu máy', style: 'width:180px', autocomplete: 'new-password' });

@@ -58,6 +58,12 @@ function rawReq(dev, method, path, body, auth, timeoutMs, ctype) {
     req.end();
   });
 }
+// Dò nhanh (không đăng nhập): IP này có cổng web ISAPI của Hikvision không — máy trả 401 (đòi đăng nhập) / 200 cho deviceInfo.
+// Dùng ở "Tìm máy LAN" để báo máy Hikvision thêm được bằng "Thêm máy Hikvision". Trả true / false, không ném lỗi.
+export function hikKnock(ip, port = 80, ms = 2500) {
+  return rawReq({ tcp_ip: ip, tcp_port: port }, 'GET', '/ISAPI/System/deviceInfo', null, null, ms)
+    .then((r) => r.status === 401 || r.status === 200, () => false);
+}
 // Gọi 1 lệnh ISAPI. Trả { status, text, json } — json khi máy trả JSON. Lỗi → ném Error (tiếng Việt).
 // body: object (gửi JSON) | chuỗi (XML / JSON) | Buffer (kèm contentType, VD multipart có ảnh).
 export async function isapi(dev, method, path, body = null, { timeoutMs = 20000, okStatus = [200], contentType = '' } = {}) {
