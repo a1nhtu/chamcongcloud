@@ -1,5 +1,6 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
+import { createHash } from 'node:crypto';
 import { db, getSetting, setSetting, empHourly } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
@@ -415,6 +416,7 @@ export function storeUserPhotos(serial, rawBody, track = null) {
     const faceType = isFace ? (parseInt(kv.type || '9', 10) || 9) : 0;
     const pp = prevPhoto ? prevPhoto.get(pin) : null;
     try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
+    markPhotoOn(serial, pin);   // máy gửi ảnh lên = máy đang có ảnh này
     upsertEmployeeFromDevice(pin, '');
     pins.add(pin);
     if (track && (!pp || (!track.newOnly && pp.photo !== content))) track.changed.add(pin);
@@ -472,6 +474,22 @@ export function buildPhotoCommand(pin) {
     return `DATA UPDATE BIOPHOTO PIN=${pin}\tType=${p.face_type || 9}\tSize=${p.photo.length}\tContent=${p.photo}\tFormat=0\tPostBackTmpFlag=1`;
   return `DATA UPDATE USERPIC PIN=${pin}\tSize=${p.photo.length}\tContent=${p.photo}`;
 }
+// Ảnh máy đang giữ (device_users_serial.photo_ver = mã rút gọn nội dung ảnh). Trước đây mỗi lần máy bắt tay đều đẩy lại
+// ảnh của MỌI người (~45KB/ảnh, 1 lệnh/lượt) dù máy đã có → khuôn mặt mới phải chờ sau (30/10/2026).
+const photoVer = (photo) => createHash('md5').update(photo).digest('hex').slice(0, 16);
+export function markPhotoOn(serial, pin) {
+  const p = db.prepare('SELECT photo FROM device_user_photos WHERE pin=?').get(pin);
+  if (!p || !p.photo) return;
+  upsertDeviceUserSerial(serial, pin, '', '');
+  db.prepare('UPDATE device_users_serial SET photo_ver=? WHERE serial=? AND pin=?').run(photoVer(p.photo), serial, pin);
+}
+// Máy này còn thiếu ảnh của PIN (chưa có / ảnh đã đổi)?
+export function needPhoto(serial, pin) {
+  const p = db.prepare('SELECT photo FROM device_user_photos WHERE pin=?').get(pin);
+  if (!p || !p.photo) return false;
+  const s = db.prepare('SELECT photo_ver FROM device_users_serial WHERE serial=? AND pin=?').get(serial, pin);
+  return !s || s.photo_ver !== photoVer(p.photo);
+}
 
 // Số ID của NV đã KHOÁ (nghỉ việc) → không đồng bộ xuống máy nữa (xoá trên máy rồi thì không bị đẩy lại)
 export function lockedPins() {
@@ -497,7 +515,7 @@ export function syncPinsToGroup(sourceSerial, pins) {
       queueCmd(t.serial, buildUserCommand(pin, t.serial), { pin, mkind: 'user' });
       const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
       for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp), { pin: tp.pin, bio_type: tp.bio_type, idx: tp.idx, mkind: 'bio' }); n++; }
-      const pc = buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc, { pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
+      const pc = needPhoto(t.serial, pin) && buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc, { pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) máy đích còn thiếu
     }
   }
   return n;
@@ -525,7 +543,7 @@ export function syncFillDevice(serial, force = false) {
     if (mine.has(key) || locked.has(String(t.pin).trim()) || held.has(t.serial + '|' + t.pin) || held.has(serial + '|' + t.pin)) continue;
     if (!pushedPins.has(t.pin)) {
       queueCmd(serial, buildUserCommand(t.pin, serial), { pin: t.pin, mkind: 'user' });
-      const pc = buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc, { pin: t.pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) nếu có
+      const pc = (force || needPhoto(serial, t.pin)) && buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc, { pin: t.pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) máy còn thiếu
       pushedPins.add(t.pin);
     }
     queueCmd(serial, buildBioCommand(t), { pin: t.pin, bio_type: t.bio_type, idx: t.idx, mkind: 'bio' });
@@ -535,6 +553,7 @@ export function syncFillDevice(serial, force = false) {
      WHERE p.pin IN (SELECT DISTINCT pin FROM device_users_serial WHERE serial IN (${ph}))`).all(...groupSerials);
   for (const r of photoPins) {
     if (pushedPins.has(r.pin) || locked.has(String(r.pin).trim()) || held.has(serial + '|' + r.pin)) continue;
+    if (!force && !needPhoto(serial, r.pin)) continue;   // máy đã có đúng ảnh này
     const pc = buildPhotoCommand(r.pin); if (!pc) continue;
     queueCmd(serial, buildUserCommand(r.pin, serial), { pin: r.pin, mkind: 'user' });
     queueCmd(serial, pc, { pin: r.pin, mkind: 'photo' });
@@ -600,6 +619,8 @@ export function ackCommand(id, ret) {
     } else if (cmd.mkind === 'bio') {
       const tp = db.prepare('SELECT * FROM device_bio_templates WHERE pin=? AND bio_type=? AND idx=? LIMIT 1').get(cmd.pin, cmd.bio_type, cmd.idx);
       if (tp) mirrorTemplateTo(cmd.serial, tp);
+    } else if (cmd.mkind === 'photo') {
+      markPhotoOn(cmd.serial, cmd.pin);
     }
   } catch (e) { console.error('[device] mirror khi ack lỗi:', e.message); }
 }

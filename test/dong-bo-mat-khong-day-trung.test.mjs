@@ -94,3 +94,31 @@ test('máy chưa rõ đời / đời cũ: vẫn 1 lệnh/lượt như trước',
   db.prepare("UPDATE push_devices SET push_ver='-' WHERE serial='M4'").run();
   assert.equal(getreq('M4').split('\n').length, 1);
 });
+
+// Ảnh mặt/ảnh NV (~45KB/ảnh): trước đây mỗi lần máy bắt tay đều đẩy lại ảnh của mọi người dù máy đã có.
+const handshake = (sn) => H.handleCData({ method: 'GET', query: { SN: sn, options: 'all', pushver: '2.4.1' }, headers: {}, socket: {} }, resObj());
+const ackAll = (sn) => {
+  const out = getreq(sn); if (!out || out === 'OK') return 0;
+  const lines = out.split('\n');
+  devcmd(sn, lines.map((l) => `ID=${l.split(':')[1]}&Return=0&CMD=DATA`).join('\n'));
+  return lines.length;
+};
+const drain = (sn) => { for (let i = 0; i < 50 && ackAll(sn); i++); };
+const photoCmds = (sn) => pending(sn).filter((c) => /^DATA UPDATE (USERPIC|BIOPHOTO) /.test(c));
+
+test('ảnh: máy đã nhận ảnh rồi thì bắt tay lại KHÔNG đẩy lại; ảnh đổi thì đẩy', () => {
+  for (const sn of ['M2', 'M3', 'M4']) drain(sn);
+  post('M1', 'USERPIC', `USERPIC PIN=11\tSize=300\tContent=${'A'.repeat(300)}`);
+  assert.equal(photoCmds('M2').length, 1, 'ảnh mới → đẩy sang máy 2');
+  drain('M2');
+  handshake('M2');
+  assert.deepEqual(photoCmds('M2'), [], 'máy 2 đã có đúng ảnh → bắt tay không đẩy lại');
+  handshake('M1');
+  assert.deepEqual(photoCmds('M1'), [], 'máy nguồn (gửi ảnh lên) cũng coi là đã có');
+  post('M1', 'USERPIC', `USERPIC PIN=11\tSize=300\tContent=${'B'.repeat(300)}`);
+  assert.equal(photoCmds('M2').length, 1, 'ảnh đổi → đẩy lại');
+  drain('M2');
+  db.prepare("DELETE FROM device_users_serial WHERE serial='M2' AND pin='11'").run();   // VD xoá NV trên máy / đọc lại thông tin
+  handshake('M2');
+  assert.equal(photoCmds('M2').length, 1, 'máy mất người này → bắt tay đẩy lại ảnh');
+});

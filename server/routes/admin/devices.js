@@ -222,6 +222,7 @@ export function registerDeviceRoutes(r, { need }) {
     db.prepare('DELETE FROM push_devices WHERE id=?').run(req.params.id);
     db.prepare('DELETE FROM push_device_commands WHERE serial=?').run(d.serial);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(d.serial);
+    db.prepare('UPDATE device_users_serial SET photo_ver=NULL WHERE serial=?').run(d.serial);   // thêm lại máy → đẩy lại ảnh
     db.prepare('DELETE FROM ai_templates WHERE serial=?').run(d.serial);
     aiKick(d.serial);   // máy AI đang kết nối → ngắt (kết nối lại sẽ hiện ở Chờ duyệt)
     res.json({ ok: true });
