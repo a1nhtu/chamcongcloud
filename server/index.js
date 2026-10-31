@@ -26,7 +26,7 @@ import { mealStaticGate } from './meal.js';
 import iclockRoutes from './routes/iclock.js';
 import hikEventRoutes from './routes/hik-event.js';
 import { isActivated } from './license.js';
-import { currentVersion, takeOverFromOldApp, clearHandoff } from './update.js';
+import { currentVersion, takeOverFromOldApp, clearHandoff, startAutoUpdate } from './update.js';
 import { offload } from './heavy.js';
 import { startTcpScheduler } from './zk-tcp.js';
 import { attachAiWs } from './ai-ws.js';
@@ -200,6 +200,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   // Bản cài của khách: tự bảo đảm app tự bật khi mở máy/đăng nhập (khách cũ bấm Cập nhật là được sửa, khỏi chạy lại CaiDat.bat)
   import('./autostart.js').then((m) => m.ensureAutostart()).catch((e) => console.error('[autostart] lỗi:', e.message));
   if (H) H.startDevicePorts(app, attachAiWs);   // cổng riêng cho máy chấm công chỉ điền được IP + cổng
+  if (startAutoUpdate()) console.log('  Máy chủ tự cập nhật khi có bản mới (15 phút hỏi GitHub 1 lần; tắt: AUTO_UPDATE=0)');
 });
 
 // HTTPS (cho điện thoại dùng camera + GPS qua mạng LAN/wifi nội bộ) — KHÔNG bắt buộc:

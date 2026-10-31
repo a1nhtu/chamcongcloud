@@ -350,3 +350,28 @@ async function applyUpdate(info) {
 const RESTART_WAIT_MS = 120000;
 export const updateBusy = (p = progress, now = Date.now()) =>
   p.state === 'run' || (p.state === 'restart' && now - (p.restartAt || 0) < RESTART_WAIT_MS);
+
+// MÁY CHỦ NHIỀU CÔNG TY TỰ CẬP NHẬT (31/10/2026): trước Anh phải vào /may-chu bấm Cập nhật cho từng máy chủ sau mỗi
+// lần phát hành. Giờ máy chủ tự hỏi GitHub 15 phút/lần, có bản mới là tự cập nhật (sao lưu từng công ty, ~15 giây) —
+// không cần mật khẩu cấp domain. Tắt: AUTO_UPDATE=0 trong config.txt. Cập nhật hỏng thì 6 giờ sau mới thử lại bản đó
+// (không tải 7 MB mỗi 15 phút mãi). Bản cài 1 công ty KHÔNG tự cập nhật (khách vẫn bấm nút trong app).
+export const AUTO_EVERY_MS = 15 * 60000, AUTO_RETRY_MS = 6 * 3600000;
+export async function autoUpdateTick(st, { check = checkUpdate, start = startUpdate, busy = updateBusy, now = Date.now() } = {}) {
+  if (busy()) return 'busy';
+  const info = await check();
+  if (!info.hasUpdate) return 'latest';
+  if (st.ver === info.latest && now - st.at < AUTO_RETRY_MS) return 'wait';
+  st.ver = info.latest; st.at = now;
+  const r = await start(info.latest);
+  return r.started ? 'started' : 'skip';
+}
+export function startAutoUpdate(env = process.env) {
+  if (!MULTI || env.AUTO_UPDATE === '0' || !isPackaged()) return false;
+  const st = { ver: '', at: 0 };
+  const tick = () => autoUpdateTick(st)
+    .then((r) => { if (r === 'started') console.log(`[update] máy chủ tự cập nhật lên ${st.ver}`); })
+    .catch((e) => console.error('[update] tự kiểm tra bản mới lỗi:', e.message));
+  setTimeout(tick, 2 * 60000).unref?.();      // máy chủ vừa bật: chờ 2 phút cho ổn định rồi mới hỏi
+  setInterval(tick, AUTO_EVERY_MS).unref?.();
+  return true;
+}

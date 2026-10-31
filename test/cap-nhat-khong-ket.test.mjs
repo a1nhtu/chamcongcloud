@@ -77,3 +77,27 @@ test('bản 1 công ty: cấu hình cập nhật vẫn đọc từ Cài đặt n
   finally { D.setSetting('update_repo', ''); D.setSetting('update_branch', ''); }
   assert.deepEqual(U.updateConfig(), { repo: 'a1nhtu/chamcongcloud', branch: 'main' }, 'để trống → về mặc định');
 });
+
+// MÁY CHỦ TỰ CẬP NHẬT (31/10/2026): 15 phút hỏi GitHub 1 lần, có bản mới là tự cập nhật; hỏng thì 6 giờ sau mới thử lại.
+test('máy chủ tự cập nhật: có bản mới → cập nhật; đang chạy / đã mới nhất → thôi; bản đó hỏng → chờ 6 giờ mới thử lại', async () => {
+  const st = { ver: '', at: 0 }, started = [];
+  let latest = '1.26.7', busy = false, t = 1e12;
+  const deps = () => ({ check: async () => ({ current: '1.26.6', latest, hasUpdate: latest !== '1.26.6' }),
+    start: async (v) => { started.push(v); return { ok: true, started: true }; }, busy: () => busy, now: t });
+  busy = true; assert.equal(await U.autoUpdateTick(st, deps()), 'busy');
+  busy = false; assert.equal(await U.autoUpdateTick(st, deps()), 'started');
+  assert.deepEqual(started, ['1.26.7']);
+  t += U.AUTO_EVERY_MS;   // vẫn chạy bản cũ = lần trước hỏng → không tải lại mỗi 15 phút
+  assert.equal(await U.autoUpdateTick(st, deps()), 'wait');
+  latest = '1.26.8';      // có bản mới hơn nữa → thử ngay
+  assert.equal(await U.autoUpdateTick(st, deps()), 'started');
+  t += U.AUTO_RETRY_MS + 1;
+  assert.equal(await U.autoUpdateTick(st, deps()), 'started', 'quá 6 giờ thử lại');
+  latest = '1.26.6';
+  assert.equal(await U.autoUpdateTick(st, deps()), 'latest');
+  assert.deepEqual(started, ['1.26.7', '1.26.8', '1.26.8']);
+});
+
+test('chỉ máy chủ nhiều công ty tự cập nhật (bản cài 1 công ty / máy dev thì không)', () => {
+  assert.equal(U.startAutoUpdate({}), false);
+});
