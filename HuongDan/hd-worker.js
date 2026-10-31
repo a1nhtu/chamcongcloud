@@ -884,7 +884,7 @@ async function handleTaoCongTy(request, env) {
 }
 
 // Trang nội bộ "Máy chủ nhiều công ty" (/may-chu): mật khẩu cấp domain. b.action:
-//   hosts | host-config {name,port} | host-update / host-update-status {host}
+//   hosts | host-config {name,port} | host-update / host-update-status {host} | host-delete {host,confirm}
 //   tenants {host} | disable/enable {host,slug} | renew {host,slug,exp,max}
 //   dl-save {code,ten,host} | dl-renew {code} | dl-lock {code}
 //   old-installs {host} | import-old {host,dir,force} | dns-to-host {host,slug} | dns-to-old {slug}
@@ -952,6 +952,28 @@ async function handleMayChu(request, env) {
       if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
       const [s, p] = await Promise.all([hostCall(env, zoneName, host, "GET", "/update"), hostCall(env, zoneName, host, "GET", "/ping")]);
       return jsonRes({ ...s, version: p.version });
+    }
+
+    // XOÁ HẲN máy chủ thử / máy chủ bỏ (31/10/2026, gỡ pc1): xoá mọi tên miền trỏ về tunnel của máy chủ + xoá tunnel.
+    // An toàn: chỉ xoá máy chủ ĐANG TẮT (tunnel không kết nối + gọi không được) và không còn link đại lý nào tạo công ty
+    // vào đó. 2 bước: không có confirm → chỉ trả danh sách tên miền sẽ xoá để trang hỏi lại.
+    if (a === "host-delete") {
+      if (!hostNameOk(host)) return jsonRes({ error: "Thiếu tên máy chủ" }, 400);
+      const t = (await allTunnels(token, accountId)).find((x) => x.name === HOST_TUN + host);
+      if (!t) return jsonRes({ error: `Không thấy máy chủ "${host}"` }, 404);
+      let online = t.status === "healthy" || (t.connections || []).length > 0;
+      if (!online) { try { await hostCall(env, zoneName, host, "GET", "/ping"); online = true; } catch {} }
+      if (online) return jsonRes({ error: `Máy chủ "${host}" đang chạy — tắt máy chủ trước rồi mới xoá được (tránh xoá nhầm máy chủ đang có khách).` }, 400);
+      const dls = (await listDealers(token, zoneId, zoneName)).filter((d) => d.host === host).map((d) => d.code);
+      if (dls.length) return jsonRes({ error: `Link đại lý ${dls.join(", ")} đang tạo công ty trên máy chủ "${host}" — đổi link đó sang máy chủ khác trước.` }, 400);
+      const target = `${t.id}.cfargotunnel.com`;
+      const recs = ((await cfProv(token, "GET", `/zones/${zoneId}/dns_records?type=CNAME&per_page=1000`)) || []).filter((r) => r.content === target);
+      const names = recs.map((r) => r.name);
+      if (!b.confirm) return jsonRes({ ok: true, preview: true, names });
+      for (const r of recs) await cfProv(token, "DELETE", `/zones/${zoneId}/dns_records/${r.id}`);
+      try { await cfProv(token, "DELETE", `/accounts/${accountId}/cfd_tunnel/${t.id}/connections`); } catch {}
+      await cfProv(token, "DELETE", `/accounts/${accountId}/cfd_tunnel/${t.id}`);
+      return jsonRes({ ok: true, deleted: names });
     }
 
     if (a === "disable" || a === "enable") {

@@ -137,7 +137,8 @@ async function loadAll() {
     (HOSTS.length ? HOSTS.map((h) => `<tr><td><b>${esc(h.name)}</b><div class="mono muted">ctl-${esc(h.name)}.${esc(d.zone)}</div></td>
       <td>${h.online ? '<span class="tag on">Đang chạy</span>' : `<span class="tag off">Không trả lời</span><div class="muted" style="font-size:12.5px">${esc(h.error)}</div>`}</td>
       <td>${esc(h.version || '')}</td><td>${h.tenants ?? ''}</td><td>${h.rss_mb ? h.rss_mb + ' MB' : ''}</td>
-      <td class="act">${h.online ? `<button class="btn sm sec" onclick="hostUpd('${esc(h.name)}', this)">Cập nhật</button>` : ''}</td></tr>`).join('')
+      <td class="act">${h.online ? `<button class="btn sm sec" onclick="hostUpd('${esc(h.name)}', this)">Cập nhật</button>`
+        : `<button class="btn sm sec" onclick="hostDel('${esc(h.name)}', this)" title="Xoá hẳn máy chủ đã tắt: tunnel + mọi tên miền trỏ về nó">Xoá</button>`}</td></tr>`).join('')
       : '<tr><td colspan="6" class="muted">Chưa có máy chủ nào — điền tên bên dưới để tạo.</td></tr>');
   const opts = HOSTS.map((h) => `<option value="${esc(h.name)}">${esc(h.name)}</option>`).join('');
   $('dHost').innerHTML = '<option value="">(máy chủ đầu tiên)</option>' + opts;
@@ -250,6 +251,23 @@ window.hostUpd = async (name, btn) => {
       btn.textContent = `${s.pct || 0}% ${s.step || ''}`;
     }
     throw new Error('Quá 6 phút chưa thấy bản mới — xem lại máy chủ (CapNhat.log trong thư mục cài).');
+  });
+};
+
+// Xoá hẳn máy chủ đã tắt (máy thử / máy bỏ): xem trước danh sách tên miền sẽ mất → hỏi lại → xoá tunnel + tên miền.
+window.hostDel = async (name, btn) => {
+  await busy(btn, 'uErr', async () => {
+    const p = await api({ action: 'host-delete', host: name });
+    const list = p.names.length ? p.names.map((n) => '  • ' + n).join('\n') : '  (không có tên miền nào)';
+    if (!confirm(`XOÁ HẲN máy chủ "${name}"?
+
+Sẽ xoá tunnel dgphost-${name} và ${p.names.length} tên miền trỏ về nó:
+${list}
+
+Công ty trên các tên miền này không vào được nữa. Không hoàn tác được.`)) return;
+    const r = await api({ action: 'host-delete', host: name, confirm: true });
+    $('uErr').textContent = `✓ Đã xoá máy chủ "${name}" và ${r.deleted.length} tên miền.`;
+    await loadAll();
   });
 };
 
