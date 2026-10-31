@@ -197,8 +197,18 @@ writeFileSync(join(OUT, 'HUONG-DAN.txt'),
 
 LƯU Ý:
 - Máy tính cài app phải BẬT khi cần chấm công.
-- Sao lưu dữ liệu: copy 2 thư mục app\\data và app\\uploads.
+- Sao lưu dữ liệu: copy file config.txt + 2 thư mục app\\data và app\\uploads (tốt nhất copy cả thư mục cài).
 - Gỡ cài đặt: chạy "GoCaiDat.bat".
+
+CÀI LẠI WINDOWS (KHÔNG MẤT DỮ LIỆU):
+1. Trước khi cài lại Win: chạy "GoCaiDat.bat" để tắt app, rồi copy cả thư mục cài
+   (VD D:\\DigiplusChamCong) ra ổ ngoài. Tối thiểu: config.txt + app\\data + app\\uploads.
+2. Khi cài Win, chỉ format ổ C. KHÔNG format ổ đang chứa thư mục Digiplus (VD ổ D).
+3. Cài lại phần mềm bằng Setup.exe. Ở bước chọn thư mục bấm "Chọn..." và trỏ ĐÚNG thư mục cũ
+   (bộ cài mặc định gợi ý ổ C - đừng bấm Tiếp tục ngay). Bộ cài chỉ chép đè phần chương trình,
+   giữ nguyên dữ liệu và cấu hình, KHÔNG cần khôi phục bản sao lưu.
+4. Cài lại Win thì "Mã máy" đổi, license cũ không dùng được. Mở trang quản lý, gửi Mã máy mới cho
+   Digiplus để cấp lại license, dán vào là dùng tiếp (dữ liệu cũ vẫn còn đủ).
 
 Hỗ trợ: Digiplus.
 `);

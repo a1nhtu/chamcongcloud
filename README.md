@@ -86,7 +86,7 @@ VPS Việt Nam (Viettel IDC, VNG, Vietnix…) hoặc cloud (AWS Lightsail, Digit
 
 ## Ghi chú kỹ thuật
 - **Múi giờ**: xử lý theo `Asia/Ho_Chi_Minh`; lưu mốc thời gian chuẩn ISO-8601 UTC → **không còn lỗi `1899-12-30`** như bản trong video.
-- **Dữ liệu**: SQLite tại `data/digiplus.db`; ảnh tại `uploads/`. Sao lưu = copy 2 thư mục này. Muốn reset toàn bộ: xoá thư mục `data/` rồi chạy lại.
+- **Dữ liệu**: SQLite tại `data/digiplus.db`; ảnh tại `uploads/`. Sao lưu = copy 2 thư mục này (bản cài Windows: kèm `config.txt` cạnh thư mục `app/`). Muốn reset toàn bộ: xoá thư mục `data/` rồi chạy lại.
 - **Đổi logo/icon**: thay 2 file `public/icons/icon-192.png`, `icon-512.png` bằng logo Digiplus (nền vuông).
 - **Nâng cấp DB** (khi nhiều người dùng đồng thời/nhiều công ty): có thể chuyển sang PostgreSQL — cấu trúc bảng ở `server/db.js`.
 

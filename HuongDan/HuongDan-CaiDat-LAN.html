@@ -214,7 +214,8 @@ footer b{color:var(--ink)}
     <h2 class="sec">Gỡ cài đặt hoặc chuyển sang máy khác</h2>
     <div class="grid2">
       <div class="fcard"><div class="vi">🗑</div><h3>Gỡ cài</h3><p>Vào <b>Settings → Apps</b> của Windows, tìm <b>Digiplus Chấm Công</b> → Uninstall — gỡ tự chạy + dừng app. Dữ liệu trong <span class="mono">app\data</span> và <span class="mono">app\uploads</span> vẫn còn.</p></div>
-      <div class="fcard"><div class="vi">💾</div><h3>Sao lưu / chuyển máy</h3><p>Copy 2 thư mục <span class="mono">app\data</span> và <span class="mono">app\uploads</span> sang máy mới (cùng vị trí), rồi lấy Mã máy mới xin cấp lại license.</p></div>
+      <div class="fcard"><div class="vi">💾</div><h3>Sao lưu / chuyển máy</h3><p>Copy file <span class="mono">config.txt</span> + 2 thư mục <span class="mono">app\data</span> và <span class="mono">app\uploads</span> (tốt nhất cả thư mục cài) sang máy mới (cùng vị trí), rồi lấy Mã máy mới xin cấp lại license.</p></div>
+      <div class="fcard"><div class="vi">🔄</div><h3>Cài lại Windows</h3><p>Trước khi cài Win: tắt app, copy cả thư mục cài (VD <span class="mono">D:\DigiplusChamCong</span>) ra ổ ngoài; chỉ format ổ C. Sau đó chạy <b>Setup.exe</b>, ở bước chọn thư mục bấm <b>Chọn…</b> trỏ đúng thư mục cũ (bộ cài mặc định gợi ý ổ C) — dữ liệu giữ nguyên, <b>không cần khôi phục sao lưu</b>. Mã máy đổi nên gửi Mã máy mới để cấp lại license.</p></div>
     </div>
   </section>
 
@@ -243,7 +244,7 @@ footer b{color:var(--ink)}
       <details><summary>Máy chấm công điền IP hay tên miền?</summary><p>Bản LAN điền IP máy chủ (nên đặt IP tĩnh) + Port 8686 + HTTP. Máy ZKTeco không nhận tên máy NetBIOS.</p></details>
       <details><summary>Cập nhật có mất dữ liệu không?</summary><p>Không. Khi cập nhật, hệ thống tự sao lưu trước rồi mới thay code; dữ liệu chấm công/nhân viên giữ nguyên.</p></details>
       <details><summary>Nhiều khách trên 1 máy/VPS được không?</summary><p>Được — mỗi khách một cổng khác nhau (8686, 8687…) và một thư mục riêng. CaiDat/GoCaiDat đã an toàn theo cổng, không đè nhau.</p></details>
-      <details><summary>Sao lưu dữ liệu thế nào?</summary><p>Copy 2 thư mục <b>app\data</b> (cơ sở dữ liệu) và <b>app\uploads</b> (ảnh chấm công). Phần mềm cũng có tự sao lưu hằng ngày trong Cài đặt.</p></details>
+      <details><summary>Sao lưu dữ liệu thế nào?</summary><p>Copy file <b>config.txt</b> (cấu hình, tên miền) và 2 thư mục <b>app\data</b> (cơ sở dữ liệu) và <b>app\uploads</b> (ảnh chấm công). Phần mềm cũng có tự sao lưu hằng ngày trong Cài đặt.</p></details>
     </div>
   </section>
 </main>
