@@ -576,7 +576,33 @@ export function resyncNow(force = false) {
     devices++;
   }
   const queued = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE trans_time IS NULL').get().c - before;
-  return { groups: groups.size, devices, queued };
+  return { groups: groups.size, devices, queued, serials: rows.filter((r) => groups.has(r.sync_group)).map((r) => r.serial) };
+}
+
+// THANH TIẾN TRÌNH lệnh máy đẩy (ADMS): nút bấm ghi mốc id lệnh trước/sau khi xếp lệnh, giao diện hỏi số lệnh máy đã báo
+// nhận. Chỉ đọc bảng lệnh (theo khoá id) — không đụng tới máy, không làm chậm đồng bộ.
+export const cmdMark = () => db.prepare('SELECT COALESCE(MAX(id),0) m FROM push_device_commands').get().m;
+// to = 0: theo dõi mở (Đồng bộ: máy trả lời DATA QUERY xong phần mềm mới xếp tiếp lệnh đẩy sang máy khác trong nhóm)
+export function cmdProgress(from, to, serials = []) {
+  const where = ['id>?'], args = [from];
+  if (to) { where.push('id<=?'); args.push(to); }
+  if (serials.length) { where.push(`serial IN (${serials.map(() => '?').join(',')})`); args.push(...serials); }
+  const rows = db.prepare(`SELECT serial, COUNT(*) total, SUM(response_at IS NOT NULL) done,
+      SUM(response_at IS NOT NULL AND CAST(return_value AS INTEGER)<0) failed
+    FROM push_device_commands WHERE ${where.join(' AND ')} GROUP BY serial`).all(...args);
+  const bySn = new Map(rows.map((r) => [r.serial, r]));
+  const dev = db.prepare('SELECT name, last_seen FROM push_devices WHERE serial=?');
+  const ahead = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE serial=? AND id<=? AND response_at IS NULL');
+  const cnt = (sql, sn) => db.prepare(sql).get(sn).c;
+  const devices = [...new Set([...serials, ...bySn.keys()])].map((sn) => {
+    const r = bySn.get(sn) || { total: 0, done: 0, failed: 0 }, d = dev.get(sn) || {};
+    return { serial: sn, name: d.name || sn, online: !!d.last_seen && Date.now() - Date.parse(d.last_seen) < 3 * 60000,
+      total: r.total, done: r.done, failed: r.failed, ahead: ahead.get(sn, from).c,
+      users: cnt('SELECT COUNT(*) c FROM device_users_serial WHERE serial=?', sn),
+      fp: cnt('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type=1', sn),
+      face: cnt('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)', sn) };
+  });
+  return { devices };
 }
 
 // /getrequest: lấy lệnh kế tiếp cho máy (đánh dấu đã gửi). Trả 'C:<id>:<content>' hoặc ''.

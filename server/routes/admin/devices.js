@@ -1,7 +1,7 @@
 // Nhóm route MÁY CHẤM CÔNG (ZKTeco ADMS push) — tách khỏi admin.js.
 import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr } from '../../device-sync.js';
+import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
@@ -94,8 +94,15 @@ export function registerDeviceRoutes(r, { need }) {
   });
   // Đồng bộ NGAY: đẩy toàn bộ vân tay/user của nhóm sang mọi máy trong nhóm (khỏi cần restart máy)
   r.post('/devices/resync', need('devices'), (req, res) => {
-    try { res.json(resyncNow(!!req.body?.force)); }
+    try { const from = cmdMark(), r2 = resyncNow(!!req.body?.force); res.json({ ...r2, track: { from, to: 0, serials: r2.serials } }); }
     catch (e) { sendCaughtError(res, 'POST /admin/devices/resync', e, { status: 400 }); }
+  });
+  // Tiến độ lệnh vừa xếp cho máy đẩy (ADMS): from/to = mốc id lệnh nút bấm trả về (track), serials = máy theo dõi
+  r.get('/devices/cmd-progress', need('devices'), (req, res) => {
+    const from = parseInt(req.query.from, 10) || 0, to = parseInt(req.query.to, 10) || 0;
+    const serials = String(req.query.serials || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
+    if (!from && !to) return res.status(400).json({ error: 'Thiếu mốc lệnh' });
+    res.json(cmdProgress(from, to, serials));
   });
   r.put('/devices/:id', need('devices'), (req, res) => {
     const b = req.body || {};
@@ -196,8 +203,9 @@ export function registerDeviceRoutes(r, { need }) {
   r.post('/devices/:id/relearn', need('devices'), (req, res) => {
     const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    const from = cmdMark();
     relearnDevice(d.serial);
-    res.json({ ok: true });
+    res.json({ ok: true, track: { from, to: cmdMark(), serials: [d.serial] } });
   });
   // Mở cửa từ xa (chỉ máy có kiểm soát cửa) — gửi lệnh ADMS AC_UNLOCK xuống hàng đợi
   r.post('/devices/:id/open-door', need('door_open'), (req, res) => {
@@ -488,10 +496,11 @@ export function registerDeviceRoutes(r, { need }) {
     // Lệnh chỉ tới được máy khi bật "Dùng máy chấm công" + máy đã duyệt — trước đây vẫn báo "đã gửi" mà máy không bao giờ nhận
     if (getSetting('device_enabled', '0') !== '1') return res.status(400).json({ error: 'Chưa bật "Dùng máy chấm công" — máy không nhận được lệnh.' });
     if (d.active !== 1) return res.status(400).json({ error: 'Máy đang chờ duyệt — bấm Duyệt máy trước rồi mới tải nhân viên được.' });
+    const from = cmdMark();
     const gen = queryDeviceUsers(d.serial);
     const off = !d.last_seen || Date.now() - Date.parse(d.last_seen) > 3 * 60000;
     const how = gen === 'old' ? ' (máy đời cũ: máy gửi lại toàn bộ người dùng + vân tay)' : '';
-    res.json({ ok: true, gen, msg: off
+    res.json({ ok: true, gen, track: { from, to: cmdMark(), serials: [d.serial] }, msg: off
       ? `Đã xếp lệnh tải nhân viên${how}, nhưng máy đang MẤT KẾT NỐI — máy nối lại mới nhận lệnh.`
       : `Đã gửi lệnh tải nhân viên từ máy${how}. Chờ 1–2 phút rồi bấm Làm mới; vẫn chưa thấy thì bấm "🕒 Đồng bộ giờ" (máy khởi động lại rồi gửi lên).` });
   });
@@ -539,10 +548,11 @@ export function registerDeviceRoutes(r, { need }) {
       const j = startJob('union-delete-users', dev.name || serial, async (prog) => { const r2 = await unionDeleteUsers(dev, pins, prog); dropConflicts(serial, pins); return r2; });
       return res.json({ ok: true, job: j.id, count: pins.length, msg: `Đang xoá ${pins.length} nhân viên trên máy…` });
     }
+    const from = cmdMark();
     const n = dev.conn_type === 'ai' ? aiDeleteUsers(serial, pins) : deleteDeviceUsers(serial, pins);
     if (dev.conn_type === 'ai') aiPoke(serial);
     dropConflicts(serial, pins);
-    res.json({ ok: true, count: n, msg: `Đã gửi lệnh xóa ${n} nhân viên trên máy.` });
+    res.json({ ok: true, count: n, track: { from, to: cmdMark(), serials: [serial] }, msg: `Đã gửi lệnh xóa ${n} nhân viên trên máy.` });
   });
 
   /* -------- CẢNH BÁO TRÙNG SỐ ID giữa các máy -------- */
@@ -577,7 +587,9 @@ export function registerDeviceRoutes(r, { need }) {
     const tcpDevs = tcpEnabled() ? db.prepare(`SELECT * FROM push_devices WHERE active=1 AND conn_type='tcp' AND serial IN (${serials.map(() => '?').join(',')})`).all(...serials) : [];
     const direct = [...hikDevs, ...tcpDevs];
     const directSet = new Set(direct.map((h) => h.serial));
+    const from = cmdMark();
     const r2 = pushEmployees(pins, { serials: serials.filter((s) => !directSet.has(s)), withBio: !!b.with_bio });
+    const track = { from, to: cmdMark(), serials: serials.filter((s) => !directSet.has(s)) };
     for (const s of serials) if (!directSet.has(s)) aiPoke(s);
     let job = null;
     if (direct.length) {
@@ -599,7 +611,7 @@ export function registerDeviceRoutes(r, { need }) {
       }).id;
     }
     const any = r2.users || job;
-    res.json({ ok: true, ...r2, job, msg: any ? (r2.users ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy. Máy nhận dần khi kết nối.` : '') + (job ? ` Đang ghi thẳng xuống ${direct.length} máy kết nối trực tiếp…` : '') : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
+    res.json({ ok: true, ...r2, job, track, msg: any ? (r2.users ? `Đã gửi ${r2.users} lệnh ghi NV${r2.bios ? ` + ${r2.bios} mẫu vân tay/khuôn mặt` : ''} xuống ${r2.devices} máy. Máy nhận dần khi kết nối.` : '') + (job ? ` Đang ghi thẳng xuống ${direct.length} máy kết nối trực tiếp…` : '') : 'Không có NV nào để đẩy (NV đã khoá / chưa có Số ID / máy chưa duyệt).' });
   });
 
   /* -------- Xóa nhân viên trên TẤT CẢ máy 1 lần (khỏi vào từng máy) -------- */
@@ -632,10 +644,12 @@ export function registerDeviceRoutes(r, { need }) {
     let tcp = tcpAll;
     const hik = devs.filter((d) => d.conn_type === 'hik');
     const uni = devs.filter((d) => d.conn_type === 'union');
+    const from = cmdMark();
     for (const d of push) {
       if (d.conn_type === 'ai') { aiDeleteUsers(d.serial, pins); aiPoke(d.serial); } else deleteDeviceUsers(d.serial, pins);
       dropConflicts(d.serial, pins);
     }
+    const track = { from, to: cmdMark(), serials: push.map((d) => d.serial) };
     let job = null, tcpNote = '';
     if (tcp.length && !tcpEnabled()) { tcpNote = `${tcp.length} máy TCP/IP chưa xoá được vì đang tắt "Dùng máy chấm công kết nối TCP/IP".`; tcp = []; }
     if (hik.length && !hikEnabled()) { tcpNote += (tcpNote ? ' ' : '') + `${hik.length} máy Hikvision chưa xoá được vì đang tắt "Dùng máy Hikvision".`; }
@@ -667,7 +681,7 @@ export function registerDeviceRoutes(r, { need }) {
     const ph = pins.map(() => '?').join(',');
     const idle = db.prepare(`SELECT DISTINCT COALESCE(NULLIF(d.name,''), d.serial) AS n FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
       WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins).map((x) => x.n);
-    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), direct: direct.map((d) => d.name || d.serial), job, tcpNote, idle });
+    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), direct: direct.map((d) => d.name || d.serial), job, track, tcpNote, idle });
   });
 
   /* -------- MÁY AI (tự nối về qua WebSocket — server/ai-ws.js): thao tác = xếp lệnh, máy nhận khi đang kết nối -------- */

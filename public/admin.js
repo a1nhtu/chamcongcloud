@@ -5861,9 +5861,9 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       { danger: true, group: 'Xóa / tạm dừng', label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách? (Dữ liệu trên máy chấm công không bị ảnh hưởng)')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } },
     ]) : rowMenu([
       m.active ? { group: 'Dữ liệu từ máy', label: '🕒 Xem giờ trên máy', fn: () => deviceClockModal(m) } : null,
-      { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); } catch (e) { toast(e.message, 'err'); } } },
+      { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); cmdTrack('Tải NV từ máy ' + (m.name || m.serial), r.track, { counts: true, after: pageDevices }); } catch (e) { toast(e.message, 'err'); } } },
       { group: 'Dữ liệu từ máy', label: '⬇ Tải lại log chấm công', fn: () => deviceAttlogModal(m) },
-      { group: 'Dữ liệu từ máy', label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại. Chờ chút rồi Làm mới.', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
+      { group: 'Dữ liệu từ máy', label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại.', 'ok'); pageDevices(); cmdTrack('Đọc lại máy ' + (m.name || m.serial), r.track, { counts: true, after: pageDevices }); } catch (e) { toast(e.message, 'err'); } } },
       { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
       { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
       { group: 'Cài đặt máy', hint: 'Bật: NV mới khai trên phần mềm tự đẩy xuống máy này (khi bật Tự động đẩy NV)', label: (m.recv_new ?? 1) ? '📥 Nhận NV mới từ phần mềm: BẬT' : '📥 Nhận NV mới từ phần mềm: TẮT', fn: async () => {
@@ -5966,7 +5966,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
     try {
       const r = await api('/admin/devices/resync', { method: 'POST', body: force ? { force: true } : undefined });
       if (!r.devices) toast('Chưa có nhóm nào ≥2 máy để đồng bộ. Hãy đặt "Nhóm ĐB" giống nhau cho các máy.', 'err');
-      else toast(`Đã xếp ${r.queued} lệnh đồng bộ cho ${r.devices} máy (${r.groups} nhóm). Máy nhận dần trong ít ${force ? 'phút' : 'giây'}.`, 'ok');
+      else { toast(`Đã xếp ${r.queued} lệnh đồng bộ cho ${r.devices} máy (${r.groups} nhóm). Máy nhận dần trong ít ${force ? 'phút' : 'giây'}.`, 'ok'); cmdTrack(force ? 'Ép đồng bộ toàn bộ' : 'Đồng bộ các máy', r.track, { after: pageDevices }); }
     } catch (e) { toast(e.message, 'err'); }
   };
   const resyncBtn = rowMenu([
@@ -6149,6 +6149,7 @@ async function pushEmpModal(devRows, after) {
     try {
       const r = await api('/admin/devices/push-employees', { method: 'POST', body: { pins: [...picked], serials, with_bio: bioChk.checked } });
       toast(r.msg, r.users || r.job ? 'ok' : 'err');
+      if (r.users) cmdTrack(`Đẩy ${picked.size} NV${bioChk.checked ? ' + vân tay/khuôn mặt' : ''} xuống máy`, r.track);
       if (r.job) { closeModal(); hikPushJobModal(r.job, bioChk.checked, after); } else if (r.users) { closeModal(); after && after(); }
     }
     catch (e) { toast(e.message, 'err'); }
@@ -6212,6 +6213,7 @@ async function deleteUsersAllModal(after) {
     let r;
     try { r = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins } }); }
     catch (e) { goBtn.disabled = false; return toast(e.message, 'err'); }
+    if (r.push.length) cmdTrack(`Xóa ${pins.length} NV trên ${r.push.length} máy`, r.track);
     result.innerHTML = '';
     if (r.push.length) result.append(el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, `✅ Đã gửi lệnh xoá xuống ${r.push.length} máy: ${r.push.join(', ')}. Máy đang kết nối xoá ngay, máy đang tắt sẽ xoá khi kết nối lại.`));
     if (r.tcpNote) result.append(el('div', { class: 'dv-warn' }, r.tcpNote));
@@ -6944,7 +6946,8 @@ async function deviceClearModal(m) {
     const pins = [...userBox.querySelectorAll('.dc-pick:checked')].map((x) => x.value);
     if (!pins.length) return toast('Chưa chọn nhân viên', 'err');
     if (!confirm(`Xóa ${pins.length} nhân viên khỏi máy "${m.name || m.serial}"? (không xóa dữ liệu trong phần mềm)`)) return;
-    await post('/delete-users', { pins }); loadUsers(); pageDevices();
+    const r = await post('/delete-users', { pins }); loadUsers(); pageDevices();
+    cmdTrack(`Xóa ${pins.length} NV trên máy ${m.name || m.serial}`, r.track);
   };
   const fromI = el('input', { type: 'date' }), toI = el('input', { type: 'date' });
   const rangeBtn = el('button', { class: 'btn' }, 'Xóa chấm công (phần mềm)');
@@ -7420,6 +7423,59 @@ function exportProgress(title) {
     }
   })();
   return { pt, done(ok) { stop = true; if (ok) { set(100, 'Xong'); box.classList.add('ok'); } setTimeout(() => box.remove(), ok ? 1200 : 0); } };
+}
+// Thanh TIẾN TRÌNH lệnh máy đẩy (ADMS) góc dưới phải: tải NV về / xoá NV / đẩy NV + vân tay/khuôn mặt / đồng bộ.
+// t = track máy chủ trả về { from, to, serials } (to = 0: đồng bộ — lệnh còn sinh thêm khi máy trả lời). Chỉ hỏi số lệnh máy
+// đã báo nhận (1,5 giây/lần) — không đụng tới máy nên không làm chậm. counts: hiện số NV/vân tay/khuôn mặt phần mềm đã nhận.
+function cmdTrack(title, t, opt = {}) {
+  if (!t || !t.from && !t.to || (t.to && t.to <= t.from)) return;
+  let stack = document.getElementById('xp-stack');
+  if (!stack) { stack = el('div', { id: 'xp-stack', class: 'xp-stack' }); document.body.append(stack); }
+  const bar = el('div', { class: 'xp-bar' }, el('i', {}));
+  const pctEl = el('b', {}, '0%'), msgEl = el('div', { class: 'xp-msg' }, 'Đang chờ máy nhận lệnh…'), list = el('div', { class: 'xp-list' });
+  const x = el('button', { class: 'xp-x', title: 'Ẩn (máy vẫn chạy tiếp)' }, '×');
+  const box = el('div', { class: 'xp-box' }, el('div', { class: 'xp-top' }, el('span', {}, '📡 ' + title), el('span', { class: 'xp-r' }, pctEl, x)), bar, msgEl, list);
+  stack.append(box);
+  let stop = false;
+  x.onclick = () => { stop = true; box.remove(); };
+  const qs = `from=${t.from}&to=${t.to || 0}&serials=${encodeURIComponent((t.serials || []).join(','))}`;
+  const t0 = Date.now(), sum = (a, k) => a.reduce((s, d) => s + d[k], 0);
+  let prev = '', offSince = 0;
+  (async () => {
+    while (!stop) {
+      await new Promise((ok) => setTimeout(ok, 1500));
+      if (stop) break;
+      let r; try { r = await api('/admin/devices/cmd-progress?' + qs); } catch { continue; }
+      const sec = Math.round((Date.now() - t0) / 1000);
+      const on = r.devices.filter((d) => d.online && d.total), off = r.devices.filter((d) => !d.online && d.total > d.done);
+      const tot = sum(on, 'total'), done = sum(on, 'done'), failed = sum(r.devices, 'failed');
+      const pct = tot ? Math.floor(done * 100 / tot) : (off.length ? 0 : 100);
+      bar.firstChild.style.width = pct + '%'; pctEl.textContent = pct + '%';
+      list.replaceChildren(...r.devices.filter((d) => d.total || opt.counts).map((d) => el('div', {},
+        `• ${d.name}: ${d.done}/${d.total} lệnh` + (opt.counts ? ` · có ${d.users} NV, ${d.fp} vân tay, ${d.face} khuôn mặt` : '')
+        + (!d.online ? ' · ⚠ mất kết nối, máy nối lại mới nhận' : d.ahead && d.done < d.total ? ` · chờ ${d.ahead} lệnh xếp trước` : '')
+        + (d.failed ? ` · ${d.failed} lệnh máy báo lỗi` : ''))));
+      // xong = máy đang kết nối đã báo nhận hết + 1 lượt hỏi không đổi gì (máy gửi dữ liệu / phần mềm xếp thêm lệnh sau báo nhận)
+      const sig = JSON.stringify(r.devices.map((d) => [d.total, d.done, d.users, d.fp, d.face]));
+      const settled = on.every((d) => d.done >= d.total) && sig === prev;
+      prev = sig;
+      if (!on.length && off.length) {
+        msgEl.textContent = `Máy đang mất kết nối — lệnh đã xếp sẵn, máy nối lại sẽ tự nhận · ${sec} giây`;
+        if (!offSince) offSince = Date.now();
+        if (Date.now() - offSince > 10 * 60000) break;
+        continue;
+      }
+      offSince = 0;
+      if (!settled) { msgEl.textContent = `Máy đang nhận ${done}/${tot} lệnh · ${sec} giây`; continue; }
+      bar.firstChild.style.width = '100%'; pctEl.textContent = '100%';
+      msgEl.textContent = (tot ? `✅ Máy đã nhận đủ ${tot} lệnh sau ${sec} giây` : '✅ Không còn gì phải gửi xuống máy')
+        + (failed ? ` — ⚠ ${failed} lệnh máy báo lỗi` : '') + (off.length ? ` — ${off.length} máy mất kết nối sẽ nhận khi nối lại` : '');
+      box.classList.add('ok');
+      if (!failed && !off.length) setTimeout(() => box.remove(), 8000);
+      opt.after && opt.after();
+      return;
+    }
+  })();
 }
 let _xlBusy = false;
 async function downloadExcel(type, from, to, extraQS) {

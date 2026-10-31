@@ -564,3 +564,9 @@ th.sortable.on, th.sortable.on .sort-ic { color: var(--brand); }
 .org-cnt { margin-left: auto; flex: none; font-size: 12px; color: var(--muted); font-weight: 500; }
 .org-help { flex: 1 1 40%; padding: 14px 18px; background: #faf8f6; font-size: 14px; line-height: 1.55; display: flex; flex-direction: column; gap: 8px; }
 @media (max-width: 760px) { .org-body { flex-direction: column; } .org-tree { border-right: 0; border-bottom: 1px solid var(--line); max-height: none; } }
+/* Tiến trình lệnh máy chấm công (cmdTrack): nhiều hộp xếp chồng góc dưới phải */
+.xp-stack { position: fixed; right: 22px; bottom: 22px; z-index: 1500; display: flex; flex-direction: column; gap: 10px; max-width: calc(100vw - 32px); }
+.xp-stack .xp-box { position: static; width: 380px; max-width: 100%; }
+.xp-r { display: flex; align-items: center; gap: 8px; }
+.xp-x { border: 0; background: none; font-size: 18px; line-height: 1; color: var(--muted, #64748b); cursor: pointer; padding: 0 2px; }
+.xp-list { font-size: 12.5px; color: var(--ink, #334155); margin-top: 4px; max-height: 120px; overflow: auto; }

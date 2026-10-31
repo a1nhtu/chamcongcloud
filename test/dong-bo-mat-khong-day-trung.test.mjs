@@ -122,3 +122,20 @@ test('ảnh: máy đã nhận ảnh rồi thì bắt tay lại KHÔNG đẩy l�
   handshake('M2');
   assert.equal(photoCmds('M2').length, 1, 'máy mất người này → bắt tay đẩy lại ảnh');
 });
+
+// Thanh tiến trình nút bấm (tải NV / xoá NV / đẩy NV / đồng bộ): đếm lệnh máy đã báo nhận trong mốc id nút bấm trả về.
+test('tiến trình lệnh: đếm đúng lệnh trong mốc, máy báo nhận dần → done tăng; lệnh xếp trước tính là "chờ trước"', () => {
+  addDev('M5');
+  db.prepare("UPDATE push_devices SET push_ver='2.4.1' WHERE serial='M5'").run();
+  S.queueCmd('M5', 'DATA UPDATE USERINFO PIN=1\tName=Truoc');   // lệnh có sẵn từ trước khi bấm
+  const from = S.cmdMark();
+  for (let i = 0; i < 3; i++) S.queueCmd('M5', `DATA DELETE USERINFO PIN=${50 + i}`);
+  const to = S.cmdMark();
+  S.queueCmd('M5', 'DATA UPDATE USERINFO PIN=2\tName=Sau');     // lệnh xếp sau, không thuộc nút bấm này
+  let p = S.cmdProgress(from, to, ['M5']).devices[0];
+  assert.deepEqual([p.total, p.done, p.ahead, p.online], [3, 0, 1, true]);
+  ackAll('M5');
+  p = S.cmdProgress(from, to, ['M5']).devices[0];
+  assert.deepEqual([p.total, p.done, p.ahead], [3, 3, 0]);
+  assert.equal(S.cmdProgress(from, 0, ['M5']).devices[0].total, 4, 'theo dõi mở (đồng bộ) tính cả lệnh xếp thêm');
+});
