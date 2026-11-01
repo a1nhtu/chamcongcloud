@@ -177,6 +177,9 @@ table.as-sheet td.c.ph { color: #b3b9c2; } table.as-sheet td.c.ex { color: #0f17
 table.as-sheet tbody td.c.dirty { background: #fef08a; } table.as-sheet td.c.bad { color: #dc2626; text-decoration: underline wavy; }
 table.as-sheet tbody td.c.sel { background: #dbeafe; } table.as-sheet tbody td.c.sel.dirty { background: #e9eda5; }
 table.as-sheet td.c.anchor { outline: 2px solid #2563eb; outline-offset: -2px; }
+/* Công tắc "hỗ trợ nhiều ca/ngày": dấu ✓ đủ ca · ✗ thiếu ca · ⚠ ca chồng giờ (chỉ xuất hiện khi bật) */
+table.as-sheet td.c[data-mk]::after { content: attr(data-mk); font-size: 10px; margin-left: 2px; vertical-align: super; font-weight: 700; }
+table.as-sheet td.c.mkok::after { color: #16a34a; } table.as-sheet td.c.mkno::after { color: #dc2626; } table.as-sheet td.c.mkwn::after { color: #d97706; }
 .as-editor { display: none; position: absolute; z-index: 6; border: 2px solid #2563eb; border-radius: 0; padding: 0 4px; font-size: 13px; font-weight: 700; text-align: center; box-sizing: border-box; background: #fff; text-transform: uppercase; }
 .as-code { border: 1px solid #cbd5e1; background: #fff; border-radius: 6px; padding: 2px 9px; font-size: 12.5px; font-weight: 700; cursor: pointer; color: #0f172a; }
 .as-code:hover { background: #eff6ff; border-color: #2563eb; }

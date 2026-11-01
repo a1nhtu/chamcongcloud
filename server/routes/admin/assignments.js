@@ -6,6 +6,7 @@ import { resolveShift, schedDay } from '../../shift-resolver.js';
 import { vnWeekday } from '../../attendance-calc.js';
 import { sendCaughtError } from '../../util.js';
 import { rebuildDays } from '../../device-sync.js';
+import { multiAssistExtra, multiAssistReport } from '../../multi-shift.js';
 
 // Đổi phân ca theo NGÀY xong → tính lại công ngay các ngày đó (ngày đã có giờ chấm từ máy), khỏi phải bấm "Tính lại công".
 // keys: tập 'empId|YYYY-MM-DD'. Ngày kế tiếp cũng được tính lại (ca đêm lấy giờ ra sáng hôm sau).
@@ -136,7 +137,8 @@ export function registerAssignmentRoutes(r, { need }) {
     }
 
     const shifts = db.prepare('SELECT id, code, name, start_time, end_time FROM shifts WHERE active = 1 ORDER BY name').all();
-    res.json({ employees, assignments, shifts });
+    // Công tắc "hỗ trợ nhiều ca/ngày" tắt → multiAssistExtra trả {} → kết quả y như cũ
+    res.json({ employees, assignments, shifts, ...(req.query.grid ? multiAssistExtra(from, to) : {}) });
   });
 
   // Gán / xoá 1 ô (upsert). shift_id null & is_off false => xoá (về ca mặc định)
@@ -547,7 +549,7 @@ export function registerAssignmentRoutes(r, { need }) {
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/import', e); }
     recalcDays(touchedImp);
 
-    res.json({ ok: true, updated, off, cleared, keptAuto, from: days[0], to: days[days.length - 1], errors: errors.slice(0, 20), errorCount: errors.length });
+    res.json({ ok: true, updated, off, cleared, keptAuto, from: days[0], to: days[days.length - 1], errors: errors.slice(0, 20), errorCount: errors.length, ...multiAssistReport(touchedImp) });
   });
 
   // Lưu các ô sửa trực tiếp trên Bảng phân ca (kiểu Excel): { cells: [{ employee_id, date, value }] }
@@ -573,6 +575,6 @@ export function registerAssignmentRoutes(r, { need }) {
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/assignments/cells', e); }
     recalcDays(touchedCells);
-    res.json({ ok: true, saved, errors: errors.slice(0, 50), errorCount: errors.length });
+    res.json({ ok: true, saved, errors: errors.slice(0, 50), errorCount: errors.length, ...multiAssistReport(touchedCells) });
   });
 }

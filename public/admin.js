@@ -2664,9 +2664,15 @@ async function pageAssignments() {
       const td = cellEls[r][c], k = keyOf(r, c), dirty = _asDirty.has(k);
       const v = curVal(r, c), g = (sheetEmps[r].grid || [])[c] || {};
       td.textContent = v || g.l || '';   // chưa nhập ở bảng này → hiện (chữ mờ) ca phần mềm tự tìm: lịch tạm thời / lịch đã gán / ca dò theo giờ chấm
-      td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph' + (g.k === 'temp' ? ' tmp' : g.k === 'found' ? ' fnd' : '')) + (dirty && norm(v).bad ? ' bad' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '');
+      // Công tắc "hỗ trợ nhiều ca/ngày" (Cài đặt) bật: ô gán ≥ 2 ca có dấu ✓ đủ ca · ✗ thiếu ca · ⚠ chồng giờ + chú thích từng ca khi rê chuột
+      const mi = data.multiAssist && !dirty && data.multi ? data.multi[k] : null;
+      if (mi && mi.mark) td.dataset.mk = mi.mark; else delete td.dataset.mk;
+      td.className = 'c' + (dirty ? ' dirty' : '') + (v ? (v === 'NGHỈ' ? ' off' : ' ex') : ' ph' + (g.k === 'temp' ? ' tmp' : g.k === 'found' ? ' fnd' : '')) + (dirty && norm(v).bad ? ' bad' : '') + (weekdayVN(days[c]) === 7 ? ' sun' : weekdayVN(days[c]) === 6 ? ' sat' : '') + (mi && mi.mark ? ' mk' + ({ '✓': 'ok', '✗': 'no', '⚠': 'wn' }[mi.mark]) : '');
       const under = g.k === 'none' ? 'tự động theo giờ chấm' : g.k === 'temp' ? (g.t || g.l) : g.k === 'found' ? g.t : 'theo lịch đã gán: ' + (g.t || g.l || '');
-      td.title = `${sheetEmps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập ở bảng này — ưu tiên cao nhất)') + `\nBấm "↺ Về tự động" để bỏ → ${under}` : (dirty ? '↺ về tự động (chưa lưu) → ' : '') + under);
+      td.title = `${sheetEmps[r].full_name} — ${fmtD(days[c])}: ` + (v ? (v === 'NGHỈ' ? 'Nghỉ' : 'ca ' + v) + (dirty ? ' (chưa lưu)' : ' (nhập ở bảng này — ưu tiên cao nhất)') + `\nBấm "↺ Về tự động" để bỏ → ${under}` : (dirty ? '↺ về tự động (chưa lưu) → ' : '') + under)
+        + (mi ? '\n' + mi.shifts.map((x) => `• ${x.code} ${x.start}-${x.end}: ${x.status === 'ok' ? '✓ đã có công' : x.status === 'missing' ? '✗ chưa có công (không quẹt trong ca này)' : 'chưa có dữ liệu chấm'}`).join('\n')
+          + (mi.overlap.length ? '\n⚠ Chồng giờ: ' + mi.overlap.map((o) => o.join(' & ')).join(', ') + ' — khi tính công chỉ 1 trong 2 ca được chọn' : '')
+          + (mi.twoPunch ? '\n‼ Chỉ có 1 dòng công mà giờ vào–ra phủ cả ca kia: có thể nhân viên chỉ quẹt 2 lần (thiếu quẹt giữa ngày), công vẫn tính như 1 ca' : '') : '');
     };
 
     // ----- vùng chọn -----
@@ -2831,6 +2837,7 @@ async function pageAssignments() {
         const r = await api('/admin/assignments/cells', { method: 'POST', body: { cells } });
         if (r.errorCount) { toast(`Đã lưu ${r.saved} ô, ${r.errorCount} ô lỗi: ${r.errors[0].error}`, 'err'); }
         else toast(`Đã lưu ${r.saved} ô`, 'ok');
+        if (r.overlapWarn && r.overlapWarn.length) alert('Cảnh báo ca chồng giờ (vẫn đã lưu):\n' + r.overlapWarn.join('\n'));
         _asDirty.clear(); pageAssignments();
       } catch (e) { toast(e.message, 'err'); saveBtn.disabled = false; }
     };
@@ -2858,6 +2865,7 @@ async function pageAssignments() {
           if (r.errorCount) msg += ` · ${r.errorCount} lỗi`;
           toast(msg, r.errorCount ? 'err' : 'ok');
           if (r.errorCount) alert('Một số dòng lỗi (các ô khác vẫn được nhập):\n' + r.errors.join('\n'));
+          if (r.overlapWarn && r.overlapWarn.length) alert('Cảnh báo ca chồng giờ (vẫn đã nhập):\n' + r.overlapWarn.join('\n'));
           _asDirty.clear(); pageAssignments();
         } catch (e) { toast(e.message, 'err'); }
       };
@@ -2865,7 +2873,19 @@ async function pageAssignments() {
       fileI.value = '';
     };
     // Bảng mã ca: bấm 1 mã để điền vào vùng đang chọn (không cần gõ)
-    const chipFor = (label, value, title, style) => { const b = el('button', { class: 'as-code', title, style: style || '' }, label); b.onclick = () => { if (!canEdit) return; fillSel(value); box.focus({ preventScroll: true }); }; return b; };
+    // Công tắc "hỗ trợ nhiều ca/ngày" bật: Ctrl (hoặc ⌘) + bấm mã ca = CỘNG THÊM ca vào ô (ca gãy S+C); bấm thường vẫn là thay cả ô như cũ
+    const addToSel = (value) => {
+      const q = rect(); const ch = [];
+      for (let r = q.r1; r <= q.r2; r++) for (let c = q.c1; c <= q.c2; c++) {
+        const g = (sheetEmps[r].grid || [])[c] || {};
+        const cur = curVal(r, c) || (g.k !== 'none' && g.k !== 'schedule' && g.l !== 'Nghỉ' ? g.l : '');
+        const parts = cur && cur !== 'NGHỈ' ? cur.split('+').map((x) => x.trim()).filter(Boolean) : [];
+        if (!parts.some((x) => x.toUpperCase() === value.toUpperCase())) parts.push(value);
+        ch.push([r, c, parts.join('+')]);
+      }
+      applyChanges(ch);
+    };
+    const chipFor = (label, value, title, style) => { const b = el('button', { class: 'as-code', title, style: style || '' }, label); b.onclick = (ev) => { if (!canEdit) return; if (data.multiAssist && (ev.ctrlKey || ev.metaKey) && value && value !== 'NGHỈ') addToSel(value); else fillSel(value); box.focus({ preventScroll: true }); }; return b; };
     const codes = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:8px 0' }, el('span', { style: 'font-size:12.5px;color:var(--muted)', title: 'Bấm 1 mã để điền vào các ô đang chọn' }, 'Mã ca:'),
       ...data.shifts.map((s) => chipFor((s.code || '').trim() || s.name, (s.code || '').trim() || s.name, `${s.name} (${s.start_time}-${s.end_time})`)),
       chipFor('NGHỈ', 'NGHỈ', 'Ngày nghỉ', 'color:#b45309;border-color:#f5d0a9'), chipFor('↺ Tự động', '', 'Bỏ ca đã nhập tay ngày đó → phần mềm tự tìm ca lại', 'color:#6b7280'));
@@ -2873,6 +2893,7 @@ async function pageAssignments() {
     // Gọn chiều cao: thanh công cụ lên dòng tiêu đề; mã ca + chú thích + ô đang chọn chung 1 dòng; hướng dẫn ẩn sau nút "?"
     let helpOn = false; try { helpOn = localStorage.getItem('as_help') === '1'; } catch {}
     const hint = el('div', { class: 'map-hint', style: 'margin:0 0 6px;' + (helpOn ? '' : 'display:none') }, 'Dùng như Excel: bấm 1 ô rồi gõ mã ca + Enter · kéo chuột (hoặc Shift + mũi tên) chọn nhiều ô rồi gõ để điền cả vùng · Ctrl+C / Ctrl+V copy–dán (dán được từ Excel) · Delete (hoặc nút ↺ Về tự động) = bỏ ô nhập tay, phần mềm tự tìm ca lại · Ctrl+Z hoàn tác · bấm số ngày / số thứ tự để chọn cả cột / cả dòng · Esc thoát toàn màn hình.'
+      + (data.multiAssist ? ' · NHIỀU CA/NGÀY: gõ nối bằng dấu + (VD S+C) hoặc Ctrl + bấm mã ca để cộng thêm ca vào ô; dấu ✓ đủ ca · ✗ thiếu ca (ngày đã chấm mà không có công của ca đó) · ⚠ ca chồng giờ — rê chuột vào ô để xem chi tiết.' : '')
       + (noCode.length ? ` Ca chưa đặt mã (${noCode.map((s) => s.name).join(', ')}) đang dùng tên ca làm mã — nên đặt mã ngắn ở mục Ca làm.` : ''));
     const helpBtn = btnSm('?', () => { const on = hint.style.display === 'none'; hint.style.display = on ? '' : 'none'; try { localStorage.setItem('as_help', on ? '1' : '0'); } catch {} fitBox(); }, 'ghost');
     helpBtn.title = 'Hướng dẫn thao tác';
@@ -7860,6 +7881,7 @@ async function pageSettings() {
   const wkExactChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_work_exact ?? '0') === '1' ? { checked: '' } : {}) });
   const wkNeedChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_need_pairs ?? '0') === '1' ? { checked: '' } : {}) });
   const pfbChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.pairs_fixed_break ?? '0') === '1' ? { checked: '' } : {}) });
+  const msaChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.multi_shift_assist ?? '0') === '1' ? { checked: '' } : {}) });
   // Phòng ban đi làm cuối tuần vẫn tính như NGÀY THƯỜNG (VD bảo vệ trực CN) — ngoại lệ của quy tắc trên
   const wkNormal = new Set((s.weekend_normal_depts || []).map(String));
   const wkNormBox = el('div', { style: 'display:flex;gap:6px 14px;flex-wrap:wrap;max-height:140px;overflow:auto' }, el('span', { class: 'map-hint' }, 'Đang tải phòng ban…'));
@@ -7892,7 +7914,7 @@ async function pageSettings() {
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -7913,6 +7935,12 @@ async function pageSettings() {
           el('label', { style: 'display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:600;color:var(--ink)' }, pfbChk,
             el('div', {}, 'Ca nghỉ trưa cố định + nhiều lần vào/ra: mỗi cặp quẹt TRỪ giờ nghỉ trưa',
               el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Giờ làm = phần của từng cặp nằm ngoài giờ nghỉ (vào lại sau giờ nghỉ thì mất phần chưa có mặt). Số lần quẹt lẻ (3, 5…): lấy lần đầu → cuối trừ giờ nghỉ.')))),
+        el('div', { style: 'margin-top:12px;padding:10px 12px;border:1px dashed var(--line, #d8dee6);border-radius:8px' },
+          el('div', { style: 'font-weight:700;color:var(--ink)' }, 'Nhân viên làm nhiều ca trong 1 ngày (ca gãy)'),
+          el('div', { style: 'font-size:12.5px;color:var(--muted);margin:2px 0 6px' }, 'Chỉ thêm phần HIỂN THỊ ở Bảng phân ca, KHÔNG đổi cách tính công. Mặc định TẮT — tắt thì mọi thứ y như cũ.'),
+          el('label', { style: 'display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:600;color:var(--ink)' }, msaChk,
+            el('div', {}, 'Bảng phân ca: đánh dấu ca đủ / thiếu / chồng giờ + Ctrl + bấm mã ca để cộng thêm ca',
+              el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Ô gán từ 2 ca có dấu ✓ (đủ ca), ✗ (ngày đã chấm mà thiếu công của ca đó), ⚠ (ca chồng giờ). Rê chuột vào ô xem chi tiết. Nhập Excel báo thêm ca chồng giờ.')))),
         el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkOtChk,
           el('div', {}, 'Đi làm vào ngày cuối tuần tính là TĂNG CA',
             el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Cả thời gian làm ngày đã tích ở trên thành tăng ca cuối tuần (không tính công thường). Báo cáo quy đổi 8 giờ = 1 công ở cột "Công TC cuối tuần". VD tích T7 → đi làm thứ 7 là tăng ca.'))),
