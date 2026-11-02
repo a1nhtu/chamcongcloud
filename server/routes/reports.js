@@ -6,6 +6,7 @@ import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
+import { multiMissingFn } from '../multi-shift.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
 import { customLeaveTypes } from '../leave-quota.js';
@@ -237,7 +238,7 @@ function loadRange(from, to, filter) {
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
-  return { from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt, shiftsById, hourly: formHourly(filter) };
+  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt, shiftsById, hourly: formHourly(filter) };
 }
 
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
@@ -348,6 +349,9 @@ function symbolOf(ctx, empId, date) {
   if ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) return 'X';   // ca tính cả ca là tăng ca: công 0 nhưng có làm
   return 'V';
 }
+// Công tắc "nhiều ca/ngày" BẬT: cột "Thiếu ca" ghi tên ca được gán mà ngày đó không có công (chỉ ghi chú). TẮT: ctx.missShift = null → không thêm cột nào.
+const MISS_COL = { key: 'missShift', label: 'Thiếu ca', w: 22 };
+const missDays = (ctx, empId, days) => days.map((d) => { const m = ctx.missShift(empId, d); return m ? `${d.slice(8)}/${d.slice(5, 7)}: ${m}` : ''; }).filter(Boolean).join('; ');
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
 const OT_LABEL = { thuong: 'Ngày thường', cuoi_tuan: 'Cuối tuần', le: 'Ngày lễ' };
 const DS_LABEL = {
@@ -472,6 +476,7 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'total', label: 'Tổng công', w: 10 }, ...(HOURLY ? [] : [{ key: 'otWk', label: 'Công TC cuối tuần', w: 11 }, { key: 'ot', label: 'OT (giờ)', w: 9 }]),
         { key: 'late', label: 'Trễ (lần)', w: 9 }, { key: 'early', label: 'Sớm (lần)', w: 9 },
         { key: 'absent', label: 'Vắng', w: 8 }, ...leaveCols(ctx),
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '', ...leaveCounts(ctx, e.id, days) };
@@ -489,6 +494,7 @@ function buildReportRaw(type, from, to, filter) {
           if (symbolOf(ctx, e.id, d) === 'V') absent++;
         }
         row.total = round2(total); row.otWk = round2(otWk); row.ot = round2(ot / 60); row.late = late; row.early = early; row.absent = absent;
+        if (ctx.missShift) row.missShift = missDays(ctx, e.id, days);
         return row;
       });
       return { title: `Bảng công ngang ${PERIOD}`, columns, rows };
@@ -543,9 +549,11 @@ function buildReportRaw(type, from, to, filter) {
         ...(ctx.leaveKinds.length ? ctx.leaveKinds.map((k) => ({ key: k.key, label: k.sym, w: 5 })) : [{ key: 'P', label: 'P', w: 5 }]),
         { key: 'L', label: 'L', w: 5 }, ...(ctx.compOff.size ? [{ key: 'NN', label: 'NN', w: 5 }] : []), { key: 'V', label: 'V', w: 5 }, { key: 'O', label: 'O', w: 5 },
         ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 9 }] : []),
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '', ...leaveCounts(ctx, e.id, days) };
+        if (ctx.missShift) row.missShift = missDays(ctx, e.id, days);
         const cnt = { X: 0, T: 0, P: 0, L: 0, V: 0, O: 0, NN: 0 };
         let mins = 0;
         for (const d of days) {
@@ -702,8 +710,10 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 }, { key: 'ot', label: 'OT (p)', w: 8 },
         ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 9 }] : []),
         { key: 'cong', label: 'Công', w: 7 }, { key: 'status', label: 'Trạng thái', w: 13 },
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = sortedResults().map((c) => ({
+        ...(ctx.missShift ? { missShift: ctx.missShift(c.employee_id, c.work_date) } : {}),
         date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)],
         code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
         inCa: c.shift_start || '', outCa: c.shift_end || '',
@@ -727,6 +737,7 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'cong', label: 'Công', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
         { key: 'ot', label: 'Tăng ca', w: 9 }, { key: 'gross', label: 'Tổng toàn bộ', w: 12 },
         { key: 'ca', label: 'Ca', w: 8 },
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = [];
       let stt = 0;
@@ -746,6 +757,7 @@ function buildReportRaw(type, from, to, filter) {
             cong: c ? round2(c.work_unit) : 0, gio: c ? round2((c.work_minutes || 0) / 60) : 0,
             ot: c ? round2((c.ot_min || 0) / 60) : 0, gross,
             ca: c ? (c.shift_name || 'HC') : (isLeave ? ctx.leaveDays.get(e.id + '|' + d).label : (symbolOf(ctx, e.id, d) || 'V')),
+            ...(ctx.missShift ? { missShift: ctx.missShift(e.id, d) } : {}),
           });
         }
       }
@@ -773,6 +785,7 @@ function buildReportRaw(type, from, to, filter) {
       columns.push({ key: 'late', label: 'Trễ', w: 7 }, { key: 'early', label: 'Sớm', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
         { key: 'cong', label: 'Công', w: 7 }, { key: 'ot', label: 'Tăng ca', w: 9 });
       if (ctx.leaveKinds.length) columns.push({ key: 'note', label: 'Nghỉ', w: 11 });
+      if (ctx.missShift) columns.push(MISS_COL);
 
 
       const rows = [];
@@ -793,6 +806,7 @@ function buildReportRaw(type, from, to, filter) {
             gio: c ? round2((c.work_minutes || 0) / 60) : 0, cong: c ? round2(c.work_unit) : 0,
             ot: c ? round2((c.ot_min || 0) / 60) : 0,
             note: isLeave ? ctx.leaveDays.get(k).label : '',
+            ...(ctx.missShift ? { missShift: ctx.missShift(e.id, d) } : {}),
           });
           rows.push(row);
         }
@@ -1569,6 +1583,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
       const meta = columns[col - 1];
       cell.border = allBorder;
       if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
+      if (meta.key === 'missShift' && cell.value) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; cell.font = { bold: true, color: { argb: 'FFB91C1C' } }; }   // công tắc nhiều ca bật: ô báo thiếu ca
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);
       if (col > 3 || multi) cell.alignment = { horizontal: col > 3 ? 'center' : 'left', vertical: 'middle', wrapText: multi };

@@ -90,3 +90,19 @@ export function multiAssistReport(keys) {
   }
   return { multiCells: n, overlapWarn: warn.slice(0, 20) };
 }
+
+// BÁO CÁO CÔNG: ca được gán mà ngày đó không có công của ca ấy ("báo thiếu ca"). Chỉ là chữ ghi chú ở báo cáo — không đổi công / giờ / lương.
+// Trả null khi công tắc TẮT (báo cáo y như cũ); bật → hàm (empId, 'YYYY-MM-DD') → 'Ca chiều, Ca đêm' ('' = không thiếu).
+// Dùng đúng phân tích ở trên (analyzeMultiDay), không tính lại. Ngày chưa có dòng công nào không tính (đã là vắng ở báo cáo).
+// Ca chồng giờ với một ca ĐÃ có công thì không coi là thiếu (làm Hành chính thì không thể làm thêm ca Sáng trùng giờ).
+export function multiMissingFn(from, to) {
+  if (!multiAssistOn()) return null;
+  const all = multiCells(from, to);
+  return (empId, date) => {
+    const m = all.get(empId + '|' + date);
+    if (!m) return '';
+    const okCodes = new Set(m.shifts.filter((s) => s.status === 'ok').map((s) => s.code));
+    const clash = (code) => m.overlap.some(([a, b]) => (a === code && okCodes.has(b)) || (b === code && okCodes.has(a)));
+    return m.shifts.filter((s) => s.status === 'missing' && !clash(s.code)).map((s) => s.name || s.code).join(', ');
+  };
+}

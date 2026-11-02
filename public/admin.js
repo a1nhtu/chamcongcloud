@@ -7389,7 +7389,7 @@ async function pageReport() {
           const isSym = type === 'symbol' && SYMBOL_COLOR[v];
           tr.append(el('td', {
             // white-space:pre-line: ô có nhiều lần vào/ra (máy chủ nối bằng xuống dòng) hiện mỗi cặp một dòng
-            style: (c.weekend ? 'background:#fffaf3;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
+            style: (c.weekend ? 'background:#fffaf3;' : '') + (c.key === 'missShift' && v ? 'background:#fee2e2;color:#b91c1c;font-weight:700;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
           }, v === '' || v == null ? '' : String(v)));
         }
         if (pinLefts) pinLefts.forEach((L, i) => { const td = tr.children[i]; if (td) { td.classList.add('pin'); td.style.left = L + 'px'; } });
