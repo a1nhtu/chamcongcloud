@@ -6431,11 +6431,11 @@ function lanScanModal() {
       const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key, udp: !!x.udp } });
       changed = true;
       cell.innerHTML = ''; cell.append(el('span', { class: 'pill ok' }, '✓ Đã trỏ — máy đang khởi động lại'));
-      // kết quả bật DHCP cổng dây LAN (server/zk/zk-tcp.ps1 set-svr)
-      const dn = o.info?.dhcp_note;
-      const dhcpMsg = dn === 'on' ? 'Đã bật DHCP: máy tự xin IP mới từ modem.'
-        : dn === 'fail' ? 'Máy không nhận lệnh bật DHCP — nếu máy không về, bật tay trên máy: Menu → Comm → Ethernet → DHCP.'
-        : dn === 'wifi' ? 'Máy đang nối Wi-Fi: phần mềm chưa bật DHCP Wi-Fi được — nếu máy không về, bật tay trên máy: Menu → Comm → Mạng không dây (Wi-Fi) → DHCP.'
+      // kết quả bật DHCP (server/zk/zk-tcp.ps1 set-svr): cổng dây LAN hoặc Wi-Fi
+      const dn = o.info?.dhcp_note, wf = o.info?.dhcp_if === 'wifi';
+      const dhcpMsg = dn === 'on' ? `Đã bật DHCP${wf ? ' Wi-Fi' : ''}: máy tự xin IP mới từ modem.`
+        : dn === 'fail' ? `Máy không nhận lệnh bật DHCP${wf ? ' Wi-Fi' : ''} — nếu máy không về, bật tay trên máy: ${wf ? 'Menu → Comm → Mạng không dây (Wi-Fi) → DHCP' : 'Menu → Comm → Ethernet → DHCP'}.`
+        : dn === 'wifi' ? 'Máy đang nối Wi-Fi nhưng không nhận lệnh DHCP Wi-Fi — nếu máy không về, bật tay trên máy: Menu → Comm → Mạng không dây (Wi-Fi) → DHCP.'
         : dn === 'tcp' ? 'Không bật DHCP vì phần mềm đang kết nối máy này theo IP (TCP/IP) — bật DHCP sẽ đổi IP, mất kết nối.' : '';
       if (dhcpMsg) cell.append(warn(dhcpMsg));
       toast(`Đã trỏ máy ${o.serial || x.ip} về ${o.domain}. Khoảng 1 phút sau máy hiện ở danh sách (Chờ duyệt).${dhcpMsg ? ' ' + dhcpMsg : ''}`, dn === 'fail' || dn === 'wifi' ? 'err' : 'ok');

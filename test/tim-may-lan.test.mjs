@@ -33,12 +33,15 @@ switch ($Action) {
     $st.svr_fun = '1'; $st.svr_mode = '1'; $st.svr_url = $From; if ($To) { $st.svr_port = $To }
     $st.restarted = [int]$st.restarted + 1; $st.proto = $Proto
     $note = ''
-    if ($Opt -eq 'dhcp' -and $st.dhcp -ne $null) {
-      if ($st.ipaddr -and $st.ipaddr -ne $Ip) { $note = 'wifi' } elseif ($st.dhcp -eq '1') { $note = 'keep' } elseif ($st.dhcp_ro) { $note = 'fail' } else { $st.dhcp = '1'; $note = 'on' }
+    $if = ''
+    if ($Opt -eq 'dhcp') {
+      $wifi = [bool]($st.ipaddr -and $st.ipaddr -ne $Ip); $k = $(if ($wifi) { 'wdhcp' } else { 'dhcp' }); $if = $(if ($wifi) { 'wifi' } else { 'lan' })
+      if ($st.$k -eq $null) { if ($wifi) { $note = 'wifi' } else { $if = '' } }
+      elseif ($st.$k -eq '1') { $note = 'keep' } elseif ($st.dhcp_ro) { $note = 'fail' } else { $st.$k = '1'; $note = 'on' }
     }
     $st | ConvertTo-Json | Set-Content $env:FAKE_ZK_STATE
     Out "I\`tsvr_url\`t$From"; Out "I\`tsvr_port\`t$($st.svr_port)"
-    if ($note) { Out "I\`tdhcp\`t$($st.dhcp)"; Out "I\`tdhcp_note\`t$note" }
+    if ($note) { Out "I\`tdhcp_note\`t$note"; Out "I\`tdhcp_if\`t$if" }
     Out "OK\`tset-svr"
   }
   default { Out "ERR\`tBADACTION\`t$Action"; exit 1 }
@@ -384,7 +387,7 @@ test('trỏ máy: DHCP tắt → bật DHCP cổng dây; đang bật thì giữ;
   setDev({ dhcp: '0', ipaddr: '127.0.0.1' });
   let { code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort });
   assert.equal(code, 200, JSON.stringify(out));
-  assert.equal(out.info.dhcp_note, 'on'); assert.equal(dev().dhcp, '1'); assert.equal(dev().restarted, 1);
+  assert.equal(out.info.dhcp_note, 'on'); assert.equal(out.info.dhcp_if, 'lan'); assert.equal(dev().dhcp, '1'); assert.equal(dev().restarted, 1);
   setDev({ dhcp: '1', ipaddr: '127.0.0.1' });
   ({ out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort }));
   assert.equal(out.info.dhcp_note, 'keep');
@@ -393,10 +396,15 @@ test('trỏ máy: DHCP tắt → bật DHCP cổng dây; đang bật thì giữ;
   assert.equal(out.info.dhcp_note, 'fail'); assert.equal(dev().dhcp, '0');
 });
 
-test('trỏ máy nối Wi-Fi (IP cổng dây khác IP đang nói chuyện): KHÔNG ghi DHCP cổng dây, báo bật tay Wi-Fi', { skip: !WIN }, async () => {
-  withDomain('abc1'); setDev({ dhcp: '0', ipaddr: '192.168.1.201' });
-  const { code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort });
+test('trỏ máy nối Wi-Fi (IP cổng dây khác IP đang nói chuyện): bật WirelessDHCP, KHÔNG đụng DHCP cổng dây', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({ dhcp: '0', wdhcp: '0', ipaddr: '192.168.1.201' });
+  let { code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort });
   assert.equal(code, 200, JSON.stringify(out));
+  assert.equal(out.info.dhcp_note, 'on'); assert.equal(out.info.dhcp_if, 'wifi');
+  assert.equal(dev().wdhcp, '1'); assert.equal(dev().dhcp, '0');
+  // máy Wi-Fi không có khoá WirelessDHCP → không ghi gì, báo bật tay
+  setDev({ dhcp: '0', ipaddr: '192.168.1.201' });
+  ({ code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort }));
   assert.equal(out.info.dhcp_note, 'wifi'); assert.equal(dev().dhcp, '0');
 });
 

@@ -246,22 +246,24 @@ try {
       if ((Clean $s) -ne $From) { $z.Disconnect(); Fail 'SETSVR' "Máy không nhận cài đặt máy chủ (đọc lại được: '$(Clean $s)'). Đặt tay trên máy: Menu → Comm → Cloud Server." }
       Out "I`tsvr_url`t$(Clean $s)"
       $s = ''; if ($z.GetSysOption($m, 'IclockSvrPort', [ref]$s)) { Out "I`tsvr_port`t$(Clean $s)" }
-      # $Opt = 'dhcp': bật DHCP cổng DÂY LAN (khoá DHCP) nếu đang tắt — máy IP tĩnh hay thiếu Gateway / DNS nên không gọi được tên miền.
-      # Chỉ bật khi IP đang nói chuyện = IP cổng dây (IPAddress). Khác → máy đang nối qua Wi-Fi: khoá DHCP này không phải của Wi-Fi
-      # (tên khoá Wi-Fi mỗi firmware một kiểu, chưa kiểm được) → không ghi gì, báo bật tay trên máy.
+      # $Opt = 'dhcp': bật DHCP nếu đang tắt — máy IP tĩnh hay thiếu Gateway / DNS nên không gọi được tên miền.
+      # IP đang nói chuyện = IP cổng dây (IPAddress) → khoá DHCP (cổng dây LAN). Khác → máy đang nối Wi-Fi → khoá WirelessDHCP
+      # (tên khoá hãng ZKTeco xác nhận với Anh 02/11/2026). Máy không có khoá đó (đọc không được) → không ghi, báo bật tay.
       if ($Opt -eq 'dhcp') {
+        $wip = ''; [void]$z.GetSysOption($m, 'IPAddress', [ref]$wip); $wip = Clean $wip
+        $wifi = [bool]($wip -and $wip -ne $Ip)
+        $k = $(if ($wifi) { 'WirelessDHCP' } else { 'DHCP' })
         $d = ''
-        if ($z.GetSysOption($m, 'DHCP', [ref]$d)) {
-          $d = Clean $d; $wip = ''; [void]$z.GetSysOption($m, 'IPAddress', [ref]$wip); $wip = Clean $wip
-          if ($wip -and $wip -ne $Ip) { $note = 'wifi' }
-          elseif ($d -eq '1') { $note = 'keep' }
+        if ($z.GetSysOption($m, $k, [ref]$d)) {
+          $d = Clean $d
+          if ($d -eq '1') { $note = 'keep' }
           else {
-            [void]$z.SetSysOption($m, 'DHCP', '1')
-            $d = ''; [void]$z.GetSysOption($m, 'DHCP', [ref]$d); $d = Clean $d   # nhiều firmware trả false dù đã ghi → đọc lại
+            [void]$z.SetSysOption($m, $k, '1')
+            $d = ''; [void]$z.GetSysOption($m, $k, [ref]$d); $d = Clean $d   # nhiều firmware trả false dù đã ghi → đọc lại
             $note = $(if ($d -eq '1') { 'on' } else { 'fail' })
           }
-          Out "I`tdhcp`t$d"; Out "I`tdhcp_note`t$note"
-        }
+          Out "I`tdhcp`t$d"; Out "I`tdhcp_note`t$note"; Out "I`tdhcp_if`t$(if ($wifi) { 'wifi' } else { 'lan' })"
+        } elseif ($wifi) { Out "I`tdhcp_note`twifi"; Out "I`tdhcp_if`twifi" }
       }
       [void]$z.RestartDevice($m); Out "OK`tset-svr"; exit 0
     }
