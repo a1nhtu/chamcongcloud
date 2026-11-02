@@ -7342,7 +7342,10 @@ async function pageReport() {
     const wrap = el('div', {});
     wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
     const H = formSel.value === 'hourly';
-    for (const [gname, cards0] of REPORT_GROUPS) {
+    // Công ty đã áp gói cài đặt (Cài đặt › Chế độ tính công): ghim báo cáo hay dùng của gói lên đầu (vẫn còn ở nhóm cũ). Chưa áp gói → như cũ.
+    const pin = Array.isArray(SETTINGS.profile_reports) ? SETTINGS.profile_reports : [];
+    const pinCards = pin.map((v) => REPORT_GROUPS.flatMap(([, cs]) => cs).find((c) => c[0] === v)).filter(Boolean);
+    for (const [gname, cards0] of [...(pinCards.length ? [['⭐ Hay dùng — ' + (SETTINGS.profile_name || ''), pinCards]] : []), ...REPORT_GROUPS]) {
       const cards = H ? cards0.map((c) => (REPORT_HOURLY_TEXT[c[0]] ? [c[0], c[1], ...REPORT_HOURLY_TEXT[c[0]]] : c)) : cards0;
       const list = cards.filter(([v]) => (!H || !REPORT_HOURLY_HIDE.includes(v)) && (auditOn() || !v.startsWith('audit3')));
       if (!list.length) continue;
@@ -7675,6 +7678,71 @@ function displayPanel(s) {
   return box;
 }
 
+// CHẾ ĐỘ TÍNH CÔNG (gói cài đặt) — tài khoản tổng chọn 1 gói = bật cả bộ công tắc có sẵn cho kiểu khách đó, xem trước từng ô, trả về được.
+// Admin công ty chỉ thấy dòng "Đang dùng: …" khi công ty đã áp gói; chưa áp gói → không hiện gì (như cũ).
+function profilePanel(s) {
+  if (!isMaster()) {
+    if (!s.profile || !hasPerm('settings')) return null;
+    return el('div', { class: 'panel', style: 'padding:14px 20px;max-width:600px;margin-bottom:16px' },
+      el('b', {}, '🧩 Chế độ tính công: '), s.profile_name || s.profile,
+      el('div', { class: 'map-hint', style: 'margin-top:4px' }, '🔒 Chỉ tài khoản tổng đổi được chế độ tính công.'));
+  }
+  // nội dung nạp sau vào `body` (giữ nguyên h3 của khung — trang Cài đặt dời h3 vào thanh thu gọn)
+  const body = el('div', {}, loading());
+  const box = el('div', { class: 'panel', style: 'padding:20px;max-width:600px;margin-bottom:16px' },
+    el('h3', { style: 'margin-top:0' }, '🧩 Chế độ tính công (gói cài đặt)'), body);
+  const yesNo = (v) => (v === '1' ? 'Bật' : 'Tắt');
+  const draw = (d) => {
+    body.replaceChildren();
+    const cur = d.list.find((p) => p.id === d.active);
+    body.append(el('div', { class: 'map-hint', style: 'margin-bottom:10px' },
+      'Bấm 1 lần là bật cả bộ công tắc tính công cho kiểu khách đó (thay vì tích từng ô). Gói chỉ đổi các ô có sẵn ở Quy tắc tính công — không thêm cách tính mới. Chưa áp gói nào thì mọi thứ như cũ. 🔒 Chỉ tài khoản tổng thấy mục này.'));
+    body.append(el('div', { style: 'margin-bottom:10px;font-size:14px' }, 'Đang dùng: ', cur ? el('b', { style: 'color:var(--ok,#16a34a)' }, cur.name) : el('b', { style: 'color:var(--muted)' }, 'Chung (chưa áp gói nào)')));
+    const sel = el('select', { style: 'width:auto;max-width:100%' }, ...d.list.map((p) => el('option', { value: p.id }, p.name)));
+    if (cur) sel.value = cur.id;
+    const detail = el('div', { style: 'display:flex;flex-direction:column;gap:8px;margin:10px 0' });
+    const applyBtn = el('button', { class: 'btn' }, 'Áp dụng gói');
+    const showDetail = () => {
+      const p = d.list.find((x) => x.id === sel.value);
+      const rows = p.preview.map((c) => el('tr', {},
+        el('td', { style: 'padding:4px 6px' }, c.label),
+        el('td', { style: 'padding:4px 6px;white-space:nowrap;text-align:center' }, yesNo(c.from), ' → ', el('b', { style: c.change ? 'color:#b45309' : '' }, yesNo(c.to)))));
+      const nChange = p.preview.filter((c) => c.change).length;
+      detail.replaceChildren(
+        el('div', { style: 'font-size:13px;color:var(--muted)' }, p.desc),
+        el('table', { style: 'width:100%;border-collapse:collapse;font-size:13px' },
+          el('tr', {}, el('th', { style: 'text-align:left;padding:4px 6px' }, 'Ô cài đặt'), el('th', { style: 'padding:4px 6px' }, 'Đang → Sẽ thành')), ...rows),
+        el('div', { style: 'font-size:13px' }, el('b', {}, 'Làm tay thêm sau khi áp:'), el('ul', { style: 'margin:4px 0 0 18px;padding:0' }, ...p.manual.map((m) => el('li', {}, m)))),
+        p.reports?.length ? el('div', { class: 'map-hint' }, 'Báo cáo hay dùng của gói được ghim lên đầu trang Báo cáo.') : null);
+      applyBtn.disabled = p.id === d.active && !nChange;
+      applyBtn.textContent = p.id === d.active ? (nChange ? `Áp lại gói (${nChange} ô đã bị đổi tay)` : 'Đang dùng gói này') : `Áp dụng gói (đổi ${nChange} ô)`;
+    };
+    sel.addEventListener('change', showDetail);
+    applyBtn.onclick = async () => {
+      const p = d.list.find((x) => x.id === sel.value);
+      if (!confirm(`Áp gói "${p.name}" cho công ty này?
+
+Các ô cài đặt ở bảng sẽ được đổi. Bấm "Trả về như trước" để khôi phục.`)) return;
+      try {
+        await api('/admin/settings/profile', { method: 'POST', body: { id: p.id } });
+        toast('Đã áp gói. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 900);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    const revertBtn = cur ? el('button', { class: 'btn ghost' }, '↩ Trả về như trước') : null;
+    if (revertBtn) revertBtn.onclick = async () => {
+      if (!confirm('Trả các ô cài đặt về đúng như trước khi áp gói?')) return;
+      try {
+        await api('/admin/settings/profile', { method: 'DELETE' });
+        toast('Đã trả về như trước. Bấm "↻ Tính lại công tất cả" nếu cần. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 900);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    body.append(el('div', {}, el('label', {}, 'Gói'), sel), detail, el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, applyBtn, revertBtn));
+    showDetail();
+  };
+  api('/admin/settings/profiles').then(draw).catch((e) => body.replaceChildren(el('div', { class: 'map-hint' }, e.message)));
+  return box;
+}
+
 async function pageSettings() {
   if (!DEPARTMENTS.length) { try { await loadRefs(); } catch {} }   // cần danh sách phòng ban cho mục đặt kiểu chấm công riêng
   setMain(head('Cài đặt'), loading());
@@ -7874,6 +7942,7 @@ async function pageSettings() {
 
   // ----- CẤU HÌNH HIỂN THỊ: bật phân hệ nào thì menu + app nhân viên hiện phân hệ đó (chỉ tài khoản tổng đổi) -----
   const panelDisplay = displayPanel(s);
+  const panelProfile = (hasPerm('settings') || isMaster()) && !attOff() ? profilePanel(s) : null;   // chế độ tính công (gói cài đặt)
 
   // ----- Quy tắc tính công -----
   const wkDays = new Set((s.weekend_days || '7').split(',').map(x => x.trim()).filter(Boolean));
@@ -8270,7 +8339,7 @@ async function pageSettings() {
       el('div', {}, lvSave))) : null;
   // ----- Công ảo / lương ảo (audit) — hạn mức tăng ca -----
   const panelAudit = auditOn() && hasPerm('settings') && !attOff() ? auditPanelEl(s) : null;
-  setMain(head('Cài đặt'), panel1, panelDisplay, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelAudit, panelHol, panelBackup, panelUpdate, panel2);
+  setMain(head('Cài đặt'), panel1, panelDisplay, panelProfile, panelLicense, panelInstall, panelNotify, panelMode, panelCalc, panelLeave, panelAudit, panelHol, panelBackup, panelUpdate, panel2);
   foldSettings($('#main'));   // mặc định thu gọn mọi khung, bấm tiêu đề / ▶ để mở
   if (hasPerm('holidays') && !hourlyMode() && !attOff()) loadHols();
   if (hasPerm('backup')) loadBackups();

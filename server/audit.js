@@ -30,6 +30,8 @@ const LABELS = {
   'PUT /shifts/:id': 'Sửa ca làm',
   'DELETE /shifts/:id': 'Xóa ca làm',
   'PUT /settings': 'Đổi cài đặt hệ thống',
+  'POST /settings/profile': 'Áp gói cài đặt (chế độ tính công)',
+  'DELETE /settings/profile': 'Trả về cài đặt trước khi áp gói',
   'POST /branding': 'Đổi logo / thương hiệu',
   'POST /update/apply': 'Cập nhật phần mềm',
   'PUT /salary/:empId': 'Sửa cấu hình lương',

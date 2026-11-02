@@ -4,6 +4,7 @@ import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
 import { checkUpdate, startUpdate, updateStatus, currentVersion, updateConfig } from '../../update.js';
 import { auditAllowed } from '../../virtual-att.js';
 import { cfg, MULTI } from '../../tenant.js';
+import { PROFILES, activeProfile, previewProfile, applyProfile, revertProfile } from '../../profiles.js';
 
 export function registerSettingsRoutes(r, { need, adminOnly }) {
   /* ----------------------------- CÀI ĐẶT ----------------------------- */
@@ -57,7 +58,8 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       meal_self_order: getSetting('meal_self_order', '1'), meal_dish_choice: getSetting('meal_dish_choice', '1'), meal_dept_head: getSetting('meal_dept_head', '1'),
       meal_machine_signup: getSetting('meal_machine_signup', '0'),   // Báo cơm bằng quẹt máy chấm công (mặc định TẮT)
       meal_ingredient: getSetting('meal_ingredient', '0'),   // Định lượng nguyên liệu + kho bếp (mặc định TẮT)
-      pay_pro: req.forceVirt ? '0' : getSetting('pay_pro', '0'),   // TIỀN LƯƠNG NÂNG CAO (BH, thuế, thành phần lương…) — mặc định TẮT, chỉ tài khoản tổng bật
+      pay_pro: req.forceVirt ? '0' : getSetting('pay_pro', '0'),
+      ...(() => { const p = activeProfile(); return p ? { profile: p.id, profile_name: p.name, profile_reports: p.reports } : {}; })(),   // GÓI CÀI ĐẶT đang dùng (chưa áp gói → không có 3 trường này)   // TIỀN LƯƠNG NÂNG CAO (BH, thuế, thành phần lương…) — mặc định TẮT, chỉ tài khoản tổng bật
       ...(auditAllowed(req.user) && !req.forceVirt ? {
         audit_ot_day_min: getSetting('audit_ot_day_min', '0'), audit_ot_week_h: getSetting('audit_ot_week_h', '0'),
         audit_ot_month_h: getSetting('audit_ot_month_h', '0'), audit_ot_year_h: getSetting('audit_ot_year_h', '0'),
@@ -207,6 +209,17 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.update_branch != null) setSetting('update_branch', String(b.update_branch).trim() || 'main');
     res.json({ ok: true });
   });
+
+  /* ----------------------- GÓI CÀI ĐẶT (chế độ tính công) — chỉ tài khoản tổng ----------------------- */
+  const masterOnly = (req, res, next) => (req.user?.master ? next() : res.status(403).json({ error: 'Chỉ tài khoản tổng (Digiplus) đổi được chế độ tính công' }));
+  r.get('/settings/profiles', masterOnly, (req, res) => {
+    res.json({ active: activeProfile()?.id || '', list: PROFILES.map((p) => ({ id: p.id, name: p.name, desc: p.desc, manual: p.manual, reports: p.reports, preview: previewProfile(p.id) })) });
+  });
+  r.post('/settings/profile', masterOnly, (req, res) => {
+    try { res.json({ ok: true, changes: applyProfile(String(req.body?.id || '')) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
+  });
+  r.delete('/settings/profile', masterOnly, (req, res) => res.json({ ok: revertProfile() }));
 
   // Logo công ty: upload (dataURL base64) hoặc xoá → hiện ở màn đăng nhập + app nhân viên
   r.post('/branding', need('settings'), (req, res) => {
