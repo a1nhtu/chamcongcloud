@@ -4012,10 +4012,9 @@ async function pageEditAtt() {
   const deptPick = new Set(), empPick = new Set();
   const deptCl = makeChecklist('🏢', 'Cả công ty', () => deptTreeItems(depts), deptPick, () => { empPick.clear(); empCl.sync(); load(); });
   const empCl = makeChecklist('👥', 'Tất cả NV', () => { const ex = deptExpand(deptPick); return emps.filter(e => !deptPick.size || ex.has(e.department || '')).map(e => ({ value: e.id, text: `${e.full_name} (${e.code})` })); }, empPick, () => load());
-  const fmt = (d) => d.toISOString().slice(0, 10);
-  const now = new Date();
-  const fromI = el('input', { type: 'date', value: fmt(new Date(now.getFullYear(), now.getMonth(), 1)), style: 'width:auto' });
-  const toI = el('input', { type: 'date', value: fmt(now), style: 'width:auto' });
+  // ngày theo giờ VN (toISOString là giờ UTC → lùi 1 ngày)
+  const fromI = el('input', { type: 'date', value: todayVN().slice(0, 8) + '01', style: 'width:auto' });
+  const toI = el('input', { type: 'date', value: todayVN(), style: 'width:auto' });
 
   let view = 'detail';
   const viewBar = el('div', { style: 'display:inline-flex;gap:6px' });
@@ -5477,10 +5476,8 @@ async function pageLogs() {
   const LIMIT = 200;
   const st = { admin: { rows: [], total: 0 }, device: { rows: [], total: 0 } };
 
-  const fmt = (d) => d.toISOString().slice(0, 10);
-  const now = new Date();
-  const fromI = el('input', { type: 'date', value: fmt(new Date(now.getTime() - 29 * 86400000)), style: 'width:auto' });
-  const toI = el('input', { type: 'date', value: fmt(now), style: 'width:auto' });
+  const fromI = el('input', { type: 'date', value: addDays(todayVN(), -29), style: 'width:auto' });
+  const toI = el('input', { type: 'date', value: todayVN(), style: 'width:auto' });
   const qI = el('input', { type: 'search', placeholder: 'Tìm thao tác / người…', style: 'width:190px' });
   const serialSel = el('select', { style: 'width:auto' }, el('option', { value: '' }, 'Tất cả máy'));
   const serialWrap = el('span', { style: 'display:none' }, serialSel);
@@ -6936,9 +6933,7 @@ function legacyImportModal() {
 // Tải lại log chấm công CŨ từ máy theo khoảng ngày (DATA QUERY ATTLOG)
 function deviceAttlogModal(m) {
   const fromI = el('input', { type: 'date' }), toI = el('input', { type: 'date' });
-  const today = new Date().toISOString().slice(0, 10);
-  const d30 = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
-  fromI.value = d30; toI.value = today;
+  fromI.value = addDays(todayVN(), -30); toI.value = todayVN();
   const go = el('button', { class: 'btn' }, '⬇ Tải log về');
   go.onclick = async () => {
     if (!fromI.value || !toI.value) return toast('Chọn khoảng ngày', 'err');

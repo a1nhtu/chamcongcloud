@@ -515,7 +515,7 @@ async function renderDontu() {
       <button class="btn block" id="lv-submit">Gửi đơn</button>
     </div>`;
   c.append(form);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });   // ngày giờ VN, không lấy UTC
   form.querySelector('#lv-from').value = today; form.querySelector('#lv-to').value = today;
   form.querySelector('#lv-submit').addEventListener('click', submitLeave);
   // lý do nghỉ công ty tự khai báo → thêm vào danh sách loại đơn (trước mục "Khác")
