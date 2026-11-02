@@ -7535,7 +7535,7 @@ async function restoreBackup(file) {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) { toast(j.error || 'Lỗi phục hồi', 'err'); return; }
   if (j.applied) { alert('✅ Đã phục hồi dữ liệu. Trang sẽ tải lại.'); location.reload(); return; }   // máy chủ Digiplus: áp ngay
-  alert('✅ Đã nạp bản sao lưu.\n\nBây giờ hãy KHỞI ĐỘNG LẠI phần mềm (tắt rồi mở lại) để hoàn tất phục hồi dữ liệu.');
+  alert('✅ Đã nạp bản sao lưu.\n\nBây giờ hãy KHỞI ĐỘNG LẠI MÁY TÍNH để hoàn tất phục hồi dữ liệu.');
 }
 async function restoreFullBackup(file) {
   const buf = await file.arrayBuffer();
@@ -7543,7 +7543,7 @@ async function restoreFullBackup(file) {
   const j = await res.json().catch(() => ({}));
   if (!res.ok) { toast(j.error || 'Lỗi phục hồi', 'err'); return; }
   if (j.applied) { alert('✅ Đã phục hồi TOÀN BỘ (dữ liệu + ảnh + logo). Trang sẽ tải lại.'); location.reload(); return; }
-  alert('✅ Đã nạp bản sao lưu TOÀN BỘ (dữ liệu + ảnh + logo).\n\nBây giờ hãy KHỞI ĐỘNG LẠI phần mềm (tắt rồi mở lại) để hoàn tất.');
+  alert('✅ Đã nạp bản sao lưu TOÀN BỘ (dữ liệu + ảnh + logo).\n\nBây giờ hãy KHỞI ĐỘNG LẠI MÁY TÍNH để hoàn tất.');
 }
 const fmtSize = (b) => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
 
@@ -8074,7 +8074,7 @@ async function pageSettings() {
     };
     bkBox.append(el('div', { style: 'margin-top:16px;padding-top:14px;border-top:1px solid #eee' },
       el('div', { style: 'font-weight:700;margin-bottom:8px' }, 'Phục hồi dữ liệu (khi cài lại máy / chuyển VPS)'),
-      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, 'Chọn file .db (chỉ dữ liệu) hoặc .zip (toàn bộ: dữ liệu + ảnh + logo) rồi bấm Phục hồi. Sau đó khởi động lại phần mềm.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, 'Chọn file .db (chỉ dữ liệu) hoặc .zip (toàn bộ: dữ liệu + ảnh + logo) rồi bấm Phục hồi. Sau đó khởi động lại máy tính.'),
       el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, fileI, restoreBtn)));
   };
   const panelBackup = hasPerm('backup') ? el('div', { class: 'panel', style: 'padding:20px;max-width:560px;margin-bottom:16px' },

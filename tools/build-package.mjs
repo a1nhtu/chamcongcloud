@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, writeFileSync, rmSync, existsSync, copyFileSync, rea
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { CHAY_APP_BAT } from '../server/autostart.js';
+import { CHAY_APP_BAT, GO_CAI_DAT_BAT } from '../server/autostart.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = process.env.DIST_DIR || join(ROOT, 'dist-khach');   // DIST_DIR: đóng gói ra chỗ khác (không đụng dist-khach)
@@ -154,27 +154,7 @@ pause
 
 // GoCaiDat.bat: gỡ autostart + dừng — CHỈ tắt instance của CỔNG này
 // (an toàn khi nhiều khách chạy chung 1 VPS: KHONG taskkill node/cloudflared tong the).
-writeFileSync(join(OUT, 'GoCaiDat.bat'),
-`@echo off
-chcp 65001 >nul
-cd /d "%~dp0"
-set "PORT=8686"
-for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
-echo Dang go cai dat instance cong %PORT% (KHONG dung khach khac tren may/VPS)...
-del "%APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\DigiplusChamCong-%PORT%.lnk" 2>nul
-schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
-schtasks /Delete /TN "Digiplus-%PORT%-logon" /F >nul 2>&1
-netsh advfirewall firewall delete rule name=all program="%~dp0runtime\\node.exe" >nul 2>&1
-netsh advfirewall firewall delete rule name="Digiplus Union 9870" >nul 2>&1
-for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
-rem Dung cloudflared cua CHINH thu muc nay (khach khac tren cung may khong bi dung)
-set "CF_EXE=%~dp0cloudflared.exe"
-powershell -NoProfile -Command "Get-Process cloudflared -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $env:CF_EXE } | Stop-Process -Force -ErrorAction SilentlyContinue" >nul 2>&1
-echo Da go autostart + dung app cong %PORT%.
-echo Du lieu trong app\\data va app\\uploads van con.
-if /i "%~1"=="silent" exit /b 0
-pause
-`);
+writeFileSync(join(OUT, 'GoCaiDat.bat'), GO_CAI_DAT_BAT);
 
 // Hướng dẫn cho khách (UTF-8 tiếng Việt)
 writeFileSync(join(OUT, 'HUONG-DAN.txt'),
@@ -209,6 +189,18 @@ CÀI LẠI WINDOWS (KHÔNG MẤT DỮ LIỆU):
    giữ nguyên dữ liệu và cấu hình, KHÔNG cần khôi phục bản sao lưu.
 4. Cài lại Win thì "Mã máy" đổi, license cũ không dùng được. Mở trang quản lý, gửi Mã máy mới cho
    Digiplus để cấp lại license, dán vào là dùng tiếp (dữ liệu cũ vẫn còn đủ).
+
+CHUYỂN SANG MÁY MỚI:
+1. Máy cũ: mở trang quản lý, phần Sao lưu, bấm "Sao lưu TOÀN BỘ (.zip)". Chép file .zip sang máy mới,
+   KHÔNG giải nén.
+2. Máy cũ: gỡ "Digiplus Chấm Công" trong Apps của Windows, rồi KHỞI ĐỘNG LẠI máy cũ.
+   Phải xong bước này mới cài máy mới. Còn sót tunnel ở máy cũ thì tên miền báo lỗi 502.
+3. Máy mới: chạy Setup.exe. Bản có tên miền thì nhập ĐÚNG tên khách cũ, giữ nguyên cổng gợi ý.
+4. Máy mới: mở trang quản lý, gửi Mã máy mới cho Digiplus, dán license vừa nhận.
+5. Máy mới: đăng nhập admin / admin123, phần Sao lưu, chọn file .zip, bấm Phục hồi,
+   rồi KHỞI ĐỘNG LẠI máy mới. Từ đây đăng nhập bằng tài khoản cũ.
+6. Máy chấm công khai bằng tên miền: không phải đổi gì. Khai bằng IP máy tính: đặt máy mới
+   trùng IP máy cũ, hoặc sửa lại IP trên máy chấm công.
 
 Hỗ trợ: Digiplus.
 `);

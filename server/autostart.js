@@ -30,6 +30,49 @@ powershell -NoProfile -Command "if(@(Get-Process cloudflared -ErrorAction Silent
 if not errorlevel 1 start "" /b "%~dp0cloudflared.exe" tunnel run --token %TUNNEL_TOKEN%
 `;
 
+// Nội dung GoCaiDat.bat (nguồn DUY NHẤT — bộ cài cũng lấy từ đây; trình gỡ cài đặt gọi file này).
+// App tự ghi lại file khi khởi động: bản cài trước 9/10/2026 có GoCaiDat KHÔNG tắt cloudflared, gỡ xong node tắt mà tunnel còn
+// → tên miền lỗi 502 tới khi khởi động lại máy cũ. CHỈ tắt theo thư mục này + token này, khách khác trên cùng VPS không ảnh hưởng.
+// Có nhãn goto nên dùng CRLF (cmd đọc nhãn trong file chỉ có LF dễ trượt).
+export const GO_CAI_DAT_BAT = String.raw`@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+rem Tham so: silent = trinh go cai dat goi (da co quyen Admin, khong pause)
+set "SILENT="
+if /i "%~1"=="silent" set "SILENT=1"
+if defined SILENT goto main
+net session >nul 2>&1
+if %errorlevel%==0 goto main
+powershell -NoProfile -Command "try { Start-Process -FilePath '%~f0' -Verb RunAs; exit 0 } catch { exit 1 }" >nul 2>&1
+if %errorlevel%==0 exit /b
+echo !! Can quyen Admin moi go duoc. Chuot phai file nay, chon Run as administrator.
+pause
+exit /b 1
+:main
+set "PORT=8686"
+set "TUNNEL_TOKEN="
+for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"
+echo Dang go cai dat instance cong %PORT% (KHONG dung khach khac tren may/VPS)...
+del "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\DigiplusChamCong-%PORT%.lnk" 2>nul
+schtasks /Delete /TN "Digiplus-%PORT%" /F >nul 2>&1
+schtasks /Delete /TN "Digiplus-%PORT%-logon" /F >nul 2>&1
+netsh advfirewall firewall delete rule name=all program="%~dp0runtime\node.exe" >nul 2>&1
+netsh advfirewall firewall delete rule name="Digiplus Union 9870" >nul 2>&1
+for /f "tokens=*" %%p in ('powershell -NoProfile -Command "(@(Get-NetTCPConnection -LocalPort %PORT% -State Listen -ErrorAction SilentlyContinue))[0].OwningProcess"') do taskkill /f /pid %%p >nul 2>&1
+rem Tat node + cloudflared cua CHINH thu muc nay; cloudflared con nhan theo token (phong khi thu muc da doi ten / doi cho)
+set "DGP_DIR=%~dp0"
+powershell -NoProfile -Command "$m={ @(Get-WmiObject Win32_Process | Where-Object { ($_.Name -eq 'node.exe' -or $_.Name -eq 'cloudflared.exe') -and (($_.ExecutablePath -and $_.ExecutablePath.StartsWith($env:DGP_DIR,'OrdinalIgnoreCase')) -or ($env:TUNNEL_TOKEN -and $_.Name -eq 'cloudflared.exe' -and $_.CommandLine -and $_.CommandLine.Contains($env:TUNNEL_TOKEN))) }) }; foreach($p in (& $m)){ Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue }; Start-Sleep -Seconds 2; if((& $m).Count -gt 0){exit 1}else{exit 0}" >nul 2>&1
+set "CON="
+if errorlevel 1 set "CON=1"
+schtasks /Query /TN "Digiplus-%PORT%" >nul 2>&1 && set "CON=1"
+schtasks /Query /TN "Digiplus-%PORT%-logon" >nul 2>&1 && set "CON=1"
+if defined CON echo !! CHUA GO HET phan mem cong %PORT%. Hay khoi dong lai may tinh roi chay lai file nay bang Run as administrator.
+if not defined CON echo Da go tu bat, da tat phan mem va tunnel cong %PORT%.
+echo Du lieu trong app\data va app\uploads van con.
+if defined SILENT exit /b 0
+pause
+`.replace(/\r?\n/g, '\r\n');
+
 const run = (file, args) => new Promise((resolve) => {
   execFile(file, args, { windowsHide: true, timeout: 30000 }, (err) => resolve(!err));
 });
@@ -42,7 +85,7 @@ export async function ensureAutostart(opts = {}) {
   const vbs = join(root, 'start-hidden.vbs');
   // Chỉ làm trên BẢN CÀI của khách (có runtime\node.exe + start-hidden.vbs); máy dev thì bỏ qua
   if (process.platform !== 'win32' || !existsSync(join(root, 'runtime', 'node.exe')) || !existsSync(vbs)) return { skipped: true };
-  const out = { bat: false, task: false, shortcut: false };
+  const out = { bat: false, go: false, task: false, shortcut: false };
 
   // 1) ChayApp.bat bản mới (chống bật trùng) — phải có trước khi thêm đường tự bật thứ hai
   try {
@@ -50,6 +93,12 @@ export async function ensureAutostart(opts = {}) {
     const cur = existsSync(batPath) ? readFileSync(batPath, 'latin1').replace(/\r\n/g, '\n') : '';
     if (cur !== CHAY_APP_BAT) { writeFileSync(batPath, CHAY_APP_BAT, 'latin1'); out.bat = true; }
   } catch (e) { console.error('[autostart] không ghi được ChayApp.bat:', e.message); return out; }
+  // GoCaiDat.bat bản mới (nút Cập nhật không thay file này, trình gỡ cài đặt lại gọi nó)
+  try {
+    const goPath = join(root, 'GoCaiDat.bat');
+    const cur = existsSync(goPath) ? readFileSync(goPath, 'latin1') : '';
+    if (cur !== GO_CAI_DAT_BAT) { writeFileSync(goPath, GO_CAI_DAT_BAT, 'latin1'); out.go = true; }
+  } catch (e) { console.error('[autostart] không ghi được GoCaiDat.bat:', e.message); }
 
   // 2a) Lịch tự bật lúc ĐĂNG NHẬP (cần quyền Admin/SYSTEM). Có rồi thì thôi.
   const taskName = `Digiplus-${port}-logon`;
