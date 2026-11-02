@@ -377,7 +377,7 @@ export function registerDeviceRoutes(r, { need }) {
       // theo IP (máy TCP/IP): DHCP đổi IP máy → mất kết nối TCP/IP.
       const tcpDev = db.prepare("SELECT name FROM push_devices WHERE conn_type='tcp' AND tcp_ip=?").get(c.tcp_ip);
       const info = await zkCareful(c, (cc) => tcpSetServer(cc, domain, before.svr_port, { dhcp: req.body?.dhcp !== false && !tcpDev }));
-      if (tcpDev && req.body?.dhcp !== false) info.dhcp_note = 'tcp';
+      if (tcpDev && req.body?.dhcp !== false) info.dhcp_skip = 'tcp';
       res.json({ ok: true, domain, serial: before.serial || '', before, info });
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });

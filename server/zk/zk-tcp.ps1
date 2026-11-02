@@ -247,23 +247,22 @@ try {
       Out "I`tsvr_url`t$(Clean $s)"
       $s = ''; if ($z.GetSysOption($m, 'IclockSvrPort', [ref]$s)) { Out "I`tsvr_port`t$(Clean $s)" }
       # $Opt = 'dhcp': bật DHCP nếu đang tắt — máy IP tĩnh hay thiếu Gateway / DNS nên không gọi được tên miền.
-      # IP đang nói chuyện = IP cổng dây (IPAddress) → khoá DHCP (cổng dây LAN). Khác → máy đang nối Wi-Fi → khoá WirelessDHCP
-      # (tên khoá hãng ZKTeco xác nhận với Anh 02/11/2026). Máy không có khoá đó (đọc không được) → không ghi, báo bật tay.
+      # Bật CẢ HAI cổng, khoá nào máy có (đọc được) thì bật khoá đó: DHCP (dây LAN) + WirelessDHCP (Wi-Fi, tên khoá hãng ZKTeco
+      # xác nhận 02/11/2026). Không đoán máy đang nối cổng nào bằng IP: khi cổng dây bật DHCP, IPAddress có firmware còn giữ IP
+      # tĩnh cũ → đoán nhầm (Anh chốt 02/11). Cổng không dùng mà bật DHCP thì không ảnh hưởng, đổi cổng sau này máy vẫn tự về.
       if ($Opt -eq 'dhcp') {
-        $wip = ''; [void]$z.GetSysOption($m, 'IPAddress', [ref]$wip); $wip = Clean $wip
-        $wifi = [bool]($wip -and $wip -ne $Ip)
-        $k = $(if ($wifi) { 'WirelessDHCP' } else { 'DHCP' })
-        $d = ''
-        if ($z.GetSysOption($m, $k, [ref]$d)) {
+        foreach ($p in @(@('lan', 'DHCP'), @('wifi', 'WirelessDHCP'))) {
+          $d = ''
+          if (-not $z.GetSysOption($m, $p[1], [ref]$d)) { continue }   # máy không có cổng / khoá này
           $d = Clean $d
           if ($d -eq '1') { $note = 'keep' }
           else {
-            [void]$z.SetSysOption($m, $k, '1')
-            $d = ''; [void]$z.GetSysOption($m, $k, [ref]$d); $d = Clean $d   # nhiều firmware trả false dù đã ghi → đọc lại
+            [void]$z.SetSysOption($m, $p[1], '1')
+            $d = ''; [void]$z.GetSysOption($m, $p[1], [ref]$d); $d = Clean $d   # nhiều firmware trả false dù đã ghi → đọc lại
             $note = $(if ($d -eq '1') { 'on' } else { 'fail' })
           }
-          Out "I`tdhcp`t$d"; Out "I`tdhcp_note`t$note"; Out "I`tdhcp_if`t$(if ($wifi) { 'wifi' } else { 'lan' })"
-        } elseif ($wifi) { Out "I`tdhcp_note`twifi"; Out "I`tdhcp_if`twifi" }
+          Out "I`tdhcp_$($p[0])`t$note"
+        }
       }
       [void]$z.RestartDevice($m); Out "OK`tset-svr"; exit 0
     }
