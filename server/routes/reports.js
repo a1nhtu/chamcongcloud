@@ -351,6 +351,8 @@ function symbolOf(ctx, empId, date) {
 }
 // Công tắc "nhiều ca/ngày" BẬT: cột "Thiếu ca" ghi tên ca được gán mà ngày đó không có công (chỉ ghi chú). TẮT: ctx.missShift = null → không thêm cột nào.
 const MISS_COL = { key: 'missShift', label: 'Thiếu ca', w: 22 };
+const MISS_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
+const MISS_FONT = { bold: true, color: { argb: 'FFB91C1C' } };
 const missDays = (ctx, empId, days) => days.map((d) => { const m = ctx.missShift(empId, d); return m ? `${d.slice(8)}/${d.slice(5, 7)}: ${m}` : ''; }).filter(Boolean).join('; ');
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
 const OT_LABEL = { thuong: 'Ngày thường', cuoi_tuan: 'Cuối tuần', le: 'Ngày lễ' };
@@ -514,6 +516,7 @@ function buildReportRaw(type, from, to, filter) {
         ...(HOURLY ? [] : otColDefs(ctx).map(([key, label]) => ({ key, label, grp: 'Tăng ca', w: 7 }))),
         { key: 'V', label: 'V', w: 6 }, ...leaveCols(ctx, true).map((c) => ({ ...c, w: 8 })),
         { key: 'lateN', label: 'Trễ', w: 6 }, { key: 'earlyN', label: 'Sớm', w: 6 },
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       let stt = 0;
       const rows = ctx.employees.map((e) => {
@@ -534,6 +537,7 @@ function buildReportRaw(type, from, to, filter) {
         }
         for (const k in ot) row[k] = round2(ot[k] / 60);
         Object.assign(row, { gio: round2(mins / 60), V, lateN, earlyN });
+        if (ctx.missShift) row.missShift = missDays(ctx, e.id, days);
         return row;
       });
       return { title: `Bảng thống kê chấm công (giờ) ${PERIOD}`, columns, rows };
@@ -575,9 +579,11 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
         { key: 'total', label: HOURLY ? 'Tổng giờ' : 'Tổng công', w: 10 },
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = ctx.employees.map((e) => {
         const row = { code: e.code, name: e.full_name, dept: e.department || '' };
+        if (ctx.missShift) row.missShift = missDays(ctx, e.id, days);
         let total = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
@@ -610,6 +616,7 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 12 }, { key: 'loai', label: 'Chỉ tiêu', w: 12 },
         ...dayCols, { key: 'total', label: 'Tổng', w: 9 },
+        ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = [];
       for (const e of ctx.employees) {
@@ -633,6 +640,7 @@ function buildReportRaw(type, from, to, filter) {
           if (c) { totalMin += c.work_minutes || 0; otMin += c.ot_min || 0; }
         }
         rIn.total = ''; rCong.total = round2(totalMin / 60); rOt.total = round2(otMin / 60);
+        if (ctx.missShift) rIn.missShift = missDays(ctx, e.id, days);
         rows.push(rIn, rCong, ...(HOURLY ? [] : [rOt]));
       }
       return { title: `${HOURLY ? 'Giờ làm theo ngày' : 'Giờ công & tăng ca'} ${PERIOD}`, columns, rows };
@@ -646,10 +654,15 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'stt', label: 'STT', w: 5 }, { key: 'code', label: 'Mã nhân viên', w: 12 }, { key: 'name', label: 'Tên nhân viên', w: 20 }, { key: 'hire', label: 'Ngày vào', w: 11 },
         { key: 'cong', label: 'Ngày công', w: 9 }, { key: 'gio', label: HOURLY ? 'Tổng giờ' : 'Giờ công', w: 9 }, ...leaveCols(ctx, true),
         { key: 'otNT', label: 'Tăng ca ngày thường (giờ)', w: 11 }, { key: 'otNN', label: 'Tăng ca ngày nghỉ / lễ (giờ)', w: 11 },
+        ...(ctx.missShift ? [MISS_COL] : []),
         { key: 'loai', label: 'Chỉ tiêu', w: 9 }, ...dayCols,
       ];
       const rows = []; let stt = 0;
-      for (const e of ctx.employees) rows.push(...t6.rowsOf(e, ++stt));
+      for (const e of ctx.employees) {
+        const rs = t6.rowsOf(e, ++stt);
+        if (ctx.missShift) rs[0].missShift = missDays(ctx, e.id, days);
+        rows.push(...rs);
+      }
       return { title: `Bảng theo dõi chấm công ${PERIOD}`, columns, rows };
     }
 
@@ -1071,6 +1084,10 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
       }
     }
     r += nBlockRows;
+    if (ctx.missShift) {   // công tắc nhiều ca BẬT: ca được gán mà không có công trong kỳ (chỉ ghi chú)
+      const mv = missDays(ctx, e.id, days);
+      if (mv) { box(r, 1, r, NC, 'Thiếu ca: ' + mv, { font: MISS_FONT, fill: MISS_FILL, alignment: { ...L, wrapText: true } }); ws.getRow(r).height = 20 + 14 * Math.floor(mv.length / 90); r++; }
+    }
     box(r, 1, r, NC, onlyLateEarly ? 'Chi tiết các ngày đi muộn / về sớm' : 'Chi tiết', { font: { bold: true }, alignment: C }); r++;
     // Tiêu đề bảng 2 dòng
     for (let i = 0; i < NC; i++) {
@@ -1169,6 +1186,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
       cell.border = border;
       cell.alignment = { horizontal: c.key === 'name' || c.key === 'dept' ? 'left' : 'center', vertical: 'middle' };
       if (c.weekend) cell.fill = weekendFill;
+      if (c.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }
     }
     r++;
   }
@@ -1197,7 +1215,8 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   const NP = maxPairs(ctx, ioOf, days);   // nhiều lần vào/ra → mỗi ngày 2 × NP cột, mỗi lần chấm 1 cột
   const PER = NP * 2;
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
-  const totalCols = FIXED + days.length * PER;
+  const missCol = ctx.missShift ? FIXED + days.length * PER + 1 : 0;   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" cuối bảng
+  const totalCols = missCol || FIXED + days.length * PER;
   const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
   const ws = wb.addWorksheet('GioCong');
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
@@ -1221,6 +1240,7 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
     if (NP > 1) for (let p = 0; p < NP; p++) { ws.getCell(H + 1, c1 + p * 2).value = 'Vào ' + (p + 1); ws.getCell(H + 1, c1 + p * 2 + 1).value = 'Ra ' + (p + 1); }
     else { ws.mergeCells(H + 1, c1, H + 1, c1 + 1); ws.getCell(H + 1, c1).value = wd; }
   });
+  if (missCol) { ws.mergeCells(H, missCol, H + 1, missCol); ws.getCell(H, missCol).value = MISS_COL.label; }
   for (let r = H; r <= H + 1; r++) {
     for (let c = 1; c <= totalCols; c++) {
       const cell = ws.getCell(r, c);
@@ -1270,12 +1290,21 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
       }
     }
     for (let i = 1; i <= FIXED; i++) ws.getCell(rIn, i).border = border;
+    if (missCol) {
+      const mv = missDays(ctx, e.id, days);
+      mergeFast(ws, rIn, missCol, rIn + NR - 1, missCol);
+      const mc = ws.getCell(rIn, missCol);
+      Object.assign(mc, { value: mv, alignment: { vertical: 'middle', wrapText: true } });
+      for (let k = 0; k < NR; k++) ws.getCell(rIn + k, missCol).border = border;
+      if (mv) { mc.fill = MISS_FILL; mc.font = MISS_FONT; }
+    }
     r += NR;
   }
   if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
 
   ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
   for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
+  if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
   ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1299,6 +1328,7 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
   const HR = ctx.hourly, TR = trackRows(ctx), NR = TR.length;
   const fixed = [['STT', 5], ['Mã nhân viên', 12], ['Tên nhân viên', 20], ['Ngày vào', 11], ...(HR ? [] : [['Ngày công', 9]]), [HR ? 'Tổng giờ' : 'Giờ công', 9],
     ...lcols.map((c) => [c.label, 9]), ...(HR ? [] : [['Tăng ca ngày thường (giờ)', 11], ['Tăng ca ngày nghỉ / lễ (giờ)', 11]])];
+  if (ctx.missShift) fixed.push([MISS_COL.label, MISS_COL.w]);   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" (trước cột Chỉ tiêu)
   const LAB = fixed.length + 1;          // cột "Chỉ tiêu"
   const D0 = LAB + 1;                    // cột ngày đầu tiên
   const totalCols = LAB + days.length;
@@ -1330,10 +1360,11 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
   for (const e of ctx.employees) {
     loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
     const { perDay, sum } = t6.compute(e);
-    const vals = [++stt, e.code, e.full_name, e.start_date ? fmtDMY(e.start_date) : '', ...(HR ? [] : [sum.cong]), sum.gio, ...lcols.map((c) => sum[c.key] || 0), ...(HR ? [] : [sum.otNT, sum.otNN])];
+    const vals = [++stt, e.code, e.full_name, e.start_date ? fmtDMY(e.start_date) : '', ...(HR ? [] : [sum.cong]), sum.gio, ...lcols.map((c) => sum[c.key] || 0), ...(HR ? [] : [sum.otNT, sum.otNN]), ...(ctx.missShift ? [missDays(ctx, e.id, days)] : [])];
     vals.forEach((v, i) => {
       mergeFast(ws, r, i + 1, r + NR - 1, i + 1);
-      Object.assign(ws.getCell(r, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 2 ? 'left' : 'center', wrapText: i === 2 } });
+      Object.assign(ws.getCell(r, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 2 ? 'left' : 'center', wrapText: i === 2 || i === vals.length - 1 && !!ctx.missShift } });
+      if (ctx.missShift && i === vals.length - 1 && v) Object.assign(ws.getCell(r, i + 1), { fill: MISS_FILL, font: MISS_FONT });
       for (let k = 0; k < NR; k++) ws.getCell(r + k, i + 1).border = border;
     });
     TR.forEach(([key, lab], k) => {
@@ -1376,8 +1407,9 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   const NP = maxPairs(ctx, ioOf, days);   // nhiều lần vào/ra → mỗi ngày 2 × NP cột, mỗi lần chấm 1 cột
   const PER = NP * 2;
   const FIXED = 5;
-  const totalCols = FIXED + days.length * PER + 1;   // + cột Tổng công / Tổng giờ
-  const congCol = totalCols;
+  const congCol = FIXED + days.length * PER + 1;   // cột Tổng công / Tổng giờ
+  const missCol = ctx.missShift ? congCol + 1 : 0;   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" cuối bảng
+  const totalCols = missCol || congCol;
   const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
   const ws = wb.addWorksheet('GioVaoRa');
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
@@ -1398,6 +1430,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
     for (let p = 0; p < NP; p++) { const s = NP > 1 ? ' ' + (p + 1) : ''; ws.getCell(H + 1, c1 + p * 2).value = 'Vào' + s; ws.getCell(H + 1, c1 + p * 2 + 1).value = 'Ra' + s; }
   });
   ws.mergeCells(H, congCol, H + 1, congCol); ws.getCell(H, congCol).value = HOURLY ? 'Tổng giờ' : 'Tổng công';
+  if (missCol) { ws.mergeCells(H, missCol, H + 1, missCol); ws.getCell(H, missCol).value = MISS_COL.label; }
   for (let r = H; r <= H + 1; r++) for (let c = 1; c <= totalCols; c++) {
     const cell = ws.getCell(r, c);
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
@@ -1425,6 +1458,11 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
       for (let k = 0; k < PER; k++) { const x = ws.getCell(r, c1 + k); x.alignment = { horizontal: 'center', vertical: 'middle' }; x.border = border; if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } }; }
     }
     const cc = ws.getCell(r, congCol); cc.value = round2(cong); cc.alignment = { horizontal: 'center' }; cc.border = border;
+    if (missCol) {
+      const mc = ws.getCell(r, missCol), mv = missDays(ctx, e.id, days);
+      mc.value = mv; mc.border = border; mc.alignment = { vertical: 'middle', wrapText: true };
+      if (mv) { mc.fill = MISS_FILL; mc.font = MISS_FONT; }
+    }
     r++;
   }
   if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
@@ -1432,6 +1470,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
   for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
   ws.getColumn(congCol).width = 10;
+  if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
   ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -1583,7 +1622,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
       const meta = columns[col - 1];
       cell.border = allBorder;
       if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
-      if (meta.key === 'missShift' && cell.value) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } }; cell.font = { bold: true, color: { argb: 'FFB91C1C' } }; }   // công tắc nhiều ca bật: ô báo thiếu ca
+      if (meta.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);
       if (col > 3 || multi) cell.alignment = { horizontal: col > 3 ? 'center' : 'left', vertical: 'middle', wrapText: multi };

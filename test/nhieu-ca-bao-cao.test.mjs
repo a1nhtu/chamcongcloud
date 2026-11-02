@@ -83,6 +83,46 @@ test('công tắc BẬT: báo cáo = báo cáo TẮT + đúng cột Thiếu ca (
   } finally { setSetting('multi_shift_assist', '0'); }
 });
 
+// Các báo cáo dạng ma trận / nhiều dòng mỗi NV: cũng chỉ thêm đúng 1 cột "Thiếu ca" khi BẬT
+const TYPES2 = ['hourstat', 'daytime', 'workhours', 'track6', 'empsheet'];
+test('công tắc TẮT: báo cáo thống kê giờ / giờ vào ra / giờ công / theo dõi / từng NV không có cột Thiếu ca', async () => {
+  for (const t of TYPES2) {
+    const rep = await get(`/data?type=${t}${Q}`);
+    assert.ok(!rep.columns.some((c) => c.key === 'missShift'), t);
+    assert.ok(!rep.rows.some((r) => 'missShift' in r), t);
+  }
+});
+
+test('công tắc BẬT: các báo cáo ma trận = báo cáo TẮT + đúng cột Thiếu ca, ghi đúng ca thiếu', async () => {
+  const off = {};
+  for (const t of TYPES2) off[t] = await get(`/data?type=${t}${Q}`);
+  setSetting('multi_shift_assist', '1');
+  try {
+    for (const t of TYPES2) {
+      const on = await get(`/data?type=${t}${Q}`);
+      assert.ok(on.columns.some((c) => c.key === 'missShift' && c.label === 'Thiếu ca'), t);
+      const strip = { ...on, columns: on.columns.filter((c) => c.key !== 'missShift'), rows: on.rows.map(({ missShift, ...r }) => r) };
+      assert.deepEqual(strip, off[t], t + ': ngoài cột Thiếu ca phải y hệt khi tắt');
+      const miss = on.rows.filter((r) => r.missShift).map((r) => ({ code: r.code, v: r.missShift }));
+      assert.ok(miss.length >= 1 && miss.every((m) => m.v.includes('Ca chiều') && !/Ca sáng|Ca HC/.test(m.v)), t + ': ' + JSON.stringify(miss));
+      assert.ok(!miss.some((m) => m.code === 'E2' || m.code === 'E3'), t + ': NV đủ ca không được báo thiếu');
+    }
+  } finally { setSetting('multi_shift_assist', '0'); }
+});
+
+test('file Excel các báo cáo ma trận: BẬT có cột / dòng Thiếu ca ghi tên ca, TẮT không có', async () => {
+  const text = async (t) => (await sheetText(await get(`/export.xlsx?type=${t}${Q}`))).flat().join('|');
+  for (const t of TYPES2) assert.ok(!(await text(t)).includes('Thiếu ca'), t + ' (tắt)');
+  setSetting('multi_shift_assist', '1');
+  try {
+    for (const t of TYPES2) {
+      const s = await text(t);
+      assert.ok(s.includes('Thiếu ca') && s.includes('Ca chiều'), t + ' (bật)');
+    }
+  } finally { setSetting('multi_shift_assist', '0'); }
+  for (const t of TYPES2) assert.ok(!(await text(t)).includes('Thiếu ca'), t + ' (tắt lại)');
+});
+
 test('file Excel xuất: BẬT có cột Thiếu ca ghi tên ca, TẮT không có', async () => {
   const text = async () => (await sheetText(await get(`/export.xlsx?type=horizontal${Q}`))).flat().join('|');
   assert.ok(!(await text()).includes('Thiếu ca'));
