@@ -7335,12 +7335,117 @@ async function pageReport() {
   };
   fromI.addEventListener('change', dimMonth); toI.addEventListener('change', dimMonth); monthI.addEventListener('change', dimMonth);
 
+  // MẪU BÁO CÁO RIÊNG của công ty (server/custom-reports.js): thẻ ở đầu trang; tài khoản tổng thêm / sửa ngay tại đây
+  let CR = { bases: [], list: [] };
+  const loadCR = async () => { try { CR = await api('/reports/custom'); } catch { CR = { bases: [], list: [] }; } };
+  await loadCR();
+  const CR_PAIR = ['cin', 'cout', 'inReal', 'outReal'];   // cột giờ vào/ra bị tách theo lần chấm (cin_1, cin_2 …)
+  // Hộp thêm / sửa mẫu: cột lấy từ báo cáo gốc theo kỳ + bộ lọc đang chọn; tích cột cần hiện, đổi tên, ↑ ↓ thứ tự, thêm cột công thức
+  const crEditor = (tpl) => {
+    const nameI = el('input', { value: tpl?.name || '', placeholder: 'VD: Bảng công công ty A' });
+    const baseS = el('select', {}, ...CR.bases.map(([t, n]) => el('option', { value: t }, n)));
+    if (tpl) baseS.value = tpl.base;
+    const titleI = el('input', { value: tpl?.title || '', placeholder: 'Để trống = tiêu đề của báo cáo gốc' });
+    const listBox = el('div', { style: 'display:flex;flex-direction:column;gap:4px;max-height:46vh;overflow:auto;border:1px solid var(--line,#eee);border-radius:8px;padding:6px' }, loading());
+    let items = [];   // [{ key, orig, label, on } | { f, label }]
+    const draw = () => {
+      listBox.replaceChildren(...items.map((it, i) => {
+        const mv = (d) => { const j = i + d; if (j < 0 || j >= items.length) return; [items[i], items[j]] = [items[j], items[i]]; draw(); };
+        const up = el('button', { class: 'btn ghost sm', type: 'button', title: 'Lên' }, '↑'); up.onclick = () => mv(-1);
+        const dn = el('button', { class: 'btn ghost sm', type: 'button', title: 'Xuống' }, '↓'); dn.onclick = () => mv(1);
+        if (it.f != null) {
+          const lb = el('input', { value: it.label, placeholder: 'Tên cột', style: 'width:150px' }); lb.oninput = () => { it.label = lb.value; };
+          const fI = el('input', { value: it.f, placeholder: '=cong*8', style: 'flex:1;min-width:120px;font-family:monospace' }); fI.oninput = () => { it.f = fI.value; };
+          const rm = el('button', { class: 'btn ghost sm', type: 'button', title: 'Bỏ cột công thức' }, '✕'); rm.onclick = () => { items.splice(i, 1); draw(); };
+          return el('div', { style: 'display:flex;gap:6px;align-items:center;padding:4px;background:var(--bg2,#f8fafc);border-radius:6px' }, up, dn, el('b', { title: 'Cột công thức' }, 'ƒ'), lb, fI, rm);
+        }
+        const chk = el('input', { type: 'checkbox', style: 'width:auto', ...(it.on ? { checked: '' } : {}) }); chk.onchange = () => { it.on = chk.checked; };
+        const lb = it.key === '@days' ? el('span', { style: 'flex:1' }) : el('input', { value: it.label, placeholder: 'Tên cột riêng (để trống = giữ tên gốc)', style: 'flex:1;min-width:120px' });
+        if (it.key !== '@days') lb.oninput = () => { it.label = lb.value; };
+        return el('div', { style: 'display:flex;gap:6px;align-items:center;padding:2px 4px' }, up, dn, chk,
+          el('div', { style: 'width:210px;font-size:13px' }, it.orig, it.key === '@days' ? null : el('div', { style: 'font-size:11px;color:var(--muted);font-family:monospace' }, 'mã: ' + it.key)), lb);
+      }));
+    };
+    const loadCols = async (keepTpl) => {
+      listBox.replaceChildren(loading());
+      let cols;
+      try { cols = (await api(`/reports/data?type=${baseS.value}&${periodQS()}${filterQS()}`)).columns || []; }
+      catch (e) { listBox.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
+      const base = [];   // cột gốc, gộp cột ngày + cột giờ vào/ra tách theo lần chấm thành 1 mục
+      for (const c of cols) {
+        if (/^d\d{4}-\d\d-\d\d$/.test(c.key)) { if (!base.some((b) => b.key === '@days')) base.push({ key: '@days', orig: '📅 Các cột ngày (mỗi ngày 1 cột)' }); continue; }
+        const m = /^(.+)_(\d+)$/.exec(c.key);
+        if (m && CR_PAIR.includes(m[1])) { if (!base.some((b) => b.key === m[1])) base.push({ key: m[1], orig: c.label.replace(/\s*\d+$/, '') + ' (mỗi lần chấm 1 cột)' }); continue; }
+        base.push({ key: c.key, orig: c.grp ? c.grp + ' · ' + c.label : c.label });
+      }
+      if (keepTpl && tpl && tpl.base === baseS.value) {
+        items = tpl.cols.map((it) => (it.f != null ? { f: it.f, label: it.label }
+          : { key: it.key, label: it.label || '', on: true, orig: (base.find((b) => b.key === it.key) || { orig: it.key + ' (kỳ này không có)' }).orig }));
+        for (const b of base) if (!items.some((i) => i.key === b.key)) items.push({ ...b, label: '', on: false });
+      } else items = base.map((b) => ({ ...b, label: '', on: true }));
+      draw();
+    };
+    const addF = el('button', { class: 'btn ghost sm', type: 'button' }, '＋ Thêm cột công thức');
+    addF.onclick = () => { items.push({ f: '', label: '' }); draw(); listBox.scrollTop = listBox.scrollHeight; };
+    baseS.onchange = () => loadCols(false);
+    const save = el('button', { class: 'btn' }, 'Lưu mẫu');
+    save.onclick = async () => {
+      const cols = items.filter((it) => it.f != null || it.on).map((it) => (it.f != null ? { label: it.label, f: it.f } : { key: it.key, label: it.label }));
+      save.disabled = true;
+      try {
+        const t = await api(tpl ? `/admin/custom-reports/${tpl.id}` : '/admin/custom-reports', { method: tpl ? 'PUT' : 'POST', body: { name: nameI.value, base: baseS.value, title: titleI.value, cols } });
+        await loadCR(); closeModal(); toast('Đã lưu mẫu báo cáo riêng', 'ok'); showReport('cr' + t.id);
+      } catch (e) { toast(e.message, 'err'); } finally { save.disabled = false; }
+    };
+    const del = tpl ? el('button', { class: 'btn ghost', style: 'color:#b91c1c' }, 'Xoá mẫu') : null;
+    if (del) del.onclick = async () => {
+      if (!confirm(`Xoá mẫu "${tpl.name}"? Báo cáo gốc không bị ảnh hưởng.`)) return;
+      try { await api(`/admin/custom-reports/${tpl.id}`, { method: 'DELETE' }); await loadCR(); closeModal(); toast('Đã xoá mẫu', 'ok'); hub(); } catch (e) { toast(e.message, 'err'); }
+    };
+    const cancel = el('button', { class: 'btn ghost' }, 'Huỷ'); cancel.onclick = closeModal;
+    openModal(tpl ? 'Sửa mẫu báo cáo riêng' : 'Thêm mẫu báo cáo riêng', [
+      el('div', { class: 'map-hint', style: 'margin-bottom:8px' }, 'Mẫu riêng chỉ lưu cách trình bày (cột nào, thứ tự, tên cột, cột công thức) cho riêng công ty này. Số liệu vẫn do báo cáo gốc tính, nên cập nhật phần mềm vẫn áp dụng cho mẫu. Cột lấy theo kỳ + bộ lọc đang chọn ở trang Báo cáo.'),
+      el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px' }, field('Tên mẫu', nameI), field('Dựa trên báo cáo', baseS), field('Tiêu đề trên báo cáo', titleI)),
+      el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin:10px 0 4px;gap:8px;flex-wrap:wrap' }, el('b', {}, 'Cột (tích cột cần hiện, ↑ ↓ đổi thứ tự)'), addF),
+      listBox,
+      el('div', { class: 'map-hint', style: 'margin-top:6px' }, 'Công thức kiểu Excel dùng mã cột, VD =cong*8 + ot hoặc =IF(vang>0, "Có vắng", ""). Hàm: IF, ROUND, MIN, MAX, SUM… Ô không phải số (giờ 08:00, ký hiệu) tính là 0.'),
+    ], [save, del, cancel].filter(Boolean));
+    $('#modal').style.maxWidth = '820px';
+    loadCols(true);
+  };
+  // Nhóm thẻ mẫu riêng ở đầu trang (chưa có mẫu nào → chỉ tài khoản tổng thấy thẻ "＋ Thêm mẫu riêng")
+  const crGroup = () => {
+    if (!CR.list.length && !isMaster()) return null;
+    const baseName = (b) => (CR.bases.find(([t]) => t === b) || [b, b])[1];
+    const grid = el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:12px' });
+    for (const t of CR.list) {
+      const edit = isMaster() ? el('button', { class: 'btn ghost sm', title: 'Sửa mẫu', style: 'margin-left:auto' }, '✎ Sửa') : null;
+      if (edit) edit.onclick = (ev) => { ev.stopPropagation(); crEditor(t); };
+      const card = el('div', { class: 'panel', style: 'padding:16px;cursor:pointer;display:flex;gap:12px;align-items:flex-start' },
+        el('div', { style: 'font-size:26px;line-height:1' }, '📌'),
+        el('div', { style: 'flex:1' }, el('div', { style: 'font-weight:700;color:var(--ink)' }, t.name),
+          el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, 'Mẫu riêng — dựa trên: ' + baseName(t.base))), edit);
+      card.onclick = () => showReport('cr' + t.id);
+      grid.append(card);
+    }
+    if (isMaster()) {
+      const add = el('div', { class: 'panel', style: 'padding:16px;cursor:pointer;display:flex;gap:12px;align-items:flex-start;border:1px dashed var(--line,#d8dee6)' },
+        el('div', { style: 'font-size:26px;line-height:1' }, '＋'),
+        el('div', {}, el('div', { style: 'font-weight:700;color:var(--ink)' }, 'Thêm mẫu riêng'),
+          el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, 'Dựa trên 1 báo cáo có sẵn: chọn cột, thứ tự, tên cột, thêm cột công thức. 🔒 Chỉ tài khoản tổng thấy thẻ này.')));
+      add.onclick = () => crEditor(null);
+      grid.append(add);
+    }
+    return [el('div', { style: 'font-weight:800;color:var(--ink);margin:18px 0 10px;font-size:15px' }, '📌 Mẫu báo cáo riêng của công ty'), grid];
+  };
+
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
   const hub = () => {
     monthI.onchange = () => { snapMonth(); dApply.synced(); }; fromI.onchange = null; toI.onchange = null; onFilterChange = () => {}; rpRun = null;
     formSel.onchange = () => { _rpForm = formSel.value; hub(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; };
     const wrap = el('div', {});
     wrap.append(el('div', { class: 'map-hint', style: 'margin-bottom:4px' }, 'Chọn kỳ (tháng hoặc Từ ngày → Đến ngày), phòng ban và/hoặc nhân viên cụ thể ở trên, rồi bấm vào một báo cáo để xem chi tiết và xuất Excel.'));
+    const crNodes = crGroup(); if (crNodes) wrap.append(...crNodes);
     const H = formSel.value === 'hourly';
     // Công ty đã áp gói cài đặt (Cài đặt › Chế độ tính công): ghim báo cáo hay dùng của gói lên đầu (vẫn còn ở nhóm cũ). Chưa áp gói → như cũ.
     const pin = Array.isArray(SETTINGS.profile_reports) ? SETTINGS.profile_reports : [];

@@ -11,10 +11,11 @@ import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../vi
 import { progressOf, getProgress, loopProg } from '../progress.js';
 import { customLeaveTypes } from '../leave-quota.js';
 import { trackCell, TRACK_ROWS } from '../track6.js';
+import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
-r.use(inspectorGuard([/^\/(dashboard|attendance|departments|data|progress|export\.xlsx)$/]));   // tài khoản kiểm tra: chỉ xem, ép công ảo
+r.use(inspectorGuard([/^\/(dashboard|attendance|departments|data|progress|export\.xlsx|custom)$/]));   // tài khoản kiểm tra: chỉ xem, ép công ảo
 
 /* ================= Helpers ================= */
 function isoToVnHM(iso) {
@@ -413,6 +414,16 @@ function buildReport(type, from, to, filter) {
   if (PAIR_COLS[type]) splitPairCols(rep, ...PAIR_COLS[type]);
   if (formHourly(filter) && type !== 'payroll' && !AUDIT3.includes(type)) rep.columns = rep.columns.filter((c) => !HOURLY_DROP.has(c.key));
   return rep;
+}
+
+// Báo cáo theo loại: mẫu riêng của công ty (cr + id) = báo cáo gốc của mẫu rồi áp cách trình bày (custom-reports.js); loại khác như cũ
+function buildAny(type, from, to, filter) {
+  const id = crId(type);
+  if (id == null) return buildReport(type, from, to, filter);
+  const tpl = getCustom(id);
+  if (!tpl) return { title: 'Mẫu báo cáo riêng không còn (đã bị xoá)', columns: [], rows: [] };
+  const rep = applyTemplate(buildReport(tpl.base, from, to, filter), tpl);
+  return tpl.title ? { ...rep, title: `${tpl.title} ${periodLabel(from, to)}` } : rep;
 }
 
 // CÔNG ẢO 3 MỨC: so tăng ca THẬT với Ảo 1 / Ảo 2 / Ảo 3 (mỗi mức cắt theo tăng ca tối đa / ngày riêng).
@@ -1561,8 +1572,11 @@ r.get('/data', virtGuard, (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const type = req.query.type || 'horizontal';
   const f = filterFromQuery(req.query, req);
-  res.json({ ...buildReport(type, from, to, f), ...(f.virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
+  res.json({ ...buildAny(type, from, to, f), ...(f.virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
 });
+
+// Mẫu báo cáo riêng của công ty (thẻ ở đầu trang Báo cáo) + danh sách báo cáo gốc dùng được — ai xem được báo cáo thì xem được
+r.get('/custom', (req, res) => res.json({ bases: CR_BASES, list: listCustom() }));
 
 // Xuất Excel (generic theo type) — hỗ trợ ?month hoặc ?from&to
 // Tiến độ 1 lần xuất Excel đang chạy (giao diện hỏi ~2 lần / giây để vẽ thanh %)
@@ -1586,7 +1600,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   if (type === 'empsheet') return exportEmpSheetXlsx(res, from, to, filter, company, false);
   if (type === 'empsheetlate') return exportEmpSheetXlsx(res, from, to, filter, company, true);
 
-  const { title, columns, rows } = buildReport(type, from, to, filter);
+  const { title, columns, rows } = buildAny(type, from, to, filter);
   PROG(50, 'Đã tính xong, đang ghi vào Excel…');
 
   const wb = new ExcelJS.Workbook();

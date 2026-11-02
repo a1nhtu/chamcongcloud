@@ -1180,7 +1180,17 @@ function migrateColumns() {
       feedback_reply TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (sheet_id, employee_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_paysheetrow_emp ON pay_sheet_rows(employee_id);`);
+    CREATE INDEX IF NOT EXISTS idx_paysheetrow_emp ON pay_sheet_rows(employee_id);
+    CREATE TABLE IF NOT EXISTS custom_reports (        -- MẪU BÁO CÁO RIÊNG của công ty (server/custom-reports.js): dựa trên 1 báo cáo có sẵn, chỉ lưu cách trình bày
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      name         TEXT NOT NULL,
+      base         TEXT NOT NULL,                      -- loại báo cáo gốc (summary, detaillist…)
+      title        TEXT NOT NULL DEFAULT '',           -- tiêu đề riêng ('' = tiêu đề báo cáo gốc)
+      cols         TEXT NOT NULL DEFAULT '[]',         -- JSON [{key,label} | {key:'@days'} | {key:'cfN',label,f}] theo thứ tự hiện
+      sort_order   INTEGER NOT NULL DEFAULT 0,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
+    );`);
 
   // Cấu hình mặc định
   if (getSetting('weekend_days') == null) setSetting('weekend_days', '7');       // CN
