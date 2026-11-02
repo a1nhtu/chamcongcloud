@@ -246,6 +246,23 @@ try {
       if ((Clean $s) -ne $From) { $z.Disconnect(); Fail 'SETSVR' "Máy không nhận cài đặt máy chủ (đọc lại được: '$(Clean $s)'). Đặt tay trên máy: Menu → Comm → Cloud Server." }
       Out "I`tsvr_url`t$(Clean $s)"
       $s = ''; if ($z.GetSysOption($m, 'IclockSvrPort', [ref]$s)) { Out "I`tsvr_port`t$(Clean $s)" }
+      # $Opt = 'dhcp': bật DHCP cổng DÂY LAN (khoá DHCP) nếu đang tắt — máy IP tĩnh hay thiếu Gateway / DNS nên không gọi được tên miền.
+      # Chỉ bật khi IP đang nói chuyện = IP cổng dây (IPAddress). Khác → máy đang nối qua Wi-Fi: khoá DHCP này không phải của Wi-Fi
+      # (tên khoá Wi-Fi mỗi firmware một kiểu, chưa kiểm được) → không ghi gì, báo bật tay trên máy.
+      if ($Opt -eq 'dhcp') {
+        $d = ''
+        if ($z.GetSysOption($m, 'DHCP', [ref]$d)) {
+          $d = Clean $d; $wip = ''; [void]$z.GetSysOption($m, 'IPAddress', [ref]$wip); $wip = Clean $wip
+          if ($wip -and $wip -ne $Ip) { $note = 'wifi' }
+          elseif ($d -eq '1') { $note = 'keep' }
+          else {
+            [void]$z.SetSysOption($m, 'DHCP', '1')
+            $d = ''; [void]$z.GetSysOption($m, 'DHCP', [ref]$d); $d = Clean $d   # nhiều firmware trả false dù đã ghi → đọc lại
+            $note = $(if ($d -eq '1') { 'on' } else { 'fail' })
+          }
+          Out "I`tdhcp`t$d"; Out "I`tdhcp_note`t$note"
+        }
+      }
       [void]$z.RestartDevice($m); Out "OK`tset-svr"; exit 0
     }
     'restart' { [void]$z.RestartDevice($m); Out "OK`trestart"; exit 0 }

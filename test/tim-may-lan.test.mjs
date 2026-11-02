@@ -21,7 +21,7 @@ process.env.ZK_RECHECK_MS = '400';   // hỏi lại máy chưa thấy cổng: ch
 process.env.ZK_RETRY_MS = '50';
 
 // Máy giả: Comm Key sai / máy bận → lỗi CONNECT như SDK thật; 'svr' in cài đặt; 'set-svr' ghi lại + đếm số lần khởi động lại + giao thức (-Proto)
-writeFileSync(FAKE, '﻿' + `param([string]$Ip, [int]$Port = 4370, [int]$Key = 0, [string]$Action = 'info', [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = '')
+writeFileSync(FAKE, '﻿' + `param([string]$Ip, [int]$Port = 4370, [int]$Key = 0, [string]$Action = 'info', [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = '', [string]$Opt = '')
 function Out($s) { [Console]::Out.WriteLine($s) }
 $st = Get-Content $env:FAKE_ZK_STATE -Raw | ConvertFrom-Json
 if ($env:FAKE_ZK_DEAD_PORT -and $Port -eq [int]$env:FAKE_ZK_DEAD_PORT) { Out "ERR\`tCONNECT-1\`tKhong ket noi duoc may $Ip"; exit 1 }
@@ -32,8 +32,14 @@ switch ($Action) {
   'set-svr' {
     $st.svr_fun = '1'; $st.svr_mode = '1'; $st.svr_url = $From; if ($To) { $st.svr_port = $To }
     $st.restarted = [int]$st.restarted + 1; $st.proto = $Proto
+    $note = ''
+    if ($Opt -eq 'dhcp' -and $st.dhcp -ne $null) {
+      if ($st.ipaddr -and $st.ipaddr -ne $Ip) { $note = 'wifi' } elseif ($st.dhcp -eq '1') { $note = 'keep' } elseif ($st.dhcp_ro) { $note = 'fail' } else { $st.dhcp = '1'; $note = 'on' }
+    }
     $st | ConvertTo-Json | Set-Content $env:FAKE_ZK_STATE
-    Out "I\`tsvr_url\`t$From"; Out "I\`tsvr_port\`t$($st.svr_port)"; Out "OK\`tset-svr"
+    Out "I\`tsvr_url\`t$From"; Out "I\`tsvr_port\`t$($st.svr_port)"
+    if ($note) { Out "I\`tdhcp\`t$($st.dhcp)"; Out "I\`tdhcp_note\`t$note" }
+    Out "OK\`tset-svr"
   }
   default { Out "ERR\`tBADACTION\`t$Action"; exit 1 }
 }
@@ -370,4 +376,38 @@ test('máy ZK trả lời lúc dò rồi im, MAC đang giữ IP là Hikvision �
     assert.equal(r.conflict, true); assert.equal(r.hik, true); assert.equal(r.code, undefined); assert.equal(r.error, undefined);
     assert.equal(dev().restarted, 0);
   } finally { process.env.ZK_SCAN_HOSTS = keep; delete process.env.ZK_SCAN_HIK_PORT; delete process.env.ZK_SCAN_ARP; u.close(); }
+});
+
+// Bật DHCP khi trỏ máy (khách máy IP tĩnh không về tên miền, 03/11/2026): chỉ cổng dây LAN; máy nối Wi-Fi / máy TCP/IP thì không ghi
+test('trỏ máy: DHCP tắt → bật DHCP cổng dây; đang bật thì giữ; máy không nhận thì báo', { skip: !WIN }, async () => {
+  withDomain('abc1');
+  setDev({ dhcp: '0', ipaddr: '127.0.0.1' });
+  let { code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort });
+  assert.equal(code, 200, JSON.stringify(out));
+  assert.equal(out.info.dhcp_note, 'on'); assert.equal(dev().dhcp, '1'); assert.equal(dev().restarted, 1);
+  setDev({ dhcp: '1', ipaddr: '127.0.0.1' });
+  ({ out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort }));
+  assert.equal(out.info.dhcp_note, 'keep');
+  setDev({ dhcp: '0', ipaddr: '127.0.0.1', dhcp_ro: true });
+  ({ out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort }));
+  assert.equal(out.info.dhcp_note, 'fail'); assert.equal(dev().dhcp, '0');
+});
+
+test('trỏ máy nối Wi-Fi (IP cổng dây khác IP đang nói chuyện): KHÔNG ghi DHCP cổng dây, báo bật tay Wi-Fi', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({ dhcp: '0', ipaddr: '192.168.1.201' });
+  const { code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort });
+  assert.equal(code, 200, JSON.stringify(out));
+  assert.equal(out.info.dhcp_note, 'wifi'); assert.equal(dev().dhcp, '0');
+});
+
+test('máy đang kết nối TCP/IP theo IP, hoặc gửi dhcp:false: KHÔNG bật DHCP (đổi IP là mất kết nối)', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({ dhcp: '0', ipaddr: '127.0.0.1' });
+  const off = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort, dhcp: false });
+  assert.equal(off.code, 200); assert.equal(off.out.info.dhcp_note, undefined); assert.equal(dev().dhcp, '0');
+  db.prepare("INSERT INTO push_devices(serial, name, active, conn_type, tcp_ip, tcp_port) VALUES('ZKTCP1','May TCP',1,'tcp','127.0.0.1',4370)").run();
+  try {
+    const { code, out } = await call('POST /devices/lan-point', { ip: '127.0.0.1', port: devPort });
+    assert.equal(code, 200, JSON.stringify(out));
+    assert.equal(out.info.dhcp_note, 'tcp'); assert.equal(dev().dhcp, '0');
+  } finally { db.prepare("DELETE FROM push_devices WHERE serial='ZKTCP1'").run(); }
 });

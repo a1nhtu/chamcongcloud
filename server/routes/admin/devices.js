@@ -373,7 +373,11 @@ export function registerDeviceRoutes(r, { need }) {
       if (k === 'refused') return res.status(400).json({ code: 'CLOSED', error: `Máy ${c.tcp_ip} đang bật nhưng từ chối kết nối ở cổng ${c.tcp_port} (cổng SDK đang tắt trên máy) — bấm Tìm lại; vẫn vậy thì đặt Cloud Server tay trên máy.` });
       if (k !== 'open') return res.status(400).json({ code: 'UNREACH', error: `Không thấy máy ở ${c.tcp_ip}:${c.tcp_port} — máy đã tắt hoặc đổi IP, bấm Tìm lại.` });
       const before = await zkCareful(c, tcpServerInfo);
-      const info = await zkCareful(c, (cc) => tcpSetServer(cc, domain, before.svr_port));
+      // Bật DHCP (máy IP tĩnh hay thiếu Gateway / DNS → không gọi được tên miền). KHÔNG bật khi phần mềm đang kết nối máy này
+      // theo IP (máy TCP/IP): DHCP đổi IP máy → mất kết nối TCP/IP.
+      const tcpDev = db.prepare("SELECT name FROM push_devices WHERE conn_type='tcp' AND tcp_ip=?").get(c.tcp_ip);
+      const info = await zkCareful(c, (cc) => tcpSetServer(cc, domain, before.svr_port, { dhcp: req.body?.dhcp !== false && !tcpDev }));
+      if (tcpDev && req.body?.dhcp !== false) info.dhcp_note = 'tcp';
       res.json({ ok: true, domain, serial: before.serial || '', before, info });
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });

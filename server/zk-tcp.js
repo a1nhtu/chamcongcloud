@@ -296,9 +296,10 @@ export async function tcpServerInfo(c) {
 // Cổng Cloudflare nhận (HTTP + HTTPS). Máy để cổng khác (VD mặc định 8081) mà firmware lại dùng cổng đó với tên miền → không về được.
 const CF_PORTS = new Set(['80', '8080', '8880', '2052', '2082', '2086', '2095', '443', '2053', '2083', '2087', '2096', '8443']);
 // Trỏ máy về tên miền rồi khởi động lại máy. port = cổng đang lưu trong máy (đọc trước): ngoài danh sách Cloudflare → đổi về 80.
-export async function tcpSetServer(c, domain, port = '') {
+// dhcp = bật DHCP cổng dây LAN nếu đang tắt → info.dhcp_note: on | keep | fail | wifi (máy nối Wi-Fi, không ghi gì)
+export async function tcpSetServer(c, domain, port = '', { dhcp = false } = {}) {
   const info = {};
-  await zkRun(c, 'set-svr', { from: domain, to: port && !CF_PORTS.has(String(port)) ? '80' : '', timeoutMs: 60000 }, kvOf(info));
+  await zkRun(c, 'set-svr', { from: domain, to: port && !CF_PORTS.has(String(port)) ? '80' : '', opt: dhcp ? 'dhcp' : '', timeoutMs: 60000 }, kvOf(info));
   return info;
 }
 

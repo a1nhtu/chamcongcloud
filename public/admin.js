@@ -6425,13 +6425,20 @@ function lanScanModal() {
       key = prompt(`${x.code === 'NEEDKEY' ? `Máy ${x.ip} có đặt mật khẩu kết nối` : `Máy ${x.ip} không cho kết nối — có thể máy đặt mật khẩu kết nối`} (Menu → Comm → PC Connection → Comm Key).\nNhập mật khẩu:`, '');
       if (key == null) return;
     }
-    if (!confirm(`Trỏ máy ${x.model || ''} ${x.serial || x.ip} về ${r.domain}?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Nếu máy đang gửi dữ liệu cho phần mềm khác thì sẽ chuyển sang gửi về phần mềm này.`)) return;
+    if (!confirm(`Trỏ máy ${x.model || ''} ${x.serial || x.ip} về ${r.domain}?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Nếu máy đang gửi dữ liệu cho phần mềm khác thì sẽ chuyển sang gửi về phần mềm này.\nMáy đang tắt DHCP (IP tĩnh) thì phần mềm bật DHCP để máy tự xin IP từ modem — IP máy có thể đổi.`)) return;
     cell.innerHTML = ''; cell.append(el('span', { class: 'muted' }, 'Đang ghi vào máy…'));
     try {
       const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key, udp: !!x.udp } });
       changed = true;
       cell.innerHTML = ''; cell.append(el('span', { class: 'pill ok' }, '✓ Đã trỏ — máy đang khởi động lại'));
-      toast(`Đã trỏ máy ${o.serial || x.ip} về ${o.domain}. Khoảng 1 phút sau máy hiện ở danh sách (Chờ duyệt).`, 'ok');
+      // kết quả bật DHCP cổng dây LAN (server/zk/zk-tcp.ps1 set-svr)
+      const dn = o.info?.dhcp_note;
+      const dhcpMsg = dn === 'on' ? 'Đã bật DHCP: máy tự xin IP mới từ modem.'
+        : dn === 'fail' ? 'Máy không nhận lệnh bật DHCP — nếu máy không về, bật tay trên máy: Menu → Comm → Ethernet → DHCP.'
+        : dn === 'wifi' ? 'Máy đang nối Wi-Fi: phần mềm chưa bật DHCP Wi-Fi được — nếu máy không về, bật tay trên máy: Menu → Comm → Mạng không dây (Wi-Fi) → DHCP.'
+        : dn === 'tcp' ? 'Không bật DHCP vì phần mềm đang kết nối máy này theo IP (TCP/IP) — bật DHCP sẽ đổi IP, mất kết nối.' : '';
+      if (dhcpMsg) cell.append(warn(dhcpMsg));
+      toast(`Đã trỏ máy ${o.serial || x.ip} về ${o.domain}. Khoảng 1 phút sau máy hiện ở danh sách (Chờ duyệt).${dhcpMsg ? ' ' + dhcpMsg : ''}`, dn === 'fail' || dn === 'wifi' ? 'err' : 'ok');
     } catch (e) {
       cell.innerHTML = ''; cell.append(el('span', { style: 'color:#b91c1c' }, '❌ ' + e.message)); toast(e.message, 'err');
       if (/^(NEEDKEY|WRONGKEY)$/.test(e.code || '')) cell.append(' ', btnSm('🔑 Nhập lại mật khẩu', () => point({ ...x, code: 'NEEDKEY' }, r, cell), 'ghost'));
