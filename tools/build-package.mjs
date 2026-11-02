@@ -190,15 +190,14 @@ CÀI LẠI WINDOWS (KHÔNG MẤT DỮ LIỆU):
 4. Cài lại Win thì "Mã máy" đổi, license cũ không dùng được. Mở trang quản lý, gửi Mã máy mới cho
    Digiplus để cấp lại license, dán vào là dùng tiếp (dữ liệu cũ vẫn còn đủ).
 
-CHUYỂN SANG MÁY MỚI:
-1. Máy cũ: mở trang quản lý, phần Sao lưu, bấm "Sao lưu TOÀN BỘ (.zip)". Chép file .zip sang máy mới,
-   KHÔNG giải nén.
-2. Máy cũ: gỡ "Digiplus Chấm Công" trong Apps của Windows, rồi KHỞI ĐỘNG LẠI máy cũ.
+CHUYỂN SANG MÁY MỚI (CHÉP THƯ MỤC, KHÔNG CẦN BẤM PHỤC HỒI):
+1. Máy cũ: chuột phải "GoCaiDat.bat", chọn Run as administrator để tắt phần mềm. Dữ liệu vẫn còn.
+2. Máy cũ: chép CẢ thư mục cài ra ổ ngoài. Phải chép TRƯỚC khi gỡ trong Apps.
+3. Máy cũ: KHỞI ĐỘNG LẠI máy, rồi mở http://localhost:<cổng>/admin. Không vào được nữa là đã tắt xong.
    Phải xong bước này mới cài máy mới. Còn sót tunnel ở máy cũ thì tên miền báo lỗi 502.
-3. Máy mới: chạy Setup.exe. Bản có tên miền thì nhập ĐÚNG tên khách cũ, giữ nguyên cổng gợi ý.
-4. Máy mới: mở trang quản lý, gửi Mã máy mới cho Digiplus, dán license vừa nhận.
-5. Máy mới: đăng nhập admin / admin123, phần Sao lưu, chọn file .zip, bấm Phục hồi,
-   rồi KHỞI ĐỘNG LẠI máy mới. Từ đây đăng nhập bằng tài khoản cũ.
+4. Máy mới: chép thư mục vào C:\\DigiplusChamCong rồi chạy Setup.exe. Để chỗ khác thì bấm "Chọn..."
+   và trỏ đúng thư mục đó. Chọn "Giữ cấu hình đang có". Dữ liệu, cổng, tên miền giữ nguyên.
+5. Máy mới: mở http://localhost:<cổng>/admin, gửi Mã máy mới cho Digiplus, dán license vừa nhận.
 6. Máy chấm công khai bằng tên miền: không phải đổi gì. Khai bằng IP máy tính: đặt máy mới
    trùng IP máy cũ, hoặc sửa lại IP trên máy chấm công.
 
