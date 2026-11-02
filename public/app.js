@@ -328,7 +328,7 @@ async function doCheck(kind) {
     if (kind === 'in') {
       const m = res.meta;
       toast(`Vào ca thành công${m.late ? ' · muộn ' + m.late + ' phút' : ''}${m.outside ? ' · ngoài VP' : ''}`, 'ok');
-    } else toast(`Ra ca thành công · ${humanMinutes(res.meta.workMinutes)}`, 'ok');
+    } else toast(`Ra ca thành công · ${humanMinutes(res.meta.work_minutes)}`, 'ok');
     renderCham();
   } catch (e) {
     if (btn) { btn.style.opacity = 1; btn.style.pointerEvents = 'auto'; }
