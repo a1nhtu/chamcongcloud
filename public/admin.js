@@ -7293,6 +7293,10 @@ function makeChecklist(icon, allLabel, getItems, picked, afterChange) {
 
 let _rpForm = '';      // mẫu báo cáo đang chọn: 'shift' | 'hourly'
 let _rpOnly = true;    // công ty có cả 2 kiểu: chỉ lấy NV chấm đúng kiểu của mẫu
+// Ô "Hiện cả ngày không đi làm" (Anh 03/11/2026): báo cáo danh sách thêm dòng để trống cho ngày NV không chấm → biết đi làm ngày nào,
+// nghỉ ngày nào. Nhớ trên máy. Báo cáo ma trận (mỗi ngày 1 cột) vốn đã đủ ngày nên không có ô này.
+let _rpAllDays = false; try { _rpAllDays = localStorage.getItem('rp_alldays') === '1'; } catch {}
+const REPORT_ALLDAYS = ['attendance', 'firstlast', 'detail', 'detaillist', 'detailmulti', 'empsheet'];
 async function pageReport() {
   // Mẫu báo cáo: theo ca (công, trễ/sớm, tăng ca) hay theo giờ (tổng giờ). Mặc định theo kiểu công ty đang dùng.
   if (!_rpForm) _rpForm = hourlyMode() ? 'hourly' : 'shift';
@@ -7321,7 +7325,8 @@ async function pageReport() {
   // Phần lọc NV cho query: ưu tiên NV cụ thể (ids), rồi tới nhiều phòng ban (depts)
   const filterQS = () => (empPick.size ? '&ids=' + [...empPick].join(',')
     : (deptPick.size ? '&depts=' + encodeURIComponent([...deptPick].join(',')) : ''))
-    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=' + _virt : '');
+    + '&mode=' + formSel.value + (mixedMode() && onlyChk.checked ? '&emode=' + formSel.value : '') + (_virt && auditOn() ? '&virt=' + _virt : '')
+    + (_rpAllDays ? '&alldays=1' : '');
   let rpRun = null;   // báo cáo đang mở: hàm tải lại (màn danh sách thẻ = null, không tải)
   const dApply = dateApply(fromI, toI, () => rpRun && rpRun());
   // Chọn tháng = đặt nhanh Từ/Đến ngày về trọn tháng đó
@@ -7477,8 +7482,12 @@ async function pageReport() {
     backBtn.onclick = hub;
     const exportBtn = el('button', { class: 'btn green' }, '⬇ Xuất Excel');
     exportBtn.onclick = () => { if (!dApply.btn.disabled) return toast('Bấm "✓ Áp dụng" để xem khoảng ngày mới trước khi xuất Excel', 'err'); downloadExcel(type, fromI.value, toI.value, filterQS()); };
+    const base = type.startsWith('cr') ? (CR.list.find((t) => 'cr' + t.id === type) || {}).base : type;   // mẫu riêng: theo báo cáo gốc
+    const allChk = el('input', { type: 'checkbox', style: 'width:auto', ...(_rpAllDays ? { checked: '' } : {}) });
+    const allLbl = REPORT_ALLDAYS.includes(base) ? el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink);font-size:13px;cursor:pointer',
+      title: 'Tích: hiện cả những ngày nhân viên không chấm công (dòng để trống, tô xám) để biết đi làm ngày nào, nghỉ ngày nào. Bỏ tích: chỉ hiện ngày có đi làm' }, allChk, 'Hiện cả ngày không đi làm') : null;
     const wrap = el('div', {}, loading());
-    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, dApply.btn, deptCl.btn, empCl.btn, formSel, onlyLbl, virtToggle(() => showReport(type)), exportBtn), wrap);
+    setMain(head('Báo cáo', backBtn, monthI, fromI, arrow, toI, dApply.btn, deptCl.btn, empCl.btn, formSel, onlyLbl, virtToggle(() => showReport(type)), allLbl, exportBtn), wrap);
     const load = async () => {
       if (fromI.value && toI.value && toI.value < fromI.value) return toast('Đến ngày phải sau Từ ngày', 'err');
       dApply.synced();
@@ -7495,7 +7504,7 @@ async function pageReport() {
       if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
       let pinLefts = null;   // vị trí các cột ghim (tính sau khi vẽ) → áp cả cho dòng vẽ sau
       const mkRow = (row) => {
-        const tr = el('tr', {});
+        const tr = el('tr', row._off ? { class: 'rp-off' } : {});   // ngày không đi làm (ô "Hiện cả ngày không đi làm")
         for (const c of data.columns) {
           const v = row[c.key];
           const isSym = type === 'symbol' && SYMBOL_COLOR[v];
@@ -7533,6 +7542,7 @@ async function pageReport() {
     const snapAndLoad = () => { snapMonth(); load(); };
     monthI.onchange = snapAndLoad; fromI.onchange = null; toI.onchange = null; onFilterChange = load; rpRun = load;   // Từ / Đến: chờ "✓ Áp dụng"
     formSel.onchange = () => { _rpForm = formSel.value; load(); }; onlyChk.onchange = () => { _rpOnly = onlyChk.checked; load(); };
+    allChk.onchange = () => { _rpAllDays = allChk.checked; try { localStorage.setItem('rp_alldays', _rpAllDays ? '1' : '0'); } catch {} load(); };
     load();
   };
 

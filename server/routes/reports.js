@@ -148,7 +148,7 @@ const effMode = (e) => (e.att_mode === 'shift' || e.att_mode === 'hourly' ? e.at
 function loadRange(from, to, filter) {
   const weekend = getSetting('weekend_days', '7');
   const ef = empFilterSql(filter);
-  const empSql = `SELECT id, code, full_name, department, position, shift_id, att_mode, start_date
+  const empSql = `SELECT id, code, full_name, department, position, shift_id, att_mode, start_date, leave_date
                 FROM employees WHERE ${EMP_IN_PERIOD}${adminAttWhere()}${ef.where} ORDER BY department, full_name`;
   let employees = db.prepare(empSql).all(from, ...ef.args);
   // ?emode=shift|hourly: chỉ lấy nhân viên chấm công theo kiểu đó (công ty có cả 2 kiểu)
@@ -258,6 +258,18 @@ function splitPairCols(rep, inKey, outKey) {
   for (const r of rep.rows) delete r._io;
   return rep;
 }
+// Ô "Hiện cả ngày không đi làm" (?alldays=1, Anh 03/11/2026): báo cáo danh sách đi qua MỌI NV × MỌI ngày trong kỳ, ngày không chấm
+// vẫn có dòng nhưng để trống (_off) → nhìn là biết NV đi làm ngày nào, nghỉ ngày nào. Bỏ ngày trước ngày vào làm / sau ngày nghỉ việc
+// (trừ khi có chấm). Không tích = như cũ.
+const allDaysOn = (filter) => !!(filter && typeof filter === 'object' && filter.alldays);
+const inJob = (e, d) => !((e.start_date && d < e.start_date) || (e.leave_date && d > e.leave_date));
+function empDays(ctx, days) {
+  const emps = [...ctx.employees].sort((a, b) => (a.full_name === b.full_name ? (a.code < b.code ? -1 : 1) : a.full_name < b.full_name ? -1 : 1));
+  const out = [];
+  for (const e of emps) for (const d of days) { const c = ctx.cell.get(e.id + '|' + d); if (c || inJob(e, d)) out.push({ e, d, c }); }
+  return out;
+}
+const offRow = (e, d) => ({ _off: 1, _io: [], date: fmtDMY(d), wd: WD[vnWeekday(d)], code: e.code, name: e.full_name, dept: e.department || '' });
 // Số cặp vào/ra nhiều nhất trong kỳ (báo cáo ma trận: mỗi ngày tách 2 × n cột)
 function maxPairs(ctx, ioOf, days) {
   let n = 1;
@@ -354,6 +366,7 @@ function symbolOf(ctx, empId, date) {
 const MISS_COL = { key: 'missShift', label: 'Thiếu ca', w: 22 };
 const MISS_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
 const MISS_FONT = { bold: true, color: { argb: 'FFB91C1C' } };
+const OFF_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
 const missDays = (ctx, empId, days) => days.map((d) => { const m = ctx.missShift(empId, d); return m ? `${d.slice(8)}/${d.slice(5, 7)}: ${m}` : ''; }).filter(Boolean).join('; ');
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
 const OT_LABEL = { thuong: 'Ngày thường', cuoi_tuan: 'Cuối tuần', le: 'Ngày lễ' };
@@ -736,7 +749,8 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'cong', label: 'Công', w: 7 }, { key: 'status', label: 'Trạng thái', w: 13 },
         ...(ctx.missShift ? [MISS_COL] : []),
       ];
-      const rows = sortedResults().map((c) => ({
+      const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().map((c) => ({ c }));
+      const rows = list.map(({ e, d, c }) => (!c ? offRow(e, d) : {
         ...(ctx.missShift ? { missShift: ctx.missShift(c.employee_id, c.work_date) } : {}),
         date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)],
         code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
@@ -769,7 +783,10 @@ function buildReportRaw(type, from, to, filter) {
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           const isLeave = ctx.leaveDays.has(e.id + '|' + d);
-          if (!c && !ctx.isScheduled(e.id, d) && !isLeave) continue; // bỏ ngày không lịch, không chấm, không nghỉ
+          if (!c && !ctx.isScheduled(e.id, d) && !isLeave) {   // ngày không lịch, không chấm, không nghỉ: bỏ — trừ khi tích "Hiện cả ngày không đi làm"
+            if (allDaysOn(filter) && inJob(e, d)) rows.push({ stt: ++stt, ...offRow(e, d) });
+            continue;
+          }
           stt++;
           const gross = (c && c.check_in_at && c.check_out_at)
             ? round2((new Date(c.check_out_at) - new Date(c.check_in_at)) / 3600000) : 0;
@@ -819,7 +836,10 @@ function buildReportRaw(type, from, to, filter) {
           const k = e.id + '|' + d;
           const c = ctx.cell.get(k);
           const isLeave = ctx.leaveDays.has(k);
-          if (!c && !ctx.isScheduled(e.id, d) && !isLeave) continue; // bỏ ngày không lịch, không chấm, không nghỉ
+          if (!c && !ctx.isScheduled(e.id, d) && !isLeave) {   // ngày không lịch, không chấm, không nghỉ: bỏ — trừ khi tích "Hiện cả ngày không đi làm"
+            if (allDaysOn(filter) && inJob(e, d)) rows.push({ stt: ++stt, ...offRow(e, d) });
+            continue;
+          }
           stt++;
           const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)] };
           const io = c ? ioOf(e.id, d, c) : null;
@@ -846,7 +866,8 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'place', label: 'Nơi chấm', w: 14 }, { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 },
         { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 }, { key: 'ot', label: 'OT (p)', w: 8 }, { key: 'cong', label: 'Công', w: 7 },
       ];
-      const rows = sortedResults().map((c) => ({
+      const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().map((c) => ({ c }));
+      const rows = list.map(({ e, d, c }) => (!c ? offRow(e, d) : {
         date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
@@ -913,7 +934,9 @@ function buildReportRaw(type, from, to, filter) {
       const pcMap = new Map();
       if (!ctx.virt) for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM device_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
         pcMap.set(p.employee_id + '|' + p.work_date, p.c);
-      const rows = sortedResults().filter((c) => c.check_in_at).map((c) => {
+      const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().filter((c) => c.check_in_at).map((c) => ({ c }));
+      const rows = list.map(({ e, d, c }) => {
+        if (!c || !c.check_in_at) return offRow(e, d);
         const mins = c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
         const punches = pcMap.get(c.employee_id + '|' + c.work_date) || ((c.check_in_at ? 1 : 0) + (c.check_out_at ? 1 : 0));
         return {
@@ -1557,7 +1580,7 @@ function filterFromQuery(q, req) {
   const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
   const m = (v) => (v === 'shift' || v === 'hourly' ? v : null);
   const force = !!(req && req.forceVirt);   // tài khoản kiểm tra: luôn công ảo
-  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: virtLevel(q, req), force };
+  return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: virtLevel(q, req), force, alldays: q.alldays === '1' };
 }
 // công ảo chỉ cho người được phép (tính năng bật + quyền "audit")
 // báo cáo so 3 mức công ảo (có cả số thật): chỉ người được xem công ảo, KHÔNG cho tài khoản kiểm tra
@@ -1593,7 +1616,7 @@ function summarySheet(wb, columns, rows, { company, address, title, from, to, al
     const k = String(r.code ?? '') + '|' + String(r.name ?? '');
     const g = agg.get(k) || agg.set(k, { code: r.code ?? '', name: r.name ?? '', dept: r.dept ?? '', days: new Set(), workDays: new Set(), min: 0 }).get(k);
     const m = +r.phut || 0;
-    g.min += m; g.days.add(r.date); if (m > 0) g.workDays.add(r.date);
+    g.min += m; if (!r._off) g.days.add(r.date); if (m > 0) g.workDays.add(r.date);   // dòng ngày không đi làm (để trống) không đếm
   }
   const hm = (m) => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
   const cols = [
@@ -1679,6 +1702,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
       const meta = columns[col - 1];
       cell.border = allBorder;
       if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
+      if (row._off) cell.fill = OFF_FILL;   // ngày không đi làm: tô xám nhạt
       if (meta.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);

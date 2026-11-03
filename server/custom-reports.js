@@ -112,6 +112,7 @@ export function applyTemplate(rep, tpl) {
     cols.push(...(it.label ? split.map((x) => ({ ...x, label: `${it.label} ${pairOf(x.key)[2]}` })) : split));
   }
   const rows = !formulas.length ? rep.rows : rep.rows.map((r) => {
+    if (r._off) return r;   // dòng ngày không đi làm (ô "Hiện cả ngày không đi làm"): cột công thức cũng để trống
     const vars = {};
     for (const [k, v] of Object.entries(r)) vars[k.toUpperCase()] = toNum(v);   // bộ tính công thức đọc tên biến IN HOA (không phân biệt hoa / thường)
     const out = { ...r };
