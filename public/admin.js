@@ -8305,6 +8305,12 @@ async function pageSettings() {
     } catch (e) { toast(e.message || 'Không tải được file log', 'err'); }
     logBtn.disabled = false;
   };
+  // Tự cập nhật (bản cài 1 công ty): phần mềm tự hỏi bản mới 15 phút/lần, có là tự cập nhật — khách không phải bấm
+  const autoChk = el('input', { type: 'checkbox', class: 'sw sm', ...(s.auto_update !== '0' ? { checked: '' } : {}) });
+  autoChk.onchange = async () => {
+    try { await api('/admin/settings', { method: 'PUT', body: { auto_update: autoChk.checked } }); s.auto_update = autoChk.checked ? '1' : '0'; toast(autoChk.checked ? 'Đã bật tự cập nhật' : 'Đã tắt tự cập nhật — có bản mới thì bấm Kiểm tra cập nhật', 'ok'); }
+    catch (e) { autoChk.checked = !autoChk.checked; toast(e.message, 'err'); }
+  };
   const panelUpdate = hasPerm('settings') ? el('div', { class: 'panel', style: 'padding:20px;max-width:520px;margin-bottom:16px' },
     el('h3', { style: 'margin-top:0' }, '⬆ Cập nhật phần mềm'),
     el('div', { style: 'display:flex;flex-direction:column;gap:12px' },
@@ -8312,6 +8318,8 @@ async function pageSettings() {
       s.host_managed === '1'   // chạy trên máy chủ của Digiplus: Digiplus cập nhật chung, khách không cần bấm
         ? el('div', { class: 'map-hint' }, 'Phần mềm đang chạy trên máy chủ của Digiplus — Digiplus tự cập nhật bản mới, không cần làm gì.')
         : el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, checkBtn, applyBtn),
+      s.host_managed === '1' ? '' : el('label', { style: 'display:flex;gap:8px;align-items:center;margin:0;font-weight:500;color:var(--ink)' }, autoChk,
+        el('span', {}, 'Tự cập nhật khi có bản mới ', el('span', { class: 'map-hint', style: 'margin:0' }, '(15 phút kiểm tra 1 lần, tự sao lưu trước, phần mềm khởi động lại khoảng 15 giây)'))),
       updStatus,
       el('div', {}, logBtn, el('span', { class: 'map-hint', style: 'margin-left:8px' }, 'Khi gặp lỗi, tải file này gửi cho Digiplus để được hỗ trợ nhanh.')),
       el('div', { class: 'map-hint' }, 'Máy phải có Internet. Bấm “Kiểm tra cập nhật”: đã mới nhất sẽ báo xanh; có bản mới sẽ hiện nút “Cập nhật ngay”. Cập nhật xong app tự khởi động lại, dữ liệu giữ nguyên (tự sao lưu trước khi cập nhật).'))) : null;

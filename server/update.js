@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { getSetting, setSetting } from './db.js';
 import { doBackup } from './backup.js';
 import { MULTI, currentTenant, eachTenant } from './tenant.js';
+import { tcpBusy } from './zk-tcp.js';
 
 // Máy chủ nhiều công ty: lệnh cập nhật chung (/_host/update) chạy NGOÀI ngữ cảnh công ty → không có CSDL
 // cài đặt để đọc, dùng mặc định (trước đây báo "thiếu ngữ cảnh" → máy chủ không tự cập nhật được, 30/10/2026)
@@ -354,9 +355,14 @@ export const updateBusy = (p = progress, now = Date.now()) =>
 // MÁY CHỦ NHIỀU CÔNG TY TỰ CẬP NHẬT (31/10/2026): trước Anh phải vào /may-chu bấm Cập nhật cho từng máy chủ sau mỗi
 // lần phát hành. Giờ máy chủ tự hỏi GitHub 15 phút/lần, có bản mới là tự cập nhật (sao lưu từng công ty, ~15 giây) —
 // không cần mật khẩu cấp domain. Tắt: AUTO_UPDATE=0 trong config.txt. Cập nhật hỏng thì 6 giờ sau mới thử lại bản đó
-// (không tải 7 MB mỗi 15 phút mãi). Bản cài 1 công ty KHÔNG tự cập nhật (khách vẫn bấm nút trong app).
+// (không tải 7 MB mỗi 15 phút mãi).
+// BẢN CÀI 1 CÔNG TY CŨNG TỰ CẬP NHẬT (03/11/2026): trước khách phải tự bấm nút → nhiều khách nằm ở bản cũ (bactrungnamsolar).
+// Công tắc "Tự cập nhật khi có bản mới" ở Cài đặt → Cập nhật phần mềm (mặc định BẬT, đọc lại mỗi lượt nên tắt là có tác dụng ngay).
+// Đang đọc/ghi máy TCP/IP thì chờ lượt sau.
 export const AUTO_EVERY_MS = 15 * 60000, AUTO_RETRY_MS = 6 * 3600000;
-export async function autoUpdateTick(st, { check = checkUpdate, start = startUpdate, busy = updateBusy, now = Date.now() } = {}) {
+export const autoOn = (env = process.env, get = setting) => env.AUTO_UPDATE !== '0' && (MULTI || get('auto_update', '1') !== '0');
+export async function autoUpdateTick(st, { on = autoOn, check = checkUpdate, start = startUpdate, busy = () => updateBusy() || tcpBusy(), now = Date.now() } = {}) {
+  if (!on()) return 'off';
   if (busy()) return 'busy';
   const info = await check();
   if (!info.hasUpdate) return 'latest';
@@ -366,11 +372,12 @@ export async function autoUpdateTick(st, { check = checkUpdate, start = startUpd
   return r.started ? 'started' : 'skip';
 }
 export function startAutoUpdate(env = process.env) {
-  if (!MULTI || env.AUTO_UPDATE === '0' || !isPackaged()) return false;
+  if (env.AUTO_UPDATE === '0' || !isPackaged()) return false;
   const st = { ver: '', at: 0 };
+  let lastErr = '';   // bản LAN không có Internet: chỉ ghi log 1 lần mỗi loại lỗi, không 15 phút 1 dòng
   const tick = () => autoUpdateTick(st)
-    .then((r) => { if (r === 'started') console.log(`[update] máy chủ tự cập nhật lên ${st.ver}`); })
-    .catch((e) => console.error('[update] tự kiểm tra bản mới lỗi:', e.message));
+    .then((r) => { lastErr = ''; if (r === 'started') console.log(`[update] tự cập nhật lên ${st.ver}`); })
+    .catch((e) => { if (e.message !== lastErr) console.error('[update] tự kiểm tra bản mới lỗi:', e.message); lastErr = e.message; });
   setTimeout(tick, 2 * 60000).unref?.();      // máy chủ vừa bật: chờ 2 phút cho ổn định rồi mới hỏi
   setInterval(tick, AUTO_EVERY_MS).unref?.();
   return true;

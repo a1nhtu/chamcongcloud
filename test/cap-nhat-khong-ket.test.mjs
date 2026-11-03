@@ -98,6 +98,40 @@ test('máy chủ tự cập nhật: có bản mới → cập nhật; đang ch�
   assert.deepEqual(started, ['1.26.7', '1.26.8', '1.26.8']);
 });
 
-test('chỉ máy chủ nhiều công ty tự cập nhật (bản cài 1 công ty / máy dev thì không)', () => {
+test('máy dev (không phải bản cài) không tự cập nhật', () => {
   assert.equal(U.startAutoUpdate({}), false);
+});
+
+// BẢN CÀI 1 CÔNG TY CŨNG TỰ CẬP NHẬT (03/11/2026): mặc định bật, tắt bằng công tắc Cài đặt (có tác dụng ngay) hoặc AUTO_UPDATE=0.
+test('bản 1 công ty: tự cập nhật mặc định BẬT; tắt công tắc → lượt hỏi bỏ qua ngay; AUTO_UPDATE=0 tắt hẳn', async () => {
+  const D = await import('../server/db.js');
+  assert.equal(U.autoOn({}), true, 'mặc định bật');
+  assert.equal(U.autoOn({ AUTO_UPDATE: '0' }), false);
+  const started = [];
+  const deps = { check: async () => ({ current: '1.28.1', latest: '1.28.2', hasUpdate: true }),
+    start: async (v) => { started.push(v); return { ok: true, started: true }; }, busy: () => false, now: 1e12 };
+  D.setSetting('auto_update', '0');
+  try {
+    assert.equal(U.autoOn({}), false);
+    assert.equal(await U.autoUpdateTick({ ver: '', at: 0 }, deps), 'off');
+    assert.deepEqual(started, [], 'tắt thì không tải gì');
+  } finally { D.setSetting('auto_update', '1'); }
+  assert.equal(await U.autoUpdateTick({ ver: '', at: 0 }, deps), 'started');
+  assert.deepEqual(started, ['1.28.2']);
+});
+
+test('đang đọc/ghi máy TCP/IP → tự cập nhật chờ lượt sau; xong việc thì cập nhật', async () => {
+  const Z = await import('../server/zk-tcp.js');
+  let finish;
+  const job = Z.startJob('push', 'May thu', () => new Promise((ok) => { finish = ok; }));
+  await new Promise((r) => setImmediate(r));
+  assert.equal(Z.tcpBusy(), true);
+  assert.equal(Z.tcpBusy(Date.now() + 31 * 60000), false, 'việc treo quá 30 phút không giữ cập nhật mãi');
+  const deps = { check: async () => ({ current: '1.28.1', latest: '1.28.2', hasUpdate: true }), start: async () => ({ started: true }), now: 1e12 };
+  assert.equal(await U.autoUpdateTick({ ver: '', at: 0 }, deps), 'busy', 'mặc định có xét việc máy TCP/IP');
+  finish({});
+  await new Promise((r) => setImmediate(r));
+  assert.equal(job.state, 'done');
+  assert.equal(Z.tcpBusy(), false);
+  assert.equal(await U.autoUpdateTick({ ver: '', at: 0 }, deps), 'started');
 });

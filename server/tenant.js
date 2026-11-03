@@ -42,6 +42,7 @@ export function busyFlag() {
   return {
     take() { const k = tenantKey(); if (on.has(k)) return false; on.add(k); return true; },
     done() { on.delete(tenantKey()); },
+    any() { return on.size > 0; },   // có công ty nào đang chạy việc này không (tự cập nhật chờ xong mới khởi động lại)
   };
 }
 

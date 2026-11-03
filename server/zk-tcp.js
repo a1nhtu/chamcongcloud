@@ -412,6 +412,9 @@ export function startJob(kind, devName, fn) {
   return j;
 }
 export const getJob = (id) => { const j = jobs.get(id); return j && j.tk === tenantKey() ? j : null; };
+// Đang đọc/ghi máy TCP/IP (việc bấm tay hoặc tự tải theo lịch) → tự cập nhật chờ lượt sau: khởi động lại giữa chừng có thể bỏ máy
+// ở trạng thái khoá (EnableDevice false). Việc 'run' quá 30 phút coi như treo, không giữ cập nhật mãi.
+export const tcpBusy = (now = Date.now()) => autoBusy.any() || [...jobs.values()].some((j) => j.state === 'run' && now - j.at < 30 * 60000);
 
 /* ---------- TỰ ĐỘNG TẢI THEO LỊCH ----------
  * Cài đặt tcp_auto_min = cứ N phút tải 1 lần (0 = tắt). Mỗi lượt, với từng máy TCP/IP đã duyệt + đang bật tự tải (tuần tự từng máy):

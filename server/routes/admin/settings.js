@@ -85,6 +85,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       host_managed: MULTI ? '1' : '',   // máy chủ nhiều công ty: Digiplus cập nhật chung cho mọi công ty (ẩn nút Cập nhật)
       update_repo: updateConfig().repo,
       update_branch: updateConfig().branch,
+      auto_update: getSetting('auto_update', '1'),   // bản cài 1 công ty tự cập nhật khi có bản mới (mặc định bật)
     });
   });
   r.put('/settings', need('settings'), (req, res) => {
@@ -207,6 +208,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.setup_done != null) setSetting('setup_done', b.setup_done ? '1' : '0');
     if (b.update_repo != null) setSetting('update_repo', String(b.update_repo).trim());
     if (b.update_branch != null) setSetting('update_branch', String(b.update_branch).trim() || 'main');
+    if (b.auto_update != null) setSetting('auto_update', b.auto_update ? '1' : '0');
     res.json({ ok: true });
   });
 
