@@ -1582,6 +1582,49 @@ r.get('/custom', (req, res) => res.json({ bases: CR_BASES, list: listCustom() })
 // Tiến độ 1 lần xuất Excel đang chạy (giao diện hỏi ~2 lần / giây để vẽ thanh %)
 r.get('/progress', (req, res) => res.json(getProgress(String(req.query.pt || '')) || { pct: 0, msg: '' }));
 
+// Sheet "TongHop" kèm báo cáo liệt kê từng ngày có Tổng phút (VD Báo cáo chấm công theo giờ): mỗi NV 1 dòng — số ngày,
+// tổng giờ, tổng phút, giờ:phút trong khoảng từ ngày → đến ngày đang xuất. Cộng từ PHÚT (không cộng số giờ đã làm tròn).
+// Báo cáo không có cột Mã NV + Ngày + Tổng phút thì không thêm sheet (file y như cũ).
+function summarySheet(wb, columns, rows, { company, address, title, from, to, allBorder }) {
+  const has = (k) => columns.some((c) => c.key === k);
+  if (!has('code') || !has('date') || !has('phut') || !rows.length) return;
+  const agg = new Map();
+  for (const r of rows) {
+    const k = String(r.code ?? '') + '|' + String(r.name ?? '');
+    const g = agg.get(k) || agg.set(k, { code: r.code ?? '', name: r.name ?? '', dept: r.dept ?? '', days: new Set(), workDays: new Set(), min: 0 }).get(k);
+    const m = +r.phut || 0;
+    g.min += m; g.days.add(r.date); if (m > 0) g.workDays.add(r.date);
+  }
+  const hm = (m) => `${Math.floor(m / 60)}:${String(Math.round(m % 60)).padStart(2, '0')}`;
+  const cols = [
+    { label: 'STT', w: 6 }, { label: 'Mã NV', w: 10 }, { label: 'Họ tên', w: 24 }, { label: 'Bộ phận', w: 16 },
+    { label: 'Số ngày có chấm', w: 11 }, { label: 'Số ngày có giờ làm', w: 11 },
+    { label: 'Tổng giờ', w: 10 }, { label: 'Tổng phút', w: 11 }, { label: 'Giờ:phút', w: 10 },
+  ];
+  const ws = wb.addWorksheet('TongHop');
+  const n = cols.length;
+  ws.mergeCells(1, 1, 1, n); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
+  ws.mergeCells(2, 1, 2, n); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
+  ws.mergeCells(3, 1, 3, n);
+  Object.assign(ws.getCell(3, 1), { value: `TỔNG HỢP GIỜ LÀM TỪNG NGƯỜI (${fmtDMY(from)} → ${fmtDMY(to)})`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
+  ws.mergeCells(4, 1, 4, n);
+  Object.assign(ws.getCell(4, 1), { value: 'Cộng từ sheet BaoCao: ' + title, font: { italic: true, size: 10, color: { argb: 'FF6B7280' } }, alignment: { horizontal: 'center' } });
+  const hr = ws.addRow(cols.map((c) => c.label));
+  hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  hr.eachCell((cell) => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E3A5F' } }; cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }; cell.border = allBorder; });
+  let i = 0, tot = 0;
+  for (const g of agg.values()) {
+    tot += g.min;
+    const r2 = ws.addRow([++i, g.code, g.name, g.dept, g.days.size, g.workDays.size, round2(g.min / 60), Math.round(g.min), hm(g.min)]);
+    r2.eachCell((cell, col) => { cell.border = allBorder; if (col !== 3 && col !== 4) cell.alignment = { horizontal: 'center' }; });
+  }
+  const tr = ws.addRow(['', '', 'TỔNG CỘNG', '', '', '', round2(tot / 60), Math.round(tot), hm(tot)]);
+  tr.font = { bold: true };
+  tr.eachCell((cell, col) => { cell.border = allBorder; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF4FA' } }; if (col > 4) cell.alignment = { horizontal: 'center' }; });
+  ws.columns.forEach((col, k) => { col.width = cols[k]?.w || 12; });
+  ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 3 }];
+}
+
 r.get('/export.xlsx', virtGuard, async (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const filter = filterFromQuery(req.query, req);
@@ -1645,6 +1688,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   }
   ws.columns.forEach((col, i) => { col.width = columns[i]?.w || 12; });
   ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 2 }];
+  summarySheet(wb, columns, rows, { company, address, title, from, to, allBorder });
 
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${from}_${to}.xlsx"`);

@@ -115,3 +115,16 @@ test('Excel chi tiết giờ vào/ra + giờ làm (theo giờ): mỗi lần ch�
   assert.ok(wh.flat().includes('Ra 3'));
   assert.ok(!wh.flat().some((v) => /tăng ca/i.test(v)));
 });
+test('Excel báo cáo chấm công (theo giờ): thêm sheet TongHop — mỗi NV 1 dòng, cộng giờ/phút cả khoảng ngày', async () => {
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await get(`/export.xlsx?type=attendance${Q}&mode=hourly`));
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['BaoCao', 'TongHop']);
+  const rows = []; wb.getWorksheet('TongHop').eachRow((r) => rows.push(r.values.slice(1).map((v) => (v == null ? '' : String(v)))));
+  assert.ok(rows[2][0].includes('01/09/2026') && rows[2][0].includes('30/09/2026'), rows[2][0]);
+  assert.deepEqual(rows[4], ['STT', 'Mã NV', 'Họ tên', 'Bộ phận', 'Số ngày có chấm', 'Số ngày có giờ làm', 'Tổng giờ', 'Tổng phút', 'Giờ:phút']);
+  assert.deepEqual(rows[5], ['1', 'H1', 'Lê Giờ', 'Xưởng', '2', '2', '12', '720', '12:00']);
+  assert.deepEqual(rows.at(-1).slice(2), ['TỔNG CỘNG', '', '', '', '12', '720', '12:00']);
+});
+test('Excel báo cáo không có cột Ngày + Tổng phút: không thêm sheet (file như cũ)', async () => {
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await get(`/export.xlsx?type=summary${Q}&mode=hourly`));
+  assert.deepEqual(wb.worksheets.map((w) => w.name), ['BaoCao']);
+});
