@@ -582,6 +582,30 @@ export function resyncNow(force = false) {
 // THANH TIẾN TRÌNH lệnh máy đẩy (ADMS): nút bấm ghi mốc id lệnh trước/sau khi xếp lệnh, giao diện hỏi số lệnh máy đã báo
 // nhận. Chỉ đọc bảng lệnh (theo khoá id) — không đụng tới máy, không làm chậm đồng bộ.
 export const cmdMark = () => db.prepare('SELECT COALESCE(MAX(id),0) m FROM push_device_commands').get().m;
+// Mã lỗi máy trả về (Return=… ở /devicecmd) — bảng mã lỗi của giao thức PUSH ZKTeco
+const CMD_ERR = { '-1': 'sai tham số', '-2': 'ảnh không đúng kích thước', '-3': 'lỗi đọc/ghi trên máy', '-9': 'mẫu sinh trắc không đúng kích thước',
+  '-10': 'máy không có Số ID này', '-11': 'sai định dạng vân tay', '-12': 'mẫu vân tay hỏng', '-1001': 'máy hết dung lượng',
+  '-1002': 'máy không hỗ trợ lệnh này', '-1003': 'máy chạy lệnh quá lâu', '-1004': 'dữ liệu không khớp cấu hình máy', '-1005': 'máy đang bận',
+  '-1006': 'dữ liệu quá dài', '-1007': 'lỗi bộ nhớ máy', '-1008': 'máy không lấy được dữ liệu từ phần mềm' };
+export const cmdErrText = (code) => CMD_ERR[String(code).trim()] || 'lỗi không rõ';
+// Tên dễ hiểu của lệnh (hiện trong thanh tiến trình khi máy báo lỗi) + Số ID nếu lệnh dành cho 1 người
+export function cmdLabel(c) {
+  const pin = (c.match(/\bPIN=([^\t\s]+)/i) || [])[1] || '';
+  const what = /^DATA QUERY USERINFO/.test(c) ? (pin ? 'Hỏi thông tin NV' : 'Hỏi danh sách NV')
+    : /^DATA QUERY FINGERTMP/.test(c) ? 'Hỏi vân tay (FINGERTMP)'
+    : /^DATA QUERY BIODATA/.test(c) ? 'Hỏi khuôn mặt / vân tay đời mới (BIODATA)'
+    : /^DATA QUERY ATTLOG/.test(c) ? 'Tải log chấm công'
+    : /^DATA UPDATE USERINFO/.test(c) ? 'Đẩy NV'
+    : /^DATA UPDATE FINGERTMP/.test(c) ? 'Đẩy vân tay'
+    : /^DATA UPDATE BIODATA/.test(c) ? (/\tType=1\b/.test(c) ? 'Đẩy vân tay' : 'Đẩy khuôn mặt')
+    : /^DATA UPDATE (USERPIC|BIOPHOTO)/.test(c) ? 'Đẩy ảnh'
+    : /^DATA DELETE USERINFO/.test(c) ? 'Xoá NV'
+    : ({ CHECK: 'Kiểm tra dữ liệu (CHECK)', REBOOT: 'Khởi động lại máy', 'CLEAR LOG': 'Xoá log chấm công', 'CLEAR DATA': 'Xoá toàn bộ dữ liệu', AC_UNLOCK: 'Mở cửa' })[c] || c.slice(0, 40);
+  return { what, pin };
+}
+// Hỏi vân tay: máy chỉ hiểu 1 trong 2 bảng FINGERTMP (vân tay đời cũ) / BIODATA (khuôn mặt, vân tay đời mới) nên phần mềm hỏi cả hai.
+// Bảng kia đã trả lời OK thì lỗi của bảng này là bình thường — không báo "máy báo lỗi" làm khách lo (bactrungnamsolar 03/11/2026).
+const BIO_QUERY = { 'DATA QUERY FINGERTMP': 'DATA QUERY BIODATA', 'DATA QUERY BIODATA': 'DATA QUERY FINGERTMP' };
 // to = 0: theo dõi mở (Đồng bộ: máy trả lời DATA QUERY xong phần mềm mới xếp tiếp lệnh đẩy sang máy khác trong nhóm)
 export function cmdProgress(from, to, serials = []) {
   const where = ['id>?'], args = [from];
@@ -591,13 +615,33 @@ export function cmdProgress(from, to, serials = []) {
       SUM(response_at IS NOT NULL AND CAST(return_value AS INTEGER)<0) failed
     FROM push_device_commands WHERE ${where.join(' AND ')} GROUP BY serial`).all(...args);
   const bySn = new Map(rows.map((r) => [r.serial, r]));
+  // Chi tiết lệnh lỗi: gộp theo (loại lệnh, mã lỗi) — 300 lệnh đẩy vân tay cùng lỗi chỉ hiện 1 dòng. Chỉ đọc 200 ký tự đầu (lệnh ảnh/mẫu rất dài).
+  const qOk = new Set(db.prepare(`SELECT serial, content FROM push_device_commands WHERE ${where.join(' AND ')}
+    AND content IN ('DATA QUERY FINGERTMP','DATA QUERY BIODATA') AND TRIM(return_value)='0'`).all(...args).map((r) => r.serial + '|' + r.content));
+  const errs = new Map(), skips = new Map();
+  for (const f of db.prepare(`SELECT serial, substr(content,1,200) c, TRIM(return_value) code FROM push_device_commands
+    WHERE ${where.join(' AND ')} AND response_at IS NOT NULL AND CAST(return_value AS INTEGER)<0 ORDER BY id LIMIT 2000`).all(...args)) {
+    const { what, pin } = cmdLabel(f.c);
+    if (BIO_QUERY[f.c] && qOk.has(f.serial + '|' + BIO_QUERY[f.c])) {
+      if (!skips.has(f.serial)) skips.set(f.serial, []);
+      skips.get(f.serial).push({ what, code: f.code });
+      continue;
+    }
+    if (!errs.has(f.serial)) errs.set(f.serial, new Map());
+    const g = errs.get(f.serial), k = what + '|' + f.code;
+    if (!g.has(k)) g.set(k, { what, code: f.code, msg: cmdErrText(f.code), n: 0, pins: [] });
+    const e = g.get(k);
+    e.n++;
+    if (pin && e.pins.length < 5) e.pins.push(pin);
+  }
   const dev = db.prepare('SELECT name, last_seen FROM push_devices WHERE serial=?');
   const ahead = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE serial=? AND id<=? AND response_at IS NULL');
   const cnt = (sql, sn) => db.prepare(sql).get(sn).c;
   const devices = [...new Set([...serials, ...bySn.keys()])].map((sn) => {
-    const r = bySn.get(sn) || { total: 0, done: 0, failed: 0 }, d = dev.get(sn) || {};
+    const r = bySn.get(sn) || { total: 0, done: 0, failed: 0 }, d = dev.get(sn) || {}, skipped = skips.get(sn) || [];
     return { serial: sn, name: d.name || sn, online: !!d.last_seen && Date.now() - Date.parse(d.last_seen) < 3 * 60000,
-      total: r.total, done: r.done, failed: r.failed, ahead: ahead.get(sn, from).c,
+      total: r.total, done: r.done, failed: r.failed - skipped.length, errors: [...(errs.get(sn) || new Map()).values()].slice(0, 6), skipped,
+      ahead: ahead.get(sn, from).c,
       users: cnt('SELECT COUNT(*) c FROM device_users_serial WHERE serial=?', sn),
       fp: cnt('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type=1', sn),
       face: cnt('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)', sn) };

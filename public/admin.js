@@ -7584,10 +7584,14 @@ function cmdTrack(title, t, opt = {}) {
       const tot = sum(on, 'total'), done = sum(on, 'done'), failed = sum(r.devices, 'failed');
       const pct = tot ? Math.floor(done * 100 / tot) : (off.length ? 0 : 100);
       bar.firstChild.style.width = pct + '%'; pctEl.textContent = pct + '%';
-      list.replaceChildren(...r.devices.filter((d) => d.total || opt.counts).map((d) => el('div', {},
+      // Lệnh lỗi: ghi rõ lệnh gì + mã máy trả (gộp lệnh cùng loại cùng mã); lỗi "bình thường" (máy chỉ hiểu 1 trong 2 bảng vân tay) ghi chú xám
+      list.replaceChildren(...r.devices.filter((d) => d.total || opt.counts).flatMap((d) => [el('div', {},
         `• ${d.name}: ${d.done}/${d.total} lệnh` + (opt.counts ? ` · có ${d.users} NV, ${d.fp} vân tay, ${d.face} khuôn mặt` : '')
         + (!d.online ? ' · ⚠ mất kết nối, máy nối lại mới nhận' : d.ahead && d.done < d.total ? ` · chờ ${d.ahead} lệnh xếp trước` : '')
-        + (d.failed ? ` · ${d.failed} lệnh máy báo lỗi` : ''))));
+        + (d.failed ? ` · ${d.failed} lệnh máy báo lỗi` : '')),
+        ...(d.errors || []).map((g) => el('div', { class: 'xp-err' }, `⚠ ${g.what}: máy báo ${g.code} (${g.msg})`
+          + (g.n > 1 ? ` — ${g.n} lệnh` : '') + (g.pins.length ? ` · Số ID ${g.pins.join(', ')}${g.n > g.pins.length ? '…' : ''}` : ''))),
+        ...(d.skipped || []).map((s) => el('div', { class: 'xp-note' }, `ℹ ${s.what}: máy không dùng bảng này (mã ${s.code}) — bình thường, dữ liệu đã về qua bảng còn lại`))]));
       // xong = máy đang kết nối đã báo nhận hết + 1 lượt hỏi không đổi gì (máy gửi dữ liệu / phần mềm xếp thêm lệnh sau báo nhận)
       const sig = JSON.stringify(r.devices.map((d) => [d.total, d.done, d.users, d.fp, d.face]));
       const settled = on.every((d) => d.done >= d.total) && sig === prev;
@@ -7604,7 +7608,9 @@ function cmdTrack(title, t, opt = {}) {
       msgEl.textContent = (tot ? `✅ Máy đã nhận đủ ${tot} lệnh sau ${sec} giây` : '✅ Không còn gì phải gửi xuống máy')
         + (failed ? ` — ⚠ ${failed} lệnh máy báo lỗi` : '') + (off.length ? ` — ${off.length} máy mất kết nối sẽ nhận khi nối lại` : '');
       box.classList.add('ok');
-      if (!failed && !off.length) setTimeout(() => box.remove(), 8000);
+      // Xong → tự ẩn sau 3 giây kể cả có lỗi (Anh 03/11/2026: trước có lỗi thì hiện mãi, phải bấm × tay); đang rê chuột vào hộp để đọc thì chờ
+      const close = () => (box.matches(':hover') ? setTimeout(close, 1000) : box.remove());
+      setTimeout(close, 3000);
       opt.after && opt.after();
       return;
     }
