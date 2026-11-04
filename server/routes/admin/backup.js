@@ -4,6 +4,7 @@ import { getSetting, setSetting } from '../../db.js';
 import { doBackup, listBackups, pruneBackups, backupPath, deleteBackup, stageRestore, doFullBackup, stageFullRestore } from '../../backup.js';
 import { sendCaughtError } from '../../util.js';
 import { MULTI, currentTenant } from '../../tenant.js';
+import { moveInfo, startMovePackage, cancelMove, finishMove } from '../../chuyen-may.js';
 
 // Máy chủ nhiều công ty: mở lại CSDL riêng công ty này ngay (không khởi động lại cả máy chủ — các công ty khác không bị gián đoạn)
 async function applyNow() {
@@ -58,6 +59,17 @@ export function registerBackupRoutes(r, { need }) {
   r.post('/backup/full', need('backup'), (req, res) => {
     try { res.json({ ok: true, ...doFullBackup() }); }
     catch (e) { sendCaughtError(res, 'POST /admin/backup/full', e, { message: 'Không tạo được bản sao lưu toàn bộ, vui lòng thử lại hoặc liên hệ Digiplus' }); }
+  });
+  // CHUYỂN SANG MÁY KHÁC (bản cài Windows 1 công ty): đóng file → tải về → tắt hẳn máy cũ (xem server/chuyen-may.js)
+  r.get('/backup/chuyen-may', need('backup'), (req, res) => res.json(moveInfo()));
+  r.post('/backup/chuyen-may/tao', need('backup'), (req, res) => {
+    try { res.json({ ok: true, ...startMovePackage() }); }
+    catch (e) { sendCaughtError(res, 'POST /admin/backup/chuyen-may/tao', e, { status: 400 }); }
+  });
+  r.post('/backup/chuyen-may/huy', need('backup'), (req, res) => res.json(cancelMove()));
+  r.post('/backup/chuyen-may/tat', need('backup'), (req, res) => {
+    try { res.json(finishMove()); }
+    catch (e) { sendCaughtError(res, 'POST /admin/backup/chuyen-may/tat', e, { status: 400 }); }
   });
   // Phục hồi TOÀN BỘ từ .zip → nạp DB (áp lúc khởi động lại) + thay ảnh/logo ngay
   r.post('/backup/full-restore', need('backup'), raw({ type: () => true, limit: '500mb' }), (req, res) => {

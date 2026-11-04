@@ -9,7 +9,7 @@ import { appRoot } from './tenant.js';
 import { userError } from './util.js';
 
 // Linux: GNU tar không đọc/ghi được .zip → dùng bsdtar (gói libarchive-tools, bộ cài Linux tự cài)
-const winTar = () => { if (process.platform !== 'win32') return 'bsdtar'; const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
+export const winTar = () => { if (process.platform !== 'win32') return 'bsdtar'; const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
 
 // Thư mục sao lưu của công ty đang phục vụ (bản 1 công ty: data/backups như cũ)
 export const backupDir = () => { const d = join(dataDir(), 'backups'); mkdirSync(d, { recursive: true }); return d; };

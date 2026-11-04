@@ -17,6 +17,8 @@ const INSTALL_ROOT = join(__dirname, '..', '..');   // bản cài: <install>\app
 // Nội dung ChayApp.bat (nguồn DUY NHẤT — bộ cài cũng lấy từ đây)
 export const CHAY_APP_BAT = String.raw`@echo off
 cd /d "%~dp0"
+rem Da bam "Chuyen sang may khac" (Cai dat > Sao luu): KHONG bat lai phan mem / tunnel tren may nay nua. CaiDat.bat xoa dau nay.
+if exist "%~dp0DA-CHUYEN-MAY.txt" exit /b
 set "PORT=8686"
 set "TUNNEL_TOKEN="
 for /f "usebackq tokens=1,* delims==" %%a in ("%~dp0config.txt") do set "%%a=%%b"

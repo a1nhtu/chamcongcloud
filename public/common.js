@@ -236,6 +236,12 @@ function showActivation(s) {
   box.innerHTML = `
     <h2 style="margin:0 0 4px;color:var(--brand)">Kích hoạt bản quyền</h2>
     <p style="color:var(--muted);margin:0 0 16px;font-size:14px">Phần mềm cần license của Digiplus để chạy.</p>
+    ${s.move ? `<div id="lic-move" style="background:#fffaf0;border:1px solid #f0dcb4;border-radius:12px;padding:12px;margin-bottom:14px;font-size:14px;line-height:1.5">
+      <b>📦 Vừa chuyển từ máy cũ — đang tự chuyển bản quyền sang máy này…</b>
+      <div id="lic-move-st" style="margin-top:6px"></div>
+      <button class="btn ghost sm" id="lic-move-go" type="button" style="margin-top:8px">Thử lại</button>
+      <div style="font-size:12px;color:var(--muted);margin-top:6px">Không tự chuyển được thì gửi Mã máy bên dưới cho Digiplus để cấp lại.</div>
+    </div>` : ''}
     <label>Mã máy — gửi mã này cho Digiplus để lấy license</label>
     <div style="display:flex;gap:8px;margin-bottom:14px">
       <input id="lic-mid" readonly value="${s.machineIdFmt || ''}" style="font-weight:700;font-family:monospace" />
@@ -248,6 +254,29 @@ function showActivation(s) {
     <div style="font-size:12px;color:var(--muted);text-align:center;margin-top:10px">Liên hệ Digiplus để mua / cấp bản quyền.</div>`;
   const wrap = el('div', { style: 'position:fixed;inset:0;background:linear-gradient(160deg,var(--brand),var(--brand-dark));z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto' }, box);
   document.body.append(wrap);
+  // Đang tự chuyển bản quyền từ máy cũ: hỏi lại 5 giây/lần, có bản quyền là vào luôn
+  if (s.move) {
+    const st = box.querySelector('#lic-move-st'), go = box.querySelector('#lic-move-go');
+    const show = (m) => { if (!m) return; st.textContent = m.error || 'Đang gửi lên máy chủ Digiplus…'; st.style.color = m.stopped ? '#c0392b' : 'var(--muted)'; };
+    const poll = async () => {
+      if (!wrap.isConnected) return;
+      const n = await licenseStatus();
+      if (n && n.activated) { toast('Đã nhận bản quyền cho máy này!', 'ok'); setTimeout(() => location.reload(), 800); return; }
+      if (n) show(n.move);
+      setTimeout(poll, 5000);
+    };
+    show(s.move);
+    setTimeout(poll, 5000);
+    go.onclick = async () => {
+      go.disabled = true; st.textContent = 'Đang thử lại…';
+      try {
+        const d = await (await fetch('/api/license/move-retry', { method: 'POST' })).json();
+        if (d.state && d.state.activated) { toast('Đã nhận bản quyền cho máy này!', 'ok'); setTimeout(() => location.reload(), 800); return; }
+        show(d.move);
+      } catch { st.textContent = 'Chưa kết nối được máy chủ phần mềm.'; }
+      go.disabled = false;
+    };
+  }
   box.querySelector('#lic-copy').onclick = () => { try { navigator.clipboard.writeText(s.machineIdFmt || ''); toast('Đã copy Mã máy', 'ok'); } catch { toast('Copy thủ công giúp em', 'err'); } };
   box.querySelector('#lic-go').onclick = async () => {
     const key = box.querySelector('#lic-key').value.trim();

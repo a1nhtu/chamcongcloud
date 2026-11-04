@@ -12,7 +12,11 @@
 ;   - NHIỀU BẢN TRÊN 1 MÁY (VPS nhiều khách): máy đã có bản Digiplus thì trình cài hỏi "cập nhật bản nào" hay "cài thêm bản mới";
 ;     mỗi bản một AppId riêng (hậu tố -2, -3...) → mỗi bản một thư mục, một mục gỡ cài đặt, một lối tắt.
 ; Cài im lặng: thêm /INSTANCE=2 để chỉ định bản (bỏ trống = bản đầu tiên).
-; Cài im lặng (thử nghiệm/tự động): /VERYSILENT /MODE=lan|domain|keep /PORT=8686|auto /SLUG=... /PASS=... /CREATE=1 /DEVICE=1 /PHONE=1 /SKIPAUTO=1 /DIR="..."
+; Cài im lặng (thử nghiệm/tự động): /VERYSILENT /MODE=lan|domain|keep|move /PORT=8686|auto /SLUG=... /PASS=... /CREATE=1 /DEVICE=1 /PHONE=1 /SKIPAUTO=1 /DIR="..."
+;   /MODE=move /MOVEFILE="D:\ChuyenMay-abc-20261104-2130.zip" = chuyển từ máy cũ (cổng theo file, /PORT để đổi)
+;   - CHUYỂN TỪ MÁY CŨ: chọn file ChuyenMay-*.zip (máy cũ: Cài đặt › Sao lưu › "Chuyển sang máy khác") → lấy config.txt trong file
+;     (tên miền, token, cổng), chép file vào thư mục cài thành ChuyenMay-nhan.zip → phần mềm chạy lên tự nhận dữ liệu + tự đổi
+;     bản quyền sang máy này (server/chuyen-may-nhan.js). Thư mục cài nào cũng được.
 ;   (/PORT=auto = tự lấy cổng trống đầu tiên từ 8686; tạo khách mới im lặng mà không ghi /PORT cũng tự lấy cổng trống)
 
 #ifndef Src
@@ -151,6 +155,8 @@ const
   MODE_KEEP = 0;
   MODE_DOMAIN = 1;
   MODE_LAN = 2;
+  MODE_MOVE = 3;
+  MOVED_MARKER = 'DA-CHUYEN-MAY.txt';   { máy này đã bấm "Chuyển sang máy khác" (phần mềm không tự bật nữa) }
 
 var
   ModePage: TInputOptionWizardPage;
@@ -171,6 +177,8 @@ var
   ListenCache: String;    { cổng đang nghe, đọc 1 lần khi vào trang Cổng → kiểm tra ngay khi gõ không phải chờ }   { số bản Digiplus đang có trên máy (để chọn sẵn ô VPS) }
 
   Instance: String;       { '' = bản đầu tiên; '2', '3'... = các bản cài thêm trên cùng máy }
+  MovePage: TInputFileWizardPage;   { chọn file chuyển máy }
+  MoveFile, MoveCfg, MovePort, MoveCust: String;   { file chuyển máy + config.txt / cổng / tên khách trong file }
 
 const
   FETCH_EXISTING = 0;   { chỉ lấy cấu hình khách đã có }
@@ -180,6 +188,7 @@ const
   UNINS_ROOT = 'Software\Microsoft\Windows\CurrentVersion\Uninstall';
 
 function ReadCfg(const FileName, Key: String): String; forward;
+function ValidPort(const S: String): Boolean; forward;
 
 function InstSuffix: String;
 begin
@@ -430,6 +439,67 @@ begin
   Result := 'PORT=' + Port + #13#10 + 'CUSTOMER=' + #13#10 + 'TUNNEL_TOKEN=' + #13#10 + 'USE_DEVICE=1' + #13#10 + 'USE_PHONE=1' + #13#10;
 end;
 
+{ Đổi (hoặc thêm) 1 dòng KEY=VALUE trong nội dung config — giữ nguyên các dòng khác của máy cũ }
+function SetCfgVal(const Text, Key, Val: String): String;
+var S, L: String; P: Integer; Found: Boolean;
+begin
+  Result := ''; Found := False; S := Text;
+  StringChangeEx(S, #13, '', True);
+  while S <> '' do begin
+    P := Pos(#10, S);
+    if P = 0 then begin L := S; S := ''; end
+    else begin L := Copy(S, 1, P - 1); Delete(S, 1, P); end;
+    if Pos(Uppercase(Key) + '=', Uppercase(Trim(L))) = 1 then begin L := Key + '=' + Val; Found := True; end;
+    if Trim(L) <> '' then Result := Result + L + #13#10;
+  end;
+  if not Found then Result := Result + Key + '=' + Val + #13#10;
+end;
+
+{ Đọc config.txt + chuyen-may.json trong file chuyển máy (tar.exe có sẵn từ Windows 10 bản 1803). Err = lý do cho người cài. }
+function ReadMovePackage(const Zip: String; var Cfg, Err: String): Boolean;
+var Dir, Tar: String; RC: Integer; S: AnsiString;
+begin
+  Result := False; Cfg := ''; Err := '';
+  if (Zip = '') or not FileExists(Zip) then begin Err := 'Chưa chọn file chuyển máy (hoặc không thấy file).'; Exit; end;
+  Dir := ExpandConstant('{tmp}\chuyenmay');
+  DelTree(Dir, True, True, True);
+  ForceDirectories(Dir);
+  Tar := ExpandConstant('{sys}\tar.exe');
+  if not FileExists(Tar) then begin Err := 'Máy này thiếu tar.exe (Windows quá cũ, cần Windows 10 bản 1803 trở lên).'; Exit; end;
+  if not Exec(Tar, '-xf "' + Zip + '" -C "' + Dir + '" config.txt chuyen-may.json', '', SW_HIDE, ewWaitUntilTerminated, RC) or
+     not FileExists(Dir + '\chuyen-may.json') or not FileExists(Dir + '\config.txt') then begin
+    Err := 'File này không phải file chuyển máy Digiplus (hoặc file bị hỏng / chép chưa hết). ' +
+           'Trên máy cũ vào Cài đặt › Sao lưu › "Chuyển sang máy khác" để lấy file ChuyenMay-....zip.';
+    Exit;
+  end;
+  if not LoadStringFromFile(Dir + '\config.txt', S) then begin Err := 'Không đọc được cấu hình trong file chuyển máy.'; Exit; end;
+  Cfg := String(S);
+  if not ValidPort(CfgVal(Cfg, 'PORT')) then begin Err := 'Cấu hình trong file chuyển máy thiếu cổng.'; Exit; end;
+  Result := True;
+end;
+
+{ Chọn file chuyển máy xong → nhớ cấu hình + cổng + tên khách của máy cũ }
+function LoadMove(const Zip: String; var Err: String): Boolean;
+begin
+  Result := ReadMovePackage(Zip, MoveCfg, Err);
+  if Result then begin
+    MoveFile := Zip; MovePort := IntToStr(StrToInt(CfgVal(MoveCfg, 'PORT'))); MoveCust := Lowercase(CfgVal(MoveCfg, 'CUSTOMER'));
+  end;
+end;
+
+{ Cấu hình máy mới = cấu hình máy cũ, cổng P. Bản tên miền đổi cổng → máy chủ Digiplus trỏ tên miền về cổng mới. }
+function MoveConfigFor(const P: String; var Err: String): Boolean;
+var Cfg: String; NotFound: Boolean;
+begin
+  Result := True; Err := '';
+  if (P <> MovePort) and (MoveCust <> '') and (CfgVal(MoveCfg, 'TUNNEL_TOKEN') <> '') then begin
+    UseVps := False;
+    Result := FetchConfig(MoveCust, '', FETCH_SETPORT, P, True, True, Cfg, Err, NotFound);
+    if not Result then Exit;
+  end;
+  NewConfig := SetCfgVal(MoveCfg, 'PORT', P);
+end;
+
 function ValidPort(const S: String): Boolean;
 var N: Integer;
 begin
@@ -591,6 +661,7 @@ begin
   ModePage.Add('Giữ cấu hình đang có trên máy này (cập nhật / cài lại, giữ nguyên dữ liệu)');
   ModePage.Add('Bản có tên miền — xem được từ xa qua Internet (chỉ cần nhập tên khách)');
   ModePage.Add('Bản LAN — chỉ dùng trong mạng nội bộ, không cần tên miền');
+  ModePage.Add('Chuyển từ máy cũ — có file chuyển máy (ChuyenMay-....zip) lấy từ máy tính cũ');
 
   DomainPage := CreateInputQueryPage(ModePage.ID, 'Thông tin khách', 'Bản có tên miền',
     'Nhập tên khách (viết liền không dấu). Khách chưa có sẽ được tạo mới. Ô máy chấm công / điện thoại chỉ áp dụng khi tạo khách mới. Máy này cần có Internet.');
@@ -613,6 +684,12 @@ begin
   ChkVps.Width := DomainPage.SurfaceWidth; ChkVps.Height := ScaleY(20);
   ChkVps.Caption := 'Đang cài trên VPS nhiều khách của Digiplus (cài ở máy khách thì BỎ tích)';
   ChkVps.Checked := OtherInstCount > 0;   { máy đã có bản Digiplus khác → nhiều khả năng là VPS }
+
+  { tạo SAU trang tên miền, cùng gắn sau trang Kiểu cài → thứ tự: Kiểu → File chuyển máy → Tên miền → Cổng }
+  MovePage := CreateInputFilePage(ModePage.ID, 'Chuyển từ máy cũ', 'Chọn file chuyển máy lấy từ máy tính cũ',
+    'Trên máy cũ: Cài đặt › Sao lưu › "Chuyển sang máy khác" → tải file ChuyenMay-<tên khách>-<ngày>.zip → chép sang máy này.' + #13#10 + #13#10 +
+    'Dữ liệu, ảnh chấm công, cài đặt và tên miền chuyển theo. Bản quyền tự chuyển sang máy này khi phần mềm chạy (máy này cần Internet).');
+  MovePage.Add('File chuyển máy:', 'File chuyển máy Digiplus (ChuyenMay-*.zip)|*.zip|Mọi file|*.*', '.zip');
 
   PortPage := CreateInputQueryPage(DomainPage.ID, 'Cổng phần mềm', 'Chọn cổng cho phần mềm trên máy này',
     'Phần mềm chạy tại http://localhost:<cổng>/admin. Mỗi bản Digiplus trên cùng một máy cần một cổng riêng. Không rõ thì bấm "Tự chọn cổng trống".');
@@ -650,7 +727,12 @@ begin
       ModePage.SelectedValueIndex := MODE_DOMAIN;   { máy mới: chọn sẵn bản tên miền (trước đây không ô nào được chọn) }
   end
   else if CurPageID = PortPage.ID then begin
-    if ModePage.SelectedValueIndex = MODE_DOMAIN then begin
+    if ModePage.SelectedValueIndex = MODE_MOVE then begin
+      Ctx := 'M:' + MoveFile;
+      if MoveCust <> '' then WizardForm.PageDescriptionLabel.Caption := 'Chuyển từ máy cũ: ' + MoveCust + '.maychamcongcloud.com — máy cũ dùng cổng ' + MovePort
+      else WizardForm.PageDescriptionLabel.Caption := 'Chuyển từ máy cũ (bản LAN) — máy cũ dùng cổng ' + MovePort;
+    end
+    else if ModePage.SelectedValueIndex = MODE_DOMAIN then begin
       Slug := Lowercase(Trim(DomainPage.Values[0]));
       Ctx := 'D:' + Slug;
       if UseVps then Ctx := Ctx + ':vps';
@@ -665,7 +747,8 @@ begin
     ListenCache := ListenPorts;   { đọc 1 lần; gõ cổng thì báo ngay theo bản này }
     if Ctx <> PortCtx then begin
       PortCtx := Ctx;
-      if (ModePage.SelectedValueIndex = MODE_DOMAIN) and not DomainIsNew and (DomainPort <> '') then PortPage.Values[0] := DomainPort
+      if ModePage.SelectedValueIndex = MODE_MOVE then PortPage.Values[0] := MovePort
+      else if (ModePage.SelectedValueIndex = MODE_DOMAIN) and not DomainIsNew and (DomainPort <> '') then PortPage.Values[0] := DomainPort
       else if HasOldConfig then PortPage.Values[0] := ReadCfg(OldConfigPath, 'PORT')
       else PortPage.Values[0] := FindFreePortIn(8686, ListenCache);
     end;
@@ -677,9 +760,10 @@ function ShouldSkipPage(PageID: Integer): Boolean;
 begin
   Result := False;
   if PageID = DomainPage.ID then Result := ModePage.SelectedValueIndex <> MODE_DOMAIN;
+  if PageID = MovePage.ID then Result := ModePage.SelectedValueIndex <> MODE_MOVE;
   if PageID = PortPage.ID then Result := ModePage.SelectedValueIndex = MODE_KEEP;
   { cài im lặng: lựa chọn lấy từ tham số dòng lệnh (SilentSetup), không chạy các trang hỏi }
-  if WizardSilent and ((PageID = DomainPage.ID) or (PageID = PortPage.ID)) then Result := True;
+  if WizardSilent and ((PageID = DomainPage.ID) or (PageID = PortPage.ID) or (PageID = MovePage.ID)) then Result := True;
 end;
 
 function NextButtonClick(CurPageID: Integer): Boolean;
@@ -693,6 +777,25 @@ begin
     end;
     if ModePage.SelectedValueIndex = MODE_KEEP then NewConfig := '';
     if ModePage.SelectedValueIndex <> MODE_DOMAIN then UseVps := False;
+    { thư mục này đã có phần mềm + dữ liệu → chuyển từ máy cũ sẽ THAY dữ liệu đang có }
+    if (ModePage.SelectedValueIndex = MODE_MOVE) and HasOldConfig then
+      if MsgBox('Thư mục ' + WizardDirValue + ' đã có phần mềm Digiplus và dữ liệu.' + #13#10 + #13#10 +
+                'Chuyển từ máy cũ sẽ THAY dữ liệu đang có bằng dữ liệu của máy cũ (dữ liệu hiện tại vẫn giữ lại trong app\data\digiplus.db.prerestore).' + #13#10 + #13#10 +
+                'Tiếp tục?', mbConfirmation, MB_YESNO) <> IDYES then begin Result := False; Exit; end;
+    { máy này đã bấm "Chuyển sang máy khác" → cài lại ở đây trong khi máy mới vẫn chạy thì tên miền chạy lẫn 2 máy }
+    if (ModePage.SelectedValueIndex <> MODE_MOVE) and FileExists(AddBackslash(WizardDirValue) + MOVED_MARKER) then
+      if MsgBox('Phần mềm trong thư mục này đã được CHUYỂN SANG MÁY KHÁC.' + #13#10 + #13#10 +
+                'Nếu máy mới vẫn đang chạy, cài lại ở đây sẽ làm tên miền chạy lẫn hai máy (lúc vào được lúc không). ' +
+                'Bản quyền của máy này cũng đã chuyển đi — cần liên hệ Digiplus để cấp lại.' + #13#10 + #13#10 +
+                'Vẫn cài lại trên máy này?', mbConfirmation, MB_YESNO) <> IDYES then begin Result := False; Exit; end;
+  end
+  else if CurPageID = MovePage.ID then begin
+    WizardForm.NextButton.Enabled := False;
+    try
+      if not LoadMove(Trim(MovePage.Values[0]), Err) then begin MsgBox(Err, mbError, MB_OK); Result := False; end;
+    finally
+      WizardForm.NextButton.Enabled := True;
+    end;
   end
   else if CurPageID = DomainPage.ID then begin
     Slug := Lowercase(Trim(DomainPage.Values[0]));
@@ -746,6 +849,19 @@ begin
     end;
 
     if ModePage.SelectedValueIndex = MODE_LAN then begin NewConfig := LanConfig(P); Exit; end;
+    if ModePage.SelectedValueIndex = MODE_MOVE then begin
+      if (P <> MovePort) and (MoveCust <> '') then
+        if MsgBox('Máy cũ dùng cổng ' + MovePort + '. Đổi sang cổng ' + P + '?' + #13#10 + #13#10 +
+                  'Tên miền ' + MoveCust + '.maychamcongcloud.com sẽ trỏ về cổng mới (máy này cần Internet).',
+                  mbConfirmation, MB_YESNO) <> IDYES then begin Result := False; Exit; end;
+      WizardForm.NextButton.Enabled := False;
+      try
+        if not MoveConfigFor(P, Err) then begin MsgBox(Err, mbError, MB_OK); Result := False; end;
+      finally
+        WizardForm.NextButton.Enabled := True;
+      end;
+      Exit;
+    end;
 
     { bản tên miền }
     Slug := Lowercase(Trim(DomainPage.Values[0]));
@@ -780,6 +896,12 @@ begin
     MODE_KEEP: S := S + 'Giữ cấu hình đang có (cổng ' + ReadCfg(OldConfigPath, 'PORT') + ')';
     MODE_DOMAIN: S := S + 'Bản có tên miền: ' + Lowercase(Trim(DomainPage.Values[0])) + '.maychamcongcloud.com, cổng ' + Trim(PortPage.Values[0]);
     MODE_LAN: S := S + 'Bản LAN, cổng ' + Trim(PortPage.Values[0]);
+    MODE_MOVE: begin
+      if MoveCust <> '' then S := S + 'Chuyển từ máy cũ — ' + MoveCust + '.maychamcongcloud.com, cổng ' + Trim(PortPage.Values[0])
+      else S := S + 'Chuyển từ máy cũ — bản LAN, cổng ' + Trim(PortPage.Values[0]);
+      S := S + NewLine + Space + 'File: ' + MoveFile + NewLine + NewLine +
+           'Dữ liệu máy cũ được nạp khi phần mềm chạy lần đầu; bản quyền tự chuyển sang máy này (cần Internet).';
+    end;
   end;
   Result := S;
 end;
@@ -818,7 +940,15 @@ begin
       else Result := False;
     end else Result := False;
   end
-  else begin Err := 'MODE phải là lan, domain hoặc keep.'; Result := False; end;
+  else if M = 'move' then begin
+    if not LoadMove(Param('MOVEFILE', ''), Err) then begin Result := False; Exit; end;
+    P := Trim(Param('PORT', ''));
+    if P = '' then P := MovePort
+    else if Lowercase(P) = 'auto' then P := FindFreePort(8686);
+    if not ValidPort(P) then begin Err := 'PORT không hợp lệ.'; Result := False; Exit; end;
+    Result := MoveConfigFor(IntToStr(StrToInt(P)), Err);
+  end
+  else begin Err := 'MODE phải là lan, domain, keep hoặc move.'; Result := False; end;
 end;
 
 { Trước khi chép tệp: dừng bản đang chạy trong thư mục này (nếu có) để chép đè được, rồi ghi config.txt mới }
@@ -840,7 +970,12 @@ begin
 
   if NewConfig <> '' then begin
     if not ForceDirectories(WizardDirValue) then begin Result := 'Không tạo được thư mục ' + WizardDirValue; Exit; end;
-    if not SaveStringToFile(Dir + 'config.txt', NewConfig, False) then Result := 'Không ghi được config.txt vào ' + WizardDirValue;
+    if not SaveStringToFile(Dir + 'config.txt', NewConfig, False) then begin Result := 'Không ghi được config.txt vào ' + WizardDirValue; Exit; end;
   end;
+
+  { Chuyển từ máy cũ: chép file vào thư mục cài → phần mềm chạy lần đầu tự nhận (server/chuyen-may-nhan.js) }
+  if (MoveFile <> '') and (WizardSilent or (ModePage.SelectedValueIndex = MODE_MOVE)) then
+    if not FileCopy(MoveFile, Dir + 'ChuyenMay-nhan.zip', False) then
+      Result := 'Không chép được file chuyển máy vào ' + WizardDirValue + ' (ổ đĩa đầy?).';
 end;
 

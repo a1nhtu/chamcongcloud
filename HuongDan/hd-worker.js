@@ -111,7 +111,7 @@ async function handleSign(request, env, kind) {
    • Lưu ở DNS TXT _lic-<mã>.<zone>: MỖI KHÁCH 1 bản ghi, giữ các lần cấp gần nhất (mới nhất đứng đầu).
    • TXT ai cũng tra được qua DNS → nội dung MÃ HOÁ AES-GCM, tên bản ghi là HMAC của tên khách (không lộ tên).
    • Khoá mã hoá suy ra từ KHOÁ KÝ license → tool CapLicense.bat trên máy Anh (có private.pem) dùng chung lịch sử này.
-   • t: "moi" cấp mới · "cap-lai" cấp lại · "nhap-bu" nhập tay/dán license cũ · "quet" quét từ khách đang chạy.
+   • t: "moi" cấp mới · "cap-lai" cấp lại · "nhap-bu" nhập tay/dán license cũ · "quet" quét từ khách đang chạy · "chuyen-may" máy mới tự đổi khi chuyển máy (f = Mã máy cũ@ngày cấp cũ).
    ============================================================ */
 const LIC_PREFIX = "_lic-";
 const LIC_MAX_CHARS = 1800;   // TXT Cloudflare tối đa 2048 ký tự → bớt lần cấp cũ nhất cho vừa
@@ -312,6 +312,61 @@ async function handleLicHistory(request, env) {
     return jsonRes({ error: "Thao tác không hợp lệ" }, 400);
   } catch (e) {
     return jsonRes({ error: e.message }, 500);
+  }
+}
+
+/* ============================================================
+   CHUYỂN MÁY TỰ CẤP LẠI LICENSE (Anh chốt "Tự cấp lại" 04/11/2026) — route /api/chuyen-may, KHÔNG mật khẩu
+   Máy cũ bấm "Chuyển sang máy khác" → file chuyển máy mang theo license máy cũ. Máy mới chạy lên gửi
+   { license: <license máy cũ>, machine: <Mã máy mới> } → ký license MỚI cho Mã máy mới, GIỮ tên công ty + hạn + số NV.
+   Chặn nhân bản (lịch sử cấp license ở trên):
+     • mỗi license chỉ chuyển 1 lần (ghi t:"chuyen-may", f = Mã máy cũ @ ngày cấp cũ); gửi lại đúng máy mới = trả lại license đó
+     • license cũ đã có lần cấp MỚI HƠN cho máy khác (Anh cấp lại / đã chuyển) → không chuyển được nữa
+     • hết hạn → từ chối (liên hệ Digiplus gia hạn)
+   Từ chối thì máy mới hiện Mã máy để Anh cấp lại tay như cũ.
+   ============================================================ */
+const vnToday = () => new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
+async function handleMoveLicense(request, env) {
+  if (request.method !== "POST") return jsonRes({ error: "Chỉ nhận POST" }, 405);
+  if (!env.LICENSE_PRIVATE_KEY) return jsonRes({ error: "Máy chủ Digiplus chưa cấu hình cấp license — liên hệ Digiplus." }, 503);
+  let b;
+  try { b = await request.json(); } catch { return jsonRes({ error: "Dữ liệu gửi lên không hợp lệ" }, 400); }
+  const machine = String((b && b.machine) || "").replace(/[-\s]/g, "").toUpperCase();
+  if (!/^[0-9A-F]{16}$/.test(machine)) return jsonRes({ error: "Mã máy không hợp lệ" }, 400);
+  const p = await licDecode(b.license);
+  if (!p) return jsonRes({ error: "License máy cũ sai định dạng" }, 400);
+  if (p.error) return jsonRes({ error: "License máy cũ không hợp lệ: " + p.error }, 400);
+  // License dùng được mọi máy / đúng máy này → dùng luôn, không cần cấp
+  if (p.m === "*" || p.m === machine) return jsonRes({ ok: true, license: String(b.license).trim().replace(/\s+/g, ""), same: true });
+  if (p.e && p.e < vnToday()) return jsonRes({ error: `License đã hết hạn (${p.e}) — liên hệ Digiplus để gia hạn.` }, 403);
+
+  let key;
+  try { key = await importPrivateKey(env.LICENSE_PRIVATE_KEY); }
+  catch (e) { return jsonRes({ error: "Máy chủ Digiplus cấu hình khoá sai — liên hệ Digiplus." }, 500); }
+  try {
+    const ctx = await licCtx(env);
+    const all = await licReadAll(env, ctx);
+    const from = `${p.m}@${p.i || ""}`;
+    // Hồ sơ khách: tìm theo Mã máy cũ (Anh có thể đã đổi tên khi cấp lại), không thấy thì theo tên công ty
+    const cid = await licIdOf(env, p.c);
+    const rec = all.find((r) => r.h.some((x) => x.m === p.m)) || all.find((r) => r.id === cid) || null;
+    const payload = { c: p.c, m: machine, e: p.e, n: p.n, i: todayStr() };
+    if (rec) {
+      const done = rec.h.find((x) => x.t === "chuyen-may" && x.f === from);
+      if (done && done.m !== machine)
+        return jsonRes({ error: `License này đã chuyển sang máy khác ngày ${done.i || "?"} — liên hệ Digiplus để cấp lại.` }, 409);
+      if (done) return jsonRes({ ok: true, license: await signPayload({ ...payload, i: done.i || payload.i }, key), payload, again: true });
+      const newer = rec.h.find((x) => x.m !== p.m && x.m !== machine && x.m !== "*" && (x.i || "") > (p.i || ""));
+      if (newer)
+        return jsonRes({ error: `Khách này đã có license mới hơn (cấp ngày ${newer.i}) cho máy khác — license cũ không chuyển được. Liên hệ Digiplus.` }, 409);
+    }
+    const license = await signPayload(payload, key);
+    // Ghi lịch sử TRƯỚC khi trả license: không ghi được thì không cấp (để lần chuyển này còn chặn được nhân bản)
+    await licAdd(env, { rid: rec ? rec.id : "", company: rec ? rec.c : p.c,
+      entry: { m: machine, e: payload.e, n: payload.n, i: payload.i, t: "chuyen-may", f: from, by: String(b.customer || "").trim().slice(0, 30) || "tu-dong" } }, ctx, all);
+    return jsonRes({ ok: true, license, payload });
+  } catch (e) {
+    return jsonRes({ error: "Máy chủ Digiplus đang bận, tự thử lại sau ít phút. (" + e.message + ")" }, 503);
   }
 }
 
@@ -1069,6 +1124,7 @@ export default {
     if (url.pathname === "/api/gen-license") return handleSign(request, env, "license");
     if (url.pathname === "/api/gen-device") return handleSign(request, env, "device");
     if (url.pathname === "/api/lic-lich-su") return handleLicHistory(request, env);   // lịch sử cấp license + cấp lại khách cũ
+    if (url.pathname === "/api/chuyen-may") return handleMoveLicense(request, env);   // máy mới (chuyển máy) tự đổi license, không mật khẩu
     if (url.pathname === "/api/tao-domain") return handleProvision(request, env);
     if (url.pathname === "/api/cai-config") return handleInstallConfig(request, env);   // đại lý tự cài: lấy config bằng tên miền, không mật khẩu
     if (url.pathname === "/api/ds-khach") return handleListCustomers(request, env);

@@ -217,7 +217,7 @@ const normMid = (s) => String(s || '').replace(/[-\s]/g, '').toUpperCase();
 const fmtMid = (s) => (s && s !== '*') ? (normMid(s).match(/.{1,4}/g) || []).join('-') : 'không gắn máy';
 const vn = (d) => d ? d.split('-').reverse().join('/') : '';
 const today = () => new Date(Date.now() + 7 * 3600000).toISOString().slice(0, 10);
-const KIND = { 'moi': 'Cấp mới', 'cap-lai': 'Cấp lại', 'nhap-bu': 'Nhập bù', 'quet': 'Quét' };
+const KIND = { 'moi': 'Cấp mới', 'cap-lai': 'Cấp lại', 'nhap-bu': 'Nhập bù', 'quet': 'Quét', 'chuyen-may': 'Chuyển máy (tự động)' };
 let hist = null, re = null, loading = null;
 
 async function loadHist(force) {

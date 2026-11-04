@@ -96,6 +96,8 @@ if %errorlevel%==0 exit /b
 echo (Chua co quyen Admin - auto-start se chi chay khi co nguoi dang nhap may)
 :main
 cd /d "%~dp0"
+rem Cai lai tren may da bam "Chuyen sang may khac": bo dau chan de phan mem chay lai tren may nay
+if exist "%~dp0DA-CHUYEN-MAY.txt" del "%~dp0DA-CHUYEN-MAY.txt" >nul 2>&1
 echo ============================================
 echo   DIGIPLUS CHAM CONG - CAI DAT
 echo ============================================

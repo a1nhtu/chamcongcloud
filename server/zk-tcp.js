@@ -3,6 +3,7 @@
 // Quy tắc SDK: làm TUẦN TỰ từng máy (không chạy song song), đọc xong luôn bật lại máy + ngắt kết nối (script lo).
 // Dữ liệu tải về đi chung đường với máy Push: lượt chấm → ingestAttlog, nhân viên → ingestUserData (tự tạo NV, tự tính công).
 import { execFile, spawn } from 'node:child_process';
+import { movingOut } from './move-flag.js';
 import { existsSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -471,7 +472,7 @@ export function startTcpScheduler() {
   if (autoTimer || process.platform !== 'win32') return;
   const tick = Math.max(2000, parseInt(process.env.ZK_TCP_TICK_MS || '30000', 10) || 30000);
   autoTimer = setInterval(() => eachTenant(() => {
-    if (!tcpEnabled() || !autoMinutes()) return;
+    if (movingOut() || !tcpEnabled() || !autoMinutes()) return;   // đang chuyển máy: máy mới sẽ tự tải
     return autoCycle(false).catch((e) => console.error('[zk-tcp] tự tải lỗi:', e.message));
   }), tick);
   autoTimer.unref();

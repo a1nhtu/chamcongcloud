@@ -7718,6 +7718,73 @@ async function downloadExcel(type, from, to, extraQS) {
 
 /* ---------- 7) CÀI ĐẶT ---------- */
 /* ---------- Sao lưu / phục hồi (tải & nạp file nhị phân) ---------- */
+// CHUYỂN PHẦN MỀM SANG MÁY TÍNH KHÁC (server/chuyen-may.js): đóng 1 file → tải về → tắt máy cũ.
+// Máy mới: bộ cài Setup.exe › "Chuyển từ máy cũ" › chọn file → tự nhận dữ liệu + tự chuyển bản quyền (giữ hạn + số NV).
+function moveBox() {
+  const box = el('div', { style: 'margin-top:18px;padding:14px 16px;border:1px solid #f0dcb4;background:#fffaf0;border-radius:12px' });
+  const line = (...k) => el('div', { style: 'font-size:14px;line-height:1.7' }, ...k);
+  const setupHint = 'Trên máy mới: tải bộ cài ở huongdan.maychamcongcloud.com/tai-bo-cai → chạy → chọn "Chuyển từ máy cũ" → chọn file chuyển máy. Phần mềm tự nhận dữ liệu và bản quyền (máy mới cần Internet).';
+  let timer = null;
+  const render = async () => {
+    clearTimeout(timer);
+    let d;
+    try { d = await api('/admin/backup/chuyen-may'); } catch { box.remove(); return; }
+    if (!box.isConnected && box.dataset.shown) return;   // đã rời trang
+    box.dataset.shown = '1';
+    box.innerHTML = '';
+    box.append(el('div', { style: 'font-weight:700;margin-bottom:6px' }, '🚚 Chuyển phần mềm sang máy tính khác'));
+    if (!d.available) { box.append(el('div', { class: 'map-hint' }, d.reason)); return; }
+    if (d.busy) {
+      box.append(el('div', { class: 'pill warn', style: 'display:inline-block' }, '⏳ Đang đóng file chuyển máy (nhiều ảnh có thể mất vài phút)…'));
+      timer = setTimeout(render, 3000);
+      return;
+    }
+    if (!d.pending) {
+      const go = el('button', { class: 'btn' }, '🚚 Chuyển sang máy khác');
+      box.append(el('div', { class: 'map-hint', style: 'margin-bottom:10px' },
+        'Đổi máy tính chạy phần mềm: bấm nút dưới → tải 1 file về → chép sang máy mới → chạy bộ cài trên máy mới, chọn "Chuyển từ máy cũ". ' +
+        'Dữ liệu, ảnh chấm công, cài đặt, tên miền chuyển theo; bản quyền tự chuyển sang máy mới, giữ nguyên hạn dùng + số nhân viên.'));
+      if (d.error) box.append(el('div', { class: 'pill bad', style: 'display:inline-block;margin-bottom:10px' }, d.error));
+      box.append(go);
+      go.onclick = async () => {
+        if (!confirm('Chuyển phần mềm sang máy tính khác?\n\n• Từ bây giờ tới lúc tắt máy này, phần mềm TẠM KHÔNG NHẬN lượt chấm mới: máy chấm công tự giữ lại và gửi sang máy mới; điện thoại tạm chưa chấm được.\n• Tải file xong thì bấm "Tắt phần mềm trên máy này".\n\nTiếp tục?')) return;
+        go.disabled = true; go.textContent = 'Đang bắt đầu…';
+        try { await api('/admin/backup/chuyen-may/tao', { method: 'POST' }); } catch (e) { toast(e.message, 'err'); }
+        render();
+      };
+      return;
+    }
+    const p = d.pending;
+    const dl = el('a', { class: 'btn', href: '/api/chuyen-may/tai?k=' + encodeURIComponent(p.token), download: p.name }, `⬇ Tải file chuyển máy (${fmtSize(p.size)})`);
+    const off = el('button', { class: 'btn', style: 'background:#c0392b' }, '⏻ Đã có file — tắt phần mềm trên máy này');
+    const cancel = el('button', { class: 'btn ghost' }, 'Huỷ, dùng tiếp máy này');
+    box.append(
+      el('div', { class: 'pill warn', style: 'display:inline-block;margin-bottom:8px' }, 'Đang chuyển máy — tạm không nhận lượt chấm mới'),
+      line('1. Tải file về. Hoặc lấy thẳng trên máy tính đang chạy phần mềm: ', el('b', { style: 'font-family:monospace;word-break:break-all' }, p.path)),
+      line('2. Chép file sang máy mới (USB, Zalo, mạng nội bộ…).'),
+      line('3. Bấm "Tắt phần mềm trên máy này" — phần mềm + tên miền trên máy này tắt hẳn, không tự bật lại.'),
+      line('4. ' + setupHint),
+      el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;margin-top:10px' }, dl, off, cancel));
+    if (!d.domain) box.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Bản LAN: máy chấm công đang gửi về địa chỉ IP của máy này — đặt máy mới đúng IP này, hoặc sửa địa chỉ máy chủ trên máy chấm công sang IP máy mới.'));
+    off.onclick = async () => {
+      if (!confirm('Đã lấy được file chuyển máy chưa?\n\nPhần mềm và tên miền trên máy này sẽ TẮT HẲN, không tự bật lại.')) return;
+      off.disabled = true; cancel.disabled = true;
+      try {
+        await api('/admin/backup/chuyen-may/tat', { method: 'POST' });
+        box.innerHTML = '';
+        box.append(el('div', { style: 'font-weight:700;color:#1e7e34;margin-bottom:6px' }, '✅ Đã tắt phần mềm trên máy này.'),
+          line('File chuyển máy: ', el('b', {}, p.name)), line(setupHint));
+      } catch (e) { toast(e.message, 'err'); off.disabled = false; cancel.disabled = false; }
+    };
+    cancel.onclick = async () => {
+      if (!confirm('Huỷ chuyển máy, dùng tiếp máy này?')) return;
+      try { await api('/admin/backup/chuyen-may/huy', { method: 'POST' }); toast('Đã huỷ — phần mềm nhận dữ liệu lại như thường', 'ok'); } catch (e) { toast(e.message, 'err'); }
+      render();
+    };
+  };
+  render();
+  return box;
+}
 async function downloadBackup(name) {
   try {
     const res = await fetch('/api/admin/backup/download?name=' + encodeURIComponent(name), { headers: { Authorization: 'Bearer ' + getToken() } });
@@ -8303,6 +8370,7 @@ async function pageSettings() {
     };
     bkBox.append(el('div', { style: 'margin-top:14px;display:flex;gap:8px;flex-wrap:wrap' }, nowBtn, fullBtn));
     bkBox.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, '"Sao lưu ngày" (.db) = chỉ dữ liệu. "Sao lưu TOÀN BỘ" (.zip) = dữ liệu + ảnh chấm công + logo — dùng khi chuyển máy / lên VPS.'));
+    bkBox.append(moveBox());   // chuyển phần mềm sang máy tính khác (bản cài Windows tại máy khách)
 
     // Danh sách bản sao lưu — mặc định hiện 3 bản gần nhất
     const showSel = el('select', { style: 'width:auto;padding:2px 6px;font-size:13px' },

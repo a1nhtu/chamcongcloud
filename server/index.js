@@ -1,5 +1,6 @@
 import './install-config.js';   // bản cài Windows: nạp config.txt khi node được bật thẳng (phải đứng trước mọi import)
 import './logger.js';   // ghi log ra data/logs/server.log (import ngay sau install-config)
+import { startMoveClaim } from './chuyen-may-nhan.js';   // máy mới: nhận file chuyển máy TRƯỚC khi mở CSDL (phải đứng trước db.js)
 import express from 'express';
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
@@ -36,6 +37,7 @@ import { startUnion } from './union.js';
 import { startHrScheduler } from './hr.js';
 import { startHrRemindScheduler } from './hr-remind.js';
 import { startRebootScheduler } from './reboot-schedule.js';
+import { moveGuard, moveDownload } from './chuyen-may.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -64,6 +66,8 @@ setInterval(backupTick, 5 * 60 * 1000);
 const app = express();
 // Máy chủ nhiều công ty: API điều khiển (tạo công ty — cần HOST_TOKEN) + mọi yêu cầu khác chạy theo công ty của TÊN MIỀN
 if (H) { app.use(H.hostRouter()); app.use(H.tenantGate); }
+// Đang chuyển sang máy khác (Cài đặt › Sao lưu): chặn lượt chấm / dữ liệu mới từ lúc chụp dữ liệu tới lúc tắt máy cũ
+app.use(moveGuard);
 
 // Máy chấm công ZKTeco đẩy dữ liệu (ADMS push) — đặt TRƯỚC express.json + cổng bản quyền
 app.use('/', iclockRoutes);
@@ -71,6 +75,9 @@ app.use('/', iclockRoutes);
 app.use('/', hikEventRoutes);
 
 app.use(express.json({ limit: '6mb' }));
+
+// Tải file chuyển máy bằng link có mã ngẫu nhiên (file lớn — trình duyệt tự tải, không giữ trong bộ nhớ trang)
+app.get('/api/chuyen-may/tai', moveDownload);
 
 // License (không bị khoá — để kích hoạt được)
 app.use('/api/license', licenseRoutes);
@@ -201,6 +208,7 @@ httpServer.listen(PORT, '0.0.0.0', () => {
   // Bản cài của khách: tự bảo đảm app tự bật khi mở máy/đăng nhập (khách cũ bấm Cập nhật là được sửa, khỏi chạy lại CaiDat.bat)
   import('./autostart.js').then((m) => m.ensureAutostart()).catch((e) => console.error('[autostart] lỗi:', e.message));
   if (H) H.startDevicePorts(app, attachAiWs);   // cổng riêng cho máy chấm công chỉ điền được IP + cổng
+  startMoveClaim();   // máy mới vừa nhận file chuyển máy: đổi license máy cũ lấy license máy này (tự thử lại khi chưa có mạng)
   if (startAutoUpdate()) console.log('  Tự cập nhật khi có bản mới (15 phút hỏi GitHub 1 lần; tắt ở Cài đặt → Cập nhật phần mềm hoặc AUTO_UPDATE=0)');
 });
 

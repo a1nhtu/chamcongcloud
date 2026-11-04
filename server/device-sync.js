@@ -1,6 +1,7 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { createHash } from 'node:crypto';
+import { movingOut } from './move-flag.js';
 import { db, getSetting, setSetting, empHourly, hourlyNoOvernight } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
@@ -957,6 +958,8 @@ export function dayPairsFor(employeeId, workDate, shift) {
 // opts.ask(serial, pin): gặp Số ID chưa khớp NV thì làm gì (mặc định: xếp lệnh ADMS hỏi máy ZKTeco thông tin người đó).
 // Trả số dòng hợp lệ đã nhận.
 export function ingestAttlog(serial, rawBody, opts = {}) {
+  // Đang chuyển sang máy khác: không nhận (lượt nhận sau lúc chụp dữ liệu sẽ mất) — báo lỗi để máy chấm công giữ lại, gửi lại sau
+  if (movingOut()) throw new Error('Đang chuyển phần mềm sang máy khác — tạm không nhận lượt chấm');
   const ask = opts.ask || askUserFromDevice;
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const touched = new Set();
