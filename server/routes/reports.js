@@ -861,14 +861,14 @@ function buildReportRaw(type, from, to, filter) {
     /* --- Chấm công (mọi bản ghi) --- */
     case 'attendance': {
       const columns = [
-        { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'place', label: 'Nơi chấm', w: 14 }, { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 },
         { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 }, { key: 'ot', label: 'OT (p)', w: 8 }, { key: 'cong', label: 'Công', w: 7 },
       ];
       const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().map((c) => ({ c }));
       const rows = list.map(({ e, d, c }) => (!c ? offRow(e, d) : {
-        date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
+        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         place: c.check_in_outside ? 'Ngoài VP' : 'Trong VP',
@@ -881,12 +881,12 @@ function buildReportRaw(type, from, to, filter) {
     /* --- Đi muộn / về sớm --- */
     case 'late': {
       const columns = [
-        { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'late', label: 'Đi muộn (p)', w: 11 }, { key: 'early', label: 'Về sớm (p)', w: 11 },
       ];
       const rows = sortedResults().filter((c) => c.late_min > 0 || c.early_min > 0).map((c) => ({
-        date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
+        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout, _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         late: c.late_min || 0, early: c.early_min || 0,
       }));
@@ -897,25 +897,25 @@ function buildReportRaw(type, from, to, filter) {
     case 'ot': {
       if (HOURLY) {   // theo giờ không có tăng ca → liệt kê tổng giờ làm từng ngày
         const columns = [
-          { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+          { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
           { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
           { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 },
         ];
         const rows = sortedResults().filter((c) => c.work_minutes > 0).map((c) => ({
-          date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
+          date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
           inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout, _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
           gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0),
         }));
         return { title: `Tổng giờ làm chi tiết ${PERIOD}`, columns, rows };
       }
       const columns = [
-        { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'otp', label: 'Tăng ca (p)', w: 11 }, { key: 'oth', label: 'Tăng ca (giờ)', w: 12 }, { key: 'loai', label: 'Loại OT', w: 14 },
         ...(ctx.hasTiers ? ['TC1', 'TC2', 'TC3', 'TC4'].map((l, i) => ({ key: 'tier' + i, label: l + ' (giờ)', w: 9 })) : []),
       ];
       const rows = sortedResults().filter((c) => c.ot_min > 0).map((c) => ({
-        date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
+        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout, _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         otp: r1(c.ot_min || 0), oth: round2((c.ot_min || 0) / 60), loai: OT_LABEL[c.ot_type] || '',
         ...Object.fromEntries((c._tiers || [0, 0, 0, 0]).map((m, i) => ['tier' + i, round2(m / 60)])),
@@ -926,7 +926,7 @@ function buildReportRaw(type, from, to, filter) {
     /* --- Giờ vào đầu / ra cuối --- */
     case 'firstlast': {
       const columns = [
-        { key: 'date', label: 'Ngày', w: 12 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'first', label: 'Vào đầu', w: 9 }, { key: 'last', label: 'Ra cuối', w: 9 },
         { key: 'punches', label: 'Số lần chấm', w: 11 }, { key: 'phut', label: 'Số phút', w: 9 }, { key: 'gio', label: 'Số giờ', w: 8 },
       ];
@@ -940,7 +940,7 @@ function buildReportRaw(type, from, to, filter) {
         const mins = c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
         const punches = pcMap.get(c.employee_id + '|' + c.work_date) || ((c.check_in_at ? 1 : 0) + (c.check_out_at ? 1 : 0));
         return {
-          date: fmtDMY(c.work_date), code: c.code, name: c.full_name, dept: c.department || '',
+          date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
           first: isoToVnHM(c.check_in_at), last: isoToVnHM(c.check_out_at),
           punches, phut: mins, gio: round2(mins / 60),
         };

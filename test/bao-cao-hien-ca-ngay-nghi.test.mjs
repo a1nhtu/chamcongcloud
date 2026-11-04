@@ -77,9 +77,23 @@ test('Excel: dòng trống có trong sheet BaoCao, sheet TongHop không đếm n
   const buf = await get(`/export.xlsx?type=attendance${Q}&alldays=1`);
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
   const rows = []; wb.getWorksheet('BaoCao').eachRow((r) => rows.push(r.values.slice(1).map((v) => (v == null ? '' : String(v)))));
-  assert.equal(rows.filter((r) => r[1] === 'H1').length, 7);
+  const head = rows.find((r) => r.includes('Mã NV'));
+  assert.deepEqual(head.slice(0, 3), ['Ngày', 'Thứ', 'Mã NV'], 'Excel có cột Thứ ngay sau Ngày');
+  const ci = head.indexOf('Mã NV');
+  assert.equal(rows.filter((r) => r[ci] === 'H1').length, 7);
   const sum = []; wb.getWorksheet('TongHop').eachRow((r) => sum.push(r.values.slice(1).map((v) => (v == null ? '' : String(v)))));
   const h1 = sum.find((r) => r[1] === 'H1');
   assert.equal(h1[4], '2', 'Số ngày có chấm = 2, không phải 7');
   assert.equal(h1[7], '720', 'Tổng phút');
+});
+
+// Anh 04/11/2026: khách báo các báo cáo liệt kê theo ngày không có thứ → cột Thứ ngay sau Ngày
+test('báo cáo liệt kê theo ngày có cột Thứ ngay sau Ngày', async () => {
+  for (const type of ['attendance', 'firstlast', 'late', 'ot']) {
+    const rep = await get(`/data?type=${type}${Q}&alldays=1`);
+    assert.deepEqual(rep.columns.slice(0, 2).map((c) => [c.key, c.label]), [['date', 'Ngày'], ['wd', 'Thứ']], type);
+    for (const r of rep.rows) assert.ok(r.wd, `${type} ${r.date}: thiếu thứ`);
+    const on = rep.rows.find((r) => r.date === '02/09/2026');
+    if (on) assert.equal(on.wd, 'T4', type + ': 02/09/2026 là thứ Tư');
+  }
 });
