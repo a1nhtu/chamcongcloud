@@ -1,11 +1,11 @@
 import { Router } from 'express';
 import { db, getSetting, allowedOffices, empAttMode, empHourly, isWeekendNormalEmp, hourlyOvernight, hourlyNoOvernight } from '../db.js';
-import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
+import { resolveEffectiveShift, resolveDayShifts, getShift } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
-import { computeLate, computeCheckout, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
+import { computeLate, computeCheckout, ruleWindow, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom, payrollCtx, computeDayMetrics } from '../day-metrics.js';
 import { otRegCapper } from '../ot-cap.js';
@@ -87,6 +87,19 @@ r.post('/request-device', (req, res) => {
   res.json({ ok: true });
 });
 
+// Phiên HÔM QUA còn mở (đã vào, chưa ra) có còn được chấm RA bằng điện thoại lúc này không:
+//   · theo GIỜ → theo ô "Cho phép chấm qua đêm"
+//   · theo CA → chỉ khi còn trong khung giờ RA của ca đó, giống máy chấm công (ca ngày: tới hết ngày hoặc 4 tiếng sau giờ
+//     kết thúc ca; ca đêm: tới 4 tiếng sau giờ kết thúc sáng hôm sau; ca có khai "Kết thúc ra" thì theo đúng giờ đó).
+//     Trước đây ca NGÀY quên chấm ra → sáng hôm sau mở app thấy RA CA → giờ đó thành giờ ra hôm trước, tăng ca hàng chục giờ.
+export function yesterdayOutOk(eid, yRow, nowMs = Date.now()) {
+  if (empHourly(eid)) return hourlyOvernight();
+  const shift = (yRow.shift_id && getShift(yRow.shift_id)) || resolveEffectiveShift(eid, yRow.work_date, yRow.check_in_at, null).shift;
+  if (!shift) return true;   // không xác định được ca → như cũ
+  const night = !!(shift.cross_midnight || shift.end_time <= shift.start_time);
+  return nowMs <= ruleWindow(yRow.work_date, shift, { toDayEnd: !night }).winEnd.getTime();
+}
+
 // Bản ghi chấm công hôm nay (hỗ trợ nhiều ca/ngày)
 r.get('/today', (req, res) => {
   const date = vnDateStr();
@@ -97,8 +110,8 @@ r.get('/today', (req, res) => {
   let forgotOut = null;   // theo giờ KHÔNG qua đêm: phiên hôm qua quên chấm ra → chỉ nhắc, không cho chấm ra vào phiên đó
   if (!openRow) {
     const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1").get(req.user.id, date);
-    if (yRow && mode === 'hourly' && !hourlyOvernight()) forgotOut = { date: yRow.work_date, check_in_at: yRow.check_in_at };
-    else if (yRow) openRow = yRow;
+    if (yRow && yesterdayOutOk(req.user.id, yRow)) openRow = yRow;
+    else if (yRow) forgotOut = { date: yRow.work_date, check_in_at: yRow.check_in_at };
   }
   const completed = rows.filter((r) => r.check_in_at && r.check_out_at).length;
 
@@ -243,10 +256,12 @@ r.post('/check-out', (req, res) => {
   let row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1').get(req.user.id, date);
   // CA ĐÊM: nếu hôm nay không có ca mở, tìm ca HÔM QUA đã VÀO mà CHƯA RA
   // (chế độ theo giờ chưa bật "Cho phép chấm qua đêm": KHÔNG lấy — quên chấm ra hôm qua thì quản lý sửa tay)
-  const noOvernight = hourlyNoOvernight(req.user.id);
-  if (!row && !noOvernight) {
+  // (theo CA: chỉ khi còn trong khung giờ RA của ca hôm qua — ca ngày quên chấm ra thì sáng hôm sau là chấm VÀO, không đóng ca hôm qua)
+  let noOvernight = hourlyNoOvernight(req.user.id);
+  if (!row) {
     const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1").get(req.user.id, date);
-    if (yRow) row = yRow;
+    if (yRow && yesterdayOutOk(req.user.id, yRow)) row = yRow;
+    else if (yRow) noOvernight = true;
   }
   if (!row) return res.status(400).json({ error: noOvernight ? 'Hôm nay bạn chưa chấm VÀO nên chưa thể chấm RA.' : 'Chưa có ca nào đang mở để chấm ra (hôm nay hoặc ca đêm hôm qua)' });
   // Chống bấm nhầm: chấm RA quá sát giờ chấm VÀO (trong N phút) → chặn
