@@ -183,10 +183,22 @@ export function openCamera({ title = 'Chụp ảnh xác nhận', stamp = [] } = 
 }
 
 /* ---------- Bản quyền ---------- */
+// Hỏi máy chủ trạng thái bản quyền. Không hỏi được (máy chủ đang khởi động lại sau cập nhật, máy tính chạy phần mềm tắt/ngủ,
+// mạng chập chờn — Cloudflare trả trang lỗi HTML) → null, KHÔNG coi là "chưa kích hoạt". Trước đây lỗi mạng rơi thẳng vào màn
+// "Kích hoạt bản quyền" với Mã máy "?" → khách đã kích hoạt tưởng mất bản quyền (Anh 04/11/2026).
+async function licenseStatus() {
+  try {
+    const r = await fetch('/api/license/status', { cache: 'no-store' });
+    if (!r.ok) return null;
+    const s = await r.json();
+    return s && typeof s.activated === 'boolean' ? s : null;
+  } catch { return null; }
+}
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 export async function ensureLicensed() {
-  let s;
-  try { s = await fetch('/api/license/status').then((r) => r.json()); }
-  catch { s = { activated: false, machineIdFmt: '?' }; }
+  let s = await licenseStatus();
+  for (let i = 0; !s && i < 3; i++) { await sleep(1500); s = await licenseStatus(); }   // chập chờn 1–2 giây: thử lại lặng lẽ
+  if (!s) s = await waitForServer();
   if (s.activated) {
     if (s.daysLeft != null && s.daysLeft <= 15)
       toast(`Bản quyền còn ${s.daysLeft} ngày${s.daysLeft <= 0 ? ' (hết hạn)' : ''}`, s.daysLeft <= 0 ? 'err' : '');
@@ -194,6 +206,30 @@ export async function ensureLicensed() {
   }
   showActivation(s);
   return false;
+}
+// Mất kết nối máy chủ: hiện màn chờ, cứ 5 giây tự hỏi lại — máy chủ trả lời là đi tiếp như thường (không cần tải lại trang)
+function waitForServer() {
+  return new Promise((resolve) => {
+    const box = el('div', { style: 'background:#fff;border-radius:18px;max-width:460px;width:100%;padding:26px;box-shadow:var(--shadow);text-align:center' });
+    box.innerHTML = `
+      <h2 style="margin:0 0 8px;color:var(--brand)">Đang kết nối máy chủ…</h2>
+      <p style="color:var(--muted);margin:0 0 14px;font-size:14px;line-height:1.5">Chưa kết nối được tới máy chủ chấm công. Đây <b>không phải lỗi bản quyền</b> — thường do máy chủ đang khởi động lại sau khi cập nhật, máy tính chạy phần mềm đang tắt / ngủ, hoặc mạng chập chờn.</p>
+      <div id="srv-st" style="font-size:13px;color:var(--muted);margin-bottom:14px"></div>
+      <button class="btn block" id="srv-go" type="button">Thử lại ngay</button>`;
+    const wrap = el('div', { style: 'position:fixed;inset:0;background:linear-gradient(160deg,var(--brand),var(--brand-dark));z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px;overflow:auto' }, box);
+    document.body.append(wrap);
+    const st = box.querySelector('#srv-st'), go = box.querySelector('#srv-go');
+    let left = 0, timer = null;
+    const tick = () => { if (--left <= 0) return check(); st.textContent = `Tự thử lại sau ${left} giây…`; timer = setTimeout(tick, 1000); };
+    async function check() {
+      clearTimeout(timer); go.disabled = true; st.textContent = 'Đang thử kết nối…';
+      const s = await licenseStatus();
+      if (s) { wrap.remove(); return resolve(s); }
+      go.disabled = false; left = 6; tick();
+    }
+    go.onclick = check;
+    left = 6; tick();
+  });
 }
 function showActivation(s) {
   const box = el('div', { style: 'background:#fff;border-radius:18px;max-width:460px;width:100%;padding:26px;box-shadow:var(--shadow)' });
