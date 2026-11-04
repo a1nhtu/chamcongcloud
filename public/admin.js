@@ -562,22 +562,33 @@ function dashListModal(title, people) {
   openModal(`${title} (${people.length})`, [body], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
 // np: số cặp vào/ra đang hiện trên bảng (NV chấm hơn 2 lần trong ngày → thêm cột Vào 2 · Ra 2 …)
+// Ngày vừa chấm điện thoại vừa quẹt máy (1 dòng Vào 1 · Ra 1 · Vào 2 …): lượt chấm điện thoại có ảnh nhỏ ngay cạnh giờ, bấm xem to
+function punchTime(t, photo) {
+  if (!t || !photo) return t || '';
+  const img = el('img', { src: photo, title: 'Ảnh chấm điện thoại lúc ' + t, style: 'width:30px;height:30px;border-radius:7px;object-fit:cover;cursor:pointer;vertical-align:middle;margin-left:6px' });
+  img.addEventListener('click', () => showPhoto(photo));
+  return el('span', { style: 'white-space:nowrap' }, t, img);
+}
 function rowToday(r, np = 1) {
   const ps = r.punches_hm || [];
-  const pairs = ps.length > 2 ? Array.from({ length: Math.ceil(ps.length / 2) }, (_, i) => [ps[2 * i], ps[2 * i + 1]]) : [[r.check_in_hm, r.check_out_hm]];
-  const outCell = (p) => p[1] || el('span', { class: 'pill muted' }, 'chưa ra');
+  const pp = ps.length > 2 ? (r.punch_photos || []) : [];
+  const pairs = ps.length > 2 ? Array.from({ length: Math.ceil(ps.length / 2) }, (_, i) => [ps[2 * i], ps[2 * i + 1], pp[2 * i], pp[2 * i + 1]]) : [[r.check_in_hm, r.check_out_hm]];
+  const outCell = (p) => (p[1] ? punchTime(p[1], p[3]) : el('span', { class: 'pill muted' }, 'chưa ra'));
+  // ảnh đã hiện cạnh giờ thì cột Ảnh vào / Ảnh ra không hiện lặp lại
+  const inline = new Set(pp.filter(Boolean));
+  const sidePhoto = (src) => photoCell(src && !inline.has(src) ? src : null);
   const extra = [];
-  for (let i = 1; i < np; i++) { const p = pairs[i]; extra.push(el('td', {}, p ? p[0] : ''), el('td', {}, p ? outCell(p) : '')); }
+  for (let i = 1; i < np; i++) { const p = pairs[i]; extra.push(el('td', {}, p ? punchTime(p[0], p[2]) : ''), el('td', {}, p ? outCell(p) : '')); }
   return el('tr', {},
-    el('td', {}, photoCell(r.check_in_photo)),
+    el('td', {}, sidePhoto(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
     el('td', {}, r.check_in_outside ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m)) : el('span', { class: 'pill ok' }, 'Trong VP')),
     ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
-    el('td', {}, (pairs[0][0] || '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
+    el('td', {}, (pairs[0][0] ? punchTime(pairs[0][0], pairs[0][2]) : '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
     el('td', {}, outCell(pairs[0])),
     ...extra,
-    el('td', {}, photoCell(r.check_out_photo)),
+    el('td', {}, sidePhoto(r.check_out_photo)),
     el('td', {}, humanMinutes(r.work_minutes)),
   );
 }
@@ -5278,7 +5289,8 @@ async function punchModal(emp, date, reload) {
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr><th>#</th><th>Giờ chấm</th><th>Loại</th><th>Nguồn</th><th></th></tr></thead>';
     const tb = el('tbody'); tbl.append(tb);
-    if (!d.rows.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, 'Chưa có lượt chấm nào trong ngày này. Thêm ở bên dưới.'))));
+    const ph = (d.phone && d.phone.length) ? d.phone : [];
+    if (!d.rows.length && !ph.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, 'Chưa có lượt chấm nào trong ngày này. Thêm ở bên dưới.'))));
     d.rows.forEach((p, i) => {
       const tdT = el('td', {}, el('b', {}, p.time), p.date !== cur ? el('span', { class: 'muted', style: 'font-size:12px' }, ' (' + p.date.slice(8) + '/' + p.date.slice(5, 7) + ')') : '');
       const edit = btnSm('Sửa', () => {
@@ -5300,12 +5312,61 @@ async function punchModal(emp, date, reload) {
         el('td', {}, p.manual ? el('span', { style: 'color:#e67e22;font-weight:600' }, '✎ Thêm tay') : p.source),
         el('td', {}, el('div', { style: 'display:flex;gap:6px' }, edit, del))));
     });
+    // Phiên vào–ra chấm điện thoại / nhập tay (ngày không quẹt máy): sửa / xoá ngay tại đây
+    const dmy = (x) => x.slice(8) + '/' + x.slice(5, 7);
+    let phoneBox = '';
+    if (ph.length && d.phoneLocked) {
+      const pt = el('table', { class: 'data' });
+      pt.innerHTML = '<thead><tr><th>#</th><th>Vào</th><th>Ra</th><th>Nguồn</th><th></th></tr></thead>';
+      const pb = el('tbody'); pt.append(pb);
+      ph.forEach((p, i) => {
+        const nextDay = p.out_date && p.out_date > cur;
+        const outTxt = p.out ? el('span', {}, punchTime(p.out, p.out_photo), nextDay ? el('b', { style: 'color:#c0392b;font-size:12px' }, ' (' + dmy(p.out_date) + ')') : '') : el('span', { class: 'pill muted' }, 'chưa ra');
+        const tdIn = el('td', {}, punchTime(p.in || '--:--', p.in_photo)), tdOut = el('td', {}, outTxt);
+        const edit = btnSm('Sửa', () => {
+          const iI = time24('', p.in); iI.className = 'att-inl-in';
+          const iO = time24('', nextDay && d.noOvernight ? '' : p.out); iO.className = 'att-inl-in'; iO.placeholder = 'chưa ra';
+          const ok = btnSm('Lưu', async () => {
+            if (!iI.value) return toast('Nhập giờ vào (muốn bỏ cả phiên thì bấm Xoá)', 'err');
+            try { await api('/admin/attendance/' + p.id, { method: 'PUT', body: { check_in: iI.value, check_out: iO.value } }); toast('Đã sửa phiên', 'ok'); after(); } catch (e) { toast(e.message, 'err'); }
+          });
+          for (const x of [iI, iO]) x.addEventListener('keydown', (e) => { if (e.key === 'Enter') { x.blur(); setTimeout(() => ok.click(), 0); } if (e.key === 'Escape') draw(); });
+          tdIn.replaceChildren(iI);
+          tdOut.replaceChildren(el('div', { style: 'display:flex;gap:6px;align-items:center' }, iO, ok, btnSm('Huỷ', draw, 'ghost')));
+          iI.focus(); iI.select();
+        }, 'ghost');
+        const del = btnSm('Xoá', async () => {
+          if (!confirm(`Xoá phiên ${p.in || '--:--'} → ${p.out || 'chưa ra'} ngày ${dmy(cur)} của ${emp.name}?`)) return;
+          try { await api('/admin/attendance/' + p.id, { method: 'DELETE' }); toast('Đã xoá phiên', 'ok'); after(); } catch (e) { toast(e.message, 'err'); }
+        }, 'ghost');
+        del.style.color = '#c0392b';
+        const acts = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, edit, del);
+        if (nextDay) {
+          const mv = btnSm(`↪ Chuyển ${p.out} sang ${dmy(p.out_date)}`, async () => {
+            if (!confirm(`Phiên ${p.in} ngày ${dmy(cur)} có giờ ra ${p.out} của ngày ${dmy(p.out_date)} (thường do quên chấm ra, sáng hôm sau chấm vào bị lấy làm giờ ra).\n\n`
+              + `→ Bỏ giờ ra khỏi ngày ${dmy(cur)} (phiên ${p.in} thành CHƯA RA, quản lý nhập giờ ra đúng nếu biết)\n→ Chuyển ${p.out} thành giờ VÀO ngày ${dmy(p.out_date)} (giữ ảnh chấm)\n\nĐồng ý?`)) return;
+            try {
+              const r = await api('/admin/attendance/' + p.id + '/split-out', { method: 'POST' });
+              toast(r.moved ? `Đã chuyển ${p.out} sang ngày ${dmy(r.next_date)}` : `Đã bỏ giờ ra; ngày ${dmy(r.next_date)} đã có phiên lúc ${p.out} nên không thêm`, 'ok'); after();
+            } catch (e) { toast(e.message, 'err'); }
+          });
+          mv.title = 'Bỏ giờ ra sang ngày sau khỏi phiên này, chuyển thành giờ vào của ngày sau';
+          acts.prepend(mv);
+        }
+        pb.append(el('tr', nextDay ? { style: 'background:#fdecea' } : {}, el('td', {}, String(i + 1)), tdIn, tdOut,
+          el('td', {}, p.manual ? el('span', { style: 'color:#e67e22;font-weight:600' }, '✎ Sửa tay') : '📱 Điện thoại'), el('td', {}, acts)));
+      });
+      const warn = ph.some((p) => p.out_date && p.out_date > cur) && d.noOvernight
+        ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#c0392b' }, 'Dòng tô đỏ: giờ ra rơi sang ngày hôm sau — dữ liệu chấm từ trước khi có ô "Qua đêm". Đang TẮT qua đêm nên bấm "↪ Chuyển … sang …" để tách cho đúng.') : '';
+      phoneBox = el('div', { style: 'margin-bottom:10px' },
+        el('div', { class: 'map-hint', style: 'margin-bottom:6px' }, '📱 Phiên vào–ra (chấm điện thoại / nhập tay) — sửa giờ, xoá ngay ở đây. Thêm ở dưới = thêm 1 phiên MỚI (nhập "Vào" trước, rồi "Ra").'),
+        el('div', { class: 'tbl-scroll' }, pt), warn);
+    }
     listBox.replaceChildren(
-      (d.phone && d.phone.length) ? el('div', { class: 'map-hint', style: 'margin-bottom:8px;color:#b45309' },
-        '📱 Các phiên vào–ra (chấm điện thoại / nhập tay): ' + d.phone.map((p) => (p.in || '--:--') + ' → ' + (p.out || 'chưa ra')).join(' · ') + '. '
-        + (d.phoneLocked ? 'Thêm ở dưới = thêm 1 phiên vào–ra MỚI (thêm "Vào" trước, rồi "Ra"), các phiên đã có giữ nguyên. Muốn đổi giờ phiên đã có thì bấm thẳng ô Vào / Ra ở bảng Tính công.' : '')) : '',
-      el('div', { class: 'tbl-scroll' }, tbl),
-      d.manualRow ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, 'Ngày này đang có giờ sửa tay ở bảng công — thêm / sửa / xoá lượt chấm sẽ tính lại theo các lượt chấm ở đây.') : '');
+      phoneBox || (ph.length ? el('div', { class: 'map-hint', style: 'margin-bottom:8px;color:#b45309' },
+        '📱 Các phiên vào–ra (chấm điện thoại / nhập tay): ' + ph.map((p) => (p.in || '--:--') + ' → ' + (p.out || 'chưa ra')).join(' · ') + '.') : ''),
+      (d.rows.length || !ph.length) ? el('div', { class: 'tbl-scroll' }, tbl) : '',
+      (d.manualRow && !d.phoneLocked) ? el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, 'Ngày này đang có giờ sửa tay ở bảng công — thêm / sửa / xoá lượt chấm sẽ tính lại theo các lượt chấm ở đây.') : '');
   };
   prev.onclick = () => { cur = addDays(cur, -1); draw(); };
   next.onclick = () => { cur = addDays(cur, 1); draw(); };

@@ -136,3 +136,41 @@ test('BẬT qua đêm: như cũ — lượt chấm sáng hôm sau đóng phiên 
     assert.equal(r.work_minutes, 480);
   } finally { setSetting('hourly_overnight', '0'); }
 });
+
+test('dữ liệu cũ (17,5 giờ): hộp Lượt chấm liệt kê phiên + nút "Chuyển giờ ra sang ngày sau" tách đúng', async () => {
+  const D0 = '2026-10-04', D1 = '2026-10-05';
+  const id = Number(db.prepare(`INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo, check_out_lat, check_out_lng,
+    work_minutes, day_status, shift_source) VALUES (?,?,?,?,'/uploads/v.jpg','/uploads/r.jpg',21.01,105.81,1050,'lam_viec','hourly')`)
+    .run(emp.SUA, D0, iso(D0, '14:29'), iso(D1, '07:59')).lastInsertRowid);
+  db.prepare("INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo, work_minutes, day_status, shift_source) VALUES (?,?,?,?,'/a.jpg','/b.jpg',274,'lam_viec','hourly')")
+    .run(emp.SUA, D0, iso(D0, '07:59'), iso(D0, '12:33'));
+  // hộp Lượt chấm: có đủ 2 phiên kèm id, ngày ra, ảnh — không còn "Chưa có lượt chấm nào"
+  const g = await call('GET', `/admin/attendance/punches?employee_id=${emp.SUA}&date=${D0}`);
+  assert.equal(g.status, 200);
+  assert.equal(g.body.phoneLocked, true);
+  assert.equal(g.body.noOvernight, true);
+  assert.deepEqual(g.body.phone.map((p) => [p.in, p.out, p.out_date]), [['07:59', '12:33', D0], ['14:29', '07:59', D1]]);
+  assert.equal(g.body.phone[1].id, id);
+  // phiên không sang ngày sau → không tách được
+  const bad = await call('POST', `/admin/attendance/${g.body.phone[0].id}/split-out`);
+  assert.equal(bad.status, 400);
+  const s = await call('POST', `/admin/attendance/${id}/split-out`);
+  assert.equal(s.status, 200, JSON.stringify(s.body));
+  assert.equal(s.body.moved, true);
+  assert.equal(s.body.next_date, D1);
+  const a = db.prepare('SELECT * FROM attendance WHERE id=?').get(id);
+  assert.equal(a.check_out_at, null);
+  assert.equal(a.check_out_photo, null);
+  assert.equal(a.work_minutes, 0);
+  assert.deepEqual(rowsOf(emp.SUA, D0), [['07:59', '12:33'], ['14:29', null]]);
+  // 07:59 thành giờ VÀO ngày 05/10, giữ ảnh + vị trí
+  const n = db.prepare('SELECT * FROM attendance WHERE employee_id=? AND work_date=?').all(emp.SUA, D1);
+  assert.equal(n.length, 1);
+  assert.equal(hm(n[0].check_in_at), '07:59');
+  assert.equal(n[0].check_out_at, null);
+  assert.equal(n[0].check_in_photo, '/uploads/r.jpg');
+  assert.equal(n[0].check_in_lat, 21.01);
+  // bấm lại → báo không còn giờ ra sang ngày sau, không thêm trùng
+  assert.equal((await call('POST', `/admin/attendance/${id}/split-out`)).status, 400);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM attendance WHERE employee_id=? AND work_date=?').get(emp.SUA, D1).c, 1);
+});

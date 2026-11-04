@@ -817,18 +817,36 @@ export function rebuildDays(keys) {
 // quẹt máy theo đúng quy tắc của ca. Chỉ chép dòng chấm điện thoại CHƯA gộp (dòng đã dựng từ lượt chấm có shift_source='device').
 const VIRT_SERIALS = "('TAY_VAO','TAY_RA','DT_VAO','DT_RA')";
 const PHONE_ROW = "(COALESCE(check_in_photo,'')<>'' OR COALESCE(check_out_photo,'')<>'')";
+// Ghi 1 lượt chấm điện thoại thành lượt của máy ảo DT_VAO / DT_RA, KÈM ẢNH CHẤM (gộp ngày rồi vẫn còn ảnh của từng lượt)
+function insPhonePunch(pin, employeeId, kind, iso, photo) {
+  const serial = kind === 'out' ? 'DT_RA' : 'DT_VAO';
+  const wd = new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(0, 10);
+  db.prepare('INSERT OR IGNORE INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id, photo) VALUES (?,?,?,?,?,0,?,?)')
+    .run(serial, pin, iso, wd, kind === 'out' ? 1 : 0, employeeId, photo || null);
+  if (photo) db.prepare("UPDATE device_punches SET photo=? WHERE serial=? AND pin=? AND punch_at=? AND COALESCE(photo,'')=''").run(photo, serial, pin, iso);   // lượt đã chép từ bản cũ (chưa có ảnh)
+}
+const punchPin = (employeeId) => { const e = db.prepare('SELECT code, device_pin FROM employees WHERE id=?').get(employeeId); return e ? String(e.device_pin || e.code) : null; };
+// Chấm RA bằng điện thoại vào DÒNG CÔNG DỰNG TỪ MÁY (vào bằng máy, ra bằng điện thoại): giờ ra điện thoại chỉ nằm ở dòng công —
+// lần dựng lại sau (máy đẩy lượt mới, Tính lại) sẽ đè mất. Ghi ngay thành lượt DT_RA để giờ ra + ảnh còn nguyên khi ghép cặp.
+export function recordPhonePunch(employeeId, kind, iso, photo) {
+  const pin = punchPin(employeeId);
+  if (pin && iso) insPhonePunch(pin, employeeId, kind, iso, photo);
+}
 function seedPhonePunches(employeeId, workDate) {
   if (!db.prepare(`SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ${VIRT_SERIALS} LIMIT 1`).get(employeeId, workDate)) return;
-  const rows = db.prepare(`SELECT check_in_at, check_out_at, check_in_photo, check_out_photo FROM attendance
-    WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND COALESCE(shift_source,'')<>'device' AND ${PHONE_ROW}`).all(employeeId, workDate);
+  const rows = db.prepare(`SELECT check_in_at, check_out_at, check_in_photo, check_out_photo, shift_source FROM attendance
+    WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND ${PHONE_ROW}`).all(employeeId, workDate);
   if (!rows.length) return;
-  const emp = db.prepare('SELECT code, device_pin FROM employees WHERE id=?').get(employeeId); if (!emp) return;
-  const pin = String(emp.device_pin || emp.code);
-  const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES (?,?,?,?,?,0,?)');
-  const vnDate = (iso) => new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(0, 10);
+  const pin = punchPin(employeeId); if (!pin) return;
+  const have = new Set(db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=?').all(employeeId, workDate).map((p) => p.punch_at));
   for (const a of rows) {
-    if (a.check_in_at && a.check_in_photo) ins.run('DT_VAO', pin, a.check_in_at, vnDate(a.check_in_at), 0, employeeId);
-    if (a.check_out_at && a.check_out_photo) ins.run('DT_RA', pin, a.check_out_at, vnDate(a.check_out_at), 1, employeeId);
+    if (a.shift_source === 'device') {
+      // dòng dựng từ máy mà giờ RA là của điện thoại (bản cũ chưa ghi lượt DT_RA lúc chấm) và chưa bị đè → cứu lại giờ ra đó
+      if (a.check_out_at && a.check_out_photo && !have.has(a.check_out_at)) insPhonePunch(pin, employeeId, 'out', a.check_out_at, a.check_out_photo);
+      continue;
+    }
+    if (a.check_in_at && a.check_in_photo) insPhonePunch(pin, employeeId, 'in', a.check_in_at, a.check_in_photo);
+    if (a.check_out_at && a.check_out_photo) insPhonePunch(pin, employeeId, 'out', a.check_out_at, a.check_out_photo);
   }
 }
 

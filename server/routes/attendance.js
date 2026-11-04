@@ -11,6 +11,7 @@ import { otRoundingFrom, payrollCtx, computeDayMetrics } from '../day-metrics.js
 import { otRegCapper } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
 import { dayRules } from '../swap.js';
+import { recordPhonePunch } from '../device-sync.js';
 
 const r = Router();
 r.use(authRequired);
@@ -304,6 +305,8 @@ r.post('/check-out', (req, res) => {
     work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=?, late_min=? WHERE id=?`)
     .run(at, lat, lng, photoPath, distance, calc.work_minutes, calc.early_min, calc.ot_min, otRaw,
          calc.work_unit, calc.day_status, calc.ot_type, finalShiftId, finalSource, finalLate, row.id);
+  // vào bằng MÁY, ra bằng ĐIỆN THOẠI: ghi giờ ra (+ ảnh) thành lượt chấm DT_RA — lần dựng lại công từ lượt quẹt sau không đè mất
+  if (row.shift_source === 'device') recordPhonePunch(req.user.id, 'out', at, photoPath);
 
   const updated = db.prepare('SELECT * FROM attendance WHERE id = ?').get(row.id);
   res.json({ ok: true, attendance: updated, meta: calc });

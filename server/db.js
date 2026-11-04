@@ -506,6 +506,8 @@ function migrateColumns() {
   add('employees', 'permissions', 'TEXT');
   // Kiểu chấm công RIÊNG của nhân viên: '' = theo cài đặt chung | 'shift' = theo ca | 'hourly' = theo giờ
   add('employees', 'att_mode', "TEXT NOT NULL DEFAULT ''");
+  // Ảnh chấm của lượt chấm ĐIỆN THOẠI đã gộp vào ngày có quẹt máy (máy ảo DT_VAO / DT_RA) → Tổng quan hiện ảnh cạnh từng giờ
+  add('device_punches', 'photo', 'TEXT');
   // Lương theo giờ (dùng cho chế độ chấm công 'hourly')
   add('salary_configs', 'hourly_rate', 'REAL NOT NULL DEFAULT 0');
   // Đánh dấu bản ghi chấm công do admin thêm/sửa tay + ghi chú lý do

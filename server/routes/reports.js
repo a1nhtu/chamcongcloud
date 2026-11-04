@@ -1564,14 +1564,34 @@ r.get('/attendance', (req, res) => {
   // Tổng quan 1 ngày: NV chấm hơn 2 lần → kèm đủ các lần chấm (punches_hm) để hiện Vào 1 · Ra 1 · Vào 2 …
   // Mỗi dòng công chỉ nhận lượt chấm nằm trong khoảng vào–ra của chính nó (ngày nhiều ca không bị lặp lượt)
   const timesOf = day && !req.forceVirt ? dayTimesLoader(day, day, new Set(raw.map((a) => a.employee_id))) : null;
-  const punchesHM = (a) => {
-    if (!timesOf || !a.check_in_at) return undefined;
+  const dayTs = (a) => {
+    if (!timesOf || !a.check_in_at) return null;
     const end = a.check_out_at || a.check_in_at;
     const ts = timesOf(a.employee_id, a.work_date).filter((t) => t >= a.check_in_at && t <= end);
-    return ts.length > 2 ? ts.map(isoToVnHM) : undefined;
+    return ts.length > 2 ? ts : null;
   };
-  const rows = raw.map((a) => ({ ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
-    check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: punchesHM(a) }));
+  // Ngày VỪA chấm điện thoại VỪA quẹt máy (gộp 1 dòng): ảnh chấm của TỪNG lượt điện thoại (máy ảo DT_VAO / DT_RA) → hiện cạnh giờ đó.
+  // Lượt gộp từ bản cũ (chưa lưu ảnh theo lượt): lượt VÀO trùng giờ vào dòng công lấy ảnh vào, lượt RA điện thoại cuối lấy ảnh ra.
+  const dtOf = timesOf ? new Map(db.prepare("SELECT employee_id, punch_at, serial, photo FROM device_punches WHERE work_date = ? AND serial IN ('DT_VAO','DT_RA')").all(day)
+    .map((p) => [p.employee_id + '|' + p.punch_at, p])) : null;
+  const punchPhotos = (a, ts) => {
+    if (!ts || !dtOf) return undefined;
+    const dt = ts.map((t) => dtOf.get(a.employee_id + '|' + t) || null);
+    const ph = dt.map((p) => (p && p.photo) || null);
+    const used = new Set(ph.filter(Boolean));
+    const lastRa = dt.map((p) => p && p.serial === 'DT_RA').lastIndexOf(true);
+    dt.forEach((p, i) => {
+      if (!p || ph[i]) return;
+      const old = p.serial === 'DT_VAO' ? (ts[i] === a.check_in_at ? a.check_in_photo : null) : (i === lastRa ? a.check_out_photo : null);
+      if (old && !used.has(old)) { ph[i] = old; used.add(old); }
+    });
+    return ph.some(Boolean) ? ph : undefined;
+  };
+  const rows = raw.map((a) => {
+    const ts = dayTs(a);
+    return { ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
+      check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: ts ? ts.map(isoToVnHM) : undefined, punch_photos: punchPhotos(a, ts) };
+  });
   res.json({ month, rows });
 });
 

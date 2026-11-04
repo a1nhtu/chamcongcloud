@@ -403,8 +403,42 @@ export function registerAttendanceRoutes(r, { need }) {
     const att = db.prepare('SELECT id, work_date, check_in_at, check_out_at, manual, check_in_photo, check_out_photo FROM attendance WHERE employee_id = ? AND work_date >= ? AND work_date <= ? ORDER BY work_date, check_in_at').all(eid, from, to);
     // các lần chấm bằng điện thoại (chỉ xem — sửa ở ô Vào / Ra của bảng Tính công)
     const locked = from === to && sessionDay(eid, from);
-    const phone = att.filter((a) => a.check_in_photo || a.check_out_photo || (locked && a.check_in_at)).map((a) => ({ date: a.work_date, in: a.check_in_at ? vnHM(a.check_in_at) : '', out: a.check_out_at ? vnHM(a.check_out_at) : '' }));
-    res.json({ rows, manualRow: att.some((a) => a.manual), phone, phoneLocked: locked });
+    const phone = att.filter((a) => a.check_in_photo || a.check_out_photo || (locked && a.check_in_at)).map((a) => ({
+      id: a.id, date: a.work_date, in: a.check_in_at ? vnHM(a.check_in_at) : '', out: a.check_out_at ? vnHM(a.check_out_at) : '',
+      out_date: a.check_out_at ? vnDate(new Date(a.check_out_at)) : '', in_photo: a.check_in_photo || '', out_photo: a.check_out_photo || '', manual: !!a.manual }));
+    res.json({ rows, manualRow: att.some((a) => a.manual), phone, phoneLocked: locked, noOvernight: hourlyNoOvernight(eid) });
+  });
+
+  // Phiên chấm điện thoại có giờ RA sang NGÀY SAU (bản cũ: quên chấm ra, sáng hôm sau chấm VÀO bị lấy làm giờ ra hôm trước):
+  // bỏ giờ ra khỏi phiên này (thành chưa ra) và chuyển lượt đó thành giờ VÀO của ngày sau (kèm ảnh, vị trí).
+  r.post('/attendance/:id/split-out', need('attendance_edit'), (req, res) => {
+    const row = db.prepare('SELECT * FROM attendance WHERE id=?').get(req.params.id);
+    if (!row) return res.status(404).json({ error: 'Không tìm thấy bản ghi' });
+    const outIso = row.check_out_at, nd = outIso ? vnDate(new Date(outIso)) : '';
+    if (!nd || nd <= row.work_date) return res.status(400).json({ error: 'Phiên này không có giờ ra sang ngày sau' });
+    if (!sessionDay(row.employee_id, row.work_date)) return res.status(400).json({ error: 'Ngày này có lượt quẹt máy — sửa ở bảng lượt chấm, rồi bấm Tính lại' });
+    const by = req.user.full_name || 'Quản lý';
+    const moved = tx(() => {
+      const m = computeManual(row.employee_id, row.work_date, row.check_in_at, null);
+      db.prepare(`UPDATE attendance SET check_out_at=NULL, check_out_lat=NULL, check_out_lng=NULL, check_out_photo=NULL, check_out_distance_m=NULL,
+        late_min=?, early_min=?, ot_min=?, ot_raw_min=?, work_minutes=?, work_unit=?, day_status=?, ot_type=?, manual=1, manual_at=?, manual_by=? WHERE id=?`)
+        .run(m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, nowIso(), by, row.id);
+      // ngày sau đã có phiên bắt đầu đúng giờ này / đang chứa giờ này → không thêm trùng
+      if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND (check_in_at=? OR (check_in_at<? AND check_out_at>?)) LIMIT 1')
+        .get(row.employee_id, nd, outIso, outIso, outIso)) return false;
+      const m2 = computeManual(row.employee_id, nd, outIso, null);
+      db.prepare(`INSERT INTO attendance (employee_id, work_date, check_in_at, check_in_lat, check_in_lng, check_in_photo, check_in_distance_m,
+        late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'')`)
+        .run(row.employee_id, nd, outIso, row.check_out_lat, row.check_out_lng, row.check_out_photo, row.check_out_distance_m,
+          m2.late, m2.early_min, m2.ot_min, m2.ot_raw, m2.work_minutes, m2.work_unit, m2.day_status, m2.ot_type, m2.shiftId ?? null, row.shift_source || 'hourly');
+      // ngày sau có quẹt máy → dựng lại ngày đó (gộp lượt điện thoại với lượt máy)
+      if (db.prepare("SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA') LIMIT 1").get(row.employee_id, nd))
+        rebuildDays([row.employee_id + '|' + nd]);
+      return true;
+    });
+    notifyTimeEdited(row.employee_id, row.work_date, row.check_in_at, null);
+    res.json({ ok: true, moved, next_date: nd });
   });
 
   // Thêm lượt chấm cho 1 hoặc nhiều NV trong 1 ngày: giờ vào và/hoặc giờ ra
