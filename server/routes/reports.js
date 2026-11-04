@@ -239,7 +239,9 @@ function loadRange(from, to, filter) {
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
-  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isWeekend: (d) => isWeekendDay(d, weekend), virt, shiftsById, hourly: formHourly(filter) };
+  // paintWeekend: CHỈ để tô màu — luôn tô thứ 7 + chủ nhật (Anh chốt 04/11/2026: mọi báo cáo bôi màu T7, CN), cộng ngày cuối tuần
+  // khai ở Cài đặt nếu khác. Tính công dùng isWeekendDay(…, weekend) như cũ.
+  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, paintWeekend: (d) => vnWeekday(d) >= 6 || isWeekendDay(d, weekend), virt, shiftsById, hourly: formHourly(filter) };
 }
 
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
@@ -367,6 +369,10 @@ const MISS_COL = { key: 'missShift', label: 'Thiếu ca', w: 22 };
 const MISS_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
 const MISS_FONT = { bold: true, color: { argb: 'FFB91C1C' } };
 const OFF_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+// Dòng thứ 7 / chủ nhật (báo cáo liệt kê theo ngày, có cột Thứ): tô cam nhạt cả dòng, chữ Thứ đậm cam (Anh 04/11/2026)
+const WK_ROW = new Set(['T7', 'CN']);
+const WK_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE8CC' } };
+const WK_FONT = { bold: true, color: { argb: 'FFB45309' } };
 const missDays = (ctx, empId, days) => days.map((d) => { const m = ctx.missShift(empId, d); return m ? `${d.slice(8)}/${d.slice(5, 7)}: ${m}` : ''; }).filter(Boolean).join('; ');
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
 const OT_LABEL = { thuong: 'Ngày thường', cuoi_tuan: 'Cuối tuần', le: 'Ngày lễ' };
@@ -495,7 +501,7 @@ function buildReportRaw(type, from, to, filter) {
   switch (type) {
     /* --- Bảng công ngang (ma trận ngày × NV) --- */
     case 'horizontal': {
-      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.isWeekend(d) }));
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.paintWeekend(d) }));
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
@@ -531,7 +537,7 @@ function buildReportRaw(type, from, to, filter) {
      * Giờ công, Tăng ca TC1 (ngày thường) / TC2 (cuối tuần) / TC3 (lễ), V (vắng), nghỉ từng loại, Trễ, Sớm (số lần).
      * Chế độ theo giờ: bỏ nhóm Tăng ca. */
     case 'hourstat': {
-      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), sub: WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()], weekend: ctx.isWeekend(d), w: 6 }));
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), sub: WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()], weekend: ctx.paintWeekend(d), w: 6 }));
       const columns = [
         { key: 'stt', label: 'STT', w: 5 }, { key: 'dept', label: 'Phòng ban', w: 14 },
         { key: 'code', label: 'Mã nhân viên', w: 12 }, { key: 'name', label: 'Tên nhân viên', w: 20 },
@@ -569,7 +575,7 @@ function buildReportRaw(type, from, to, filter) {
 
     /* --- Ký hiệu (X/V/T/P/L/O) --- */
     case 'symbol': {
-      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.isWeekend(d) }));
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.paintWeekend(d) }));
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
@@ -598,7 +604,7 @@ function buildReportRaw(type, from, to, filter) {
 
     /* --- Chi tiết giờ vào/ra theo ngày (ma trận) --- */
     case 'daytime': {
-      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.isWeekend(d) }));
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.paintWeekend(d) }));
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
         { key: 'dept', label: 'Bộ phận', w: 14 }, ...dayCols,
@@ -630,7 +636,7 @@ function buildReportRaw(type, from, to, filter) {
       const NP = maxPairs(ctx, ioOf, days);
       const dayCols = [];
       for (const d of days) {
-        const wk = ctx.isWeekend(d);
+        const wk = ctx.paintWeekend(d);
         for (let p = 1; p <= NP; p++) {
           dayCols.push({ key: 'd' + d + 'i' + (p > 1 ? p : ''), label: p > 1 ? 'Vào ' + p : d.slice(8), weekend: wk });
           dayCols.push({ key: 'd' + d + 'o' + (p > 1 ? p : ''), label: p > 1 ? 'Ra ' + p : 'Ra', weekend: wk });
@@ -673,7 +679,7 @@ function buildReportRaw(type, from, to, filter) {
     /* --- Bảng theo dõi chấm công: mỗi NV 6 dòng × từng ngày (Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ HC · Giờ TC) — khách chấm 4 lần/ngày --- */
     case 'track6': {
       const t6 = track6Data(ctx, days);
-      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), sub: WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()], weekend: ctx.isWeekend(d), w: 7 }));
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), sub: WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()], weekend: ctx.paintWeekend(d), w: 7 }));
       const columns = [
         { key: 'stt', label: 'STT', w: 5 }, { key: 'code', label: 'Mã nhân viên', w: 12 }, { key: 'name', label: 'Tên nhân viên', w: 20 }, { key: 'hire', label: 'Ngày vào', w: 11 },
         { key: 'cong', label: 'Ngày công', w: 9 }, { key: 'gio', label: HOURLY ? 'Tổng giờ' : 'Giờ công', w: 9 }, ...leaveCols(ctx, true),
@@ -1072,7 +1078,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
       if (onlyLateEarly && !(c && (c.late_min > 0 || c.early_min > 0))) continue;
       const io = c ? ioOf(e.id, d, c) : null;
       const ps = !io || !c.check_in_at ? [] : io.pairs ? io.pairs : [[c.check_in_at, c.check_out_at]];
-      const row = { date: fmtDMY(d), wd: WD[vnWeekday(d)], weekend: ctx.isWeekend(d), sym: sym === 'P' ? ctx.leaveDays.get(e.id + '|' + d).sym : sym };
+      const row = { date: fmtDMY(d), wd: WD[vnWeekday(d)], weekend: ctx.paintWeekend(d), sym: sym === 'P' ? ctx.leaveDays.get(e.id + '|' + d).sym : sym };
       for (let i = 0; i < PAIRS; i++) {
         row['in' + (i + 1)] = ps[i] && ps[i][0] ? isoToVnHM(ps[i][0]) : '';
         row['out' + (i + 1)] = ps[i] && ps[i][1] ? isoToVnHM(ps[i][1]) : '';
@@ -1297,7 +1303,7 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
     for (let di = 0; di < days.length; di++) {
       const d = days[di], c1 = FIXED + di * PER + 1;
       const c = ctx.cell.get(e.id + '|' + d);
-      const weekend = ctx.isWeekend(d);
+      const weekend = ctx.paintWeekend(d);
       const ps = pairsHM(ioOf(e.id, d, c), c);   // mỗi lần chấm 1 cột
       const lv = !c && ctx.leaveDays.get(e.id + '|' + d);   // ngày nghỉ (đơn đã duyệt) → ký hiệu loại nghỉ
       for (let p = 0; p < NP; p++) {
@@ -1385,7 +1391,7 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
     const cell = ws.getCell(rr, c);
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c >= D0 && ctx.isWeekend(days[c - D0]) ? 'FFB45309' : teal } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c >= D0 && ctx.paintWeekend(days[c - D0]) ? 'FFB45309' : teal } };
     cell.border = border;
   }
   ws.getRow(H).height = 30;
@@ -1410,7 +1416,7 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
         cell.value = v === '' ? null : v;
         cell.alignment = { horizontal: 'center' }; cell.border = border;
         if (k >= 4) cell.font = { bold: true };
-        if (ctx.isWeekend(d)) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+        if (ctx.paintWeekend(d)) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
       });
     });
     r += NR;
@@ -1485,7 +1491,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
     for (let di = 0; di < days.length; di++) {
       const d = days[di], c1 = FIXED + di * PER + 1;
       const c = ctx.cell.get(e.id + '|' + d);
-      const weekend = ctx.isWeekend(d);
+      const weekend = ctx.paintWeekend(d);
       const ps = pairsHM(ioOf(e.id, d, c), c);   // theo quy tắc ghép log: mỗi lần chấm 1 cột
       for (let p = 0; p < NP; p++) { ws.getCell(r, c1 + p * 2).value = ps[p] ? ps[p][0] : ''; ws.getCell(r, c1 + p * 2 + 1).value = ps[p] ? ps[p][1] : ''; }
       if (c) cong += HOURLY ? (c.work_minutes || 0) / 60 : (c.work_unit || 0);
@@ -1697,12 +1703,15 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   for (const row of rows) {
     loopProg(PROG, ++pi, rows.length, 50, 88, 'Đang ghi dòng');
     const r2 = ws.addRow(columns.map((c) => row[c.key] ?? ''));
+    const wkRow = WK_ROW.has(row.wd);
     let lines = 1;
-    r2.eachCell((cell, col) => {
+    r2.eachCell({ includeEmpty: true }, (cell, col) => {
       const meta = columns[col - 1];
+      if (!meta) return;
       cell.border = allBorder;
       if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
       if (row._off) cell.fill = OFF_FILL;   // ngày không đi làm: tô xám nhạt
+      if (wkRow) { cell.fill = WK_FILL; if (meta.key === 'wd') cell.font = WK_FONT; }   // thứ 7 / chủ nhật: tô cả dòng (kể cả ngày không đi làm)
       if (meta.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);

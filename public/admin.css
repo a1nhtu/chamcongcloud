@@ -155,6 +155,7 @@ table.dev-tbl td.num.zero { color: #cbd0d6; font-weight: 400; }
 .rep-scroll table.data th.pin { z-index: 4; }
 .rep-scroll table.data tr:hover td.pin { background: #fcfbfa; }
 .rep-scroll table.data tr.rp-off td { background: #f1f5f9; }   /* ngày không đi làm (ô "Hiện cả ngày không đi làm") */
+.rep-scroll table.data tr.rp-wk td { background: #ffe8cc; }    /* thứ 7 / chủ nhật — tô cả dòng, kể cả ngày không đi làm */
 /* Phân ca > Bảng phân ca kiểu Excel */
 .as-sheet-box { position: relative; overflow: auto; outline: none; max-height: calc(100vh - 300px); }
 .as-sheet-box:focus { box-shadow: 0 0 0 2px #bfdbfe; }

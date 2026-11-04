@@ -7504,13 +7504,16 @@ async function pageReport() {
       if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
       let pinLefts = null;   // vị trí các cột ghim (tính sau khi vẽ) → áp cả cho dòng vẽ sau
       const mkRow = (row) => {
-        const tr = el('tr', row._off ? { class: 'rp-off' } : {});   // ngày không đi làm (ô "Hiện cả ngày không đi làm")
+        // rp-off: ngày không đi làm (ô "Hiện cả ngày không đi làm"); rp-wk: dòng thứ 7 / chủ nhật tô cam (Anh 04/11/2026)
+        const wk = row.wd === 'T7' || row.wd === 'CN';
+        const cls = [row._off ? 'rp-off' : '', wk ? 'rp-wk' : ''].filter(Boolean).join(' ');
+        const tr = el('tr', cls ? { class: cls } : {});
         for (const c of data.columns) {
           const v = row[c.key];
           const isSym = type === 'symbol' && SYMBOL_COLOR[v];
           tr.append(el('td', {
             // white-space:pre-line: ô có nhiều lần vào/ra (máy chủ nối bằng xuống dòng) hiện mỗi cặp một dòng
-            style: (c.weekend ? 'background:#fffaf3;' : '') + (c.key === 'missShift' && v ? 'background:#fee2e2;color:#b91c1c;font-weight:700;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
+            style: (c.weekend ? 'background:#fffaf3;' : '') + (wk && c.key === 'wd' ? 'color:#b45309;font-weight:700;' : '') + (c.key === 'missShift' && v ? 'background:#fee2e2;color:#b91c1c;font-weight:700;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
           }, v === '' || v == null ? '' : String(v)));
         }
         if (pinLefts) pinLefts.forEach((L, i) => { const td = tr.children[i]; if (td) { td.classList.add('pin'); td.style.left = L + 'px'; } });
