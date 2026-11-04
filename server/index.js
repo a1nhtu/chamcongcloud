@@ -1,4 +1,5 @@
-import './logger.js';   // ghi log ra data/logs/server.log (phải import đầu tiên)
+import './install-config.js';   // bản cài Windows: nạp config.txt khi node được bật thẳng (phải đứng trước mọi import)
+import './logger.js';   // ghi log ra data/logs/server.log (import ngay sau install-config)
 import express from 'express';
 import { createServer as createHttp } from 'node:http';
 import { createServer as createHttps } from 'node:https';
