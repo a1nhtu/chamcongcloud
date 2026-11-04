@@ -5344,10 +5344,10 @@ async function punchModal(emp, date, reload) {
         if (nextDay) {
           const mv = btnSm(`↪ Chuyển ${p.out} sang ${dmy(p.out_date)}`, async () => {
             if (!confirm(`Phiên ${p.in} ngày ${dmy(cur)} có giờ ra ${p.out} của ngày ${dmy(p.out_date)} (thường do quên chấm ra, sáng hôm sau chấm vào bị lấy làm giờ ra).\n\n`
-              + `→ Bỏ giờ ra khỏi ngày ${dmy(cur)} (phiên ${p.in} thành CHƯA RA, quản lý nhập giờ ra đúng nếu biết)\n→ Chuyển ${p.out} thành giờ VÀO ngày ${dmy(p.out_date)} (giữ ảnh chấm)\n\nĐồng ý?`)) return;
+              + `→ Bỏ giờ ra khỏi ngày ${dmy(cur)} (phiên ${p.in} thành CHƯA RA, quản lý nhập giờ ra đúng nếu biết)\n→ Chuyển ${p.out} thành giờ VÀO ngày ${dmy(p.out_date)} (giữ ảnh chấm; ngày đó đã có giờ vào sát giờ này thì không thêm lần nữa)\n\nĐồng ý?`)) return;
             try {
               const r = await api('/admin/attendance/' + p.id + '/split-out', { method: 'POST' });
-              toast(r.moved ? `Đã chuyển ${p.out} sang ngày ${dmy(r.next_date)}` : `Đã bỏ giờ ra; ngày ${dmy(r.next_date)} đã có phiên lúc ${p.out} nên không thêm`, 'ok'); after();
+              toast(r.moved ? `Đã chuyển ${p.out} sang ngày ${dmy(r.next_date)}` : `Đã bỏ giờ ra khỏi ngày ${dmy(cur)}; ngày ${dmy(r.next_date)} đã có giờ vào lúc ${p.out} nên không thêm lần nữa`, 'ok'); after();
             } catch (e) { toast(e.message, 'err'); }
           });
           mv.title = 'Bỏ giờ ra sang ngày sau khỏi phiên này, chuyển thành giờ vào của ngày sau';

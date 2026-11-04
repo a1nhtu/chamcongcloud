@@ -423,9 +423,12 @@ export function registerAttendanceRoutes(r, { need }) {
       db.prepare(`UPDATE attendance SET check_out_at=NULL, check_out_lat=NULL, check_out_lng=NULL, check_out_photo=NULL, check_out_distance_m=NULL,
         late_min=?, early_min=?, ot_min=?, ot_raw_min=?, work_minutes=?, work_unit=?, day_status=?, ot_type=?, manual=1, manual_at=?, manual_by=? WHERE id=?`)
         .run(m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, nowIso(), by, row.id);
-      // ngày sau đã có phiên bắt đầu đúng giờ này / đang chứa giờ này → không thêm trùng
-      if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND (check_in_at=? OR (check_in_at<? AND check_out_at>?)) LIMIT 1')
-        .get(row.employee_id, nd, outIso, outIso, outIso)) return false;
+      // ngày sau đã có phiên VÀO sát giờ này (trong ngưỡng chống bấm nhầm — thường NV bấm RA nhầm rồi bấm VÀO ngay cùng phút)
+      // hoặc phiên đang chứa giờ này → không thêm trùng, chỉ bỏ giờ ra
+      const tol = Math.max(2, parseInt(getSetting('punch_dedup_min', '15'), 10) || 15) * 60000;
+      const lo = new Date(Date.parse(outIso) - tol).toISOString(), hi = new Date(Date.parse(outIso) + tol).toISOString();
+      if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND ((check_in_at>=? AND check_in_at<=?) OR (check_in_at<? AND check_out_at>?)) LIMIT 1')
+        .get(row.employee_id, nd, lo, hi, outIso, outIso)) return false;
       const m2 = computeManual(row.employee_id, nd, outIso, null);
       db.prepare(`INSERT INTO attendance (employee_id, work_date, check_in_at, check_in_lat, check_in_lng, check_in_photo, check_in_distance_m,
         late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note)

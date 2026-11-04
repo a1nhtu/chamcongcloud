@@ -174,3 +174,16 @@ test('dữ liệu cũ (17,5 giờ): hộp Lượt chấm liệt kê phiên + nú
   assert.equal((await call('POST', `/admin/attendance/${id}/split-out`)).status, 400);
   assert.equal(db.prepare('SELECT COUNT(*) c FROM attendance WHERE employee_id=? AND work_date=?').get(emp.SUA, D1).c, 1);
 });
+
+test('Chuyển giờ ra sang ngày sau: ngày sau ĐÃ có giờ vào cùng phút (bấm RA nhầm rồi bấm VÀO ngay) → chỉ bỏ giờ ra, không nhân đôi', async () => {
+  const D0 = '2026-10-11', D1 = '2026-10-12';
+  const id = Number(db.prepare("INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo, work_minutes, day_status, shift_source) VALUES (?,?,?,?,'/v.jpg','/r.jpg',1050,'lam_viec','hourly')")
+    .run(emp.SUA, D0, iso(D0, '14:29'), new Date(`${D1}T07:59:12+07:00`).toISOString()).lastInsertRowid);
+  db.prepare("INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo, work_minutes, day_status, shift_source) VALUES (?,?,?,?,'/a.jpg','/b.jpg',608,'lam_viec','hourly')")
+    .run(emp.SUA, D1, new Date(`${D1}T07:59:40+07:00`).toISOString(), iso(D1, '18:08'));
+  const s = await call('POST', `/admin/attendance/${id}/split-out`);
+  assert.equal(s.status, 200, JSON.stringify(s.body));
+  assert.equal(s.body.moved, false);
+  assert.deepEqual(rowsOf(emp.SUA, D0), [['14:29', null]]);
+  assert.deepEqual(rowsOf(emp.SUA, D1), [['07:59', '18:08']]);
+});
