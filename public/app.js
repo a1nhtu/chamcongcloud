@@ -238,6 +238,12 @@ async function renderCham() {
     c.append(el('div', { class: 'status-banner', style: 'background:#eef2ff;color:#3730a3', html: '⚙ Ca hôm nay: <b>tự động</b> — hệ thống xác định theo giờ Anh/Chị chấm vào' }));
   }
 
+  // Theo giờ (không qua đêm): hôm qua quên chấm RA → nhắc báo quản lý sửa giờ; hôm nay chấm VÀO như bình thường
+  if (data.forgotOut) {
+    const f = data.forgotOut, dm = f.date.slice(8, 10) + '/' + f.date.slice(5, 7);
+    c.append(el('div', { class: 'status-banner', style: 'background:#fef3c7;color:#92400e',
+      html: `⚠ Ngày <b>${dm}</b> bạn vào lúc <b>${isoToHM(f.check_in_at)}</b> nhưng chưa chấm RA — báo quản lý sửa giờ ra giúp bạn.` }));
+  }
   // Banner trạng thái
   if (hasIn) {
     const bits = [`Đã vào ca lúc <b>${isoToHM(a.check_in_at)}</b>`];

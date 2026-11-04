@@ -1,5 +1,5 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
-import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren } from '../../db.js';
+import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren, hourlyNoOvernight } from '../../db.js';
 import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
@@ -26,6 +26,14 @@ function vnToIso(date, hm) {
   if (!hm) return null;
   return new Date(`${date}T${hm}:00+07:00`).toISOString();
 }
+// NV theo giờ, Cài đặt KHÔNG cho chấm qua đêm: giờ ra nhập tay không sau giờ vào → báo lỗi (trước đây tự hiểu là sáng hôm sau).
+// Trả câu báo lỗi, hoặc null nếu hợp lệ.
+function overnightBlocked(eid, inIso, outIso) {
+  if (!inIso || !outIso || new Date(outIso) > new Date(inIso) || !hourlyNoOvernight(eid)) return null;
+  const hm = (iso) => new Date(new Date(iso).getTime() + 7 * 3600000).toISOString().slice(11, 16);
+  return `Giờ ra ${hm(outIso)} không sau giờ vào ${hm(inIso)}. Chấm công theo giờ đang KHÔNG cho qua đêm — nếu nhân viên làm qua đêm thì bật ô "Cho phép chấm qua đêm" ở Cài đặt.`;
+}
+const OVERNIGHT_MSG = 'Giờ ra không sau giờ vào. Chấm công theo giờ đang KHÔNG cho qua đêm — nếu nhân viên làm qua đêm thì bật ô "Cho phép chấm qua đêm" ở Cài đặt.';
 // Tính lại các chỉ số cho 1 bản ghi khi admin nhập tay
 function computeManual(employeeId, workDate, inIso, outIso) {
   const ctx = payrollCtx(getSetting, db);
@@ -245,6 +253,8 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!db.prepare('SELECT 1 FROM employees WHERE id=?').get(eid)) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
     let inIso = vnToIso(date, b.check_in);
     let outIso = vnToIso(date, b.check_out);
+    const blk = overnightBlocked(eid, inIso, outIso);
+    if (blk) return res.status(400).json({ error: blk });
     if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString(); // qua đêm
     const m = computeManual(eid, date, inIso, outIso);
     // Khoá theo (NV, ngày, CA) → cho phép thêm nhiều ca/ngày (VD ca gãy sáng + chiều)
@@ -271,6 +281,8 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!row) return res.status(404).json({ error: 'Không tìm thấy bản ghi' });
     let inIso = b.check_in !== undefined ? vnToIso(row.work_date, b.check_in) : row.check_in_at;
     let outIso = b.check_out !== undefined ? vnToIso(row.work_date, b.check_out) : row.check_out_at;
+    const blk = overnightBlocked(row.employee_id, inIso, outIso);
+    if (blk) return res.status(400).json({ error: blk });
     if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();
     const m = computeManual(row.employee_id, row.work_date, inIso, outIso);
     db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?,
@@ -347,6 +359,8 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!tIn) {
       if (!open) return { error: `Ngày ${dm(date)} không có phiên nào đang mở (đã vào, chưa ra) — nhập cả giờ vào và giờ ra để thêm phiên mới.` };
       let outIso = vnToIso(date, tOut);
+      const blk = overnightBlocked(eid, open.check_in_at, outIso);
+      if (blk) return { error: blk };
       if (new Date(outIso) <= new Date(open.check_in_at)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();   // ra sáng hôm sau
       const m = computeManual(eid, date, open.check_in_at, outIso);
       db.prepare(`UPDATE attendance SET check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?, work_minutes=?, work_unit=?, day_status=?, ot_type=?,
@@ -356,6 +370,8 @@ export function registerAttendanceRoutes(r, { need }) {
     }
     const inIso = vnToIso(date, tIn);
     let outIso = tOut ? vnToIso(date, tOut) : null;
+    const blk = overnightBlocked(eid, inIso, outIso);
+    if (blk) return { error: blk };
     if (outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();
     if (open) return { error: `Ngày ${dm(date)} đang có phiên chưa chấm ra (vào ${vnHM(open.check_in_at)}) — nhập giờ ra cho phiên đó trước.` };
     const hit = rows.find((a) => inIso < a.check_out_at && (outIso || inIso) >= a.check_in_at);
@@ -400,6 +416,7 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Chọn ngày' });
     if (!tIn && !tOut) return res.status(400).json({ error: 'Nhập giờ vào hoặc giờ ra (dạng 08:00)' });
+    if (tIn && tOut && !outDate && tOut <= tIn && ids.some(hourlyNoOvernight)) return res.status(400).json({ error: OVERNIGHT_MSG });
     const by = req.user.full_name || 'Quản lý';
     let phoneErr = '';
     const keys = new Set();
@@ -464,6 +481,7 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     if (!dates.length) return res.status(400).json({ error: 'Chưa chọn ngày' });
     if (!tIn && !tOut) return res.status(400).json({ error: 'Tích "Giờ vào" và/hoặc "Giờ ra" và nhập giờ' });
+    if (tIn && tOut && tOut <= tIn && ids.some(hourlyNoOvernight)) return res.status(400).json({ error: OVERNIGHT_MSG });
     if (ids.length * dates.length > 40000) return res.status(400).json({ error: 'Quá nhiều (tối đa 40.000 lượt người × ngày mỗi lần)' });
     const has = db.prepare('SELECT 1 FROM device_punches WHERE employee_id = ? AND work_date = ? LIMIT 1');
     const rnd = (j) => Math.floor(Math.random() * (j * 60 + 1));   // giây lệch

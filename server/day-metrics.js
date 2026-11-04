@@ -101,7 +101,10 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
       if (half) c.early_min = computeCheckout(shift, inIso, outIso, workDate, { ...flags, priv: lePriv }).early_min;
     } else {
       // Không ca (chế độ theo giờ): "theo cặp" ≥ 2 cặp → cộng từng cặp; còn lại = ra − vào (FILO)
-      const wm = (pairs && pairs.length >= 2) ? sumPairsMinutes(pairs)
+      // Theo giờ + theo cặp mà chỉ ghép được 1 cặp nhưng còn lượt lẻ (VD vào 1 · ra 1 · vào 2 chưa ra): chỉ tính cặp đủ
+      // (ra 1 − vào 1), KHÔNG tính tới lượt vào 2. 1 cặp trùng đúng đầu–cuối thì vẫn ra − vào như cũ.
+      const oddPair = opts.hourly && pairs && pairs.length === 1 && (pairs[0][0] !== inIso || pairs[0][1] !== outIso);
+      const wm = ((pairs && pairs.length >= 2) || oddPair) ? sumPairsMinutes(pairs)
         : Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000));
       c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, flags), ot_type: otType, day_status: 'lam_viec' };
     }

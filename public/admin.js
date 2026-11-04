@@ -352,19 +352,23 @@ async function hrPage(fn) {
 
 /* ---------- Lựa chọn phụ khi chấm "Theo giờ": đầu–cuối (FILO) / theo cặp vào–ra ----------
  * Chỉ hiện khi radio "Theo giờ" đang được chọn. Trả { box, value(), sync() }. */
-function hourlyRulePicker(name, current, hourlyRadio, radios) {
+// overnight: giá trị ô "Cho phép chấm qua đêm" ('1' = bật, mặc định tắt). anyHourly: công ty có NV đặt riêng kiểu theo giờ
+// → vẫn hiện khung này dù kiểu chung là theo ca.
+function hourlyRulePicker(name, current, hourlyRadio, radios, overnight = '0', anyHourly = false) {
   const rFilo = el('input', { type: 'radio', name, value: 'filo', style: 'width:auto', ...(current !== 'pairs' ? { checked: '' } : {}) });
   const rPairs = el('input', { type: 'radio', name, value: 'pairs', style: 'width:auto', ...(current === 'pairs' ? { checked: '' } : {}) });
+  const nightChk = el('input', { type: 'checkbox', style: 'width:auto', ...(overnight === '1' ? { checked: '' } : {}) });
   const sub = (radio, title, desc) => el('label', { style: 'display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line,#eee);border-radius:10px;cursor:pointer;background:var(--surface,#fff)' },
     radio, el('div', {}, el('b', { style: 'font-size:14px' }, title), el('div', { style: 'font-size:12.5px;color:var(--muted)' }, desc)));
   const box = el('div', { style: 'display:flex;flex-direction:column;gap:6px;margin:-2px 0 0 28px' },
     el('div', { style: 'font-size:12.5px;color:var(--muted)' }, 'Khi một ngày chấm nhiều lần, tính giờ làm theo:'),
     sub(rFilo, 'Đầu – cuối (FILO)', 'Từ lần chấm đầu đến lần chấm cuối trong ngày.'),
-    sub(rPairs, 'Theo cặp vào / ra', 'Chấm 1–2 là một cặp, 3–4 là cặp tiếp…; giờ làm = tổng các cặp, thời gian ra ngoài bị trừ.'));
-  const sync = () => { box.style.display = hourlyRadio.checked ? 'flex' : 'none'; };
+    sub(rPairs, 'Theo cặp vào / ra', 'Chấm 1–2 là một cặp, 3–4 là cặp tiếp…; giờ làm = tổng các cặp, thời gian ra ngoài bị trừ.'),
+    sub(nightChk, '🌙 Cho phép chấm qua đêm', 'Bỏ trống (mặc định): giờ làm chỉ tính trong ngày — quên chấm ra thì dòng đó để "thiếu ra", lượt chấm sáng hôm sau là giờ VÀO của hôm sau, không bị lấy làm giờ ra hôm trước. Tích khi có người làm vắt qua nửa đêm (VD 22:00 → 06:00): lượt chấm sáng hôm sau đóng phiên còn mở của hôm trước — ai quên chấm ra thì phải sửa giờ tay.'));
+  const sync = () => { box.style.display = hourlyRadio.checked || anyHourly ? 'flex' : 'none'; };
   for (const r of radios) r.addEventListener('change', sync);
   sync();
-  return { box, value: () => (rPairs.checked ? 'pairs' : 'filo') };
+  return { box, value: () => (rPairs.checked ? 'pairs' : 'filo'), overnight: () => nightChk.checked };
 }
 
 /* ---------- Thiết lập lần đầu ---------- */
@@ -391,7 +395,7 @@ function setupWizard() {
     const hourly_merge_rule = swRule.value();
     save.disabled = true;
     try {
-      await api('/admin/settings', { method: 'PUT', body: { attendance_mode, hourly_merge_rule, geofence_enforce: geo.checked, setup_done: true } });
+      await api('/admin/settings', { method: 'PUT', body: { attendance_mode, hourly_merge_rule, hourly_overnight: swRule.overnight(), geofence_enforce: geo.checked, setup_done: true } });
       closeModal(); location.reload();
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
@@ -7927,7 +7931,7 @@ async function pageSettings() {
   // ----- Kiểu chấm công + Phạm vi chấm công -----
   const modeShift = el('input', { type: 'radio', name: 'att-mode', value: 'shift', style: 'width:auto', ...(s.attendance_mode !== 'hourly' ? { checked: '' } : {}) });
   const modeHourly = el('input', { type: 'radio', name: 'att-mode', value: 'hourly', style: 'width:auto', ...(s.attendance_mode === 'hourly' ? { checked: '' } : {}) });
-  const stRule = hourlyRulePicker('att-hrule', s.hourly_merge_rule, modeHourly, [modeShift, modeHourly]);
+  const stRule = hourlyRulePicker('att-hrule', s.hourly_merge_rule, modeHourly, [modeShift, modeHourly], s.hourly_overnight, !!s.any_hourly);
   const geoChk = el('input', { type: 'checkbox', id: 'st-geo', style: 'width:auto', ...(s.geofence_enforce === '1' ? { checked: '' } : {}) });
   const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}) });
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}) });
@@ -7946,7 +7950,7 @@ async function pageSettings() {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value === 'hourly' ? 'hourly' : 'shift';
     const hourly_merge_rule = stRule.value();
     try {
-      const body = { attendance_mode, hourly_merge_rule, geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
+      const body = { attendance_mode, hourly_merge_rule, hourly_overnight: stRule.overnight(), geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
       if (isMaster() || s.device_enabled === '1') {   // máy TCP/IP + máy Union: admin cũng bật được (khi đã dùng máy chấm công)
         body.tcp_device_enabled = tcpDevChk.checked;
         body.union_device_enabled = unionDevChk.checked;

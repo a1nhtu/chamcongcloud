@@ -1281,6 +1281,11 @@ export function empAttMode(employeeId) {
   return r && (r.att_mode === 'shift' || r.att_mode === 'hourly') ? r.att_mode : g;
 }
 export const empHourly = (employeeId) => empAttMode(employeeId) === 'hourly';
+// Chế độ THEO GIỜ có cho phiên chấm QUA ĐÊM không (Cài đặt › ô "Cho phép chấm qua đêm", mặc định TẮT).
+// TẮT: không bao giờ lấy lượt chấm của ngày hôm sau làm giờ RA (quên chấm ra thì dòng đó "thiếu ra", quản lý sửa tay).
+// BẬT: như trước — phiên vào hôm nay chưa ra thì lượt chấm ra sáng hôm sau đóng phiên đó.
+export const hourlyOvernight = () => getSetting('hourly_overnight', '0') === '1';
+export const hourlyNoOvernight = (employeeId) => empHourly(employeeId) && !hourlyOvernight();
 // Công ty hiện có nhân viên chấm theo ca / theo giờ không (giao diện dựa vào đây để hiện mục Ca làm, Phân ca…)
 export function attModeMix() {
   const g = globalAttMode();

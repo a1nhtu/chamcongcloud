@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { db, getSetting, allowedOffices, empAttMode, empHourly, isWeekendNormalEmp } from '../db.js';
+import { db, getSetting, allowedOffices, empAttMode, empHourly, isWeekendNormalEmp, hourlyOvernight, hourlyNoOvernight } from '../db.js';
 import { resolveEffectiveShift, resolveDayShifts } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
@@ -93,9 +93,11 @@ r.get('/today', (req, res) => {
   const rows = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? ORDER BY check_in_at').all(req.user.id, date);
   // Ca đang mở (đã vào, chưa ra) — hôm nay hoặc ca đêm hôm qua
   let openRow = rows.find((r) => r.check_in_at && !r.check_out_at) || null;
+  let forgotOut = null;   // theo giờ KHÔNG qua đêm: phiên hôm qua quên chấm ra → chỉ nhắc, không cho chấm ra vào phiên đó
   if (!openRow) {
     const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1").get(req.user.id, date);
-    if (yRow) openRow = yRow;
+    if (yRow && mode === 'hourly' && !hourlyOvernight()) forgotOut = { date: yRow.work_date, check_in_at: yRow.check_in_at };
+    else if (yRow) openRow = yRow;
   }
   const completed = rows.filter((r) => r.check_in_at && r.check_out_at).length;
 
@@ -132,7 +134,7 @@ r.get('/today', (req, res) => {
     else device.state = 'mismatch';
   }
   res.json({ date, attendance: row || null, todayRows: rows, state, expected, completed, dayShiftNames,
-    todayShift: shift, dayOff, autoDetect, mode, geofence, device,
+    todayShift: shift, dayOff, autoDetect, mode, geofence, device, forgotOut,
     phoneEnabled: getSetting('phone_enabled', '1') === '1' });
 });
 
@@ -239,11 +241,13 @@ r.post('/check-out', (req, res) => {
   // Tìm CA ĐANG MỞ hôm nay (đã vào, chưa ra) — mới nhất trước (hỗ trợ nhiều ca/ngày)
   let row = db.prepare('SELECT * FROM attendance WHERE employee_id = ? AND work_date = ? AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1').get(req.user.id, date);
   // CA ĐÊM: nếu hôm nay không có ca mở, tìm ca HÔM QUA đã VÀO mà CHƯA RA
-  if (!row) {
+  // (chế độ theo giờ chưa bật "Cho phép chấm qua đêm": KHÔNG lấy — quên chấm ra hôm qua thì quản lý sửa tay)
+  const noOvernight = hourlyNoOvernight(req.user.id);
+  if (!row && !noOvernight) {
     const yRow = db.prepare("SELECT * FROM attendance WHERE employee_id = ? AND work_date = date(?, '-1 day') AND check_in_at IS NOT NULL AND check_out_at IS NULL ORDER BY check_in_at DESC LIMIT 1").get(req.user.id, date);
     if (yRow) row = yRow;
   }
-  if (!row) return res.status(400).json({ error: 'Chưa có ca nào đang mở để chấm ra (hôm nay hoặc ca đêm hôm qua)' });
+  if (!row) return res.status(400).json({ error: noOvernight ? 'Hôm nay bạn chưa chấm VÀO nên chưa thể chấm RA.' : 'Chưa có ca nào đang mở để chấm ra (hôm nay hoặc ca đêm hôm qua)' });
   // Chống bấm nhầm: chấm RA quá sát giờ chấm VÀO (trong N phút) → chặn
   const dedupMinOut = parseInt(getSetting('punch_dedup_min', '15'), 10) || 0;
   if (dedupMinOut > 0 && (Date.now() - new Date(row.check_in_at)) < dedupMinOut * 60000)

@@ -1,7 +1,7 @@
 // Xử lý dữ liệu chấm công đẩy về từ máy ZKTeco (ADMS Push).
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { createHash } from 'node:crypto';
-import { db, getSetting, setSetting, empHourly } from './db.js';
+import { db, getSetting, setSetting, empHourly, hourlyNoOvernight } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
@@ -774,6 +774,7 @@ export function relinkPunchesForPin(employeeId, pin) {
 // Lượt quẹt sáng sớm đã được dùng làm giờ RA của ca qua đêm NGÀY HÔM TRƯỚC → không tính lại cho ngày này.
 // Trả mốc ISO: các lượt quẹt <= mốc này thuộc ngày hôm trước (null = không có).
 function consumedByPrevDay(employeeId, workDate) {
+  if (hourlyNoOvernight(employeeId)) return null;   // theo giờ KHÔNG qua đêm: lượt chấm hôm nay luôn là của hôm nay
   const prev = new Date(workDate + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
   const r = db.prepare('SELECT MAX(check_out_at) m FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, prev.toISOString().slice(0, 10));
   return r && r.m && r.m >= new Date(workDate + 'T00:00:00+07:00').toISOString() ? r.m : null;
