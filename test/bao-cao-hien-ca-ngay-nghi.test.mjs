@@ -98,7 +98,9 @@ test('báo cáo liệt kê theo ngày có cột Thứ ngay sau Ngày', async () 
   }
 });
 
-// Anh 04/11/2026: mọi báo cáo bôi màu thứ 7 + chủ nhật (xem trước trên phần mềm + Excel) — kể cả khi Cài đặt chỉ khai CN nghỉ
+// Anh 04/11/2026: mọi báo cáo bôi màu thứ 7 + chủ nhật (xem trước trên phần mềm + Excel) — kể cả khi Cài đặt chỉ khai CN nghỉ;
+// thứ 7 màu NHẠT hơn chủ nhật
+const T7_FILL = 'FFFFF3E3', CN_FILL = 'FFFFDDB3';
 test('Excel: dòng thứ 7 / chủ nhật tô cam cả dòng, chữ Thứ đậm; ngày thường không tô', async () => {
   for (const type of ['attendance', 'firstlast', 'detail']) {
     const buf = await get(`/export.xlsx?type=${type}${Q}&alldays=1`);
@@ -114,9 +116,10 @@ test('Excel: dòng thứ 7 / chủ nhật tô cam cả dòng, chữ Thứ đậm
       const fills = cols.map((_, k) => r.getCell(k + 1).fill?.fgColor?.argb || '');
       if (wd === 'T7' || wd === 'CN') {
         seen.add(wd);
-        assert.ok(fills.every((f) => f === 'FFFFE8CC'), `${type} ${d} ${wd}: cả dòng tô cam`);
+        const want = wd === 'T7' ? T7_FILL : CN_FILL;   // thứ 7 nhạt hơn chủ nhật
+        assert.ok(fills.every((f) => f === want), `${type} ${d} ${wd}: cả dòng tô ${want}`);
         assert.equal(r.getCell(wdCol).font?.bold, true, `${type} ${d}: chữ Thứ đậm`);
-      } else assert.ok(!fills.includes('FFFFE8CC'), `${type} ${d} ${wd}: ngày thường không tô cam`);
+      } else assert.ok(!fills.some((f) => f === T7_FILL || f === CN_FILL), `${type} ${d} ${wd}: ngày thường không tô cam`);
     });
     assert.deepEqual([...seen].sort(), ['CN', 'T7'], type + ': kỳ 01–07/09/2026 có cả T7 (05) và CN (06)');
   }
@@ -124,6 +127,15 @@ test('Excel: dòng thứ 7 / chủ nhật tô cam cả dòng, chữ Thứ đậm
 
 test('báo cáo ma trận (mỗi ngày 1 cột): cột thứ 7 + chủ nhật được đánh dấu tô màu dù Cài đặt chỉ khai CN', async () => {
   const rep = await get(`/data?type=horizontal${Q}`);
-  const wk = rep.columns.filter((c) => c.weekend).map((c) => c.key);
-  assert.deepEqual(wk, ['d2026-09-05', 'd2026-09-06']);
+  const wk = rep.columns.filter((c) => c.weekend).map((c) => [c.key, c.weekend]);
+  assert.deepEqual(wk, [['d2026-09-05', 'T7'], ['d2026-09-06', 'CN']], 'T7 / CN phân biệt để tô T7 nhạt hơn');
+  // Excel ma trận: ô cột T7 nhạt hơn ô cột CN
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(await get(`/export.xlsx?type=horizontal${Q}`));
+  const ws = wb.getWorksheet('BaoCao');
+  let head = 0; ws.eachRow((r, i) => { if (!head && r.values.includes('05')) head = i; });
+  const cols = ws.getRow(head).values.slice(1);
+  const body = ws.getRow(head + 1);
+  assert.equal(body.getCell(cols.indexOf('05') + 1).fill?.fgColor?.argb, T7_FILL, 'cột 05 (T7)');
+  assert.equal(body.getCell(cols.indexOf('06') + 1).fill?.fgColor?.argb, CN_FILL, 'cột 06 (CN)');
+  assert.notEqual(body.getCell(cols.indexOf('04') + 1).fill?.fgColor?.argb, T7_FILL, 'cột 04 (T6) không tô');
 });

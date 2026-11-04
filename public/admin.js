@@ -7497,23 +7497,26 @@ async function pageReport() {
       catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
       const tbl = el('table', { class: 'data' });
       const thead = el('tr', {});
-      for (const c of data.columns) thead.append(el('th', { style: (c.weekend ? 'background:#fff4e6;color:#b45309;' : '') + (c.sub || c.grp ? 'text-align:center;white-space:pre-line' : '') },
+      // cột ngày cuối tuần (báo cáo ma trận): THỨ 7 NHẠT HƠN CHỦ NHẬT (Anh 04/11/2026) — c.weekend = 'T7' | 'CN' | 'X' (ngày khác khai ở Cài đặt)
+      const wkTh = (w) => (!w ? '' : w === 'T7' ? 'background:#fff4e6;color:#b45309;' : 'background:#ffd9a8;color:#9a3412;');
+      const wkTd = (w) => (!w ? '' : w === 'T7' ? 'background:#fffaf3;' : 'background:#ffecd6;');
+      for (const c of data.columns) thead.append(el('th', { style: wkTh(c.weekend) + (c.sub || c.grp ? 'text-align:center;white-space:pre-line' : '') },
         c.sub ? c.label + '\n' + c.sub : c.grp ? c.grp + '\n' + c.label : c.label));
       tbl.append(el('thead', {}, thead));
       const tb = el('tbody');
       if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
       let pinLefts = null;   // vị trí các cột ghim (tính sau khi vẽ) → áp cả cho dòng vẽ sau
       const mkRow = (row) => {
-        // rp-off: ngày không đi làm (ô "Hiện cả ngày không đi làm"); rp-wk: dòng thứ 7 / chủ nhật tô cam (Anh 04/11/2026)
+        // rp-off: ngày không đi làm (ô "Hiện cả ngày không đi làm"); rp-t7 / rp-cn: dòng thứ 7 / chủ nhật tô cam, T7 nhạt hơn CN (Anh 04/11/2026)
         const wk = row.wd === 'T7' || row.wd === 'CN';
-        const cls = [row._off ? 'rp-off' : '', wk ? 'rp-wk' : ''].filter(Boolean).join(' ');
+        const cls = [row._off ? 'rp-off' : '', row.wd === 'T7' ? 'rp-t7' : row.wd === 'CN' ? 'rp-cn' : ''].filter(Boolean).join(' ');
         const tr = el('tr', cls ? { class: cls } : {});
         for (const c of data.columns) {
           const v = row[c.key];
           const isSym = type === 'symbol' && SYMBOL_COLOR[v];
           tr.append(el('td', {
             // white-space:pre-line: ô có nhiều lần vào/ra (máy chủ nối bằng xuống dòng) hiện mỗi cặp một dòng
-            style: (c.weekend ? 'background:#fffaf3;' : '') + (wk && c.key === 'wd' ? 'color:#b45309;font-weight:700;' : '') + (c.key === 'missShift' && v ? 'background:#fee2e2;color:#b91c1c;font-weight:700;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
+            style: wkTd(c.weekend) + (wk && c.key === 'wd' ? 'color:#b45309;font-weight:700;' : '') + (c.key === 'missShift' && v ? 'background:#fee2e2;color:#b91c1c;font-weight:700;' : '') + (isSym ? `color:${SYMBOL_COLOR[v]};font-weight:700;text-align:center` : (c.key.startsWith('d20') ? 'text-align:center;white-space:pre-line' : 'white-space:pre-line')),
           }, v === '' || v == null ? '' : String(v)));
         }
         if (pinLefts) pinLefts.forEach((L, i) => { const td = tr.children[i]; if (td) { td.classList.add('pin'); td.style.left = L + 'px'; } });

@@ -239,9 +239,9 @@ function loadRange(from, to, filter) {
 
   // Có ca nào đặt giới hạn mức tăng ca → báo cáo tách cột TC1…TC4
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
-  // paintWeekend: CHỈ để tô màu — luôn tô thứ 7 + chủ nhật (Anh chốt 04/11/2026: mọi báo cáo bôi màu T7, CN), cộng ngày cuối tuần
-  // khai ở Cài đặt nếu khác. Tính công dùng isWeekendDay(…, weekend) như cũ.
-  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, paintWeekend: (d) => vnWeekday(d) >= 6 || isWeekendDay(d, weekend), virt, shiftsById, hourly: formHourly(filter) };
+  // paintWeekend: CHỈ để tô màu — luôn tô thứ 7 + chủ nhật (Anh chốt 04/11/2026: mọi báo cáo bôi màu T7, CN; T7 nhạt hơn CN), cộng
+  // ngày cuối tuần khai ở Cài đặt → 'T7' | 'CN' | 'X' (ngày khác, tô như CN) | false. Tính công dùng isWeekendDay(…, weekend) như cũ.
+  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, paintWeekend: (d) => { const w = vnWeekday(d); return w === 6 ? 'T7' : w === 7 ? 'CN' : isWeekendDay(d, weekend) ? 'X' : false; }, virt, shiftsById, hourly: formHourly(filter) };
 }
 
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
@@ -369,9 +369,14 @@ const MISS_COL = { key: 'missShift', label: 'Thiếu ca', w: 22 };
 const MISS_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEE2E2' } };
 const MISS_FONT = { bold: true, color: { argb: 'FFB91C1C' } };
 const OFF_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
-// Dòng thứ 7 / chủ nhật (báo cáo liệt kê theo ngày, có cột Thứ): tô cam nhạt cả dòng, chữ Thứ đậm cam (Anh 04/11/2026)
+// Thứ 7 / chủ nhật: tô cam (cả dòng ở báo cáo liệt kê theo ngày, cả cột ngày ở báo cáo ma trận), chữ Thứ đậm cam (Anh 04/11/2026)
 const WK_ROW = new Set(['T7', 'CN']);
-const WK_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE8CC' } };
+const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+// THỨ 7 NHẠT HƠN CHỦ NHẬT (Anh 04/11/2026). wk = 'T7' | 'CN' | 'X' (ngày cuối tuần khác khai ở Cài đặt → tô như CN)
+const wkShade = (wk, cn, t7) => (wk === 'T7' ? t7 : cn);
+const WK_CELL = (wk) => solid(wkShade(wk, 'FFFFDDB3', 'FFFFF3E3'));
+const WK_HEAD = (wk) => wkShade(wk, 'FFB45309', 'FFD97706');
+const PINK_T7 = 'FFFFF0F6';   // mẫu Excel nền hồng: T7 hồng nhạt hơn CN
 const WK_FONT = { bold: true, color: { argb: 'FFB45309' } };
 const missDays = (ctx, empId, days) => days.map((d) => { const m = ctx.missShift(empId, d); return m ? `${d.slice(8)}/${d.slice(5, 7)}: ${m}` : ''; }).filter(Boolean).join('; ');
 const r1 = (v) => Math.round((Number(v) || 0) * 10) / 10;   // số phút tăng ca: tối đa 1 số lẻ
@@ -1146,7 +1151,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
         cell.value = row[c.k] ?? '';
         cell.border = border;
         cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        if (row.weekend) cell.fill = fill('FF9BE7F5');
+        if (row.weekend) cell.fill = fill(wkShade(row.weekend, 'FF9BE7F5', 'FFD5F5FB'));
       }
       r++;
     }
@@ -1192,7 +1197,6 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
   const thin = { style: 'thin', color: { argb: 'FF000000' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const C = { horizontal: 'center', vertical: 'middle', wrapText: true };
-  const weekendFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
 
   ws.mergeCells(1, 1, 1, N); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase() });
   ws.mergeCells(2, 1, 2, N); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
@@ -1215,7 +1219,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
   for (let rr = H; rr <= H + 1; rr++) for (let col = 1; col <= N; col++) {
     const cell = ws.getCell(rr, col);
     cell.font = { name: 'Times New Roman', bold: true }; cell.alignment = C; cell.border = border;
-    if (columns[col - 1].weekend) cell.fill = weekendFill;
+    if (columns[col - 1].weekend) cell.fill = WK_CELL(columns[col - 1].weekend);
   }
   let r = H + 2;
   for (const row of rows) {
@@ -1225,7 +1229,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
       cell.value = row[c.key] ?? '';
       cell.border = border;
       cell.alignment = { horizontal: c.key === 'name' || c.key === 'dept' ? 'left' : 'center', vertical: 'middle' };
-      if (c.weekend) cell.fill = weekendFill;
+      if (c.weekend) cell.fill = WK_CELL(c.weekend);
       if (c.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }
     }
     r++;
@@ -1318,14 +1322,14 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
         const cell = ws.getCell(rIn, c1 + k);
         cell.alignment = { horizontal: 'center' };
         cell.border = border;
-        if (weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+        if (weekend) cell.fill = solid(wkShade(weekend, pink, PINK_T7));
       }
       for (const rr of HOURLY ? [rCong] : [rCong, rOt]) {
         for (let k = 0; k < PER; k++) {
           const x = ws.getCell(rr, c1 + k);
           x.alignment = { horizontal: 'centerContinuous' };
           x.border = { top: thin, bottom: thin, ...(k === 0 ? { left: thin } : {}), ...(k === PER - 1 ? { right: thin } : {}) };
-          if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+          if (weekend) x.fill = solid(wkShade(weekend, pink, PINK_T7));
         }
       }
     }
@@ -1391,7 +1395,7 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
     const cell = ws.getCell(rr, c);
     cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: c >= D0 && ctx.paintWeekend(days[c - D0]) ? 'FFB45309' : teal } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: (c >= D0 && ctx.paintWeekend(days[c - D0])) ? WK_HEAD(ctx.paintWeekend(days[c - D0])) : teal } };
     cell.border = border;
   }
   ws.getRow(H).height = 30;
@@ -1416,7 +1420,7 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
         cell.value = v === '' ? null : v;
         cell.alignment = { horizontal: 'center' }; cell.border = border;
         if (k >= 4) cell.font = { bold: true };
-        if (ctx.paintWeekend(d)) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } };
+        { const wk = ctx.paintWeekend(d); if (wk) cell.fill = solid(wkShade(wk, pink, PINK_T7)); }
       });
     });
     r += NR;
@@ -1495,7 +1499,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
       const ps = pairsHM(ioOf(e.id, d, c), c);   // theo quy tắc ghép log: mỗi lần chấm 1 cột
       for (let p = 0; p < NP; p++) { ws.getCell(r, c1 + p * 2).value = ps[p] ? ps[p][0] : ''; ws.getCell(r, c1 + p * 2 + 1).value = ps[p] ? ps[p][1] : ''; }
       if (c) cong += HOURLY ? (c.work_minutes || 0) / 60 : (c.work_unit || 0);
-      for (let k = 0; k < PER; k++) { const x = ws.getCell(r, c1 + k); x.alignment = { horizontal: 'center', vertical: 'middle' }; x.border = border; if (weekend) x.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: pink } }; }
+      for (let k = 0; k < PER; k++) { const x = ws.getCell(r, c1 + k); x.alignment = { horizontal: 'center', vertical: 'middle' }; x.border = border; if (weekend) x.fill = solid(wkShade(weekend, pink, PINK_T7)); }
     }
     const cc = ws.getCell(r, congCol); cc.value = round2(cong); cc.alignment = { horizontal: 'center' }; cc.border = border;
     if (missCol) {
@@ -1695,7 +1699,7 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
   hr.eachCell((cell, col) => {
     const meta = columns[col - 1];
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.weekend ? 'FFB45309' : 'FF1E3A5F' } };
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: meta.weekend ? WK_HEAD(meta.weekend) : 'FF1E3A5F' } };
     cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
     cell.border = allBorder;
   });
@@ -1709,9 +1713,9 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
       const meta = columns[col - 1];
       if (!meta) return;
       cell.border = allBorder;
-      if (meta.weekend) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF3E6' } };
+      if (meta.weekend) cell.fill = WK_CELL(meta.weekend);
       if (row._off) cell.fill = OFF_FILL;   // ngày không đi làm: tô xám nhạt
-      if (wkRow) { cell.fill = WK_FILL; if (meta.key === 'wd') cell.font = WK_FONT; }   // thứ 7 / chủ nhật: tô cả dòng (kể cả ngày không đi làm)
+      if (wkRow) { cell.fill = WK_CELL(row.wd); if (meta.key === 'wd') cell.font = WK_FONT; }   // thứ 7 / chủ nhật: tô cả dòng (kể cả ngày không đi làm)
       if (meta.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);
