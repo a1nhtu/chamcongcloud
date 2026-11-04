@@ -214,3 +214,33 @@ test('đẩy tên NV xuống máy: tắt = dùng tên trên máy; bật = tên p
   assert.equal(G.onEmployeesSaved(['2']), 0);   // tắt → không tự đẩy
   setSetting('device_auto_push_emp', '1');
 });
+
+// Khách lienminh 04/11/2026: 3 máy cùng nhóm (2 máy có khuôn mặt) báo 9 "Số ID nghi trùng" dù không trùng ai — người đăng ký
+// gốc ở máy A (đã đồng bộ sang máy khác) quay lại CHÍNH máy A đăng ký thêm khuôn mặt / ngón tay → bị coi là "đăng ký mới".
+const face = (pin, c) => `OPLOG 34\t0\t${vn()}\t${pin}\t0\t0\t0\nBIODATA Pin=${pin}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=39\tMinorVer=1\tFormat=0\tTmp=${TMP(c)}`;
+const finger = (pin, fid, c) => `OPLOG 6\t0\t${vn()}\t${pin}\t${fid}\t0\t0\nFP PIN=${pin}\tFID=${fid}\tSize=48\tValid=1\tTMP=${TMP(c)}`;
+const openOf = (sn, pin) => conflicts().filter((x) => x.serial === sn && x.pin === pin && x.status === 'open');
+test('máy GỐC của Số ID đăng ký thêm khuôn mặt / ngón tay cho chính người đó → KHÔNG báo trùng', () => {
+  for (const [sn, name] of [['L_N', 'Máy vân tay'], ['L_X', 'Máy mặt 1'], ['L_V', 'Máy mặt 2']])
+    db.prepare("INSERT INTO push_devices(serial,name,active,sync_group,oper_stamp) VALUES(?,?,1,'L','100')").run(sn, name);
+  post('L_V', 'OPERLOG', enroll('51', 'Tran Thi Sau', 0, 's'));   // đăng ký gốc ở máy mặt 2
+  post('L_N', 'OPERLOG', enroll('52', 'Le Van Nam', 0, 'n'));     // đăng ký gốc ở máy vân tay
+  for (const sn of ['L_N', 'L_X', 'L_V']) deviceRun(sn);
+  post('L_V', 'OPERLOG', face('51', 'u'));          // máy gốc thêm khuôn mặt (máy không gửi tên)
+  post('L_V', 'OPERLOG', finger('51', 1, 'v'));     // máy gốc thêm 1 ngón
+  post('L_X', 'OPERLOG', face('51', 'w'));          // máy nhận đồng bộ thêm khuôn mặt
+  post('L_X', 'OPERLOG', face('52', 'x'));
+  post('L_N', 'OPERLOG', finger('52', 2, 'y'));     // máy gốc (chỉ vân tay) thêm ngón
+  for (const [sn, pin] of [['L_V', '51'], ['L_X', '51'], ['L_X', '52'], ['L_N', '52']]) assert.deepEqual(openOf(sn, pin), [], `${sn}/${pin}`);
+  // khuôn mặt mới vẫn đồng bộ sang máy mặt còn lại như thường
+  assert.ok(pending('L_X', '51').some((x) => x.includes(TMP('u'))), 'khuôn mặt máy gốc đồng bộ sang máy mặt 1');
+});
+
+test('máy XOÁ Số ID rồi đăng ký lại (không tên) trong khi máy khác đang giữ vân tay → vẫn báo trùng', () => {
+  post('L_V', 'OPERLOG', `OPLOG 9\t0\t${vn()}\t51\t0\t0\t0`);   // xoá trước, gửi riêng 1 lượt
+  post('L_V', 'OPERLOG', finger('51', 0, 'z'));
+  assert.equal(openOf('L_V', '51').length, 1, 'xoá (lượt trước) + đăng ký lại');
+  assert.equal(openOf('L_V', '51')[0].reason, 'enroll');
+  post('L_N', 'OPERLOG', `OPLOG 9\t0\t${vn()}\t52\t0\t0\t0\n${finger('52', 0, 'q')}`);   // xoá + đăng ký lại cùng 1 lượt
+  assert.equal(openOf('L_N', '52').length, 1, 'xoá + đăng ký lại cùng lượt');
+});

@@ -67,9 +67,11 @@ const kvOf = (line) => {
   return kv;
 };
 const ENROLL_OPS = new Set([6, 7, 8, 29, 30, 34]);   // đăng ký vân tay / mật khẩu / thẻ / người dùng mới / đổi vân tay / khuôn mặt
-// Đọc khối dữ liệu máy gửi: thông tin từng Số ID + các Số ID vừa được ĐĂNG KÝ trên máy (dòng OPLOG)
+const OP_DELETE_USER = 9;                            // xoá người dùng trên máy
+// Đọc khối dữ liệu máy gửi: thông tin từng Số ID + các Số ID vừa được ĐĂNG KÝ / bị XOÁ trên máy (dòng OPLOG)
 function parseBody(table, body) {
   const info = new Map(), enrolled = new Map();   // enrolled: Số ID → giờ đăng ký (ISO, theo đồng hồ MÁY)
+  const deleted = new Set();
   const T = String(table || '').toUpperCase();
   const get = (pin) => { if (!info.has(pin)) info.set(pin, {}); return info.get(pin); };
   for (let line of String(body || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
@@ -81,6 +83,7 @@ function parseBody(table, body) {
       const ti = parts.findIndex((p) => /^\d{4}[-/]\d\d[-/]\d\d[ T]\d\d:\d\d/.test(p));
       const others = parts.filter((_, i) => i !== ti);
       const op = parseInt(others[0], 10), who = (others[2] || '').trim();
+      if (op === OP_DELETE_USER && who && who !== '0' && !who.includes(' ') && who.length <= 20) deleted.add(who);
       if (ENROLL_OPS.has(op) && who && who !== '0' && !who.includes(' ') && who.length <= 20) {
         const t = ti >= 0 ? new Date(parts[ti].replace(/\//g, '-').replace(' ', 'T') + '+07:00') : null;
         const iso = t && !isNaN(t) ? t.toISOString() : '';
@@ -103,8 +106,11 @@ function parseBody(table, body) {
       if (content.length >= 100) it.photo = { kind: kind === 'BIOPHOTO' ? 'face' : 'user', faceType: kind === 'BIOPHOTO' ? (parseInt(kv.type || '9', 10) || 9) : 0, content };
     } else it.tmpl = true;
   }
-  return { info, enrolled };
+  return { info, enrolled, deleted };
 }
+// Thao tác gần nhất máy báo cho Số ID này (trong nhật ký thao tác đã lưu) là XOÁ người dùng?
+const lastOpIsDelete = (serial, pin) => db.prepare(`SELECT op_code FROM device_oplogs WHERE serial=? AND obj1=?
+  AND op_code IN (${[OP_DELETE_USER, ...ENROLL_OPS].join(',')}) ORDER BY op_time DESC, id DESC LIMIT 1`).get(serial, pin)?.op_code === OP_DELETE_USER;
 
 // Ghi thông tin máy B gửi (tên/thẻ/mật mã/quyền/ảnh) vào dòng cảnh báo — KHÔNG ghi vào dữ liệu chung của Số ID
 function captureInto(id, it) {
@@ -116,7 +122,7 @@ function captureInto(id, it) {
 }
 
 // Có nghi trùng không? → { reason, refName } | null
-function detect(dev, pin, it, enrolledNow, realtime) {
+function detect(dev, pin, it, enrolledNow, realtime, deletedNow = false) {
   const serial = dev.serial;
   const prior = db.prepare('SELECT name FROM device_users_serial WHERE serial=? AND pin=?').get(serial, pin);
   // máy này đã NHẬN Số ID này từ phần mềm (đồng bộ) và xác nhận OK → không phải tự đăng ký
@@ -132,7 +138,11 @@ function detect(dev, pin, it, enrolledNow, realtime) {
   const refName = (emp && !placeholder(emp.full_name, pin)) ? emp.full_name
     : (others.map((o) => o.name).find((n) => !placeholder(n, pin)) || '');
   const incName = placeholder(it.name, pin) ? '' : it.name;
-  const isNewHere = !prior || enrolledNow;
+  // Máy này ĐANG GIỮ Số ID này từ trước (chưa báo xoá) → đăng ký thêm vân tay / khuôn mặt / thẻ là cho CHÍNH người đang có trên
+  // máy, không phải người mới mang Số ID cũ. Trước đây vẫn báo trùng: người đăng ký gốc ở máy A (đã đồng bộ sang máy khác) quay
+  // lại máy A đăng ký thêm khuôn mặt → "Số ID nghi trùng" (khách lienminh 04/11/2026, 9 Số ID). Chỉ coi là đăng ký MỚI khi máy
+  // chưa từng có Số ID này, hoặc máy vừa báo XOÁ Số ID đó rồi đăng ký lại (có thể là người khác).
+  const isNewHere = !prior || (enrolledNow && (deletedNow || lastOpIsDelete(serial, pin)));
   // 1) Máy này vừa TỰ đăng ký Số ID mà máy khác đang giữ sinh trắc (tên trùng khớp thì bỏ qua)
   if (realtime && isNewHere && !syncedIn && !accepted && othersBio > 0
       && !(incName && refName && !namesDiffer(incName, refName))) return { reason: 'enroll', refName };
@@ -153,13 +163,13 @@ export function guardIncoming(serial, table, body, opts = {}) {
   if (!dev) return 0;
   const realtime = opts.realtime != null ? !!opts.realtime
     : String(table || '').toUpperCase() === 'OPERLOG' && !['', '0'].includes(String(dev.oper_stamp || '').trim());
-  const { info, enrolled } = parseBody(table, body);
+  const { info, enrolled, deleted } = parseBody(table, body);
   for (const pin of enrolled.keys()) if (!info.has(pin)) info.set(pin, {});
   let n = 0;
   for (const [pin, it] of info) {
     const open = openConflict(serial, pin);
     if (open) { captureInto(open.id, it); continue; }
-    const r = detect(dev, pin, it, enrolled.has(pin), realtime);
+    const r = detect(dev, pin, it, enrolled.has(pin), realtime, deleted.has(pin));
     if (!r) continue;
     // Mốc giữ lượt quẹt: giờ đăng ký ghi trên MÁY (cùng đồng hồ với lượt quẹt máy gửi), không có thì giờ máy chủ
     const nowIso = new Date().toISOString(), devIso = enrolled.get(pin) || '';
