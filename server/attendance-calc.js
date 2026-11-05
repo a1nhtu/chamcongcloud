@@ -173,11 +173,11 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   const shiftLen = mins(start, end);
   const halfShift = Math.floor(shiftLen / 2);
   let work_minutes;
-  if (pairs && pairs.length >= 2) {
+  const full = pairs && pairs.length >= 2 ? pairs.filter(([pi, po]) => pi && po) : null;   // các cặp đủ vào–ra
+  if (full) {
     // Quy tắc "Nhiều lần vào/ra": cộng từng cặp vào–ra (kẹp trong khung ca); thời gian ra ngoài giữa các cặp
     // chính là giờ nghỉ nên KHÔNG trừ thêm nghỉ giữa ca.
     work_minutes = 0;
-    const full = pairs.filter(([pi, po]) => pi && po);
     for (const [k, [pi, po]] of full.entries()) {
       let a = toMinute(pi), b = toMinute(po);
       if (k === 0) a = adjIn(a);                 // lượt vào đầu: áp số phút cho phép đi trễ
@@ -185,6 +185,17 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
       const a2 = a < start ? start : a, b2 = b > end ? end : b;
       // (cài đặt pairs_fixed_break) ca có nghỉ trưa CỐ ĐỊNH giờ: phần của cặp rơi vào giờ nghỉ không phải giờ làm (HR-ERP: giao với khung sáng + khung chiều)
       work_minutes += Math.max(0, mins(a2, b2) - (pairsFixedBreak ? breakOverlap(brk, a2, b2) : 0));
+    }
+    // Khoảng ra ngoài giữa các cặp (trong khung ca) ngắn hơn giờ nghỉ của ca → trừ phần còn thiếu, như FILO.
+    // VD ca 8–17 nghỉ 60': 08–17 rồi 18–22 (không quẹt trưa) → 480p, không phải 540p; 08–12 + 12:30–17 → trừ thêm 30'.
+    // Làm chưa tới nửa ca thì không trừ (giống FILO).
+    if (!pairsFixedBreak && work_minutes >= halfShift) {
+      let gapIn = 0;
+      for (let k = 1; k < full.length; k++) {
+        const a = toMinute(full[k - 1][1]), b = toMinute(full[k][0]);
+        gapIn += Math.max(0, mins(a < start ? start : a, b > end ? end : b));
+      }
+      work_minutes = Math.max(0, work_minutes - Math.max(0, (shift.break_minutes || 0) - gapIn));
     }
     // Ưu đãi "về giữa giờ / đến muộn giữa giờ": phần ra ngoài giữa các cặp (trong khung ca, ngoài giờ nghỉ của ca)
     // được bù lại tối đa midOut + midIn phút
@@ -212,7 +223,11 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
 
   // Tăng ca SAU giờ tan ca: ở lại >= ngưỡng
   // (vào SAU giờ tan ca → chỉ tính từ lúc có mặt, không tính từ giờ tan ca)
-  let otAfterRaw = Math.max(0, mins(ci > end ? ci : end, co));
+  // Tính theo CẶP (2 kiểu "Tự động"): chỉ cộng phần của từng cặp nằm sau giờ tan ca — thời gian ra ngoài giữa
+  // các cặp và lượt VÀO lẻ cuối không phải tăng ca (như Ronald Jack: mỗi cặp 1 dòng). VD ca 8–17, quẹt 08/17/18/22 → 240p.
+  const pairSum = (lo, hi) => full.reduce((m, [pi, po]) => { const a = toMinute(pi), b = toMinute(po);
+    return m + Math.max(0, mins(lo && a < lo ? lo : a, hi && b > hi ? hi : b)); }, 0);
+  let otAfterRaw = full ? pairSum(end, null) : Math.max(0, mins(ci > end ? ci : end, co));
   // Bù trừ (tùy chọn của ca): đi trễ quá dung sai thì phần ở lại sau giờ tan ca được BÙ vào giờ công
   // (tối đa bằng số phút trễ; phần dùng để bù KHÔNG tính tăng ca; giờ công không vượt giờ chuẩn của ca)
   const standard = Math.max(1, shiftLen - (shift.break_minutes || 0));
@@ -233,7 +248,7 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
     // Tăng ca TRƯỚC giờ vào ca (tùy chọn): đến sớm >= ngưỡng
     // (cài đặt chung weekend_ot_before: ngày nghỉ hằng tuần đến sớm cũng là tăng ca dù ca không bật — HR-ERP Hoa Hồng)
     if (shift.ot_before || (isWeekend && weekendOtBefore)) {
-      const beforeRaw = Math.max(0, mins(ci, co < start ? co : start));   // ra trước giờ vào ca → chỉ tính tới lúc ra
+      const beforeRaw = full ? pairSum(null, start) : Math.max(0, mins(ci, co < start ? co : start));   // ra trước giờ vào ca → chỉ tính tới lúc ra
       if (beforeRaw > 0 && beforeRaw >= (shift.ot_before_min ?? 30)) { ot_min += beforeRaw; ot_parts.push(beforeRaw); }
     }
   }

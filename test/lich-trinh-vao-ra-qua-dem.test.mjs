@@ -182,3 +182,44 @@ test('FILO ca ngày: lượt sáng hôm sau KHÔNG bị kéo về hôm trước 
   assert.equal(hm(r.day('02').check_out_at), '02 18:00');
   assert.equal(hm(r.day('03').check_in_at), '03 01:30');
 });
+
+// ---- Tăng ca theo CẶP (v1.30.5, Anh chốt 05/11/2026): như Ronald Jack mỗi cặp 1 dòng ----
+//  - chỉ cộng phần của từng cặp nằm SAU giờ tan ca (và TRƯỚC giờ vào ca nếu ca bật tăng ca trước ca)
+//  - khoảng ra ngoài giữa các cặp không phải tăng ca
+//  - khoảng ra ngoài trong ca ngắn hơn giờ nghỉ của ca → trừ phần còn thiếu (như FILO)
+test('Tăng ca theo cặp: ca 8–17, quẹt 08/17/18/22 → tăng ca 240p (trước 300p), giờ làm 480p (trước 540p)', () => {
+  const r = chay(W.HC, IO.pairs, ['02 08:00', '02 17:00', '02 18:00', '02 22:00']).day('02');
+  assert.equal(r.ot_min, 240); assert.equal(r.work_minutes, 480); assert.equal(r.work_unit, 1);
+  // FILO giữ nguyên như cũ: tăng ca liền từ 17:00 tới 22:00
+  assert.equal(chay(W.HC, IO.filo, ['02 08:00', '02 17:00', '02 18:00', '02 22:00']).day('02').ot_min, 300);
+});
+
+test('Tăng ca theo cặp qua đêm (tdqd): 18:00 → 01:30 = 450p, không tính 17:00–18:00 ra ngoài', () => {
+  const r = chay(W.HC, IO.tdqd, ['02 08:00', '02 17:00', '02 18:00', '03 01:30']).day('02');
+  assert.equal(r.ot_min, 450); assert.equal(r.work_minutes, 480);
+});
+
+test('Giờ nghỉ: ra trưa đủ 60p thì không trừ thêm; ra 30p thì trừ thêm 30p; không ra trưa thì trừ đủ 60p', () => {
+  assert.equal(chay(W.HC, IO.pairs, ['02 08:00', '02 12:00', '02 13:00', '02 17:00']).day('02').work_minutes, 480);
+  assert.equal(chay(W.HC, IO.pairs, ['02 08:00', '02 12:00', '02 12:30', '02 17:00']).day('02').work_minutes, 480);
+  assert.equal(chay(W.HC, IO.pairs, ['02 08:00', '02 10:00', '02 10:30', '02 17:00']).day('02').work_minutes, 480);
+  // ra ngoài 2 tiếng (dài hơn giờ nghỉ) → mất 1 tiếng công như trước
+  assert.equal(chay(W.HC, IO.pairs, ['02 08:00', '02 12:00', '02 14:00', '02 17:00']).day('02').work_minutes, 420);
+});
+
+test('Tăng ca theo cặp: 08/12/13/19 → 120p; lượt VÀO lẻ cuối (08/17/18) không thành tăng ca', () => {
+  assert.equal(chay(W.HC, IO.pairs, ['02 08:00', '02 12:00', '02 13:00', '02 19:00']).day('02').ot_min, 120);
+  assert.equal(chay(W.HC, IO.pairs, ['02 08:00', '02 17:00', '02 18:00']).day('02').ot_min, 0);
+});
+
+test('Ca ĐÊM theo cặp không đổi: ra ngoài 22–02 → 480p, ăn đêm 1 tiếng → 660p, tăng ca tới 09:00 → 120p', async () => {
+  const { computeCheckout } = await import('../server/attendance-calc.js');
+  const sh = { start_time: '08:00', end_time: '17:00', break_minutes: 60, late_grace_min: 0, early_grace_min: 0, allow_ot: 1, ot_start_after_min: 30, ot_before: 1, ot_before_min: 30, work_unit_value: 1 };
+  // tăng ca TRƯỚC ca theo cặp: 06–07 + 07:30 vào ca → 90p (bỏ 30p ra ngoài 07:00–07:30)
+  const ts = ['02 06:00', '02 07:00', '02 07:30', '02 17:00'].map(vn);
+  assert.equal(computeCheckout(sh, ts[0], ts[3], '2026-11-02', { pairs: punchPairs(ts, 30) }).ot_min, 90);
+  const d = chay(W.DM, IO.pairs, ['02 19:00', '02 22:00', '03 02:00', '03 07:00']).day('02');
+  assert.equal(d.work_minutes, 480);
+  assert.equal(chay(W.DM, IO.pairs, ['02 19:00', '03 00:00', '03 01:00', '03 07:00']).day('02').work_minutes, 660);
+  assert.equal(chay(W.DM, IO.tdqd, ['02 19:00', '03 00:00', '03 01:00', '03 09:00']).day('02').ot_min, 120);
+});
