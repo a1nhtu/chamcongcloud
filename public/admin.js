@@ -6394,13 +6394,13 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
         out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Thời gian: ' + [r.ms.connect != null && 'kiểm tra máy ' + sec(r.ms.connect), r.ms.users != null && 'đọc NV ' + sec(r.ms.users),
           r.ms.range_try && 'thử lọc theo ngày ' + sec(r.ms.range_try), r.ms.read != null && 'đọc chấm công ' + sec(r.ms.read), r.ms.save != null && 'lưu + tính công ' + sec(r.ms.save)].filter(Boolean).join(' · '))); }
       if (r.unmatched) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${r.unmatched} Số ID trên máy chưa khớp nhân viên nào — vào Nhân viên điền "Số ID máy" cho khớp.`));
-      if (r.long) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${n(r.long)} người trên máy có Số ID dài hơn 20 ký tự — phần mềm chưa nhận các người này và lượt chấm của họ. Đổi sang Số ID ngắn (số) trên máy thì mới tính công được.`));
+      if (r.long) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${n(r.long)} người trên máy có Số ID dài hơn 32 ký tự — phần mềm chưa nhận các người này và lượt chấm của họ.`));
       if (!r.ranged && r.from && kind === 'tcp') out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, `Máy này (firmware cũ) không lọc được theo ngày nên phần mềm đã đọc cả ${n(r.onDevice)} lượt trên máy rồi lọc lại.`));
       out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Công đã tự tính cho các ngày có lượt chấm mới. Xem ở menu Tính công.'));
     } else if (action === 'users') {
       msg.textContent = '✅ Đã tải nhân viên'; out.append(line('Nhân viên đọc từ máy', n(r.read)), line('Đã lưu / cập nhật', n(r.saved)));
       if (r.onDevice != null && r.onDevice !== r.read) out.append(line('Người trên máy', n(r.onDevice)));
-      if (r.long) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${n(r.long)} người trên máy có Số ID dài hơn 20 ký tự — phần mềm chưa nhận. Đổi sang Số ID ngắn (số) trên máy thì mới tính công được.`));
+      if (r.long) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${n(r.long)} người trên máy có Số ID dài hơn 32 ký tự — phần mềm chưa nhận.`));
       if (r.fps != null) out.append(line('Mẫu vân tay đọc từ máy', n(r.fps)));
     } else if (action === 'info') { msg.textContent = '✅ Đã đọc thông tin máy'; out.append(tcpInfoBox(r.info || {})); }
     else if (action === 'delete-users') {

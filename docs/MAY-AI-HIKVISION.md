@@ -76,8 +76,10 @@ Máy đang có 3.977 người + 44.665 lượt chấm từ 04/2026 của khách.
 - **Cài địa chỉ nhận lần đầu, máy gửi lại TOÀN BỘ sự kiện cũ** (`currentEvent:false`) khoảng 4 tin/giây, từ sự kiện cũ nhất →
   44 nghìn sự kiện mất cỡ 3 giờ, lượt quẹt mới xếp hàng sau. Không có cài đặt bỏ qua (`EventOptimizationCfg` chỉ là gộp sự kiện,
   `EventStorageCfg` báo notSupport). Trong lúc chờ: bấm "⬇ Tải chấm công" hôm nay là có ngay. Chỉ xoá sạch sự kiện trên máy mới bỏ được hàng đợi.
-- **Số ID 32 ký tự** (3.976 người, kiểu `a00b06f3…`): phần mềm chỉ nhận Số ID ≤ 20 ký tự → bỏ qua người + lượt chấm của họ.
-  Từ v1.29.8 tải NV báo rõ số người bị bỏ, và thông tin máy ghi đúng số người trên máy (trước ghi số người phần mềm nhận).
+- **Số ID 32 ký tự** (3.976 người, kiểu `a00b06f3…`, thường do HikCentral / nền tảng cloud cấp): từ **v1.29.9** máy Hikvision nhận Số ID tới
+  **32 ký tự** (giới hạn employeeNo của hãng) ở cả tải NV, tải chấm công và máy tự gửi; mã NV nháp = Số ID. Máy ZK / máy khác vẫn giới hạn 20 như cũ.
+  Thử trên bản chép DB demo (cổng 8899): tải 3.979 người trong 10 giây, ngày 10/04/2026 có 141 lượt của 53 người, 0 lượt chưa khớp, không báo nghi trùng.
+  v1.29.8: thông tin máy ghi đúng số người trên máy; tải NV báo số người bị bỏ (giờ chỉ còn Số ID > 32 ký tự).
 - Lệnh gửi thử: không có (giống MT05WE).
 
 ## Đã kiểm / chưa kiểm (máy giả lập)

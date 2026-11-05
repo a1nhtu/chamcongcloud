@@ -79,7 +79,9 @@ function relinkQuiet(empId, pin) {
 // Máy gửi các dòng: "USER PIN=1\tName=..\tPri=0\t..", "FP PIN=1\tFID=0\t..\tTMP=..", hoặc "PIN=1\tName=.." (bảng USERINFO).
 // Trả về số NV đã đụng tới.
 // track = { changed: Set, newOnly } (máy ADMS): ghi riêng PIN THỰC SỰ mới/đổi — chỉ những PIN này mới đồng bộ sang máy khác.
-export function ingestUserData(serial, table, rawBody, track = null) {
+// opts.maxPin: Số ID dài nhất được nhận (mặc định 20 như máy ZK; máy Hikvision 32 — hãng cho employeeNo tới 32 ký tự)
+export function ingestUserData(serial, table, rawBody, track = null, opts = {}) {
+  const maxPin = opts.maxPin || 20;
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const seen = new Set();
   const held = heldSet();
@@ -98,7 +100,7 @@ export function ingestUserData(serial, table, rawBody, track = null) {
       if (eq > 0) kv[part.slice(0, eq).trim().toLowerCase()] = part.slice(eq + 1).trim();
     }
     const pin = (kv.pin || '').trim();
-    if (!pin || pin.includes(' ') || pin.length > 20) continue; // bỏ dòng rác
+    if (!pin || pin.includes(' ') || pin.length > maxPin) continue; // bỏ dòng rác
     let name = kv.name || '';
     if (name.includes('=') || name.length > 80) name = ''; // tên rác (firmware nhét FileName=/Content=)
     const card = kv.card && kv.card !== '0' ? kv.card : '';

@@ -286,15 +286,31 @@ test('máy chỉ giữ 1 ô (máy thật DS-K1T671M): ghi ô trống làm mất 
   assert.deepEqual(r.out.lost, ['10.0.0.5:9000']);
   H.hosts = keep;
 });
-test('tải NV: Số ID dài hơn 20 ký tự (máy thật DS-K1T671M) → báo số người bỏ qua, số người trên máy đếm đủ', async () => {
-  H.moreUsers = [{ employeeNo: 'a00b06f31e584aa6b651633651bb71f4', name: 'Dai 1', userType: 'normal', numOfFace: 1 },
-    { employeeNo: 'b00b06f31e584aa6b651633651bb71f5', name: 'Dai 2', userType: 'normal', numOfFace: 1 }];
+test('Số ID 32 ký tự (máy thật DS-K1T671M): tải NV + tải chấm công + máy tự gửi đều nhận; 33 ký tự mới bỏ; máy ZK vẫn giới hạn 20', async () => {
+  const P32 = 'a00b06f31e584aa6b651633651bb71f4', P33 = 'b00b06f31e584aa6b651633651bb71f5x';
+  H.moreUsers = [{ employeeNo: P32, name: 'Nguyen Dai', userType: 'normal', numOfFace: 1 }, { employeeNo: P33, name: 'Qua Dai', userType: 'normal', numOfFace: 1 }];
   const j = await waitJob((await call('POST /devices/:id/hik/:action', { params: { id, action: 'users' } })).out.job);
   H.moreUsers = [];
   assert.equal(j.state, 'done', j.msg);
-  assert.deepEqual([j.result.read, j.result.onDevice, j.result.long], [1, 3, 2]);
+  assert.deepEqual([j.result.read, j.result.onDevice, j.result.long], [2, 3, 1]);
   const info = JSON.parse(db.prepare('SELECT tcp_info FROM push_devices WHERE id=?').get(id).tcp_info);
-  assert.deepEqual([info.users, info.faces], [3, 2]);
+  assert.deepEqual([info.users, info.faces], [3, 2], 'số người / mặt trên máy đếm đủ, kể cả người bị bỏ');
+  const e = db.prepare('SELECT id, full_name FROM employees WHERE device_pin=?').get(P32);
+  assert.equal(e?.full_name, 'Nguyen Dai');
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM employees WHERE device_pin=?').get(P33).c, 0);
+  // tải chấm công theo nút
+  H.events = [{ major: 5, minor: 75, time: '2026-10-18T08:00:00+07:00', employeeNoString: P32 }];
+  const j2 = await waitJob((await call('POST /devices/:id/hik/:action', { params: { id, action: 'logs' }, body: { from: '2026-10-18', to: '2026-10-18' } })).out.job);
+  H.events = [];
+  assert.equal(j2.state, 'done', j2.msg); assert.equal(j2.result.added, 1);
+  // máy tự gửi tức thì
+  assert.equal((await post(appPort, '/hik/event/' + token, alert({ employeeNoString: P32, attendanceStatus: 'checkOut' }, { dateTime: '2026-10-18T17:30:00+07:00' }))).status, 200);
+  const att = db.prepare("SELECT check_in_at, check_out_at FROM attendance WHERE employee_id=? AND work_date='2026-10-18'").get(e.id);
+  assert.deepEqual([att?.check_in_at, att?.check_out_at], ['2026-10-18T01:00:00.000Z', '2026-10-18T10:30:00.000Z']);
+  // đường máy ZK / máy khác: như cũ, Số ID > 20 ký tự là dòng rác
+  const { ingestUserData } = await import('../server/device-sync.js');
+  assert.equal(ingestUserData('ZK-THU-1', 'USER', `USER PIN=${'9'.repeat(21)}\tName=Rac`).size, 0);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM employees WHERE device_pin=?').get('9'.repeat(21)).c, 0);
 });
 
 /* ======================= ĐẨY ẢNH KHUÔN MẶT ======================= */

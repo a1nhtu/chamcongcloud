@@ -69,7 +69,7 @@ const kvOf = (line) => {
 const ENROLL_OPS = new Set([6, 7, 8, 29, 30, 34]);   // đăng ký vân tay / mật khẩu / thẻ / người dùng mới / đổi vân tay / khuôn mặt
 const OP_DELETE_USER = 9;                            // xoá người dùng trên máy
 // Đọc khối dữ liệu máy gửi: thông tin từng Số ID + các Số ID vừa được ĐĂNG KÝ / bị XOÁ trên máy (dòng OPLOG)
-function parseBody(table, body) {
+function parseBody(table, body, maxPin = 20) {
   const info = new Map(), enrolled = new Map();   // enrolled: Số ID → giờ đăng ký (ISO, theo đồng hồ MÁY)
   const deleted = new Set();
   const T = String(table || '').toUpperCase();
@@ -93,7 +93,7 @@ function parseBody(table, body) {
     }
     const kv = kvOf(line);
     const pin = (kv.pin || '').trim();
-    if (!pin || pin.includes(' ') || pin.length > 20) continue;
+    if (!pin || pin.includes(' ') || pin.length > maxPin) continue;
     const it = get(pin);
     if (kind === 'USER' || kind === 'USERINFO') {
       const name = kv.name || '';
@@ -163,7 +163,7 @@ export function guardIncoming(serial, table, body, opts = {}) {
   if (!dev) return 0;
   const realtime = opts.realtime != null ? !!opts.realtime
     : String(table || '').toUpperCase() === 'OPERLOG' && !['', '0'].includes(String(dev.oper_stamp || '').trim());
-  const { info, enrolled, deleted } = parseBody(table, body);
+  const { info, enrolled, deleted } = parseBody(table, body, opts.maxPin || 20);
   for (const pin of enrolled.keys()) if (!info.has(pin)) info.set(pin, {});
   let n = 0;
   for (const [pin, it] of info) {

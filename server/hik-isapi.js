@@ -107,10 +107,14 @@ export function saveHikInfo(id, info) {
 }
 
 /* ---------- tải NHÂN VIÊN ---------- */
+// Số ID dài nhất: hãng cho employeeNo tới 32 ký tự; máy thật DS-K1T671M (khách gửi thử) có 3.976 người Số ID 32 ký tự hex.
+// Máy ZK / máy khác vẫn 20 như cũ (giới hạn chỉ nới cho đường Hikvision).
+export const HIK_MAX_PIN = 32;
+const HIK_PIN = { maxPin: HIK_MAX_PIN };
 // 1 người trên máy → dòng "USER PIN=..\tName=.." (null = bỏ: Số ID rác, khách visitor, danh sách chặn)
 function userLine(u) {
   const pin = String(u.employeeNo ?? '').trim();
-  if (!pin || /[\s=\t]/.test(pin) || pin.length > 20) return null;
+  if (!pin || /[\s=\t]/.test(pin) || pin.length > HIK_MAX_PIN) return null;
   if (u.userType && !['normal', ''].includes(String(u.userType))) return null;
   return `USER PIN=${pin}\tName=${String(u.name || '').replace(/[\t\r\n]/g, ' ').trim()}`;
 }
@@ -125,7 +129,7 @@ export async function hikUsers(dev, prog = () => {}) {
     for (const u of list) {
       fp += +u.numOfFP || 0; face += +u.numOfFace || 0; card += +u.numOfCard || 0;
       const l = userLine(u);
-      if (!l) { if (String(u.employeeNo ?? '').trim().length > 20) long++; continue; }
+      if (!l) { if (String(u.employeeNo ?? '').trim().length > HIK_MAX_PIN) long++; continue; }
       lines.push(l);
     }
     pos += list.length;
@@ -133,8 +137,8 @@ export async function hikUsers(dev, prog = () => {}) {
     if (s.responseStatusStrg !== 'MORE' || !list.length) break;
   }
   prog(`Đang lưu ${lines.length} nhân viên…`);
-  if (lines.length) { try { guardIncoming(dev.serial, 'USER', lines.join('\n'), { realtime: false }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); } }
-  const seen = lines.length ? ingestUserData(dev.serial, 'USER', lines.join('\n')) : new Set();
+  if (lines.length) { try { guardIncoming(dev.serial, 'USER', lines.join('\n'), { realtime: false, ...HIK_PIN }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); } }
+  const seen = lines.length ? ingestUserData(dev.serial, 'USER', lines.join('\n'), null, HIK_PIN) : new Set();
   // số vân tay / khuôn mặt / thẻ trên máy (máy Hikvision không gửi mẫu về → chỉ ghi số đếm để hiển thị)
   try {
     const d = db.prepare('SELECT tcp_info FROM push_devices WHERE id=?').get(dev.id);
@@ -158,7 +162,7 @@ const shiftDay = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000)
 // (bỏ phần múi giờ) — giống mọi máy chấm công khác; máy để sai múi giờ cũng không lệch công.
 export function hikEventLine(e, strict) {
   const pin = String(e.employeeNoString ?? e.employeeNo ?? '').trim();
-  if (!pin || /[\s\t]/.test(pin) || pin.length > 20) return null;
+  if (!pin || /[\s\t]/.test(pin) || pin.length > HIK_MAX_PIN) return null;
   const minor = +e.minor;
   if (strict && (+e.major !== 5 || !PASS.has(minor))) return null;
   const t = String(e.time || '').replace('T', ' ').slice(0, 19);
@@ -299,7 +303,7 @@ export async function hikPushUsers(dev, pins, prog = () => {}, { withFace = fals
         try { await isapi(dev, 'PUT', '/ISAPI/AccessControl/CardInfo/SetUp?format=json', { CardInfo: { employeeNo: pin, cardNo: String(u.card), cardType: 'normalCard' } }); }
         catch (e) { if (e.code !== 'ISAPI') throw e; }   // máy không có đầu đọc thẻ → bỏ qua thẻ
       }
-      ingestUserData(dev.serial, 'USER', `USER PIN=${pin}\tName=${name}${u.card && u.card !== '0' ? '\tCard=' + u.card : ''}`);
+      ingestUserData(dev.serial, 'USER', `USER PIN=${pin}\tName=${name}${u.card && u.card !== '0' ? '\tCard=' + u.card : ''}`, null, HIK_PIN);
       ok++; userOk = true;
     } catch (e) {
       if (e.code === 'CONN' || e.code === 'AUTH' || e.code === 'TIMEOUT') throw e;
@@ -393,8 +397,8 @@ function hikPushDevice(token, alerts, remoteIp) {
   return null;
 }
 function addDeviceUsers(serial, lines) {
-  try { guardIncoming(serial, 'USER', lines.join('\n'), { realtime: false }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); }
-  ingestUserData(serial, 'USER', lines.join('\n'));
+  try { guardIncoming(serial, 'USER', lines.join('\n'), { realtime: false, ...HIK_PIN }); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); }
+  ingestUserData(serial, 'USER', lines.join('\n'), null, HIK_PIN);
 }
 // Hỏi máy tên các Số ID lạ (tối đa 30 / lần) → tạo NV nháp (nếu bật "Tự tạo NV") + gán các lượt chấm vừa nhận
 export async function hikFetchUsers(dev, pins) {
