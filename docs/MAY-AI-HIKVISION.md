@@ -100,6 +100,7 @@ Máy đang có 3.977 người + 44.665 lượt chấm từ 04/2026 của khách.
 - Chỉ tải cho **Số ID đã là NV đang làm, chưa có ảnh**; không lưu ảnh người lạ, không tải lại ảnh đã có. 1 Số ID thử lại sau 30 phút nếu máy chưa có mặt.
 - Người đổi ảnh trên máy: phần mềm giữ ảnh cũ (chưa tự thay).
 - **Cài đặt `AcsCfg.saveFacePic` trên máy quyết định máy có giữ ảnh gửi xuống không.** MT05WE (máy 1) đang `false`: ảnh gửi qua FDSetUp chỉ dựng thành mẫu rồi bỏ, FDSearch vẫn trả `faceURL` nhưng GET báo 404, máy nhận diện được mà không có ảnh để hiện. DS-K1T671M (máy 2) `true`: ảnh đọc lại được. Ảnh đăng ký ngay trên máy thì máy 1 vẫn giữ. `uploadCapPic` / `saveCapPic` của máy 1 cũng `false` nên lượt chấm không kèm ảnh chụp.
+- Thử thật 05/11 14:05: bật `saveFacePic` trên máy 1 (PUT AcsCfg, các mục khác giữ nguyên) rồi ghi lại mặt 9001, 9002 → đọc lại được đủ ảnh (33.872 và 37.710 byte). Bật xong phải **ghi lại mặt** thì ảnh mới được giữ; ảnh gửi trước lúc bật không tự có lại.
 
 ## Đã kiểm / chưa kiểm (máy giả lập)
 - Đã kiểm bằng máy giả lập (test `test/may-ai-hikvision.test.mjs` + chạy thử giao diện): kết nối, chờ duyệt, lượt chấm → công,
