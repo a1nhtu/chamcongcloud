@@ -6411,6 +6411,7 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
       if (r.onDevice != null && r.onDevice !== r.read) out.append(line('Người trên máy', n(r.onDevice)));
       if (r.long) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${n(r.long)} người trên máy có Số ID dài hơn 32 ký tự — phần mềm chưa nhận.`));
       if (r.fps != null) out.append(line('Mẫu vân tay đọc từ máy', n(r.fps)));
+      if (r.photos) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, `Đang tải ảnh khuôn mặt đăng ký của ${n(r.photos)} nhân viên về phần mềm (chạy nền${r.photos > 200 ? ', vài phút' : ''}) — xem ở chi tiết nhân viên.`));
     } else if (action === 'sync') {
       msg.textContent = r.devices < 2 && r.note ? '⚠ ' + r.note : `✅ Đã đồng bộ nhóm "${r.group}" (${n(r.devices)} máy)`;
       if (r.devices < 2 && r.note) msg.style.color = '#b45309';

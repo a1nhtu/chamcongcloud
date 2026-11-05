@@ -253,6 +253,23 @@ test('máy nhận nhỏ (đầy): chép tới khi đủ sức chứa rồi dừn
   } finally { delete C.max; }
 });
 
+test('ảnh khuôn mặt đăng ký: Tải NV máy Hikvision → NV chưa có ảnh được tải ảnh mặt về phần mềm (chạy nền), người không có mặt thì không', async () => {
+  const photo = (pin) => db.prepare('SELECT kind, photo FROM device_user_photos WHERE pin=?').get(pin);
+  assert.equal(photo('7002'), undefined, 'đồng bộ máy↔máy không lưu ảnh người lạ');
+  const r = await call('POST /devices/:id/hik/:action', { params: { id: ids[B.serial], action: 'users' } });
+  const j = await waitJob(r.out.job);
+  assert.equal(j.state, 'done', JSON.stringify(j));
+  assert.ok(j.result.photos >= 3, JSON.stringify(j.result));   // 7001, 7002, 7006 có mặt trên B
+  for (let k = 0; k < 200 && !(photo('7001') && photo('7002') && photo('7006')); k++) await sleep(20);
+  for (const pin of ['7001', '7002', '7006']) {
+    const ph = photo(pin); assert.ok(ph, 'có ảnh ' + pin); assert.equal(ph.kind, 'face');
+    assert.ok(Buffer.from(ph.photo, 'base64').equals(B.faces.get(pin)), 'đúng ảnh đã đăng ký trên máy ' + pin);
+  }
+  assert.equal(photo('7004'), undefined, '7004 không có mặt trên máy → không có ảnh');
+  const r2 = await call('POST /devices/:id/hik/:action', { params: { id: ids[B.serial], action: 'users' } });
+  assert.equal((await waitJob(r2.out.job)).result.photos, 0, 'tải lại: NV đã có ảnh thì không tải nữa');
+});
+
 test('tắt tính năng máy Hikvision → không đồng bộ được (như cũ)', async () => {
   setSetting('hik_device_enabled', '0');
   try {

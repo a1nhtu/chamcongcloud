@@ -120,6 +120,7 @@ function userLine(u) {
 }
 export async function hikUsers(dev, prog = () => {}) {
   const lines = [], searchID = randomUUID();
+  const faceOf = new Set();   // Số ID có ảnh mặt trên máy
   let pos = 0, fp = 0, face = 0, card = 0, long = 0;   // đếm theo TOÀN BỘ người trên máy (kể cả người phần mềm bỏ qua)
   for (let page = 0; page < 5000; page++) {
     const r = await isapi(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Search?format=json',
@@ -128,6 +129,7 @@ export async function hikUsers(dev, prog = () => {}) {
     const list = Array.isArray(s.UserInfo) ? s.UserInfo : [];
     for (const u of list) {
       fp += +u.numOfFP || 0; face += +u.numOfFace || 0; card += +u.numOfCard || 0;
+      if (+u.numOfFace) faceOf.add(String(u.employeeNo ?? '').trim());
       const l = userLine(u);
       if (!l) { if (String(u.employeeNo ?? '').trim().length > HIK_MAX_PIN) long++; continue; }
       lines.push(l);
@@ -147,7 +149,15 @@ export async function hikUsers(dev, prog = () => {}) {
     Object.assign(info, { users: pos, fps: fp, faces: face, cards: card });
     db.prepare('UPDATE push_devices SET tcp_info=? WHERE id=?').run(JSON.stringify(info), dev.id);
   } catch {}
-  return { read: lines.length, saved: seen.size, onDevice: pos, long };
+  // ảnh khuôn mặt đăng ký của NV chưa có ảnh trong phần mềm → tải nền (máy nhiều người thì mất vài phút, không bắt chờ)
+  const facePins = lines.map((l) => (/PIN=([^	]+)/.exec(l) || [])[1]).filter((p) => p && faceOf.has(p));
+  let photos = 0;
+  if (facePins.length) {
+    const m = await import('./hik-sync.js');
+    photos = m.hikPhotoMissing(facePins).length;
+    if (photos) m.hikFetchPhotosLater(dev, facePins);
+  }
+  return { read: lines.length, saved: seen.size, onDevice: pos, long, photos };
 }
 
 /* ---------- tải LƯỢT CHẤM ---------- */
@@ -448,6 +458,9 @@ export function hikReceive({ token = '', contentType = '', body, remoteIp = '' }
     else { const k = tenantKey() + '|' + d.serial + '|' + pin; if (Date.now() - (askedAt.get(k) || 0) > 10 * 60000) { askedAt.set(k, Date.now()); ask.push(pin); } }
   }
   if (ask.length) hikFetchUsers(d, ask).catch((e) => console.error('[hik] hỏi tên NV từ máy lỗi:', e.message));
+  // NV vừa quẹt chưa có ảnh khuôn mặt trong phần mềm → tải ảnh đăng ký từ máy (chạy nền)
+  const quet = [...new Set(lines.map((l) => l.split('	')[0]))].filter((p) => !unknown.has(p));
+  if (quet.length) import('./hik-sync.js').then((m) => m.hikFetchPhotosLater(d, quet)).catch((e) => console.error('[hik] tải ảnh khuôn mặt lỗi:', e.message));
   return { device: d.serial, added };
 }
 // Các ô địa chỉ nhận đang có trên máy

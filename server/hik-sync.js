@@ -10,7 +10,7 @@ import { db } from './db.js';
 import { isapi, faceLib, hikWriteUser, hikWriteFace, hikEnabled, HIK_MAX_PIN, HIK_PIN } from './hik-isapi.js';
 import { ingestUserData, lockedPins } from './device-sync.js';
 import { heldSet, pmNameFor } from './pin-guard.js';
-import { busyFlag } from './tenant.js';
+import { busyFlag, tenantKey } from './tenant.js';
 
 const FATAL = new Set(['CONN', 'AUTH', 'TIMEOUT']);
 const okPin = (p) => !!p && !/[\s=\t]/.test(p) && p.length <= HIK_MAX_PIN;
@@ -73,6 +73,37 @@ export async function hikReadCards(dev, pin) {
     { CardInfoSearchCond: { searchID: randomUUID(), searchResultPosition: 0, maxResults: 5, EmployeeNoList: [{ employeeNo: pin }] } });
   return (Array.isArray(r.json?.CardInfoSearch?.CardInfo) ? r.json.CardInfoSearch.CardInfo : [])
     .filter((c) => c.cardNo && String(c.employeeNo ?? pin) === pin).map((c) => ({ no: String(c.cardNo), type: c.cardType || 'normalCard' }));
+}
+
+/* ---------- ảnh khuôn mặt đăng ký → phần mềm (hộp chi tiết NV "📸 Ảnh khuôn mặt đăng ký trên máy") ---------- */
+// Máy ZKTeco tự gửi ảnh (BIOPHOTO) về; máy Hikvision KHÔNG gửi → phần mềm tự tải ảnh trong thư viện mặt (FDSearch → faceURL).
+// Chỉ lấy cho Số ID ĐÃ LÀ NV (không lưu ảnh người lạ), NV chưa có ảnh. Ảnh lưu chung bảng device_user_photos như máy ZK.
+export function saveHikPhoto(pin, buf) {
+  db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo) VALUES(?,'face',9,?)
+    ON CONFLICT(pin) DO UPDATE SET kind='face',face_type=9,photo=excluded.photo,updated_at=datetime('now')`).run(String(pin), buf.toString('base64'));
+}
+export function hikPhotoMissing(pins) {
+  const q = db.prepare("SELECT 1 FROM employees e WHERE e.device_pin=? AND e.active=1 AND NOT EXISTS (SELECT 1 FROM device_user_photos p WHERE p.pin=e.device_pin)");
+  return [...new Set(pins.map(String))].filter((p) => q.get(p));
+}
+const photoTried = new Map();   // máy|Số ID → lúc thử gần nhất (người chưa có mặt trên máy thì khỏi hỏi mỗi lượt quẹt)
+// Tải ảnh mặt của các Số ID (đã là NV, chưa có ảnh) từ 1 máy. Tuần tự. Trả số ảnh đã lưu.
+export async function hikFetchPhotos(dev, pins, prog = () => {}) {
+  const todo = hikPhotoMissing(pins).filter((p) => Date.now() - (photoTried.get(tenantKey() + '|' + dev.serial + '|' + p) || 0) > 30 * 60000);
+  const ctx = {};
+  let n = 0, i = 0;
+  for (const pin of todo) {
+    photoTried.set(tenantKey() + '|' + dev.serial + '|' + pin, Date.now());
+    if (++i % 50 === 1 && todo.length > 20) prog(`${dev.name || dev.serial}: đang tải ảnh khuôn mặt ${i} / ${todo.length}…`);
+    try { const buf = await hikReadFace(dev, pin, ctx); if (buf) { saveHikPhoto(pin, buf); n++; } }
+    catch (e) { if (FATAL.has(e.code)) break; }
+  }
+  return n;
+}
+// chạy nền (sau khi máy tự gửi lượt chấm / tải NV xong) — lỗi chỉ ghi log
+export function hikFetchPhotosLater(dev, pins) {
+  if (!pins || !pins.length || !hikPhotoMissing(pins).length) return;
+  hikFetchPhotos(dev, pins).catch((e) => console.error('[hik] tải ảnh khuôn mặt lỗi:', e.message));
 }
 
 /* ---------- ghi sang máy nhận ---------- */
@@ -198,7 +229,10 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
             me.cards += await hikWriteCards(t, pin, c.cards);
           }
           if (a.face && (!h || !h.face)) {
-            if (c.face === undefined) c.face = await hikReadFace(a.face, pin, ctxOf(a.face));
+            if (c.face === undefined) {
+              c.face = await hikReadFace(a.face, pin, ctxOf(a.face));
+              if (c.face && hikPhotoMissing([pin]).length) saveHikPhoto(pin, c.face);   // NV chưa có ảnh trong phần mềm → lưu luôn
+            }
             if (c.face) { await hikWriteFace(t, pin, c.face, name, tctx); me.faces++; }
           }
           if (a.fp && (!h || h.fp < a.fpN)) {
