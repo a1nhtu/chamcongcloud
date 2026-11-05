@@ -110,14 +110,14 @@ const EXPECT = {
   G_quet_lap: {"*": "02: 02 08:00→02 17:06 480p 1c tre0 som0 tc0"},
   H_ra_ngoai_2h: {"*": "02: 02 08:00→02 17:00 420p 0.87c tre0 som0 tc0", "filo": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0", "tdhc": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
   I_tang_ca_toi: {"*": "02: 02 08:00→02 21:00 480p 1c tre0 som0 tc180", "filo": "02: 02 08:00→02 21:00 480p 1c tre0 som0 tc240", "tdhc": "02: 02 08:00→02 21:00 480p 1c tre0 som0 tc240"},
-  J_tang_ca_qua_dem: {"*": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc60 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "pairs": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "tdqd": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "tdqdI": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "idm": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0", "state": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0"},
+  J_tang_ca_qua_dem: {"*": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc60 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "pairs": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "tdqd": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "tdqdI": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "idm": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "state": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450"},
   // vào 08:00 → ra 01:30 sáng hôm sau = 17,5 tiếng > thời gian lớn nhất 960' → không ghép (cả 2 kiểu qua đêm)
   K_mot_mach_qua_dem: {"*": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "tdqdI": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0", "idm": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0", "state": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0"},
   L_tre_som: {"*": "02: 02 08:30→02 16:00 390p 0.81c tre30 som60 tc0"},
   M_dem_chuan: {"*": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0"},
   N_dem_ra_ngoai: {"*": "02: 02 19:00→03 07:00 480p 0.72c tre0 som0 tc0", "filo": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0", "tdhc": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0"},
   O_dem_quen_ra: {"*": "02: 02 19:00→- 0p 0c tre0 som0 tc0"},
-  P_dem_quen_vao: {"*": "(không có dòng công)"},
+  P_dem_quen_vao: {"*": "(không có dòng công)", "tdqdI": "02: -→03 07:00 0p 0c tre0 som0 tc0", "idm": "02: -→03 07:00 0p 0c tre0 som0 tc0", "state": "02: -→03 07:00 0p 0c tre0 som0 tc0"},
   Q_dem_2_dem_lien: {"*": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0 | 03: 03 19:00→04 07:00 660p 1c tre0 som0 tc0"},
   R_dem_quen_ra_dem1: {"*": "02: 02 19:00→- 0p 0c tre0 som0 tc0 | 03: 03 19:00→04 07:00 660p 1c tre0 som0 tc0"},
   S_quet_nham_may: {"*": "02: 02 07:58→02 17:00 480p 1c tre0 som0 tc0", "tdqdI": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0", "idm": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0", "state": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
@@ -194,4 +194,24 @@ test('báo cáo danh sách: Theo ID máy / Chọn từ máy hiện từng lần 
       assert.ok(JSON.stringify((await r.json()).rows).includes('17:00'), `${type}: dòng chỉ có giờ ra phải hiện 17:00`);
     }
   } finally { server.close(); }
+});
+
+// Anh chốt 05/11/2026: Theo ID máy / Chọn từ máy — máy vào là giờ vào, máy ra là giờ ra, BẤT KỂ NGÀY ĐÊM, rồi mới tìm ca
+// (như Wise Eye On39: lượt RA đóng lượt VÀO đang mở nếu cách ≤ "thời gian lớn nhất", qua nửa đêm vẫn ghép)
+test('Theo ID máy / Chọn từ máy: ghép vào–ra qua nửa đêm không cần chọn "qua đêm"', async () => {
+  const { rebuildDays } = await import('../server/device-sync.js');
+  for (const rule of ['idm', 'state']) {
+    // ca HC, vào tối 20:00, RA lúc 07:55 sáng hôm sau (sát giờ vào ca hôm sau) rồi 08:00 VÀO ca hôm sau
+    // → 07:55 là lượt RA (máy ra) nên là giờ ra của hôm trước, không bị coi là giờ vào hôm sau
+    assert.deepEqual(chay('HC', rule, ['02 20:00 v', '03 07:55 r', '03 08:00 v', '03 17:00 r']).map((r) => `${r.d}: ${r.vao}→${r.ra}`),
+      ['02: 02 20:00→03 07:55', '03: 03 08:00→03 17:00'], rule);
+    // ca đêm quên chấm vào: chỉ có lượt RA sáng hôm sau → dòng "chỉ giờ Ra" của ca đêm hôm trước, không có dòng rác hôm sau
+    chay('DM', rule, ['03 07:00 r']);
+    const e = db.prepare('SELECT MAX(id) id FROM employees').get().id;
+    // "Tính lại" chỉ chọn ngày có lượt chấm (03) vẫn dựng được dòng của đêm 02
+    db.prepare('DELETE FROM attendance WHERE employee_id=?').run(e);
+    rebuildDays([e + '|2026-11-03']);
+    const rows = db.prepare('SELECT work_date, check_in_at, check_out_at FROM attendance WHERE employee_id=? ORDER BY work_date').all(e);
+    assert.deepEqual(rows.map((r) => [r.work_date.slice(8), hm(r.check_in_at), hm(r.check_out_at)]), [['02', '-', '03 07:00']], rule);
+  }
 });

@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
 import { db, getSetting, setSetting, empHourly, hourlyNoOvernight } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
-import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs, idmOpenIn, ruleKnowsDir } from './attendance-calc.js';
+import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
@@ -812,6 +812,22 @@ function consumedByPrevDay(employeeId, workDate) {
   return r && r.m && r.m >= new Date(workDate + 'T00:00:00+07:00').toISOString() ? r.m : null;
 }
 
+// CA ĐÊM QUÊN CHẤM VÀO + quy tắc biết hướng (Theo ID máy / Chọn từ máy): ngày này không có lượt quẹt nào (lượt RA nằm ở
+// sáng hôm sau) → vẫn dựng ngày này từ các lượt trong khung ca đêm, để lượt RA sáng hôm sau thành dòng "chỉ giờ Ra" của
+// ca đêm hôm nay (máy ra là giờ ra → tìm ca: ca đêm kết thúc sáng hôm sau). Hôm sau thấy lượt đó đã dùng (consumedByPrevDay).
+function nightOutOnlyPunches(employeeId, workDate) {
+  if (empHourly(employeeId)) return [];
+  const plan = resolveDayShifts(employeeId, workDate);
+  if (plan.off || plan.shifts.length !== 1) return [];
+  const shift = plan.shifts[0];
+  if (!isNightShift(shift) || !ruleKnowsDir(plan.mergeRule, shift)) return [];
+  // ngày đã có dòng công không dựng từ máy (chấm điện thoại / nhập tay) → giữ nguyên, không đè
+  if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return [];
+  const { winStart, winEnd } = ruleWindow(workDate, shift);
+  return db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+    .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+}
+
 // Khung RA của ca hôm nay kéo sang sáng hôm sau (VD ca 14h–22h nhận ra tới 6h sáng): lượt quẹt sáng hôm sau nằm trong
 // khung VÀO của ca hôm sau và gần giờ bắt đầu ca hôm sau hơn giờ kết thúc ca hôm nay → là giờ VÀO hôm sau, không lấy làm giờ ra
 // (như HR-ERP). Trả hàm (punchIso, endCaHomNay) → true nếu lượt đó thuộc hôm sau; null nếu không cần xét.
@@ -834,17 +850,18 @@ function nextDayClaim(employeeId, workDate, winEnd, hourly) {
 // Chỉ xét lượt quẹt ĐẦU TIÊN của hôm sau (bỏ quẹt lặp); lượt đó là giờ vào hôm sau thì thôi.
 // Trả Date = giờ của lượt RA đó (để nới cửa sổ ca tới đúng lượt này), null = không có.
 // "Tự động - không qua đêm" thì không làm bước này: lượt VÀO lẻ cuối ngày giữ nguyên là thiếu giờ ra.
-// Kiểu con THEO ID MÁY (như Wise Eye On39 ChiaHaiCot): lượt VÀO máy lẻ chưa ra → lượt RA là lượt quẹt MÁY CHẴN đầu tiên
-// sáng hôm sau; gặp lượt máy lẻ trước (vào lại) thì lượt VÀO cũ là quên chấm ra.
+// THEO ID MÁY / CHỌN TỪ MÁY (biết hướng từng lượt — Anh chốt 05/11/2026): máy vào là giờ vào, máy ra là giờ ra, BẤT KỂ NGÀY ĐÊM
+// → luôn làm bước này (không cần chọn "qua đêm"): lượt VÀO chưa ra → lượt RA đầu tiên sau đó (sáng hôm sau) trong "thời gian lớn nhất";
+// gặp lượt VÀO trước (vào lại) thì lượt VÀO cũ là quên chấm ra. Không xét "giờ vào ca hôm sau" vì lượt RA không thể là giờ vào.
 function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo) {
-  if (hourly || !shift || rule !== 'tdqd' || isNightShift(shift)) return null;
-  const idm = !rulePairs(rule, shift);
+  if (hourly || !shift || isNightShift(shift)) return null;
+  const dir = ruleDir(rule, shift, deviceMachineMap());
+  if (!dir && rule !== 'tdqd') return null;
+  const idm = !!dir;
   const w = ruleWindow(workDate, shift, wopts);
-  const rows = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, w.winStart.toISOString(), w.winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
-  const mmap = idm ? deviceMachineMap() : null;
-  const mnum = (p) => mmap[p.serial] || 0;
-  const open = idm ? idmOpenIn(rows, mnum, wopts.dupMin) : openTailIn(rows.map((p) => p.punch_at), wopts.dupMin);
+  const open = idm ? dirOpenIn(rows, dir, wopts.dupMin) : openTailIn(rows.map((p) => p.punch_at), wopts.dupMin);
   if (!open) return null;
   const d = wopts.dupMin && typeof wopts.dupMin === 'object' ? wopts.dupMin : { min: wopts.dupMin };
   const minMs = Math.max(1, Number(d.min) || 5) * 60000;
@@ -852,15 +869,16 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
   const limit = new Date(Date.parse(open) + maxMs);
   if (limit <= w.winEnd) return null;
   const claim = nextDayClaim(employeeId, workDate, limit, hourly);
-  const next = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
+  const next = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, w.winEnd.toISOString(), limit.toISOString());
   const gapMs = Math.max(1, Number(d.gap ?? d.min) || 5) * 60000;
   if (idm) {
     for (let i = 0; i < next.length; i++) {
-      if (mnum(next[i]) % 2 === 1) { if (Date.parse(next[i].punch_at) - Date.parse(open) < minMs) continue; return null; }   // vào lại → quên ra
-      if (claim && claim(next[i].punch_at, w.end)) return null;
-      let j = i;   // RA lặp (máy chẵn, cách nhau < min phút) → lấy lượt sau
-      while (j + 1 < next.length && mnum(next[j + 1]) % 2 === 0 && Date.parse(next[j + 1].punch_at) - Date.parse(next[j].punch_at) < minMs) j++;
+      const k = dir(next[i]);
+      if (k === 0) continue;   // phím không rõ vào/ra
+      if (k === 1) { if (Date.parse(next[i].punch_at) - Date.parse(open) < minMs) continue; return null; }   // vào lại → quên ra
+      let j = i;   // RA lặp (cách nhau < min phút) → lấy lượt sau
+      while (j + 1 < next.length && dir(next[j + 1]) === 2 && Date.parse(next[j + 1].punch_at) - Date.parse(next[j].punch_at) < minMs) j++;
       return new Date(next[j].punch_at);
     }
     return null;
@@ -880,11 +898,16 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
 // lượt quẹt sáng sớm nào đã là giờ ra ca đêm. keys: Set/mảng 'empId|YYYY-MM-DD'. Tự thêm ngày kế tiếp (ca đêm lấn sang).
 export function rebuildDays(keys) {
   const all = new Set();
+  const hasPunch = db.prepare('SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? LIMIT 1');
   for (const key of keys) {
     const [eid, date] = String(key).split('|');
     all.add(eid + '|' + date);
     const nx = new Date(date + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
     all.add(eid + '|' + nx.toISOString().slice(0, 10));
+    // hôm trước KHÔNG có lượt quẹt nào: có thể là ca đêm quên chấm vào mà lượt RA nằm ở hôm nay (nightOutOnlyPunches) → dựng cả hôm trước
+    const pv = new Date(date + 'T12:00:00Z'); pv.setUTCDate(pv.getUTCDate() - 1);
+    const pd = pv.toISOString().slice(0, 10);
+    if (!hasPunch.get(+eid, pd)) all.add(eid + '|' + pd);
   }
   const list = [...all].map((k) => k.split('|')).sort((a, b) => (+a[0] - +b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
   const outer = _batchCtx;
@@ -941,6 +964,7 @@ function rebuildDayCore(employeeId, workDate) {
   // "+punch_at": ép dùng chỉ mục (NV, ngày) rồi mới sắp xếp — không thì SQLite có thể duyệt hết lượt quẹt của NV theo chỉ mục (NV, giờ)
   seedPhonePunches(employeeId, workDate);
   let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
+  if (!prov.length) prov = nightOutOnlyPunches(employeeId, workDate);
   if (!prov.length) return;
   // Ngày chấm điện thoại mà chỉ có lượt THÊM TAY (bản cũ để lại): không dựng lại — dựng từ riêng lượt thêm tay sẽ đè mất các phiên chấm điện thoại
   if (prov.every((p) => p.serial.startsWith('TAY_')) && db.prepare(`SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND ${PHONE_ROW} LIMIT 1`).get(employeeId, workDate)) return;
@@ -993,8 +1017,10 @@ function rebuildDayCore(employeeId, workDate) {
     wopts.extendEnd = overnightTail(employeeId, workDate, shift, mergeRule, wopts, hourly, usedTo);
     const { winStart, winEnd, end } = ruleWindow(workDate, shift, wopts);
     let punches = punchesInWin(winStart, winEnd);
+    // lượt sáng hôm sau gần giờ vào ca hôm sau → của hôm sau. Riêng quy tắc biết hướng đã ghép RA sáng hôm sau (overnightTail)
+    // thì giữ nguyên các lượt tới đúng lượt RA đó (máy ra là giờ ra, bất kể ngày đêm)
     const claim = nextDayClaim(employeeId, workDate, winEnd, hourly);
-    if (claim) punches = punches.filter((p) => !claim(p.punch_at, end));
+    if (claim) punches = punches.filter((p) => (wopts.extendEnd && ruleKnowsDir(mergeRule, shift) && p.punch_at <= wopts.extendEnd.toISOString()) || !claim(p.punch_at, end));
     if (!punches.length) punches = prov;
     ({ inIso, outIso, pairs = null } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate, wopts));
     if (!inIso && outIso && ruleKnowsDir(mergeRule, shift)) {

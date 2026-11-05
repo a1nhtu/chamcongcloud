@@ -595,6 +595,13 @@ export function idmRows(punches, mnum, opt = PAIR_DUP_DEFAULT) { return walkDir(
 export function stateRows(punches, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, stateDir, opt).rows; }
 // Lượt VÀO (máy lẻ) cuối cùng chưa có RA; null = không có (cho "Tự động - qua đêm" kiểu ID máy)
 export function idmOpenIn(punches, mnum, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, idmDir(mnum), opt).open; }
+// Hướng từng lượt của quy tắc biết hướng (null nếu quy tắc không biết hướng) — dùng chung cho ghép qua đêm
+export function ruleDir(rule, shift, machineMap = {}) {
+  if (rule === 'state') return stateDir;
+  if (rule === 'idm' || (rule === 'tdqd' && (shift?.tdqd_mode || 'pair') === 'idm')) return idmDir((p) => machineMap[p.serial] || 0);
+  return null;
+}
+export function dirOpenIn(punches, dir, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, dir, opt).open; }
 // Kết quả gộp ngày của 2 quy tắc biết hướng lượt chấm (Theo ID máy / Chọn từ máy):
 // VÀO = lượt VÀO sớm nhất, RA = lượt RA muộn nhất (hiển thị như cũ); giờ công tính theo các cặp ĐỦ khi
 // có ≥ 2 cặp, hoặc 1 cặp nhưng không trùng đầu–cuối (VD quên ra trưa 08 vào · 13 vào · 17 ra → chỉ tính 13–17).
