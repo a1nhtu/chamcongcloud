@@ -29,7 +29,7 @@ import iclockRoutes from './routes/iclock.js';
 import hikEventRoutes from './routes/hik-event.js';
 import { isActivated } from './license.js';
 import { currentVersion, takeOverFromOldApp, clearHandoff, startAutoUpdate } from './update.js';
-import { offload } from './heavy.js';
+import { offload, warmHeavy, markWrites, reportSticky } from './heavy.js';
 import { startTcpScheduler } from './zk-tcp.js';
 import { attachAiWs } from './ai-ws.js';
 import { startHikScheduler } from './hik-isapi.js';
@@ -68,6 +68,8 @@ const app = express();
 if (H) { app.use(H.hostRouter()); app.use(H.tenantGate); }
 // Đang chuyển sang máy khác (Cài đặt › Sao lưu): chặn lượt chấm / dữ liệu mới từ lúc chụp dữ liệu tới lúc tắt máy cũ
 app.use(moveGuard);
+// Đếm thế hệ dữ liệu theo công ty (xem server/heavy.js): có ghi thì Excel không dùng lại bản báo cáo xem trước cũ
+app.use(markWrites);
 
 // Máy chấm công ZKTeco đẩy dữ liệu (ADMS push) — đặt TRƯỚC express.json + cổng bản quyền
 app.use('/', iclockRoutes);
@@ -105,7 +107,7 @@ app.use('/api/leaves', leaveRoutes);
 app.use('/api/admin', offload([/^\/attendance\/grid$/, /^\/payroll$/, /^\/assignments$/, /^\/abnormal(\.xlsx)?$/, /^\/ot-reg$/,
   /^\/pay\/sheets\/\d+\/(export|bank)\.xlsx$/, /^\/pay\/reports\/[a-z]+(\.xlsx)?$/],
   [/^\/pay\/sheets\/\d+\/compute$/]));   // tiền lương nâng cao: tính lại bảng lương nháp (không thân, làm lại được) ở luồng phụ
-app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$/]));
+app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$/], [], reportSticky));
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/shift-requests', shiftRequestRoutes);
@@ -203,6 +205,7 @@ httpServer.on('error', (e) => {
 });
 httpServer.listen(PORT, '0.0.0.0', () => {
   clearHandoff();
+  setTimeout(warmHeavy, 3000);   // nạp sẵn luồng phụ báo cáo: lần xuất đầu tiên trong ngày khỏi phải chờ
   console.log(`\n  === Digiplus Chấm công ===`);
   console.log(`  HTTP  (máy này):  http://localhost:${PORT}/  |  /admin`);
   // Bản cài của khách: tự bảo đảm app tự bật khi mở máy/đăng nhập (khách cũ bấm Cập nhật là được sửa, khỏi chạy lại CaiDat.bat)

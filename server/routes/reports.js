@@ -12,6 +12,8 @@ import { progressOf, getProgress, loopProg } from '../progress.js';
 import { customLeaveTypes } from '../leave-quota.js';
 import { trackCell, TRACK_ROWS } from '../track6.js';
 import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
+import { currentTenant } from '../tenant.js';
+import { dataGen } from '../heavy.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -36,6 +38,18 @@ function mergeFast(ws, r1, c1, r2, c2) {
   if (!all || typeof all !== 'object' || Array.isArray(all)) return ws.mergeCells(r1, c1, r2, c2);
   ws._merges = {};
   try { ws.mergeCells(r1, c1, r2, c2); Object.assign(all, ws._merges); } finally { ws._merges = all; }
+}
+
+// GHI FILE EXCEL NHANH (báo cáo tự xếp ô): ExcelJS dựng lại kiểu (viền, nền, chữ…) cho TỪNG Ô — trừ khi các ô dùng chung 1 đối tượng
+// style, nên dồn ô cùng kiểu về 1 đối tượng trước khi ghi. Nén mức 1: file lớn hơn khoảng 1/3 nhưng ghi nhanh hơn hẳn.
+async function writeBook(wb, res) {
+  const same = new Map();
+  wb.eachSheet((ws) => ws.eachRow((row) => row.eachCell({ includeEmpty: true }, (cell) => {
+    const k = JSON.stringify(cell.style), st = same.get(k);
+    if (st) cell.style = st; else same.set(k, cell.style);
+  })));
+  await wb.xlsx.write(res, { zip: { compressionOptions: { level: 1 } } });
+  res.end();
 }
 
 function monthDays(month) {
@@ -495,7 +509,7 @@ function buildReportRaw(type, from, to, filter) {
   if (AUDIT3.includes(type)) return buildAudit3(type, from, to, filter);
   if (type === 'manualtime') return filter && filter.virt ? { title: `Giờ sửa/thêm bằng tay ${periodLabel(from, to)}`, columns: [], rows: [] } : buildManualTime(from, to);
   const ctx = loadRange(from, to, filter);
-  if (filter && filter._prog) filter._prog(28, 'Đã đọc xong dữ liệu, đang tính công từng nhân viên…');   // thanh tiến trình khi xuất Excel
+  if (filter && filter._prog) filter._prog(28, 'Đã đọc xong dữ liệu, đang lập bảng báo cáo…');   // thanh tiến trình khi xuất Excel
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to);
   const ioOf = inOutResolver(ctx.employees, days[0], days[days.length - 1], ctx.virt);   // giờ vào/ra theo quy tắc ghép log
@@ -1180,8 +1194,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${onlyLateEarly ? 'dimuon_vesom_theonv' : 'chitiet_tung_nv'}_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await wb.xlsx.write(res);
-  res.end();
+  await writeBook(wb, res);
   PROG && PROG(100, 'Xong');
 }
 
@@ -1241,8 +1254,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="thongke_chamcong_gio_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await wb.xlsx.write(res);
-  res.end();
+  await writeBook(wb, res);
   PROG && PROG(100, 'Xong');
 }
 
@@ -1354,8 +1366,7 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="giocong_tangca_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await wb.xlsx.write(res);
-  res.end();
+  await writeBook(wb, res);
   PROG && PROG(100, 'Xong');
 }
 
@@ -1434,8 +1445,7 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="theodoi_chamcong_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await wb.xlsx.write(res);
-  res.end();
+  await writeBook(wb, res);
   PROG && PROG(100, 'Xong');
 }
 
@@ -1520,8 +1530,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="chitiet_giovaora_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await wb.xlsx.write(res);
-  res.end();
+  await writeBook(wb, res);
   PROG && PROG(100, 'Xong');
 }
 
@@ -1621,11 +1630,27 @@ const virtGuard = (req, res, next) => {
   return deny ? res.status(403).json({ error: 'Không có quyền dùng chức năng này' }) : next();
 };
 
+// XEM TRƯỚC RỒI XUẤT EXCEL: nút Xuất Excel nằm ngay trên bảng xem trước, cùng báo cáo + cùng bộ lọc → dùng lại đúng bảng vừa dựng,
+// khỏi đọc lại CSDL. Mỗi luồng giữ 1 bản, tối đa 2 phút, và bỏ ngay khi có thao tác ghi bất kỳ (dataGen — server/heavy.js).
+// Khoá gồm cả công ty, người kiểm tra (force) và mức công ảo nên không lẫn số giữa các tài khoản. Bảng này chỉ đọc, không sửa.
+const PREVIEW_MS = 2 * 60 * 1000;
+let preview = null;
+const previewKey = (req, type, from, to, f) => JSON.stringify([currentTenant()?.slug || '', dataGen(req), type, from, to, f]);
+function keepPreview(req, type, from, to, f, rep) {
+  clearTimeout(preview?.timer);
+  const timer = setTimeout(() => { preview = null; }, PREVIEW_MS);
+  timer.unref();
+  preview = { key: previewKey(req, type, from, to, f), rep, timer };
+}
+const takePreview = (req, type, from, to, f) => (preview && preview.key === previewKey(req, type, from, to, f) ? preview.rep : null);
+
 r.get('/data', virtGuard, (req, res) => {
   const { from, to } = resolvePeriod(req.query);
   const type = req.query.type || 'horizontal';
   const f = filterFromQuery(req.query, req);
-  res.json({ ...buildAny(type, from, to, f), ...(f.virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
+  const rep = buildAny(type, from, to, f);
+  keepPreview(req, type, from, to, f, rep);
+  res.json({ ...rep, ...(f.virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
 });
 
 // Mẫu báo cáo riêng của công ty (thẻ ở đầu trang Báo cáo) + danh sách báo cáo gốc dùng được — ai xem được báo cáo thì xem được
@@ -1654,7 +1679,8 @@ function summarySheet(wb, columns, rows, { company, address, title, from, to, al
     { label: 'Số ngày có chấm', w: 11 }, { label: 'Số ngày có giờ làm', w: 11 },
     { label: 'Tổng giờ', w: 10 }, { label: 'Tổng phút', w: 11 }, { label: 'Giờ:phút', w: 10 },
   ];
-  const ws = wb.addWorksheet('TongHop');
+  const ws = wb.addWorksheet('TongHop', { views: [{ state: 'frozen', ySplit: 5, xSplit: 3 }] });
+  ws.columns = cols.map((c) => ({ width: c.w }));
   const n = cols.length;
   ws.mergeCells(1, 1, 1, n); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
   ws.mergeCells(2, 1, 2, n); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
@@ -1674,8 +1700,6 @@ function summarySheet(wb, columns, rows, { company, address, title, from, to, al
   const tr = ws.addRow(['', '', 'TỔNG CỘNG', '', '', '', round2(tot / 60), Math.round(tot), hm(tot)]);
   tr.font = { bold: true };
   tr.eachCell((cell, col) => { cell.border = allBorder; cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF4FA' } }; if (col > 4) cell.alignment = { horizontal: 'center' }; });
-  ws.columns.forEach((col, k) => { col.width = cols[k]?.w || 12; });
-  ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 3 }];
 }
 
 r.get('/export.xlsx', virtGuard, async (req, res) => {
@@ -1684,9 +1708,10 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   const type = req.query.type || 'horizontal';
   const company = getSetting('company_name', 'Digiplus');
   const address = getSetting('company_address', '');
-  const PROG = progressOf(req); let pi = 0;   // thanh tiến trình (giao diện gửi kèm ?pt=…)
+  const PROG = progressOf(req);   // thanh tiến trình (giao diện gửi kèm ?pt=…)
+  const shown = takePreview(req, type, from, to, filter);   // tìm trước khi gắn _prog vào filter (khoá so bộ lọc gốc)
   filter._prog = PROG;
-  PROG(4, 'Đang đọc dữ liệu chấm công…');
+  PROG(4, shown ? 'Dùng lại số liệu vừa xem…' : 'Đang đọc dữ liệu chấm công…');
 
   // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
   if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, filter, company, address);
@@ -1696,12 +1721,27 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   if (type === 'empsheet') return exportEmpSheetXlsx(res, from, to, filter, company, false);
   if (type === 'empsheetlate') return exportEmpSheetXlsx(res, from, to, filter, company, true);
 
-  const { title, columns, rows } = buildAny(type, from, to, filter);
-  PROG(50, 'Đã tính xong, đang ghi vào Excel…');
+  const { title, columns, rows } = shown || buildAny(type, from, to, filter);
+  PROG(50, shown ? 'Đang ghi vào Excel…' : 'Đã lập xong, đang ghi vào Excel…');
 
-  const wb = new ExcelJS.Workbook();
+  // Ghi THẲNG từng dòng ra file (bộ ghi luồng của ExcelJS, nén bằng zlib của Node) + mọi ô cùng kiểu dùng chung 1 style:
+  // 47.000 dòng từ 6 giây xuống 1 giây. Bộ ghi luồng yêu cầu khai cột, khung đóng băng TRƯỚC khi ghi dòng đầu.
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${from}_${to}.xlsx"`);
+  try {
+    await writeReportXlsx(res, { title, columns, rows, from, to, company, address, PROG });
+  } catch (e) {   // đã gửi tiêu đề file: không trả được báo lỗi JSON nữa, cắt kết nối để trình duyệt báo không xuất được
+    console.error('[reports] xuất Excel lỗi:', e.message);
+    res.destroy();
+  }
+});
+
+async function writeReportXlsx(res, { title, columns, rows, from, to, company, address, PROG }) {
+  let pi = 0;
+  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: true, useSharedStrings: true });
   wb.creator = 'Digiplus';
-  const ws = wb.addWorksheet('BaoCao');
+  const ws = wb.addWorksheet('BaoCao', { views: [{ state: 'frozen', ySplit: 5, xSplit: 2 }] });
+  ws.columns = columns.map((c) => ({ width: c.w || 12 }));
   const lastCol = columns.length;
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
   const allBorder = { top: thin, left: thin, bottom: thin, right: thin };
@@ -1724,35 +1764,42 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
     cell.border = allBorder;
   });
 
+  const styles = new Map();   // 1 kiểu ô = 1 đối tượng dùng chung
   for (const row of rows) {
-    loopProg(PROG, ++pi, rows.length, 50, 88, 'Đang ghi dòng');
+    loopProg(PROG, ++pi, rows.length, 50, 92, 'Đang ghi dòng');
     const r2 = ws.addRow(columns.map((c) => row[c.key] ?? ''));
     const wkRow = WK_ROW.has(row.wd);
     let lines = 1;
     r2.eachCell({ includeEmpty: true }, (cell, col) => {
       const meta = columns[col - 1];
       if (!meta) return;
-      cell.border = allBorder;
-      if (meta.weekend) cell.fill = WK_CELL(meta.weekend);
-      if (row._off) cell.fill = OFF_FILL;   // ngày không đi làm: tô xám nhạt
-      if (wkRow) { cell.fill = WK_CELL(row.wd); if (meta.key === 'wd') cell.font = WK_FONT; }   // thứ 7 / chủ nhật: tô cả dòng (kể cả ngày không đi làm)
-      if (meta.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
+      let fill = null, font = null;
+      if (meta.weekend) fill = WK_CELL(meta.weekend);
+      if (row._off) fill = OFF_FILL;   // ngày không đi làm: tô xám nhạt
+      if (wkRow) { fill = WK_CELL(row.wd); if (meta.key === 'wd') font = WK_FONT; }   // thứ 7 / chủ nhật: tô cả dòng (kể cả ngày không đi làm)
+      if (meta.key === 'missShift' && cell.value) { fill = MISS_FILL; font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);
-      if (col > 3 || multi) cell.alignment = { horizontal: col > 3 ? 'center' : 'left', vertical: 'middle', wrapText: multi };
+      const k = `${fill ? fill.fgColor.argb : ''}|${font === WK_FONT ? 1 : font ? 2 : 0}|${col > 3 ? 1 : 0}|${multi ? 1 : 0}`;
+      let st = styles.get(k);
+      if (!st) {
+        st = { border: allBorder };
+        if (fill) st.fill = fill;
+        if (font) st.font = font;
+        if (col > 3 || multi) st.alignment = { horizontal: col > 3 ? 'center' : 'left', vertical: 'middle', wrapText: multi };
+        styles.set(k, st);
+      }
+      cell.style = st;
     });
     if (lines > 1) r2.height = 15 * lines;
+    r2.commit();
   }
-  ws.columns.forEach((col, i) => { col.width = columns[i]?.w || 12; });
-  ws.views = [{ state: 'frozen', ySplit: 5, xSplit: 2 }];
+  await ws.commit();
   summarySheet(wb, columns, rows, { company, address, title, from, to, allBorder });
 
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="baocao_${type}_${from}_${to}.xlsx"`);
-  PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await wb.xlsx.write(res);
-  res.end();
-  PROG && PROG(100, 'Xong');
-});
+  PROG(94, 'Đang đóng gói file Excel…');
+  await wb.commit();   // bộ ghi tự kết thúc res
+  PROG(100, 'Xong');
+}
 
 export default r;
