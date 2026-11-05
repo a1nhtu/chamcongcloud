@@ -65,6 +65,8 @@ function makeDev(serial, { reader = 1, noFP = false } = {}) {
       const json = (o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
       const no = () => json({ statusCode: 4, statusString: 'Invalid Operation', subStatusCode: 'notSupport' }, 404);
       if (u === '/ISAPI/System/deviceInfo') { res.writeHead(200, { 'Content-Type': 'application/xml' }); return res.end(`<DeviceInfo><deviceName>${serial}</deviceName><model>DS-K1T671M</model><serialNumber>${serial}</serialNumber><macAddress>aa:bb:cc:00:00:0${reader}</macAddress><firmwareVersion>V3.2.30</firmwareVersion></DeviceInfo>`); }
+      if (u.startsWith('/ISAPI/AccessControl/AcsCfg') && req.method === 'GET') { M.acsReads = (M.acsReads || 0) + 1; return M.saveFacePic === undefined ? no() : json({ AcsCfg: { showPicture: true, saveFacePic: M.saveFacePic } }); }
+      if (u.startsWith('/ISAPI/AccessControl/AcsCfg') && req.method === 'PUT') { M.acsWrites = (M.acsWrites || 0) + 1; return json({ statusCode: 1, statusString: 'OK' }); }
       if (u.startsWith('/ISAPI/AccessControl/UserInfo/capabilities')) return M.max ? json({ UserInfo: { maxRecordNum: M.max } }) : no();
       if (u.startsWith('/ISAPI/AccessControl/UserInfo/Count')) return json({ UserInfoCount: { userNumber: M.users.size } });
       if (u.startsWith('/ISAPI/AccessControl/AcsEventTotalNum')) return json({ AcsEventTotalNum: { totalNum: 0 } });
@@ -251,6 +253,25 @@ test('máy nhận nhỏ (đầy): chép tới khi đủ sức chứa rồi dừn
     const r2 = await sync(ids[A.serial]);   // bấm lại: không cố ghi vào máy đầy
     assert.equal(r2.out.per.find((x) => x.device === C.serial).users, 0); assert.equal(r2.out.full, 3);
   } finally { delete C.max; }
+});
+
+test('máy nhận tắt lưu ảnh đăng ký (saveFacePic false): chép mặt vẫn xong, báo tên máy, KHÔNG tự đổi cài đặt máy; máy bật / không có mục này thì không báo', async () => {
+  A.users.set('806', 'Mat moi'); A.faces.set('806', jpg(5));
+  B.saveFacePic = false; C.saveFacePic = true;
+  try {
+    const r = await sync(ids[A.serial], { pins: ['806'] });
+    assert.equal(r.job.state, 'done', JSON.stringify(r.job));
+    assert.ok(B.faces.has('806') && C.faces.has('806'), 'mặt vẫn được chép');
+    assert.deepEqual(r.out.noSavePic, [B.serial]);
+    assert.equal(r.out.per.find((x) => x.device === B.serial).noSavePic, true);
+    assert.equal(B.acsWrites, undefined, 'không tự đổi cài đặt máy');
+    const reads = B.acsReads;
+    const r2 = await sync(ids[A.serial], { pins: ['806'] });   // không chép mặt nào thì khỏi hỏi máy, khỏi báo
+    assert.deepEqual(r2.out.noSavePic, []); assert.equal(B.acsReads, reads);
+    A.users.set('807', 'Mat moi 2'); A.faces.set('807', jpg(7));
+    B.saveFacePic = undefined;   // máy không có mục này → không báo
+    assert.deepEqual((await sync(ids[A.serial], { pins: ['807'] })).out.noSavePic, []);
+  } finally { delete B.saveFacePic; delete C.saveFacePic; }
 });
 
 test('ảnh khuôn mặt đăng ký: Tải NV máy Hikvision → NV chưa có ảnh được tải ảnh mặt về phần mềm (chạy nền), người không có mặt thì không', async () => {

@@ -192,7 +192,7 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
       all.set(pin, a);
     }
     const locked = lockedPins(), held = heldSet(), hasEmp = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>''");
-    const tot = { users: 0, faces: 0, fps: 0, cards: 0, skipped: 0, nofp: 0, full: 0 }, errors = [...offline], per = [];
+    const tot = { users: 0, faces: 0, fps: 0, cards: 0, skipped: 0, nofp: 0, full: 0 }, errors = [...offline], per = [], noSavePic = [];
     const cache = new Map(), srcCtx = new Map();   // dữ liệu đã đọc của từng Số ID (dùng lại cho máy nhận thứ 2, 3…)
     const ctxOf = (d) => { if (!srcCtx.has(d.serial)) srcCtx.set(d.serial, {}); return srcCtx.get(d.serial); };
     // 3) từng máy nhận: ghi người / thẻ / mặt / vân tay còn thiếu
@@ -249,9 +249,13 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
         }
       }
       if (full) { me.full = full; tot.full += full; errors.unshift(`${t.name || t.serial} ĐẦY: máy chỉ chứa ${cap.max || '?'} người — còn ${full} người chưa chép được.`); }
+      // máy tắt "lưu ảnh đăng ký" (AcsCfg.saveFacePic): ảnh vừa chép chỉ dựng thành mẫu rồi bị bỏ → nhận diện được nhưng máy không hiện ảnh. Chỉ cảnh báo, không tự đổi cài đặt máy.
+      if (me.faces) {
+        try { if ((await isapi(t, 'GET', '/ISAPI/AccessControl/AcsCfg?format=json')).json?.AcsCfg?.saveFacePic === false) { me.noSavePic = true; noSavePic.push(t.name || t.serial); } } catch {}
+      }
       for (const k of ['users', 'faces', 'fps', 'cards']) tot[k] += me[k];
       per.push(me);
     }
-    return { group, devices: live.length, people: all.size, ...tot, failed: per.reduce((s, x) => s + x.failed, 0), per, errors, offline };
+    return { group, devices: live.length, people: all.size, ...tot, failed: per.reduce((s, x) => s + x.failed, 0), per, errors, offline, noSavePic };
   } finally { syncBusy.done(); }
 }
