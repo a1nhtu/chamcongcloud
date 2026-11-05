@@ -361,7 +361,7 @@ export function deleteDeviceUsers(serial, pins) {
   for (const pin of (pins || [])) {
     const p = String(pin).trim(); if (!p) continue;
     // bỏ các lệnh đồng bộ CHƯA gửi của người này (khỏi ghi lại lên máy rồi mới xoá)
-    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial, p);
+    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo')").run(serial, p);
     queueCmd(serial, `DATA DELETE USERINFO\tPIN=${p}`);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=? AND pin=?').run(serial, p);
     db.prepare('DELETE FROM device_users_serial WHERE serial=? AND pin=?').run(serial, p);
@@ -397,6 +397,25 @@ export function buildBioCommand(t) {
     return `DATA UPDATE FINGERTMP PIN=${t.pin}\tFID=${t.idx}\tSize=${(t.tmp || '').length}\tValid=${t.valid}\tTMP=${t.tmp}`;
   // vân tay ZKFinger 10.0 hoặc khuôn mặt (type 2/9)
   return `DATA UPDATE BIODATA Pin=${t.pin}\tNo=${t.idx}\tIndex=${t.idx}\tValid=${t.valid}\tDuress=${t.duress}\tType=${t.bio_type}\tMajorVer=${t.major_ver}\tMinorVer=${t.minor_ver}\tFormat=0\tTmp=${t.tmp}`;
+}
+// Mẫu vân tay ZKFinger 10 bắt đầu bằng "..SS21" (base64 "xxxTUzIx…"). Máy gửi dòng FP / FINGERTMP không ghi MajorVer nên phần mềm
+// lưu là ZK9 dù thật ra là ZK10 (máy ZAM70 đời mới) — nhận ra bằng nội dung mẫu.
+export const isFpV10 = (tmp) => { try { return Buffer.from(String(tmp || '').slice(0, 12), 'base64').includes('SS21'); } catch { return false; } };
+// Máy TỪ CHỐI lệnh đẩy vân tay (lienminh 05/11/2026: 9 vân tay từ máy xô viết bị 3 máy cùng nhóm trả -30 / -3, 40 ≠ 31) →
+// gửi lại đúng mẫu đó theo kiểu còn lại: FINGERTMP (kiểu cũ) ↔ BIODATA Type=1 MajorVer=10. Mỗi máy/firmware có thể chỉ nhận 1 kiểu.
+// Trả null nếu không có kiểu thay thế (mẫu ZK9 thật thì không gửi dạng ZK10; khuôn mặt không có kiểu khác).
+export function altFingerCommand(content) {
+  const c = String(content || '');
+  const m = c.match(/^DATA UPDATE (FINGERTMP|BIODATA)\s+/);
+  if (!m) return null;
+  const kv = kvOf(c.slice(m[0].length));
+  if (!kv.pin || !kv.tmp) return null;
+  if (m[1] === 'FINGERTMP') {
+    if (!isFpV10(kv.tmp)) return null;
+    return buildBioCommand({ pin: kv.pin, idx: parseInt(kv.fid || '0', 10) || 0, valid: kv.valid ?? 1, duress: 0, bio_type: 1, major_ver: 10, minor_ver: 0, tmp: kv.tmp });
+  }
+  if (kv.type !== '1') return null;
+  return buildBioCommand({ pin: kv.pin, idx: parseInt(kv.no || kv.index || '0', 10) || 0, valid: kv.valid ?? 1, bio_type: 1, major_ver: 9, tmp: kv.tmp });
 }
 
 // Nạp ẢNH người dùng / ảnh khuôn mặt máy đẩy về (dòng USERPIC / BIOPHOTO, thường trong OPERLOG).
@@ -621,13 +640,17 @@ export function cmdProgress(from, to, serials = []) {
   // Chi tiết lệnh lỗi: gộp theo (loại lệnh, mã lỗi) — 300 lệnh đẩy vân tay cùng lỗi chỉ hiện 1 dòng. Chỉ đọc 200 ký tự đầu (lệnh ảnh/mẫu rất dài).
   const qOk = new Set(db.prepare(`SELECT serial, content FROM push_device_commands WHERE ${where.join(' AND ')}
     AND content IN ('DATA QUERY FINGERTMP','DATA QUERY BIODATA') AND TRIM(return_value)='0'`).all(...args).map((r) => r.serial + '|' + r.content));
+  // lệnh đẩy vân tay bị máy từ chối nhưng bản gửi lại kiểu khác đã OK → không phải lỗi (bản gửi lại có thể nằm sau mốc 'to')
+  const altOk = new Set(db.prepare(`SELECT serial||'|'||pin||'|'||idx k FROM push_device_commands WHERE id>? AND mkind='bio-alt' AND TRIM(return_value)='0'`)
+    .all(from).map((r) => r.k));
   const errs = new Map(), skips = new Map();
-  for (const f of db.prepare(`SELECT serial, substr(content,1,200) c, TRIM(return_value) code FROM push_device_commands
+  for (const f of db.prepare(`SELECT serial, pin, idx, mkind, substr(content,1,200) c, TRIM(return_value) code FROM push_device_commands
     WHERE ${where.join(' AND ')} AND response_at IS NOT NULL AND CAST(return_value AS INTEGER)<0 ORDER BY id LIMIT 2000`).all(...args)) {
     const { what, pin } = cmdLabel(f.c);
-    if (BIO_QUERY[f.c] && qOk.has(f.serial + '|' + BIO_QUERY[f.c])) {
+    const viaAlt = f.mkind === 'bio' && altOk.has(f.serial + '|' + f.pin + '|' + f.idx);
+    if ((BIO_QUERY[f.c] && qOk.has(f.serial + '|' + BIO_QUERY[f.c])) || viaAlt) {
       if (!skips.has(f.serial)) skips.set(f.serial, []);
-      skips.get(f.serial).push({ what, code: f.code });
+      skips.get(f.serial).push({ what: viaAlt ? what + ' (máy nhận kiểu khác)' : what, code: f.code });
       continue;
     }
     if (!errs.has(f.serial)) errs.set(f.serial, new Map());
@@ -681,15 +704,21 @@ export function nextCommand(serial) {
 // CHỈ khi máy xác nhận OK (Return=0) mới CỘNG SỐ ĐẾM (mirror) → số hiển thị đúng thực tế,
 // máy offline/lỗi mạng (không ack) sẽ không bị cộng khống.
 export function ackCommand(id, ret) {
-  const cmd = db.prepare('SELECT serial,pin,bio_type,idx,mkind FROM push_device_commands WHERE id=?').get(id);
+  const cmd = db.prepare('SELECT serial,pin,bio_type,idx,mkind,content FROM push_device_commands WHERE id=?').get(id);
   db.prepare("UPDATE push_device_commands SET return_value=?, response_at=datetime('now') WHERE id=?").run(String(ret), id);
   if (cmd && cmd.mkind === 'user') { try { onUserAck(cmd.serial, cmd.pin, String(ret).trim() === '0'); } catch (e) { console.error('[pin-guard] ack lỗi:', e.message); } }
+  // máy từ chối vân tay (trừ hết dung lượng) → gửi lại 1 lần theo kiểu còn lại (FINGERTMP ↔ BIODATA)
+  const code = parseInt(String(ret).trim(), 10);
+  if (cmd && cmd.mkind === 'bio' && cmd.bio_type === 1 && code < 0 && code !== -1001) {
+    try { const alt = altFingerCommand(cmd.content); if (alt) queueCmd(cmd.serial, alt, { pin: cmd.pin, bio_type: 1, idx: cmd.idx, mkind: 'bio-alt' }); }
+    catch (e) { console.error('[device] gửi lại vân tay kiểu khác lỗi:', e.message); }
+  }
   if (!cmd || !cmd.mkind || String(ret).trim() !== '0') return;   // chỉ mirror khi thành công
   try {
     if (cmd.mkind === 'user') {
       const u = db.prepare('SELECT name,card FROM device_users WHERE pin=?').get(cmd.pin) || {};
       upsertDeviceUserSerial(cmd.serial, cmd.pin, u.name, u.card);
-    } else if (cmd.mkind === 'bio') {
+    } else if (cmd.mkind === 'bio' || cmd.mkind === 'bio-alt') {
       const tp = db.prepare('SELECT * FROM device_bio_templates WHERE pin=? AND bio_type=? AND idx=? LIMIT 1').get(cmd.pin, cmd.bio_type, cmd.idx);
       if (tp) mirrorTemplateTo(cmd.serial, tp);
     } else if (cmd.mkind === 'photo') {
@@ -704,7 +733,7 @@ export function relearnDevice(serial) {
   db.prepare('DELETE FROM device_users_serial WHERE serial=?').run(serial);
   db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(serial);
   // bỏ các lệnh đồng bộ CHƯA gửi (tránh sau đó lại cộng số khống)
-  db.prepare("DELETE FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial);
+  db.prepare("DELETE FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo')").run(serial);
   // yêu cầu máy đẩy lại thực tế (đời cũ: mốc 0 + CHECK, đời mới: DATA QUERY)
   queueUserQuery(serial);
   return true;

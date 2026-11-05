@@ -179,7 +179,7 @@ export function guardIncoming(serial, table, body, opts = {}) {
     db.prepare('INSERT INTO device_pin_remaps(serial,pin,from_at,to_at,new_pin,conflict_id) VALUES(?,?,?,NULL,?,?)').run(serial, pin, now, holdPin(pin, id), id);
     captureInto(id, it);
     // bỏ lệnh đồng bộ đang chờ của Số ID này xuống máy này (khỏi ghi đè người vừa đăng ký)
-    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial, pin);
+    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo')").run(serial, pin);
     n++;
   }
   return n;
@@ -334,7 +334,7 @@ export function onUserAck(serial, pin, ok) {
   let toAt = new Date().toISOString();
   if (lastNew && lastNew >= toAt) toAt = new Date(Date.parse(lastNew) + 1000).toISOString();
   db.prepare('UPDATE device_pin_remaps SET to_at=? WHERE conflict_id=? AND to_at IS NULL').run(toAt, c.id);
-  db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','photo')").run(serial, c.pin);
+  db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo')").run(serial, c.pin);
   queueCmd(serial, `DATA DELETE USERINFO\tPIN=${c.pin}`);
   db.prepare("UPDATE device_pin_conflicts SET status='moved', resolved_at=datetime('now'), note=? WHERE id=?")
     .run(`Đã chuyển sang Số ID ${c.new_pin}; Số ID ${c.pin} trả lại cho người đang dùng`, c.id);

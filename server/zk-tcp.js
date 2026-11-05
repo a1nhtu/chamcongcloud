@@ -11,7 +11,7 @@ import { connect } from 'node:net';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
-import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates } from './device-sync.js';
+import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates, isFpV10 } from './device-sync.js';
 import { guardIncoming, heldSet } from './pin-guard.js';
 import { vnDateStr } from './util.js';
 import { busyFlag, eachTenant, tenantKey } from './tenant.js';
@@ -346,7 +346,7 @@ export async function tcpPushUsers(dev, pins, { withBio = false } = {}, prog = (
     if (!withBio) continue;
     const fps = new Map();   // ngón → mẫu mới nhất (phần mềm có thể giữ mẫu cùng ngón từ nhiều máy)
     for (const t of db.prepare('SELECT idx, major_ver, tmp FROM device_bio_templates WHERE pin=? AND serial<>? AND bio_type=1 AND valid=1 ORDER BY id').all(p, dev.serial)) fps.set(t.idx, t);
-    for (const t of fps.values()) if (t.tmp) lines.push(['F', p, t.idx, (t.major_ver || 10) < 10 ? 9 : 10, SAFE(t.tmp)].join('\t'));
+    for (const t of fps.values()) if (t.tmp) lines.push(['F', p, t.idx, isFpV10(t.tmp) || (t.major_ver || 10) >= 10 ? 10 : 9, SAFE(t.tmp)].join('\t'));
   }
   if (!sent.length) return { pushed: 0, failed: 0, fps: 0, skipped: (pins || []).length };
   const file = join(tmpdir(), `dgp-push-${process.pid}-${Date.now()}.txt`);
