@@ -102,14 +102,17 @@ const EXPECT = {
   A_chuan_2lan: {"*": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
   B_4lan_nghi_trua: {"*": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
   C_quen_ra: {"*": "02: 02 08:00→- 0p 0c tre0 som0 tc0"},
-  D_quen_vao: {"*": "02: 02 17:00→- 0p 0c tre540 som0 tc0"},
+  // quên chấm vào: quy tắc biết hướng lượt chấm (ID máy / Chọn từ máy) → dòng CHỈ CÓ GIỜ RA, không trễ (Anh chốt 05/11/2026);
+  // quy tắc khác không biết lượt 17:00 là vào hay ra → coi là giờ vào như cũ
+  D_quen_vao: {"*": "02: 02 17:00→- 0p 0c tre540 som0 tc0", "tdqdI": "02: -→02 17:00 0p 0c tre0 som0 tc0", "idm": "02: -→02 17:00 0p 0c tre0 som0 tc0", "state": "02: -→02 17:00 0p 0c tre0 som0 tc0"},
   E_quen_ra_trua: {"*": "02: 02 08:00→02 17:00 240p 0.5c tre0 som0 tc0", "filo": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0", "pairs": "02: 02 08:00→02 17:00 240p 0.5c tre0 som240 tc0", "tdqd": "02: 02 08:00→02 17:00 240p 0.5c tre0 som240 tc0", "tdhc": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
   F_quen_vao_chieu: {"*": "02: 02 08:00→02 17:00 240p 0.5c tre0 som300 tc0", "filo": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0", "tdhc": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
   G_quet_lap: {"*": "02: 02 08:00→02 17:06 480p 1c tre0 som0 tc0"},
   H_ra_ngoai_2h: {"*": "02: 02 08:00→02 17:00 420p 0.87c tre0 som0 tc0", "filo": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0", "tdhc": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0"},
   I_tang_ca_toi: {"*": "02: 02 08:00→02 21:00 480p 1c tre0 som0 tc180", "filo": "02: 02 08:00→02 21:00 480p 1c tre0 som0 tc240", "tdhc": "02: 02 08:00→02 21:00 480p 1c tre0 som0 tc240"},
-  J_tang_ca_qua_dem: {"*": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc60 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "pairs": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "tdqd": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "tdqdI": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "idm": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "state": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0"},
-  K_mot_mach_qua_dem: {"*": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0"},
+  J_tang_ca_qua_dem: {"*": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc60 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "pairs": "02: 02 08:00→02 18:00 480p 1c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "tdqd": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "tdqdI": "02: 02 08:00→03 01:30 480p 1c tre0 som0 tc450", "idm": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0", "state": "02: 02 08:00→02 17:00 480p 1c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0"},
+  // vào 08:00 → ra 01:30 sáng hôm sau = 17,5 tiếng > thời gian lớn nhất 960' → không ghép (cả 2 kiểu qua đêm)
+  K_mot_mach_qua_dem: {"*": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: 03 01:30→- 0p 0c tre0 som0 tc0", "tdqdI": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0", "idm": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0", "state": "02: 02 08:00→- 0p 0c tre0 som0 tc0 | 03: -→03 01:30 0p 0c tre0 som0 tc0"},
   L_tre_som: {"*": "02: 02 08:30→02 16:00 390p 0.81c tre30 som60 tc0"},
   M_dem_chuan: {"*": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0"},
   N_dem_ra_ngoai: {"*": "02: 02 19:00→03 07:00 480p 0.72c tre0 som0 tc0", "filo": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0", "tdhc": "02: 02 19:00→03 07:00 660p 1c tre0 som0 tc0"},
@@ -182,5 +185,13 @@ test('báo cáo danh sách: Theo ID máy / Chọn từ máy hiện từng lần 
     assert.deepEqual(await row('state', CASES.H_ra_ngoai_2h[1]), [['08:00', '10:00'], ['12:00', '17:00'], ['', '']]);
     assert.deepEqual(await row('idm', CASES.E_quen_ra_trua[1]), [['08:00', '?'], ['13:00', '17:00'], ['', '']]);
     assert.deepEqual(await row('idm', CASES.A_chuan_2lan[1]), [['08:00', '17:00'], ['', ''], ['', '']]);
+    // quên chấm vào: dòng chỉ có giờ ra vẫn hiện trên báo cáo (không bị coi là ngày trống)
+    assert.deepEqual(await row('idm', CASES.D_quen_vao[1]), [['', '17:00'], ['', ''], ['', '']]);
+    const e = db.prepare('SELECT MAX(id) id FROM employees').get().id;
+    for (const type of ['detail', 'detailmulti', 'daytime', 'attendance']) {
+      const r = await fetch(`http://127.0.0.1:${server.address().port}/api/reports/data?type=${type}&from=2026-11-02&to=2026-11-02&ids=${e}`, { headers: { Authorization: 'Bearer ' + tok } });
+      assert.equal(r.status, 200, type);
+      assert.ok(JSON.stringify((await r.json()).rows).includes('17:00'), `${type}: dòng chỉ có giờ ra phải hiện 17:00`);
+    }
   } finally { server.close(); }
 });

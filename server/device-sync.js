@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
 import { db, getSetting, setSetting, empHourly, hourlyNoOvernight } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
-import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs, idmOpenIn } from './attendance-calc.js';
+import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs, idmOpenIn, ruleKnowsDir } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
@@ -976,7 +976,7 @@ function rebuildDayCore(employeeId, workDate) {
       // chỉ 1 ca → nhận lượt quẹt như ca đơn (tới hết ngày với ca ngày); nhiều ca → đúng các lượt đã chia cho ca đó
       const w = ruleWindow(workDate, shift, wopts);
       const { inIso, outIso, pairs } = mergeDayPunches(one ? punchesInWin(w.winStart, w.winEnd) : punches, shift, rule, machineMap, workDate, wopts);
-      if (!inIso) continue;
+      if (!inIso && !(outIso && ruleKnowsDir(rule, shift))) continue;   // quên chấm vào (Theo ID máy / Chọn từ máy) → dòng chỉ có giờ ra
       if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
       upsertRow(employeeId, workDate, shift.id, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs));
     }
@@ -997,7 +997,9 @@ function rebuildDayCore(employeeId, workDate) {
     if (claim) punches = punches.filter((p) => !claim(p.punch_at, end));
     if (!punches.length) punches = prov;
     ({ inIso, outIso, pairs = null } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate, wopts));
-    if (!inIso) {
+    if (!inIso && outIso && ruleKnowsDir(mergeRule, shift)) {
+      // Theo ID máy / Chọn từ máy: chỉ có lượt RA (quên chấm vào) → dòng công chỉ có giờ ra, không tính trễ
+    } else if (!inIso) {
       // Ca đêm: punch lẻ (thường là giờ RA sáng hôm sau) thuộc ca đêm NGÀY TRƯỚC → không tạo dòng rác ở ngày này
       const night = shift.cross_midnight || shift.end_time <= shift.start_time;
       if (night) return;

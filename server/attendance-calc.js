@@ -444,6 +444,9 @@ export function pickShiftSet(cands, punches, workDate) {
 
 // Quy tắc nào tính giờ công theo TỪNG CẶP vào–ra (thời gian ra ngoài giữa các cặp bị trừ):
 // "Tự động - không qua đêm" và "Tự động - qua đêm" (trừ kiểu con theo ID máy của quy tắc qua đêm).
+// Quy tắc BIẾT HƯỚNG từng lượt chấm (Theo ID máy, Tự động - qua đêm kiểu ID máy, Chọn từ máy): ngày chỉ có lượt RA
+// (quên chấm vào) lưu thành dòng công CHỈ CÓ GIỜ RA — không coi lượt ra là giờ vào (Anh chốt 05/11/2026)
+export const ruleKnowsDir = (rule, shift) => rule === 'idm' || rule === 'state' || (rule === 'tdqd' && (shift?.tdqd_mode || 'pair') === 'idm');
 export const rulePairs = (rule, shift) => rule === 'pairs' || (rule === 'tdqd' && (shift?.tdqd_mode || 'pair') !== 'idm');
 
 export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate, opts = {}) {

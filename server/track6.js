@@ -30,7 +30,7 @@ export function trackTimes({ virt, c, punches, breakStart }) {
  * leaveSym: ký hiệu nghỉ khi không có ô công (hiện ở dòng Vào 1). Ngày nghỉ hằng tuần: Giờ HC = 0, Giờ TC = giờ tăng ca.
  */
 export function trackCell({ virt, c, punches, breakStart, leaveSym }) {
-  if (!c || !c.check_in_at) return { v1: leaveSym || '', r1: '', v2: '', r2: '', hc: '', tc: '' };
+  if (!c || !(c.check_in_at || c.check_out_at)) return { v1: leaveSym || '', r1: '', v2: '', r2: '', hc: '', tc: '' };
   const t = trackTimes({ virt, c, punches, breakStart });
   return { v1: hhmm(t.v1), r1: hhmm(t.r1), v2: hhmm(t.v2), r2: hhmm(t.r2), hc: round2((c.work_minutes || 0) / 60), tc: round2((c.ot_min || 0) / 60) };
 }

@@ -326,7 +326,8 @@ function loadRange(from, to, filter) {
 }
 
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
-const pairsHM = (io, c) => (!c || !c.check_in_at ? [] : io.pairs ? io.pairs.map(([a, b]) => [isoToVnHM(a), b ? isoToVnHM(b) : '?']) : [[io.cin, io.cout]]);
+const hasPunch = (c) => !!(c && (c.check_in_at || c.check_out_at));   // dòng chỉ có giờ ra (quên chấm vào, Theo ID máy) vẫn là có chấm
+const pairsHM = (io, c) => (!hasPunch(c) ? [] : io.pairs ? io.pairs.map(([a, b]) => [a ? isoToVnHM(a) : '?', b ? isoToVnHM(b) : '?']) : [[io.cin || '?', io.cout]]);
 // Báo cáo danh sách: quy tắc "Nhiều lần vào/ra" → MỖI LẦN CHẤM 1 CỘT (Giờ vào 1 · Giờ ra 1 · Giờ vào 2 …) thay vì dồn nhiều giờ vào 1 ô.
 // Dòng mang _io = pairsHM(...); chỉ tách khi có ngày > 1 cặp (FILO giữ nguyên 2 cột như cũ).
 function splitPairCols(rep, inKey, outKey) {
@@ -356,7 +357,7 @@ const offRow = (e, d) => ({ _off: 1, _io: [], date: fmtDMY(d), wd: WD[vnWeekday(
 // Số cặp vào/ra nhiều nhất trong kỳ (báo cáo ma trận: mỗi ngày tách 2 × n cột)
 function maxPairs(ctx, ioOf, days) {
   let n = 1;
-  for (const e of ctx.employees) for (const d of days) { const c = ctx.cell.get(e.id + '|' + d); if (c && c.check_in_at) n = Math.max(n, pairsHM(ioOf(e.id, d, c), c).length); }
+  for (const e of ctx.employees) for (const d of days) { const c = ctx.cell.get(e.id + '|' + d); if (hasPunch(c)) n = Math.max(n, pairsHM(ioOf(e.id, d, c), c).length); }
   return n;
 }
 
@@ -440,7 +441,7 @@ function symbolOf(ctx, empId, date) {
   if (ctx.leaveDays.has(empId + '|' + date)) return 'P';
   if (ctx.holidays.has(date)) return ctx.compOff.has(date) && c && ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) ? 'NN' : 'L';   // NN = đi làm ngày nghỉ bù lễ
   if (!c) return ctx.isScheduled(empId, date) ? 'V' : '';
-  if (c.day_status === 'thieu_ra' || (!c.check_out_at && c.day_status !== 'mot_lan')) return 'O';   // mot_lan = ca "chấm 1 lần là đủ công"
+  if (c.day_status === 'thieu_ra' || ((!c.check_out_at || !c.check_in_at) && c.day_status !== 'mot_lan')) return 'O';   // thiếu giờ ra / thiếu giờ vào   // mot_lan = ca "chấm 1 lần là đủ công"
   if (!ctx.hourly && ((c.late_min || 0) > 0 || (c.early_min || 0) > 0)) return 'T';   // theo giờ: không có trễ/sớm
   if ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) return 'X';   // ca tính cả ca là tăng ca: công 0 nhưng có làm
   return 'V';
@@ -708,9 +709,9 @@ function buildReportRaw(type, from, to, filter) {
         let total = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
-          if (c && c.check_in_at) {
+          if (hasPunch(c)) {
             const io = ioOf(e.id, d, c);
-            row['d' + d] = io.pairs ? io.pairs.map(([a, b]) => isoToVnHM(a) + '-' + (b ? isoToVnHM(b) : '?')).join('\n') : io.cin + '-' + (io.cout || '?');
+            row['d' + d] = io.pairs ? io.pairs.map(([a, b]) => (a ? isoToVnHM(a) : '?') + '-' + (b ? isoToVnHM(b) : '?')).join('\n') : (io.cin || '?') + '-' + (io.cout || '?');
             total += HOURLY ? (c.work_minutes || 0) / 60 : (c.work_unit || 0);   // theo giờ: tổng giờ, không có công
           } else row['d' + d] = ctx.leaveDays.has(e.id + '|' + d) ? ctx.leaveDays.get(e.id + '|' + d).sym : '';
         }
@@ -1031,10 +1032,10 @@ function buildReportRaw(type, from, to, filter) {
       const pcMap = new Map();
       if (!ctx.virt) for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM device_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
         pcMap.set(p.employee_id + '|' + p.work_date, p.c);
-      const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().filter((c) => c.check_in_at).map((c) => ({ c }));
+      const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().filter(hasPunch).map((c) => ({ c }));
       const rows = list.map(({ e, d, c }) => {
-        if (!c || !c.check_in_at) return offRow(e, d);
-        const mins = c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
+        if (!hasPunch(c)) return offRow(e, d);
+        const mins = c.check_in_at && c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
         const punches = pcMap.get(c.employee_id + '|' + c.work_date) || ((c.check_in_at ? 1 : 0) + (c.check_out_at ? 1 : 0));
         return {
           date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
@@ -1169,7 +1170,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
       }
       if (onlyLateEarly && !(c && (c.late_min > 0 || c.early_min > 0))) continue;
       const io = c ? ioOf(e.id, d, c) : null;
-      const ps = !io || !c.check_in_at ? [] : io.pairs ? io.pairs : [[c.check_in_at, c.check_out_at]];
+      const ps = !io || !hasPunch(c) ? [] : io.pairs ? io.pairs : [[c.check_in_at, c.check_out_at]];
       const row = { date: fmtDMY(d), wd: WD[vnWeekday(d)], weekend: ctx.paintWeekend(d), sym: sym === 'P' ? ctx.leaveDays.get(e.id + '|' + d).sym : sym };
       for (let i = 0; i < PAIRS; i++) {
         row['in' + (i + 1)] = ps[i] && ps[i][0] ? isoToVnHM(ps[i][0]) : '';
@@ -1610,7 +1611,7 @@ r.get('/dashboard', (req, res) => {
   // Đếm SỐ NGƯỜI distinct đã chấm (1 NV chấm nhiều phiên/ngày vẫn tính 1), cùng bộ lọc vai trò với totalEmp
   const checkedIn = db.prepare(
     "SELECT COUNT(DISTINCT a.employee_id) c FROM attendance a JOIN employees e ON e.id = a.employee_id" +
-    " WHERE a.work_date = ? AND a.check_in_at IS NOT NULL AND e.active = 1" + adminAttWhere('e.role')
+    " WHERE a.work_date = ? AND (a.check_in_at IS NOT NULL OR a.check_out_at IS NOT NULL) AND e.active = 1" + adminAttWhere('e.role')
   ).get(today).c;
   const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0').get(today).c;
   const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_outside = 1').get(today).c;
