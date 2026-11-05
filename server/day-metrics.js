@@ -100,11 +100,13 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
       // Ca "Nhiều lần vào/ra" chỉ ghép được 1 cặp đủ + lượt lẻ phía sau (VD vào 08 · ra 10 · vào 11 chưa ra; quên ra trưa 08 · 13 · 17):
       // chỉ tính cặp đủ (vào 1 → ra 1), lượt lẻ không tính — Anh chốt 04/11/2026, giống chế độ theo giờ.
       // (Cài đặt "nghỉ trưa cố định kiểu HR-ERP" bỏ ghép cặp khi quẹt lẻ → pairs = null → vẫn đầu → cuối như cũ.)
+      // Theo ID máy / Chọn từ máy: cặp đủ duy nhất có thể nằm SAU lượt vào đầu (vào 08 quên ra · vào 13 · ra 17 → tính 13–17).
       const odd1 = pairs && pairs.length === 1 && pairs[0][0] && pairs[0][1]
-        && Date.parse(pairs[0][0]) === Date.parse(inIso) && Date.parse(pairs[0][1]) < Date.parse(outIso);
-      const outCalc = odd1 ? pairs[0][1] : outIso;
-      c = computeCheckout(shift, inIso, outCalc, workDate, flags);
-      if (half) c.early_min = computeCheckout(shift, inIso, outCalc, workDate, { ...flags, priv: lePriv }).early_min;
+        && Date.parse(pairs[0][0]) >= Date.parse(inIso) && Date.parse(pairs[0][1]) <= Date.parse(outIso)
+        && !(Date.parse(pairs[0][0]) === Date.parse(inIso) && Date.parse(pairs[0][1]) === Date.parse(outIso));
+      const inCalc = odd1 ? pairs[0][0] : inIso, outCalc = odd1 ? pairs[0][1] : outIso;
+      c = computeCheckout(shift, inCalc, outCalc, workDate, flags);
+      if (half) c.early_min = computeCheckout(shift, inCalc, outCalc, workDate, { ...flags, priv: lePriv }).early_min;
     } else {
       // Không ca (chế độ theo giờ): "theo cặp" ≥ 2 cặp → cộng từng cặp; còn lại = ra − vào (FILO)
       // Theo giờ + theo cặp mà chỉ ghép được 1 cặp nhưng còn lượt lẻ (VD vào 1 · ra 1 · vào 2 chưa ra): chỉ tính cặp đủ

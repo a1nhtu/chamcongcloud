@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
 import { db, getSetting, setSetting, empHourly, hourlyNoOvernight } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
-import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs } from './attendance-calc.js';
+import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs, idmOpenIn } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
@@ -762,7 +762,7 @@ export const pairDup = () => parseInt(getSetting('punch_dedup_min', '15'), 10) |
 const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
 
 // Map serial → số máy (IDM: máy lẻ VÀO / chẵn RA)
-function deviceMachineMap() {
+export function deviceMachineMap() {
   const map = {};
   for (const d of db.prepare('SELECT serial, machine_number FROM push_devices').all()) map[d.serial] = d.machine_number || 0;
   map.DT_VAO = 1; map.DT_RA = 2;     // giờ chấm ĐIỆN THOẠI của ngày có cả lượt quẹt máy (xem seedPhonePunches)
@@ -834,12 +834,17 @@ function nextDayClaim(employeeId, workDate, winEnd, hourly) {
 // Chỉ xét lượt quẹt ĐẦU TIÊN của hôm sau (bỏ quẹt lặp); lượt đó là giờ vào hôm sau thì thôi.
 // Trả Date = giờ của lượt RA đó (để nới cửa sổ ca tới đúng lượt này), null = không có.
 // "Tự động - không qua đêm" thì không làm bước này: lượt VÀO lẻ cuối ngày giữ nguyên là thiếu giờ ra.
+// Kiểu con THEO ID MÁY (như Wise Eye On39 ChiaHaiCot): lượt VÀO máy lẻ chưa ra → lượt RA là lượt quẹt MÁY CHẴN đầu tiên
+// sáng hôm sau; gặp lượt máy lẻ trước (vào lại) thì lượt VÀO cũ là quên chấm ra.
 function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo) {
-  if (hourly || !shift || rule !== 'tdqd' || !rulePairs(rule, shift) || isNightShift(shift)) return null;
+  if (hourly || !shift || rule !== 'tdqd' || isNightShift(shift)) return null;
+  const idm = !rulePairs(rule, shift);
   const w = ruleWindow(workDate, shift, wopts);
-  const iso = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
-    .all(employeeId, w.winStart.toISOString(), w.winEnd.toISOString()).map((p) => p.punch_at).filter((t) => !usedTo || t > usedTo);
-  const open = openTailIn(iso, wopts.dupMin);
+  const rows = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+    .all(employeeId, w.winStart.toISOString(), w.winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
+  const mmap = idm ? deviceMachineMap() : null;
+  const mnum = (p) => mmap[p.serial] || 0;
+  const open = idm ? idmOpenIn(rows, mnum, wopts.dupMin) : openTailIn(rows.map((p) => p.punch_at), wopts.dupMin);
   if (!open) return null;
   const d = wopts.dupMin && typeof wopts.dupMin === 'object' ? wopts.dupMin : { min: wopts.dupMin };
   const minMs = Math.max(1, Number(d.min) || 5) * 60000;
@@ -847,9 +852,19 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
   const limit = new Date(Date.parse(open) + maxMs);
   if (limit <= w.winEnd) return null;
   const claim = nextDayClaim(employeeId, workDate, limit, hourly);
-  const next = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
+  const next = db.prepare('SELECT punch_at, serial FROM device_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, w.winEnd.toISOString(), limit.toISOString());
   const gapMs = Math.max(1, Number(d.gap ?? d.min) || 5) * 60000;
+  if (idm) {
+    for (let i = 0; i < next.length; i++) {
+      if (mnum(next[i]) % 2 === 1) { if (Date.parse(next[i].punch_at) - Date.parse(open) < minMs) continue; return null; }   // vào lại → quên ra
+      if (claim && claim(next[i].punch_at, w.end)) return null;
+      let j = i;   // RA lặp (máy chẵn, cách nhau < min phút) → lấy lượt sau
+      while (j + 1 < next.length && mnum(next[j + 1]) % 2 === 0 && Date.parse(next[j + 1].punch_at) - Date.parse(next[j].punch_at) < minMs) j++;
+      return new Date(next[j].punch_at);
+    }
+    return null;
+  }
   for (let i = 0; i < next.length; i++) {
     if (Date.parse(next[i].punch_at) - Date.parse(open) < minMs) continue;   // quẹt lặp ngay sau lượt vào
     if (claim && claim(next[i].punch_at, w.end)) return null;                // là giờ vào ca hôm sau

@@ -3,9 +3,10 @@ import ExcelJS from 'exceljs';
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
-import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs } from '../attendance-calc.js';
+import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs, idmRows, stateRows } from '../attendance-calc.js';
+import { deviceMachineMap, pairDup } from '../device-sync.js';
 import { computePayrollTable } from '../payroll-calc.js';
-import { resolveEffectiveShift } from '../shift-resolver.js';
+import { resolveEffectiveShift, ioParamsFor } from '../shift-resolver.js';
 import { multiMissingFn } from '../multi-shift.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
@@ -149,13 +150,17 @@ function dayTimesLoader(from, to, empIds) {
   const punches = new Map(), sessions = new Map(), byEmp = new Map();
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   const to1 = new Date(to + 'T12:00:00Z'); to1.setUTCDate(to1.getUTCDate() + 1);   // + ngày sau: giờ ra ca đêm / qua đêm
-  for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to1.toISOString().slice(0, 10)))
-    if (empIds.has(p.employee_id)) { push(byEmp, p.employee_id, p.punch_at); if (p.work_date <= to) push(punches, p.employee_id + '|' + p.work_date, p.punch_at); }
+  const serialOf = new Map();   // empId|giờ quẹt → lượt quẹt (máy, phím) cho quy tắc Theo ID máy / Chọn từ máy
+  for (const p of db.prepare('SELECT employee_id, work_date, punch_at, serial, status FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to1.toISOString().slice(0, 10)))
+    if (empIds.has(p.employee_id)) {
+      push(byEmp, p.employee_id, p.punch_at); serialOf.set(p.employee_id + '|' + p.punch_at, p);
+      if (p.work_date <= to) push(punches, p.employee_id + '|' + p.work_date, p.punch_at);
+    }
   for (const a of db.prepare('SELECT employee_id, work_date, check_in_at, check_out_at, manual FROM attendance WHERE work_date >= ? AND work_date <= ? ORDER BY check_in_at').all(from, to))
     if (empIds.has(a.employee_id)) push(sessions, a.employee_id + '|' + a.work_date, a);
   // span = [giờ vào, giờ ra] của dòng công: chỉ lấy lượt quẹt nằm trong đó (ca đêm 19:00 → 07:00 sáng hôm sau,
   // "Tự động - qua đêm" lấy giờ ra sáng hôm sau) — lấy theo ngày lịch sẽ tách mất lượt sau nửa đêm
-  return (empId, date, span = null) => {
+  const fn = (empId, date, span = null) => {
     const k = empId + '|' + date;
     const ss = sessions.get(k) || [];
     let list;
@@ -168,6 +173,9 @@ function dayTimesLoader(from, to, empIds) {
     // bỏ lượt quẹt lặp theo CÙNG ngưỡng với lúc tính công → các cặp hiện trên báo cáo khớp với giờ đã tính
     return dropRepeatPunches(list, dupMin);
   };
+  // Lượt quẹt máy THÔ (kèm máy) trong [giờ vào, giờ ra] của dòng công — cho quy tắc Theo ID máy (ghép theo máy, không theo thứ tự)
+  fn.raw = (empId, span) => (byEmp.get(empId) || []).filter((t) => t >= span[0] && t <= span[1]).map((t) => serialOf.get(empId + '|' + t) || { punch_at: t, serial: '', status: 0 });
+  return fn;
 }
 // [t0,t1,t2,t3,t4] → [[t0,t1],[t2,t3],[t4,null]]
 const toPairs = (ts) => { const r = []; for (let i = 0; i < ts.length; i += 2) r.push([ts[i], ts[i + 1] || null]); return r; };
@@ -180,7 +188,7 @@ function inOutResolver(employees, from, to, virt = false) {
   const modeOf = new Map(employees.map((e) => [e.id, effMode(e)]));
   const hourlyOf = (empId) => (modeOf.get(empId) || globalAttMode()) === 'hourly';   // theo kiểu chấm công của từng NV
   const hourlyRule = getSetting('hourly_merge_rule', 'filo');
-  let timesOf = null;
+  let timesOf = null, machineMap = null;
   const memo = new Map();   // empId|date → kết quả (nhiều cột cùng gọi 1 ô)
   return (empId, date, c) => {
     const mk = empId + '|' + date;
@@ -193,6 +201,16 @@ function inOutResolver(employees, from, to, virt = false) {
     if (!timesOf) timesOf = dayTimesLoader(from, to, new Set(employees.map((e) => e.id)));
     const eff = hourlyOf(empId) ? null : resolveEffectiveShift(empId, date, c.check_in_at, c.check_out_at || null);
     const rule = eff ? (eff.mergeRule || 'filo') : hourlyRule;
+    // Theo ID máy (hoặc Tự động - qua đêm kiểu ID máy) / Chọn từ máy: từng lần VÀO → RA đúng như lúc tính công,
+    // kể cả dòng quên ra (vào 08 · ?) / quên vào (? · ra 17) như Wise Eye On39 hiện
+    const idm = rule === 'idm' || (rule === 'tdqd' && !rulePairs(rule, eff && eff.shift));
+    if (eff && c.check_out_at && !c.manual && (idm || rule === 'state')) {
+      if (!machineMap) machineMap = deviceMachineMap();
+      const raw = timesOf.raw(empId, [c.check_in_at, c.check_out_at]), dup = ioParamsFor(empId, date) || pairDup();
+      const ps = idm ? idmRows(raw, (p) => machineMap[p.serial] || 0, dup) : stateRows(raw, dup);
+      if (ps.length < 2) return single;
+      return { cin: ps.map(([a]) => (a ? isoToVnHM(a) : '?')).join('\n'), cout: ps.map(([, b]) => (b ? isoToVnHM(b) : '?')).join('\n'), pairs: ps };
+    }
     if (eff ? !rulePairs(rule, eff.shift) : rule !== 'pairs') return single;
     const ts = timesOf(empId, date, eff ? [c.check_in_at, c.check_out_at] : null);
     if (ts.length <= 2) return single;

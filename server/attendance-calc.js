@@ -463,21 +463,12 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
   const dupMs = Math.max(0, Number(dupRaw) || 0) * 60000;
 
   // IDM (hoặc TĐ-QĐ/idm): máy lẻ = VÀO sớm nhất, máy chẵn = RA muộn nhất
+  // Ra/vào nhiều lần qua cửa máy chẵn/lẻ hoặc bấm phím Vào/Ra (như Wise Eye On39): cộng từng cặp VÀO → RA,
+  // thời gian ra ngoài bị trừ; lượt quên vào / quên ra không tính (xem walkDir)
   const useIdm = rule === 'idm' || (rule === 'tdqd' && (shift.tdqd_mode || 'pair') === 'idm');
-  if (useIdm) {
-    const mnum = (p) => machineMap[p.serial] || 0;
-    const ins = inWin.filter((p) => mnum(p) % 2 === 1);
-    const outs = inWin.filter((p) => mnum(p) % 2 === 0);
-    return { inIso: iso(ins[0] || null), outIso: iso(outs.length ? outs[outs.length - 1] : null) };
-  }
-
+  if (useIdm) return dirMerge(inWin, idmDir((p) => machineMap[p.serial] || 0), opts.dupMin);
   // "Chọn từ máy": VÀO/RA theo phím trạng thái nhân viên bấm trên máy (0 Check-In, 3 Break-In, 4 OT-In = VÀO; 1 Check-Out, 2 Break-Out, 5 OT-Out = RA)
-  if (rule === 'state') {
-    const st = (p) => Number(p.status) || 0;
-    const ins = inWin.filter((p) => [0, 3, 4].includes(st(p)));
-    const outs = inWin.filter((p) => [1, 2, 5].includes(st(p)));
-    return { inIso: iso(ins[0] || null), outIso: iso(outs.length ? outs[outs.length - 1] : null) };
-  }
+  if (rule === 'state') return dirMerge(inWin, stateDir, opts.dupMin);
 
   // Phân theo giờ: VÀO = lượt đầu trong khung vào; RA = lượt CUỐI trong khung ra (sau giờ vào).
   // Lượt nằm ngoài cả 2 khung (VD ra ăn trưa 12h) bỏ qua — trước đây lấy "lượt kế tiếp" nên quẹt trưa làm mất giờ ra.
@@ -495,6 +486,8 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
       cos = vnInstant(workDate, shift.check_out_start);
       coe = vnInstant(workDate, shift.check_out_end);
       if (coe < cos) coe = new Date(coe.getTime() + 24 * HH);
+      // Ca ĐÊM (19:00 → 07:00) khai khung ra 04:00 – 11:00: khung ra là sáng HÔM SAU (trước đây lấy sáng cùng ngày → luôn thiếu giờ ra)
+      if ((shift.cross_midnight || shift.end_time <= shift.start_time) && cos < start) { cos = new Date(cos.getTime() + 24 * HH); coe = new Date(coe.getTime() + 24 * HH); }
     } else { cos = new Date(end.getTime() - HH); coe = new Date(end.getTime() + 8 * HH); }
     const outs = all.filter((p) => at(p) - at(ci) >= dupMs && at(p) > at(ci) && at(p) >= cos && at(p) <= coe);
     return { inIso: iso(ci), outIso: outs.length ? iso(outs[outs.length - 1]) : null };
@@ -557,6 +550,57 @@ function walkPairs(isoList, opt) {
     out.push([inT, t]); lastOut = x; inT = null;
   }
   return { out, open: inT };
+}
+
+// Ghép cặp theo HƯỚNG đã biết của từng lượt (như Wise Eye On39 "Theo ID máy" / "Theo máy" rồi ChiaHaiCot):
+// dir(p) = 1 → VÀO (máy số lẻ, hoặc phím Check-In), 2 → RA (máy số chẵn, hoặc phím Check-Out), 0 → bỏ qua.
+//   - VÀO lặp (cách VÀO trước < min phút) → bỏ, giữ lượt đầu; VÀO mới khi đang mở → lượt VÀO cũ là QUÊN CHẤM RA
+//   - RA đóng lượt VÀO đang mở nếu không dài quá max phút; quá max → lượt VÀO cũ quên ra, lượt RA này quên vào
+//   - RA lặp (cách RA trước < min phút, chưa VÀO lại) → lấy lượt RA SAU; RA không có VÀO → QUÊN CHẤM VÀO
+// rows = mọi dòng [vào|null, ra|null] (như các dòng On39 hiện), out = các cặp ĐỦ, open = lượt VÀO cuối còn mở.
+function walkDir(punches, dir, opt) {
+  const o = opt && typeof opt === 'object' ? opt : { min: opt };
+  const min = Math.max(1, Number(o.min) || PAIR_DUP_DEFAULT) * 60000;
+  const maxMs = Number(o.max) > 0 ? Number(o.max) * 60000 : Infinity;
+  const ps = [...(punches || [])].sort((a, b) => Date.parse(a.punch_at) - Date.parse(b.punch_at));
+  const rows = [];
+  let inT = null, lastOut = null;
+  for (const p of ps) {
+    const x = Date.parse(p.punch_at), k = dir(p);
+    if (k === 1) {
+      if (inT != null && x - Date.parse(inT) < min) continue;
+      if (inT != null) rows.push([inT, null]);
+      inT = p.punch_at;
+    } else if (k === 2) {
+      if (inT != null && x - Date.parse(inT) <= maxMs) { rows.push([inT, p.punch_at]); inT = null; lastOut = x; continue; }
+      if (inT != null) { rows.push([inT, null]); inT = null; }
+      else if (lastOut != null && x - lastOut < min) { rows[rows.length - 1][1] = p.punch_at; lastOut = x; continue; }
+      rows.push([null, p.punch_at]); lastOut = x;
+    }
+  }
+  if (inT != null) rows.push([inT, null]);
+  return { rows, out: rows.filter(([a, b]) => a && b), open: inT };
+}
+// Theo ID máy: máy số lẻ = VÀO, số chẵn = RA (máy chưa đặt số = 0 → RA, như trước)
+const idmDir = (mnum) => (p) => (mnum(p) % 2 === 1 ? 1 : 2);
+// Chọn từ máy: phím 0 Check-In, 3 Break-In, 4 OT-In = VÀO; 1 Check-Out, 2 Break-Out, 5 OT-Out = RA; phím khác bỏ qua
+export const stateDir = (p) => { const st = Number(p.status) || 0; return [0, 3, 4].includes(st) ? 1 : [1, 2, 5].includes(st) ? 2 : 0; };
+// Các cặp ĐỦ vào–ra [[vào, ra], …] theo ID máy
+export function idmPairs(punches, mnum, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, idmDir(mnum), opt).out; }
+// Mọi dòng (kể cả quên vào / quên ra) theo ID máy — cho báo cáo hiện từng lần vào/ra
+export function idmRows(punches, mnum, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, idmDir(mnum), opt).rows; }
+export function stateRows(punches, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, stateDir, opt).rows; }
+// Lượt VÀO (máy lẻ) cuối cùng chưa có RA; null = không có (cho "Tự động - qua đêm" kiểu ID máy)
+export function idmOpenIn(punches, mnum, opt = PAIR_DUP_DEFAULT) { return walkDir(punches, idmDir(mnum), opt).open; }
+// Kết quả gộp ngày của 2 quy tắc biết hướng lượt chấm (Theo ID máy / Chọn từ máy):
+// VÀO = lượt VÀO sớm nhất, RA = lượt RA muộn nhất (hiển thị như cũ); giờ công tính theo các cặp ĐỦ khi
+// có ≥ 2 cặp, hoặc 1 cặp nhưng không trùng đầu–cuối (VD quên ra trưa 08 vào · 13 vào · 17 ra → chỉ tính 13–17).
+function dirMerge(inWin, dir, dupOpt) {
+  const ins = inWin.filter((p) => dir(p) === 1), outs = inWin.filter((p) => dir(p) === 2);
+  const res = { inIso: ins.length ? ins[0].punch_at : null, outIso: outs.length ? outs[outs.length - 1].punch_at : null };
+  const pairs = walkDir(inWin, dir, dupOpt).out;
+  if (res.inIso && res.outIso && (pairs.length >= 2 || (pairs.length === 1 && (pairs[0][0] !== res.inIso || pairs[0][1] !== res.outIso)))) res.pairs = pairs;
+  return res;
 }
 
 // Tổng phút của các cặp vào–ra (chế độ theo giờ, quy tắc "theo cặp")
