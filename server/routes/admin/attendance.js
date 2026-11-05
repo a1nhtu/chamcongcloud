@@ -4,6 +4,7 @@ import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js'
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays } from '../../device-sync.js';
+import { rulePairs } from '../../attendance-calc.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../../virtual-att.js';
@@ -104,7 +105,7 @@ export function registerAttendanceRoutes(r, { need }) {
         // hoặc theo giờ chọn "theo cặp"): tính theo các cặp lượt quẹt; giờ sửa tay thì tính như cũ.
         const hr = ctx.isHourly(row.employee_id);   // kiểu chấm công riêng của nhân viên này
         const calcShift = hr ? null : eff.shift;
-        const usePairs = !row.manual && (hr ? hourlyPairs : eff.mergeRule === 'pairs');
+        const usePairs = !row.manual && (hr ? hourlyPairs : rulePairs(eff.mergeRule, calcShift));
         const pairs = usePairs ? dayPairsFor(row.employee_id, row.work_date, calcShift) : null;
         const m = computeDayMetrics(ctx, calcShift, row.work_date, row.check_in_at, row.check_out_at || null, pairs, { hourly: hr, empId: row.employee_id });
         if (!row.check_out_at && !(calcShift && calcShift.no_out_credit)) {

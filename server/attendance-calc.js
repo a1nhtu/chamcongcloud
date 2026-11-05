@@ -335,9 +335,12 @@ export function splitOtTiers(otMin, shift) {
  *   filo — Vào trước, ra sau: sớm nhất/muộn nhất trong cửa sổ ca.
  *   tdhc — Phân theo giờ (như Ronald Jack): lượt quẹt trong khung vào = VÀO, trong khung ra = RA; lượt nằm ngoài cả hai khung bỏ qua.
  *   idm  — Máy lẻ vào / máy chẵn ra: VÀO = log máy lẻ sớm nhất; RA = log máy chẵn muộn nhất.
- *   tdqd — Qua đêm: cửa sổ xuyên đêm; con: pair (như filo) hoặc idm.
- *   pairs — Nhiều lần vào/ra: giờ Vào/Ra như FILO, kèm danh sách cặp (lượt 1-2, 3-4…) để tính giờ công
- *           = tổng các cặp (lượt lẻ cuối không có cặp thì bỏ).
+ *   pairs — "Tự động - không qua đêm": giờ Vào/Ra như FILO, kèm danh sách cặp (lượt 1-2, 3-4…) để tính giờ công
+ *           = tổng các cặp (lượt lẻ cuối không có cặp thì bỏ). Cặp chỉ ghép trong cửa sổ của ca (ca đêm đã khai giờ
+ *           ra < giờ vào thì cửa sổ tự sang sáng hôm sau).
+ *   tdqd — "Tự động - qua đêm": như pairs, THÊM: lượt VÀO lẻ cuối ngày (ca ngày tăng ca quá nửa đêm) được ghép với
+ *           lượt quẹt sáng hôm sau trong "thời gian lớn nhất" — như Ronald Jack (kiểu 7) và Wise Eye (số ngày = 1).
+ *           Kiểu con idm: máy lẻ vào / máy chẵn ra.
  * punches: [{ punch_at: ISO, serial }] (đã lấy trong cửa sổ rộng). machineMap: { serial: số máy }.
  */
 const HH = 3600000;
@@ -374,6 +377,8 @@ export function ruleWindow(workDate, shift, opts = {}) {
   // Lượt quẹt sáng sớm là giờ ra ca đêm hôm trước đã được loại trước khi gọi (consumedByPrevDay).
   // (ca đã khai "Bắt đầu vào" → theo đúng khung đã khai, như "quét trước ca" của HR-ERP)
   if (opts.toDayEnd && !night && !shift.check_in_start) { const dayStart = vnInstant(workDate, '00:00'); if (dayStart < winStart) winStart = dayStart; }
+  // "Tự động - qua đêm": giờ RA của lượt VÀO lẻ cuối ngày nằm ở sáng hôm sau → nới cửa sổ tới đúng lượt đó (device-sync tính sẵn)
+  if (opts.extendEnd && opts.extendEnd > winEnd) winEnd = opts.extendEnd;
   return { winStart, winEnd, start, end };
 }
 
@@ -421,6 +426,10 @@ export function pickShiftSet(cands, punches, workDate) {
   }
   return best ? best.out : [];
 }
+
+// Quy tắc nào tính giờ công theo TỪNG CẶP vào–ra (thời gian ra ngoài giữa các cặp bị trừ):
+// "Tự động - không qua đêm" và "Tự động - qua đêm" (trừ kiểu con theo ID máy của quy tắc qua đêm).
+export const rulePairs = (rule, shift) => rule === 'pairs' || (rule === 'tdqd' && (shift?.tdqd_mode || 'pair') !== 'idm');
 
 export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate, opts = {}) {
   if (!punches || !punches.length || !shift) {
@@ -476,13 +485,13 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
     return { inIso: iso(ci), outIso: outs.length ? iso(outs[outs.length - 1]) : null };
   }
 
-  // FILO (mặc định) & TĐ-QĐ/pair: sớm nhất VÀO, muộn nhất RA trong cửa sổ
+  // FILO (mặc định), Tự động không qua đêm / qua đêm: sớm nhất VÀO, muộn nhất RA trong cửa sổ (2 kiểu tự động kèm các cặp)
   const ci = inWin[0];
   if (!ci) return { inIso: null, outIso: null };
   let co = inWin.length > 1 ? inWin[inWin.length - 1] : null;
   if (co && at(co) - at(ci) < dupMs) co = null;   // cả ngày chỉ 1 cụm quẹt lặp → vẫn là thiếu giờ ra
   const res = { inIso: iso(ci), outIso: iso(co && co !== ci ? co : null) };
-  if (rule === 'pairs') {
+  if (rulePairs(rule, shift)) {
     res.pairs = punchPairs(inWin.map((p) => p.punch_at), opts.dupMin);
     // (cài đặt pairs_fixed_break) Ca có nghỉ trưa CỐ ĐỊNH và số lần quẹt LẺ (3, 5…): HR-ERP không ghép cặp mà lấy đầu → cuối trừ giờ nghỉ
     if (opts.pairsFixedBreak && shift.break_start && inWin.length >= 3 && inWin.length % 2 === 1) res.pairs = null;
@@ -508,6 +517,14 @@ export function dropRepeatPunches(isoList, dupMin = PAIR_DUP_DEFAULT) {
 //   - cặp dài hơn `max` phút (quên quẹt ra) → bỏ lượt VÀO cũ, lấy lượt này làm VÀO mới
 // opt: số phút (dùng chung cho min và gap) HOẶC { min, gap, max }.
 export function punchPairs(isoList, opt = PAIR_DUP_DEFAULT) {
+  return walkPairs(isoList, opt).out;
+}
+// Lượt VÀO cuối cùng CHƯA có cặp (ISO) sau khi ghép cặp như punchPairs; null = mọi lượt VÀO đã có RA.
+// Dùng cho "Tự động - qua đêm": lượt VÀO lẻ cuối ngày tìm giờ RA ở sáng hôm sau.
+export function openTailIn(isoList, opt = PAIR_DUP_DEFAULT) {
+  return walkPairs(isoList, opt).open;
+}
+function walkPairs(isoList, opt) {
   const o = opt && typeof opt === 'object' ? opt : { min: opt, gap: opt };
   const min = Math.max(1, Number(o.min) || PAIR_DUP_DEFAULT) * 60000;
   const gap = Math.max(1, Number(o.gap) || PAIR_DUP_DEFAULT) * 60000;
@@ -524,7 +541,7 @@ export function punchPairs(isoList, opt = PAIR_DUP_DEFAULT) {
     if (d > maxMs) { inT = t; continue; }
     out.push([inT, t]); lastOut = x; inT = null;
   }
-  return out;
+  return { out, open: inT };
 }
 
 // Tổng phút của các cặp vào–ra (chế độ theo giờ, quy tắc "theo cặp")

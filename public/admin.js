@@ -1488,8 +1488,8 @@ async function pageShifts() {
  * Khai báo RIÊNG cách xác định lượt quẹt nào là VÀO, lượt nào là RA (không còn nằm trong ca). Gán kèm khi Gán ca cho nhân viên / phòng ban. */
 const IO_RULES = [
   ['filo', 'Giờ đầu là vào, giờ cuối là ra', 'Lần chấm công đầu tiên được xem là giờ VÀO, lần chấm công cuối cùng được xem là giờ RA, bỏ qua tất cả các giờ chấm ở giữa. Tính trong khung giờ của ca: ca ngày lấy trong ngày; ca qua đêm lấy lượt VÀO buổi tối và lượt RA sáng hôm sau.'],
-  ['pairs', 'Tự động - không qua đêm (không qua 12h)', 'Lần chấm đầu là VÀO, lần chấm kế tiếp là RA, rồi lại VÀO… Giờ làm = tổng các cặp vào–ra (thời gian ra ngoài giữa chừng bị trừ). Việc chọn lượt phụ thuộc ba thông số bên dưới.'],
-  ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động" nhưng dùng cho ca đêm: lượt VÀO buổi tối ghép với lượt RA sáng hôm sau.'],
+  ['pairs', 'Tự động - không qua đêm (không qua 12h)', 'Lần chấm đầu là VÀO, lần chấm kế tiếp là RA, rồi lại VÀO… Giờ làm = tổng các cặp vào–ra (thời gian ra ngoài giữa chừng bị trừ). Việc chọn lượt phụ thuộc ba thông số bên dưới. Cặp chỉ ghép trong khung giờ của ca: ca ngày trong ngày, ca đêm (giờ ra nhỏ hơn giờ vào) thì sang sáng hôm sau. Lượt VÀO lẻ cuối ngày là thiếu giờ ra.'],
+  ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động - không qua đêm" (tính theo từng cặp, trừ thời gian ra ngoài), thêm: lượt VÀO lẻ cuối ngày được ghép với lượt chấm đầu tiên sáng hôm sau làm giờ RA, nếu cách nhau không quá "Thời gian lớn nhất" và lượt đó không phải giờ vào ca hôm sau. Dùng khi ca ngày hay tăng ca quá nửa đêm. Ca đêm 19h–7h không cần trừ giờ ra ngoài thì dùng "Giờ đầu là vào, giờ cuối là ra" là đủ.'],
   ['idm', 'Theo ID máy', 'Khi chấm công ở máy có số máy lẻ (1, 3, 5, 7, 9) sẽ là VÀO. Khi chấm ở máy có số máy chẵn (2, 4, 6, 8, 10) sẽ là RA. Đặt "ID máy" cho từng máy ở cột ID máy của mục Máy chấm công.'],
   ['state', 'Chọn từ máy', 'Giờ VÀO hay giờ RA nhận từ máy chấm công: bấm phím Check In trước khi chấm là VÀO, bấm Check Out trước khi chấm là RA.'],
   ['tdhc', 'Phân theo giờ', 'Giờ chấm nằm trong khung "Bắt đầu vào – Kết thúc vào" của ca là VÀO; nằm trong khung "Bắt đầu ra – Kết thúc ra" là RA (khai ở Ca làm việc).'],
@@ -3117,7 +3117,7 @@ const MERGE_RULES = [
   ['filo', 'FILO — Vào trước, ra sau'],
   ['tdhc', 'TĐ-HC — Theo cửa sổ thời gian'],
   ['idm', 'IDM — Máy lẻ vào / máy chẵn ra'],
-  ['tdqd', 'TĐ-QĐ — Qua đêm'],
+  ['tdqd', 'TĐ-QĐ — Tự động qua đêm (theo cặp, ghép lượt ra sáng hôm sau)'],
   ['pairs', 'Nhiều lần vào/ra — cộng từng cặp, trừ thời gian ra ngoài'],
 ];
 const RULE_LABEL = Object.fromEntries(MERGE_RULES);

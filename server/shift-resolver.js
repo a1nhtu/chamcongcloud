@@ -250,7 +250,9 @@ export function resolveDayShifts(employeeId, workDate) {
       const sd = schedDay(ra.work_schedule_id, workDate, ra.from_date);
       if (sd.off) return { off: false, shifts: [], mergeRule: null, source: 'auto', isSchedule: false, patternOff: true };   // ngày nghỉ theo chu kỳ: nếu vẫn có lượt quẹt thì tính như ngày không ca, không bỏ dữ liệu
       const cands = sd.shifts;
-      if (cands.length) return { off: false, shifts: cands, mergeRule: (override && override !== 'default') ? override : null, source: 'schedule', isSchedule: true };
+      // lịch 1 ca/ngày → dựng như ca đơn: cách ghép theo lịch trình vào ra của dòng gán, không chọn thì theo lịch trình MẶC ĐỊNH
+      // (trước đây trả null → luôn thành "Giờ đầu - Giờ cuối", bỏ qua lịch trình vào ra mặc định)
+      if (cands.length) return { off: false, shifts: cands, mergeRule: cands.length === 1 ? effectiveMergeRule(cands[0], override) : ((override && override !== 'default') ? override : null), source: 'schedule', isSchedule: true };
     }
   }
   const emp = q('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
@@ -258,7 +260,7 @@ export function resolveDayShifts(employeeId, workDate) {
     const sd = schedDay(emp.work_schedule_id, workDate, null);
     if (sd.off) return { off: false, shifts: [], mergeRule: null, source: 'auto', isSchedule: false, patternOff: true };
     const cands = sd.shifts;
-    if (cands.length) return { off: false, shifts: cands, mergeRule: null, source: 'schedule', isSchedule: true };
+    if (cands.length) return { off: false, shifts: cands, mergeRule: cands.length === 1 ? effectiveMergeRule(cands[0], null) : null, source: 'schedule', isSchedule: true };
   }
   if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shifts: [s], mergeRule: effectiveMergeRule(s, null), source: 'default', isSchedule: false }; }
   return { off: false, shifts: [], mergeRule: null, source: 'auto', isSchedule: false };

@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
-import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN } from '../attendance-calc.js';
+import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs } from '../attendance-calc.js';
 import { computePayrollTable } from '../payroll-calc.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
 import { multiMissingFn } from '../multi-shift.js';
@@ -146,17 +146,22 @@ export function empFilterSql(filter) {
 // Bỏ lượt trùng trong vòng 1 phút. Trả hàm timesOf(empId, date) → [iso...] đã sắp xếp.
 function dayTimesLoader(from, to, empIds) {
   const dupMin = parseInt(getSetting('punch_dedup_min', '15'), 10) || 5;   // cùng ngưỡng với lúc tính công
-  const punches = new Map(), sessions = new Map();
+  const punches = new Map(), sessions = new Map(), byEmp = new Map();
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
-  for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to))
-    if (empIds.has(p.employee_id)) push(punches, p.employee_id + '|' + p.work_date, p.punch_at);
+  const to1 = new Date(to + 'T12:00:00Z'); to1.setUTCDate(to1.getUTCDate() + 1);   // + ngày sau: giờ ra ca đêm / qua đêm
+  for (const p of db.prepare('SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to1.toISOString().slice(0, 10)))
+    if (empIds.has(p.employee_id)) { push(byEmp, p.employee_id, p.punch_at); if (p.work_date <= to) push(punches, p.employee_id + '|' + p.work_date, p.punch_at); }
   for (const a of db.prepare('SELECT employee_id, work_date, check_in_at, check_out_at, manual FROM attendance WHERE work_date >= ? AND work_date <= ? ORDER BY check_in_at').all(from, to))
     if (empIds.has(a.employee_id)) push(sessions, a.employee_id + '|' + a.work_date, a);
-  return (empId, date) => {
+  // span = [giờ vào, giờ ra] của dòng công: chỉ lấy lượt quẹt nằm trong đó (ca đêm 19:00 → 07:00 sáng hôm sau,
+  // "Tự động - qua đêm" lấy giờ ra sáng hôm sau) — lấy theo ngày lịch sẽ tách mất lượt sau nửa đêm
+  return (empId, date, span = null) => {
     const k = empId + '|' + date;
     const ss = sessions.get(k) || [];
     let list;
-    if (ss.some((x) => x.manual) || !punches.has(k)) {
+    if (span && span[0] && span[1] && !ss.some((x) => x.manual) && punches.has(k)) {
+      list = (byEmp.get(empId) || []).filter((t) => t >= span[0] && t <= span[1]);
+    } else if (ss.some((x) => x.manual) || !punches.has(k)) {
       list = [];
       for (const x of ss) { if (x.check_in_at) list.push(x.check_in_at); if (x.check_out_at) list.push(x.check_out_at); }
     } else list = punches.get(k).slice();
@@ -186,10 +191,11 @@ function inOutResolver(employees, from, to, virt = false) {
     const single = { cin: c && c.check_in_at ? isoToVnHM(c.check_in_at) : '', cout: c && c.check_out_at ? isoToVnHM(c.check_out_at) : '', pairs: null };
     if (!c || !c.check_in_at || virt) return single;   // công ảo: chỉ giờ vào / ra ảo, không liệt kê lượt quẹt thật
     if (!timesOf) timesOf = dayTimesLoader(from, to, new Set(employees.map((e) => e.id)));
-    const ts = timesOf(empId, date);
+    const eff = hourlyOf(empId) ? null : resolveEffectiveShift(empId, date, c.check_in_at, c.check_out_at || null);
+    const rule = eff ? (eff.mergeRule || 'filo') : hourlyRule;
+    if (eff ? !rulePairs(rule, eff.shift) : rule !== 'pairs') return single;
+    const ts = timesOf(empId, date, eff ? [c.check_in_at, c.check_out_at] : null);
     if (ts.length <= 2) return single;
-    const rule = hourlyOf(empId) ? hourlyRule : (resolveEffectiveShift(empId, date, c.check_in_at, c.check_out_at || null).mergeRule || 'filo');
-    if (rule !== 'pairs') return single;
     const ps = toPairs(ts);
     return { cin: ps.map(([a]) => isoToVnHM(a)).join('\n'), cout: ps.map(([, b]) => (b ? isoToVnHM(b) : '?')).join('\n'), pairs: ps };
   }
