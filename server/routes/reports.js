@@ -35,21 +35,64 @@ const round2 = (n) => Math.round((n || 0) * 100) / 100;
 // tạm cho danh sách đã-gộp rỗng lúc gộp rồi ghép lại. Thư viện đổi cấu trúc bên trong thì tự về cách gộp thường.
 function mergeFast(ws, r1, c1, r2, c2) {
   const all = ws._merges;
-  if (!all || typeof all !== 'object' || Array.isArray(all)) return ws.mergeCells(r1, c1, r2, c2);
-  ws._merges = {};
-  try { ws.mergeCells(r1, c1, r2, c2); Object.assign(all, ws._merges); } finally { ws._merges = all; }
+  if (!all || typeof all !== 'object') return ws.mergeCells(r1, c1, r2, c2);
+  const list = Array.isArray(all);   // bộ ghi luồng giữ danh sách, sổ thường giữ đối tượng
+  ws._merges = list ? [] : {};
+  try {
+    ws.mergeCells(r1, c1, r2, c2);
+    if (list) all.push(...ws._merges); else Object.assign(all, ws._merges);
+  } finally { ws._merges = all; }
 }
 
-// GHI FILE EXCEL NHANH (báo cáo tự xếp ô): ExcelJS dựng lại kiểu (viền, nền, chữ…) cho TỪNG Ô — trừ khi các ô dùng chung 1 đối tượng
-// style, nên dồn ô cùng kiểu về 1 đối tượng trước khi ghi. Nén mức 1: file lớn hơn khoảng 1/3 nhưng ghi nhanh hơn hẳn.
-async function writeBook(wb, res) {
-  const same = new Map();
-  wb.eachSheet((ws) => ws.eachRow((row) => row.eachCell({ includeEmpty: true }, (cell) => {
-    const k = JSON.stringify(cell.style), st = same.get(k);
-    if (st) cell.style = st; else same.set(k, cell.style);
-  })));
-  await wb.xlsx.write(res, { zip: { compressionOptions: { level: 1 } } });
-  res.end();
+// GHI FILE EXCEL NHANH (báo cáo tự xếp ô): ghi bằng bộ ghi luồng, xong tới đâu đẩy dòng ra file tới đó (flush) nên không giữ hàng triệu ô
+// trong bộ nhớ. ExcelJS dựng lại kiểu (viền, nền, chữ…) cho TỪNG Ô trừ khi các ô dùng chung 1 đối tượng style, nên trước khi đẩy dòng ra
+// thì dồn ô cùng kiểu về 1 đối tượng (so theo từng phần của kiểu, không so cả chuỗi JSON của từng ô).
+// Bộ ghi luồng yêu cầu: khung đóng băng + thiết lập in khai lúc mở sheet (opts), độ rộng cột trước lần flush đầu, dòng đã flush thì không sửa được.
+const FLUSH_BATCH = 1000;   // cứ ngần này dòng thì nhả luồng 1 lần cho zlib nén bớt
+function openBook(res, file, sheet, opts) {
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="${file}"`);
+  const wb = new ExcelJS.stream.xlsx.WorkbookWriter({ stream: res, useStyles: true, useSharedStrings: true });
+  wb.creator = 'Digiplus';
+  const ws = wb.addWorksheet(sheet, opts);
+  const ids = new WeakMap(), partIds = new Map(), same = new Map();
+  const partId = (o) => {
+    if (!o) return 0;
+    let id = ids.get(o);
+    if (!id) {
+      const k = JSON.stringify(o);
+      id = partIds.get(k);
+      if (!id) partIds.set(k, id = partIds.size + 1);
+      ids.set(o, id);
+    }
+    return id;
+  };
+  const shareStyles = (row) => row.eachCell({ includeEmpty: true }, (cell) => {
+    const st = cell.style, k = `${partId(st.font)}|${partId(st.alignment)}|${partId(st.border)}|${partId(st.fill)}`;
+    const one = same.get(k);
+    if (one) cell.style = one; else same.set(k, st);
+  });
+  let next = 1, sinceYield = 0;
+  const pushOut = (upto) => {
+    for (; next <= upto; next++) { const row = ws.findRow(next); if (row) shareStyles(row); }
+  };
+  return {
+    ws,
+    async flush(upto) {   // đẩy ra file mọi dòng tới hết dòng upto
+      sinceYield += upto - next + 1;
+      pushOut(upto);
+      ws.getRow(upto).commit();
+      if (sinceYield < FLUSH_BATCH) return;
+      sinceYield = 0;
+      await new Promise(setImmediate);
+      if (res.destroyed) throw new Error('Người dùng đã huỷ tải file');   // đóng tab giữa chừng: thôi ghi tiếp
+    },
+    async finish() {
+      if (ws.lastRow) pushOut(ws.lastRow.number);
+      await ws.commit();
+      await wb.commit();   // bộ ghi tự kết thúc res
+    },
+  };
 }
 
 function monthDays(month) {
@@ -385,7 +428,12 @@ const MISS_FONT = { bold: true, color: { argb: 'FFB91C1C' } };
 const OFF_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
 // Thứ 7 / chủ nhật: tô cam (cả dòng ở báo cáo liệt kê theo ngày, cả cột ngày ở báo cáo ma trận), chữ Thứ đậm cam (Anh 04/11/2026)
 const WK_ROW = new Set(['T7', 'CN']);
-const solid = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+const solidFills = new Map();
+const solid = (argb) => {   // mỗi màu 1 đối tượng dùng chung (không sửa đối tượng trả về)
+  let f = solidFills.get(argb);
+  if (!f) solidFills.set(argb, f = { type: 'pattern', pattern: 'solid', fgColor: { argb } });
+  return f;
+};
 // THỨ 7 NHẠT HƠN CHỦ NHẬT (Anh 04/11/2026). wk = 'T7' | 'CN' | 'X' (ngày cuối tuần khác khai ở Cài đặt → tô như CN)
 const wkShade = (wk, cn, t7) => (wk === 'T7' ? t7 : cn);
 const WK_CELL = (wk) => solid(wkShade(wk, 'FFFFDDB3', 'FFFFF3E3'));
@@ -1057,15 +1105,14 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
   cols.push({ k: 'sym', h: 'Ký hiệu', w: 7 });
   const NC = cols.length;
 
-  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
-  const ws = wb.addWorksheet(onlyLateEarly ? 'DiMuonVeSom' : 'ChiTietTungNV', {
+  const { ws, flush, finish } = openBook(res, `${onlyLateEarly ? 'dimuon_vesom_theonv' : 'chitiet_tung_nv'}_${from}_${to}.xlsx`, onlyLateEarly ? 'DiMuonVeSom' : 'ChiTietTungNV', {
     pageSetup: { paperSize: 9, orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
       horizontalCentered: true, margins: { left: 0.3, right: 0.3, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 } },
   });
   cols.forEach((c, i) => { ws.getColumn(i + 1).width = c.w; });
   const thin = { style: 'thin', color: { argb: 'FF000000' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
-  const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+  const fill = solid;
   const box = (r1, c1, r2, c2, value, style = {}) => {
     if (r1 !== r2 || c1 !== c2) mergeFast(ws, r1, c1, r2, c2);
     const cell = ws.getCell(r1, c1);
@@ -1077,6 +1124,8 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
   const C = { horizontal: 'center', vertical: 'middle', wrapText: true };
   const L = { horizontal: 'left', vertical: 'middle' };
   const R = { horizontal: 'right', vertical: 'middle' };
+  const CM = { horizontal: 'center', vertical: 'middle' };
+  const BOLD = { bold: true };
 
   let r = 1, printed = 0;
   for (const e of ctx.employees) {
@@ -1164,7 +1213,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
         const cell = ws.getCell(r, i + 1);
         cell.value = row[c.k] ?? '';
         cell.border = border;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.alignment = CM;
         if (row.weekend) cell.fill = fill(wkShade(row.weekend, 'FF9BE7F5', 'FFD5F5FB'));
       }
       r++;
@@ -1175,7 +1224,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
       for (let i = 0; i < NC; i++) {
         const c = cols[i], cell = ws.getCell(r, i + 1);
         cell.value = i === 0 ? 'Tổng' : SUM.has(c.k) ? round2(lines.reduce((s, x) => s + (Number(x[c.k]) || 0), 0)) : '';
-        cell.border = border; cell.font = { bold: true }; cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.fill = fill('FFF2F2F2');
+        cell.border = border; cell.font = BOLD; cell.alignment = CM; cell.fill = fill('FFF2F2F2');
       }
       r++;
     }
@@ -1188,25 +1237,28 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
     mergeFast(ws, r, sc1, r, NC); Object.assign(ws.getCell(r, sc1), { value: e.full_name, font: { bold: true }, alignment: C });
     r += 2;
     void top;
+    await flush(r - 2);   // chừa dòng r - 1: NV sau đặt ngắt trang ở đó
   }
   if (!printed) { box(1, 1, 1, NC, onlyLateEarly ? 'Không có nhân viên nào đi muộn / về sớm trong kỳ.' : 'Không có dữ liệu.', { alignment: C }); }
 
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="${onlyLateEarly ? 'dimuon_vesom_theonv' : 'chitiet_tung_nv'}_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await writeBook(wb, res);
+  await finish();
   PROG && PROG(100, 'Xong');
 }
 
 /* ===== Xuất Excel "BẢNG THỐNG KÊ CHẤM CÔNG (GIỜ)" — tiêu đề 2 dòng như mẫu:
  * cột ngày: dòng trên = số ngày, dòng dưới = thứ; nhóm "Tăng ca" gộp trên TC1–TC3; cột khác gộp 2 dòng. */
-async function exportHourStatXlsx(res, from, to, filter, company, address) {
+async function exportHourStatXlsx(res, from, to, filter, company, address, shown) {
   const PROG = filter._prog; let pi = 0;
-  const { title, columns, rows } = buildReport('hourstat', from, to, filter);
+  const { title, columns, rows } = shown || buildReport('hourstat', from, to, filter);
   PROG && PROG(55, 'Đã tính xong, đang ghi vào Excel…');
   const N = columns.length;
-  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
-  const ws = wb.addWorksheet('ThongKeGio', { pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 } });
+  const H = 5;
+  const { ws, flush, finish } = openBook(res, `thongke_chamcong_gio_${from}_${to}.xlsx`, 'ThongKeGio', {
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0 },
+    views: [{ state: 'frozen', ySplit: H + 1, xSplit: 4 }],
+  });
+  columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.w || 8; });
   const thin = { style: 'thin', color: { argb: 'FF000000' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const C = { horizontal: 'center', vertical: 'middle', wrapText: true };
@@ -1216,7 +1268,6 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
   ws.mergeCells(3, 1, 3, N); Object.assign(ws.getCell(3, 1), { value: 'BẢNG THỐNG KÊ CHẤM CÔNG (GIỜ)', font: { name: 'Times New Roman', size: 16, bold: true }, alignment: C });
   ws.mergeCells(4, 1, 4, N); Object.assign(ws.getCell(4, 1), { value: title.replace(/^Bảng thống kê chấm công \(giờ\)\s*/i, '').replace(/^./, (x) => x.toUpperCase()), font: { italic: true }, alignment: C });
 
-  const H = 5;
   for (let i = 0; i < N; i++) {
     const c = columns[i], col = i + 1;
     if (c.sub) {          // cột ngày: số ngày / thứ
@@ -1234,6 +1285,7 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
     cell.font = { name: 'Times New Roman', bold: true }; cell.alignment = C; cell.border = border;
     if (columns[col - 1].weekend) cell.fill = WK_CELL(columns[col - 1].weekend);
   }
+  const AL = { horizontal: 'left', vertical: 'middle' }, AC = { horizontal: 'center', vertical: 'middle' };
   let r = H + 2;
   for (const row of rows) {
     loopProg(PROG, ++pi, rows.length, 55, 88, 'Đang ghi dòng');
@@ -1241,20 +1293,17 @@ async function exportHourStatXlsx(res, from, to, filter, company, address) {
       const c = columns[i], cell = ws.getCell(r, i + 1);
       cell.value = row[c.key] ?? '';
       cell.border = border;
-      cell.alignment = { horizontal: c.key === 'name' || c.key === 'dept' ? 'left' : 'center', vertical: 'middle' };
+      cell.alignment = c.key === 'name' || c.key === 'dept' ? AL : AC;
       if (c.weekend) cell.fill = WK_CELL(c.weekend);
       if (c.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }
     }
+    await flush(r);
     r++;
   }
   if (!rows.length) { ws.mergeCells(r, 1, r, N); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
-  columns.forEach((c, i) => { ws.getColumn(i + 1).width = c.w || 8; });
-  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: 4 }];
 
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="thongke_chamcong_gio_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await writeBook(wb, res);
+  await finish();
   PROG && PROG(100, 'Xong');
 }
 
@@ -1273,8 +1322,11 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
   const missCol = ctx.missShift ? FIXED + days.length * PER + 1 : 0;   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" cuối bảng
   const totalCols = missCol || FIXED + days.length * PER;
-  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
-  const ws = wb.addWorksheet('GioCong');
+  const H = 5;
+  const { ws, flush, finish } = openBook(res, `giocong_tangca_${from}_${to}.xlsx`, 'GioCong', { views: [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }] });
+  ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
+  for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
+  if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const teal = 'FF0F7D7D', pink = 'FFFFE0EC';
@@ -1286,7 +1338,6 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   ws.mergeCells(4, 1, 4, totalCols); Object.assign(ws.getCell(4, 1), { value: HOURLY ? 'Mỗi nhân viên gồm 2 dòng: (1) Giờ chấm Vào–Ra · (2) Giờ làm' : 'Mỗi nhân viên gồm 3 dòng: (1) Giờ chấm Vào–Ra · (2) Giờ công · (3) Giờ tăng ca', font: { italic: true, size: 10, color: { argb: 'FF666666' } } });
 
   // 2 dòng tiêu đề cột (dòng số ngày + dòng thứ / Vào 1 · Ra 1 … khi nhiều lần vào/ra)
-  const H = 5;
   const fixedLabels = ['STT', 'Phòng ban', 'Mã nhân viên', 'Tên nhân viên', 'Ngày vào làm'];
   fixedLabels.forEach((lab, i) => { ws.mergeCells(H, i + 1, H + 1, i + 1); ws.getCell(H, i + 1).value = lab; });
   days.forEach((d, di) => {
@@ -1308,6 +1359,8 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   }
 
   // Mỗi NV = 3 dòng (theo giờ 2 dòng)
+  const AC = { horizontal: 'center' }, ACC = { horizontal: 'centerContinuous' };
+  const edge = Array.from({ length: PER }, (_, k) => ({ top: thin, bottom: thin, ...(k === 0 ? { left: thin } : {}), ...(k === PER - 1 ? { right: thin } : {}) }));
   let r = H + 2, stt = 0;
   const hireDate = (e) => (e.start_date ? fmtDMY(e.start_date) : '');   // ngày vào làm (hồ sơ NV)
   for (const e of ctx.employees) {
@@ -1332,15 +1385,15 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
       if (!HOURLY) ws.getCell(rOt, c1).value = c && c.ot_min ? round2(c.ot_min / 60) : 0;
       for (let k = 0; k < PER; k++) {
         const cell = ws.getCell(rIn, c1 + k);
-        cell.alignment = { horizontal: 'center' };
+        cell.alignment = AC;
         cell.border = border;
         if (weekend) cell.fill = solid(wkShade(weekend, pink, PINK_T7));
       }
       for (const rr of HOURLY ? [rCong] : [rCong, rOt]) {
         for (let k = 0; k < PER; k++) {
           const x = ws.getCell(rr, c1 + k);
-          x.alignment = { horizontal: 'centerContinuous' };
-          x.border = { top: thin, bottom: thin, ...(k === 0 ? { left: thin } : {}), ...(k === PER - 1 ? { right: thin } : {}) };
+          x.alignment = ACC;
+          x.border = edge[k];
           if (weekend) x.fill = solid(wkShade(weekend, pink, PINK_T7));
         }
       }
@@ -1355,18 +1408,12 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
       if (mv) { mc.fill = MISS_FILL; mc.font = MISS_FONT; }
     }
     r += NR;
+    await flush(r - 1);
   }
   if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
 
-  ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
-  for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
-  if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
-  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
-
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="giocong_tangca_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await writeBook(wb, res);
+  await finish();
   PROG && PROG(100, 'Xong');
 }
 
@@ -1387,8 +1434,11 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
   const LAB = fixed.length + 1;          // cột "Chỉ tiêu"
   const D0 = LAB + 1;                    // cột ngày đầu tiên
   const totalCols = LAB + days.length;
-  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
-  const ws = wb.addWorksheet('TheoDoiChamCong');
+  const H = 5;   // 2 dòng tiêu đề: số ngày + thứ
+  const { ws, flush, finish } = openBook(res, `theodoi_chamcong_${from}_${to}.xlsx`, 'TheoDoiChamCong', { views: [{ state: 'frozen', ySplit: H + 1, xSplit: 3 }] });
+  fixed.forEach(([, w], i) => { ws.getColumn(i + 1).width = w; });
+  ws.getColumn(LAB).width = 9;
+  for (let i = 0; i < days.length; i++) ws.getColumn(D0 + i).width = 7;
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const teal = 'FF0F7D7D', pink = 'FFFFE0EC', grey = 'FFF3F4F6';
@@ -1398,7 +1448,6 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
   ws.mergeCells(3, 1, 3, lastLabelCol); ws.getCell(3, 1).value = `From ${fmtDMY(from)} To ${fmtDMY(to)}`;
   if (address) { ws.mergeCells(4, 1, 4, lastLabelCol); ws.getCell(4, 1).value = 'Địa chỉ: ' + address; }
 
-  const H = 5;   // 2 dòng tiêu đề: số ngày + thứ
   fixed.forEach(([lab], i) => { mergeFast(ws, H, i + 1, H + 1, i + 1); ws.getCell(H, i + 1).value = lab; });
   mergeFast(ws, H, LAB, H + 1, LAB); ws.getCell(H, LAB).value = 'Chỉ tiêu';
   days.forEach((d, di) => { ws.getCell(H, D0 + di).value = +d.slice(8); ws.getCell(H + 1, D0 + di).value = WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()]; });
@@ -1411,6 +1460,9 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
   }
   ws.getRow(H).height = 30;
 
+  const AC = { horizontal: 'center' }, BOLD = { bold: true };
+  const labFont = [{ bold: false, size: 10 }, { bold: true, size: 10 }];
+  const dayFill = days.map((d) => { const wk = ctx.paintWeekend(d); return wk ? solid(wkShade(wk, pink, PINK_T7)) : null; });
   let r = H + 2, stt = 0;
   for (const e of ctx.employees) {
     loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
@@ -1424,28 +1476,23 @@ async function exportTrack6Xlsx(res, from, to, filter, company, address) {
     });
     TR.forEach(([key, lab], k) => {
       const lc = ws.getCell(r + k, LAB); lc.value = lab; lc.border = border;
-      lc.alignment = { horizontal: 'center' }; lc.font = { bold: k >= 4, size: 10 }; lc.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: grey } };
+      lc.alignment = AC; lc.font = labFont[k >= 4 ? 1 : 0]; lc.fill = solid(grey);
       days.forEach((d, di) => {
         const cell = ws.getCell(r + k, D0 + di);
         const v = perDay.get(d)[key];
         cell.value = v === '' ? null : v;
-        cell.alignment = { horizontal: 'center' }; cell.border = border;
-        if (k >= 4) cell.font = { bold: true };
-        { const wk = ctx.paintWeekend(d); if (wk) cell.fill = solid(wkShade(wk, pink, PINK_T7)); }
+        cell.alignment = AC; cell.border = border;
+        if (k >= 4) cell.font = BOLD;
+        if (dayFill[di]) cell.fill = dayFill[di];
       });
     });
     r += NR;
+    await flush(r - 1);
   }
   if (!ctx.employees.length) { ws.mergeCells(r, 1, r, lastLabelCol); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
-  fixed.forEach(([, w], i) => { ws.getColumn(i + 1).width = w; });
-  ws.getColumn(LAB).width = 9;
-  for (let i = 0; i < days.length; i++) ws.getColumn(D0 + i).width = 7;
-  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: 3 }];
 
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="theodoi_chamcong_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await writeBook(wb, res);
+  await finish();
   PROG && PROG(100, 'Xong');
 }
 
@@ -1464,8 +1511,12 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   const congCol = FIXED + days.length * PER + 1;   // cột Tổng công / Tổng giờ
   const missCol = ctx.missShift ? congCol + 1 : 0;   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" cuối bảng
   const totalCols = missCol || congCol;
-  const wb = new ExcelJS.Workbook(); wb.creator = 'Digiplus';
-  const ws = wb.addWorksheet('GioVaoRa');
+  const H = 5;
+  const { ws, flush, finish } = openBook(res, `chitiet_giovaora_${from}_${to}.xlsx`, 'GioVaoRa', { views: [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }] });
+  ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
+  for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
+  ws.getColumn(congCol).width = 10;
+  if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
   const teal = 'FF0F7D7D', pink = 'FFFFE0EC';
@@ -1475,7 +1526,6 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   ws.mergeCells(3, 1, 3, totalCols); Object.assign(ws.getCell(3, 1), { value: `BẢNG CHẤM CÔNG CHI TIẾT THỜI GIAN LÀM VIỆC ${PERIOD}`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
   ws.mergeCells(4, 1, 4, totalCols); Object.assign(ws.getCell(4, 1), { value: NP > 1 ? `Mỗi ngày gồm ${PER} cột: mỗi lần chấm 1 cột (Vào 1 | Ra 1 | Vào 2 | Ra 2 …)` : 'Mỗi ngày gồm 2 cột: Giờ Vào | Giờ Ra', font: { italic: true, size: 10, color: { argb: 'FF666666' } } });
 
-  const H = 5;
   const fixedLabels = ['STT', 'Phòng ban', 'Mã nhân viên', 'Tên nhân viên', 'Ngày vào làm'];
   fixedLabels.forEach((lab, i) => { ws.mergeCells(H, i + 1, H + 1, i + 1); ws.getCell(H, i + 1).value = lab; });
   days.forEach((d, di) => {
@@ -1493,6 +1543,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
     cell.border = border;
   }
 
+  const AM = { horizontal: 'center', vertical: 'middle' };
   let r = H + 2, stt = 0;
   for (const e of ctx.employees) {
     loopProg(PROG, ++pi, ctx.employees.length, 30, 88, 'Đang ghi nhân viên');
@@ -1509,7 +1560,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
       const ps = pairsHM(ioOf(e.id, d, c), c);   // theo quy tắc ghép log: mỗi lần chấm 1 cột
       for (let p = 0; p < NP; p++) { ws.getCell(r, c1 + p * 2).value = ps[p] ? ps[p][0] : ''; ws.getCell(r, c1 + p * 2 + 1).value = ps[p] ? ps[p][1] : ''; }
       if (c) cong += HOURLY ? (c.work_minutes || 0) / 60 : (c.work_unit || 0);
-      for (let k = 0; k < PER; k++) { const x = ws.getCell(r, c1 + k); x.alignment = { horizontal: 'center', vertical: 'middle' }; x.border = border; if (weekend) x.fill = solid(wkShade(weekend, pink, PINK_T7)); }
+      for (let k = 0; k < PER; k++) { const x = ws.getCell(r, c1 + k); x.alignment = AM; x.border = border; if (weekend) x.fill = solid(wkShade(weekend, pink, PINK_T7)); }
     }
     const cc = ws.getCell(r, congCol); cc.value = round2(cong); cc.alignment = { horizontal: 'center' }; cc.border = border;
     if (missCol) {
@@ -1517,20 +1568,13 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
       mc.value = mv; mc.border = border; mc.alignment = { vertical: 'middle', wrapText: true };
       if (mv) { mc.fill = MISS_FILL; mc.font = MISS_FONT; }
     }
+    await flush(r);
     r++;
   }
   if (!ctx.employees.length) { ws.mergeCells(r, 1, r, totalCols); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
 
-  ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
-  for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
-  ws.getColumn(congCol).width = 10;
-  if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
-  ws.views = [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }];
-
-  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="chitiet_giovaora_${from}_${to}.xlsx"`);
   PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await writeBook(wb, res);
+  await finish();
   PROG && PROG(100, 'Xong');
 }
 
@@ -1713,13 +1757,22 @@ r.get('/export.xlsx', virtGuard, async (req, res) => {
   filter._prog = PROG;
   PROG(4, shown ? 'Dùng lại số liệu vừa xem…' : 'Đang đọc dữ liệu chấm công…');
 
-  // Mẫu chi tiết dạng ma trận 2 cột/ngày (giống file mẫu)
-  if (type === 'workhours') return exportWorkhoursXlsx(res, from, to, filter, company, address);
-  if (type === 'track6') return exportTrack6Xlsx(res, from, to, filter, company, address);
-  if (type === 'daytime') return exportDaytimeXlsx(res, from, to, filter, company, address);
-  if (type === 'hourstat') return exportHourStatXlsx(res, from, to, filter, company, address);
-  if (type === 'empsheet') return exportEmpSheetXlsx(res, from, to, filter, company, false);
-  if (type === 'empsheetlate') return exportEmpSheetXlsx(res, from, to, filter, company, true);
+  // Mẫu tự xếp ô (ma trận 2 cột/ngày, bảng từng NV…)
+  const layout = {
+    workhours: () => exportWorkhoursXlsx(res, from, to, filter, company, address),
+    track6: () => exportTrack6Xlsx(res, from, to, filter, company, address),
+    daytime: () => exportDaytimeXlsx(res, from, to, filter, company, address),
+    hourstat: () => exportHourStatXlsx(res, from, to, filter, company, address, shown),
+    empsheet: () => exportEmpSheetXlsx(res, from, to, filter, company, false),
+    empsheetlate: () => exportEmpSheetXlsx(res, from, to, filter, company, true),
+  }[type];
+  if (layout) {
+    try { await layout(); } catch (e) {   // file đang ghi dở: chỉ còn cách cắt kết nối để trình duyệt báo không xuất được
+      if (!res.destroyed) console.error('[reports] xuất Excel lỗi:', e.message);
+      res.destroy();
+    }
+    return;
+  }
 
   const { title, columns, rows } = shown || buildAny(type, from, to, filter);
   PROG(50, shown ? 'Đang ghi vào Excel…' : 'Đã lập xong, đang ghi vào Excel…');

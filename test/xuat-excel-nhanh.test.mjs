@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 
 const DBP = join(tmpdir(), `dgp-xuat-excel-nhanh-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -99,6 +100,71 @@ test('báo cáo tự xếp ô (bảng từng NV) vẫn đúng màu T7 / CN sau k
   assert.equal(color['05/09'], 'FFD5F5FB');
   assert.equal(color['06/09'], 'FF9BE7F5');
   assert.equal(color['04/09'], undefined);
+});
+
+test('báo cáo tự xếp ô ghi bằng bộ ghi luồng: giữ đóng băng, độ rộng, gộp ô, ngắt trang, thiết lập in và tô T7 / CN', async () => {
+  const h2 = Number(db.prepare("INSERT INTO employees(code, full_name, department, role, username, password_hash, att_mode, start_date) VALUES ('H2','Bình Đi Làm','Xưởng','employee','h2','x','hourly','2026-01-01')").run().lastInsertRowid);
+  db.prepare('INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, work_unit, work_minutes) VALUES (?,?,?,?,?,?)')
+    .run(h2, '2026-09-05', vn('2026-09-05', '08:00'), vn('2026-09-05', '12:00'), 0.5, 240);
+  const ids = `&ids=${h1},${h2}`;
+  try {
+    const ws = async (type) => (await book(`type=${type}${Q}&mode=shift${ids}`)).worksheets[0];
+    const pane = (s) => s.views.map((v) => [v.state, v.xSplit, v.ySplit]);
+
+    const hours = await ws('workhours');
+    assert.equal(hours.name, 'GioCong');
+    assert.deepEqual(pane(hours), [['frozen', 5, 6]]);
+    assert.deepEqual([1, 2, 3, 4, 5, 6].map((c) => hours.getColumn(c).width), [5, 14, 12, 20, 12, 7]);
+    assert.ok(hours.model.merges.includes('A7:A9') && hours.model.merges.includes('A10:A12'), 'mỗi NV 3 dòng, gộp ô STT');
+    assert.equal(hours.getCell(7, 4).value, 'An Đi Làm');
+    assert.equal(hours.getCell(10, 4).value, 'Bình Đi Làm');
+    const dayCol = (n) => { let col = 0; hours.getRow(5).eachCell((c, i) => { if (parseInt(c.value, 10) === n) col = i; }); return col; };
+    assert.equal(argb(hours.getCell(10, dayCol(5))), 'FFFFF0F6', 'T7 hồng nhạt');
+    assert.equal(argb(hours.getCell(10, dayCol(6))), 'FFFFE0EC', 'CN hồng đậm');
+    assert.equal(argb(hours.getCell(10, dayCol(4))), undefined, 'ngày thường không tô');
+
+    const track = await ws('track6');
+    assert.deepEqual(pane(track), [['frozen', 3, 6]]);
+    assert.equal(track.getColumn(3).width, 20);
+    assert.equal(track.getRow(5).height, 30);
+    assert.equal(track.getCell(7, 3).value, 'An Đi Làm');
+
+    const daytime = await ws('daytime');
+    assert.deepEqual(pane(daytime), [['frozen', 5, 6]]);
+    assert.equal(daytime.getCell(8, 4).value, 'Bình Đi Làm');
+    assert.equal(daytime.getColumn(14).width, 7);
+
+    const stat = await ws('hourstat');
+    assert.deepEqual(pane(stat), [['frozen', 4, 6]]);
+    assert.equal(stat.pageSetup.orientation, 'landscape');
+    assert.equal(stat.pageSetup.fitToPage, true);
+
+    const sheet = await ws('empsheet');
+    assert.equal(sheet.name, 'ChiTietTungNV');
+    assert.equal(sheet.pageSetup.orientation, 'portrait');
+    assert.equal(sheet.pageSetup.fitToWidth, 1);
+    assert.equal(sheet.getColumn(1).width, 11);
+    const titles = [];
+    sheet.eachRow((r, n) => { if (r.getCell(1).value === 'BẢNG CHI TIẾT CHẤM CÔNG') titles.push(n); });
+    assert.equal(titles.length, 2);
+    const raw = await JSZip.loadAsync(await (await call(`/api/reports/export.xlsx?type=empsheet${Q}&mode=shift${ids}`)).arrayBuffer());
+    const brk = [...(await raw.file('xl/worksheets/sheet1.xml').async('string')).matchAll(/<brk id="(\d+)"/g)].map((m) => +m[1]);   // ExcelJS đọc file không nạp ngắt trang
+    assert.deepEqual(brk, [titles[1] - 1], 'mỗi NV 1 trang: ngắt ngay trước NV thứ hai');
+    assert.ok(sheet.model.merges.includes(`A${titles[1]}:${sheet.getColumn(sheet.columnCount).letter}${titles[1]}`));
+  } finally {
+    db.prepare('DELETE FROM attendance WHERE employee_id = ?').run(h2);
+    db.prepare('DELETE FROM employees WHERE id = ?').run(h2);
+  }
+});
+
+test('báo cáo tự xếp ô không có dữ liệu vẫn ra file mở được', async () => {
+  for (const [type, text] of [['workhours', 'Không có dữ liệu.'], ['track6', 'Không có dữ liệu.'], ['daytime', 'Không có dữ liệu.'], ['hourstat', 'Không có dữ liệu.'],
+    ['empsheet', 'Không có dữ liệu.'], ['empsheetlate', 'Không có nhân viên nào đi muộn / về sớm trong kỳ.']]) {
+    const ws = (await book(`type=${type}${Q}&mode=shift&ids=99999`)).worksheets[0];
+    const seen = [];
+    ws.eachRow((r) => r.eachCell((c) => seen.push(c.value)));
+    assert.ok(seen.includes(text), type);
+  }
 });
 
 test('mẫu riêng đã xoá (không có cột nào) vẫn xuất được file', async () => {
