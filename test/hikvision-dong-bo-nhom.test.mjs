@@ -270,6 +270,24 @@ test('ảnh khuôn mặt đăng ký: Tải NV máy Hikvision → NV chưa có �
   assert.equal((await waitJob(r2.out.job)).result.photos, 0, 'tải lại: NV đã có ảnh thì không tải nữa');
 });
 
+test('ảnh khuôn mặt đăng ký: NV quẹt trên máy (máy tự gửi lượt chấm) → tự tải ảnh mặt về phần mềm, người lạ thì không', async () => {
+  const photo = (pin) => db.prepare('SELECT kind, photo FROM device_user_photos WHERE pin=?').get(pin);
+  const { hikReceive } = await import('../server/hik-isapi.js');
+  db.prepare("INSERT INTO employees(code, full_name, username, password_hash, device_pin, active) VALUES('NV804','NV quet 804','nv804','x','804',1)").run();
+  A.users.set('804', 'NV quet 804'); A.faces.set('804', jpg(8));
+  A.users.set('805', 'Nguoi la'); A.faces.set('805', jpg(9));
+  db.prepare('UPDATE push_devices SET hik_push_token=? WHERE id=?').run('tok-a', ids[A.serial]);
+  const ev = (pin, serialNo) => JSON.stringify({ ipAddress: '127.0.0.1', macAddress: 'aa:bb:cc:00:00:01', dateTime: '2026-11-05T13:37:00+07:00', eventType: 'AccessControllerEvent', eventState: 'active',
+    AccessControllerEvent: { majorEventType: 5, subEventType: 75, employeeNoString: pin, serialNo, currentVerifyMode: 'face' } });
+  assert.equal(photo('804'), undefined);
+  assert.equal(hikReceive({ token: 'tok-a', contentType: 'application/json', body: ev('804', 1) }).added, 1);
+  for (let k = 0; k < 200 && !photo('804'); k++) await sleep(20);
+  assert.ok(photo('804'), 'NV vừa quẹt có ảnh'); assert.ok(Buffer.from(photo('804').photo, 'base64').equals(A.faces.get('804')));
+  setSetting('device_autocreate', '0');   // Số ID lạ không thành NV
+  try { hikReceive({ token: 'tok-a', contentType: 'application/json', body: ev('805', 2) }); await sleep(120); } finally { setSetting('device_autocreate', '1'); }
+  assert.equal(photo('805'), undefined, 'người lạ không lưu ảnh');
+});
+
 test('tắt tính năng máy Hikvision → không đồng bộ được (như cũ)', async () => {
   setSetting('hik_device_enabled', '0');
   try {

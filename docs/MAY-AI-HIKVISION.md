@@ -94,6 +94,13 @@ Máy đang có 3.977 người + 44.665 lượt chấm từ 04/2026 của khách.
 - Thử thật 05/11 12:10: xoá sạch máy 1 (UserInfoDetail/Delete mode all → 0 người, 0 mặt), đồng bộ chỉ 9001 + 9002 → máy 1 nhận 2 người + 2 ảnh mặt (0,6 giây). KHÔNG đặt nhóm cố định trên 8686: máy 2 có 3.979 người của khách, đặt nhóm thì vòng tự tải sẽ chép tới đầy 500 chỗ của máy 1.
 - Thử thật 05/11 (bản sao DB 8686, chỉ 4 Số ID 9001, 9002, 2, 3032151722): máy 2 → máy 1 chép 2 người + 2 ảnh mặt; máy 1 → máy 2 chép 2 người + 1 ảnh mặt + 1 thẻ; chạy lại không ghi gì. **DS-K1T671M không có vân tay**: đầu đọc 1 chỉ `face`, đầu đọc 2 là cổng Wiegand trống (capabilities vẫn báo 2…2, ghi vào thì máy trả `cardReaderRecvStatus` 8). Ghi vân tay sang máy có vân tay mới thử trên máy giả lập (chưa có 2 máy thật cùng có vân tay).
 
+## Ảnh khuôn mặt đăng ký về phần mềm (v1.29.12)
+- Hộp chi tiết NV có ô "📸 Ảnh khuôn mặt đăng ký trên máy" đọc từ bảng `device_user_photos`. Máy ZKTeco tự gửi ảnh (BIOPHOTO), máy Hikvision **không gửi** → phần mềm tự tải: FDSearch → `faceURL` → GET ảnh JPG.
+- Tải khi: NV quẹt trên máy (chạy nền), bấm Tải NV (chạy nền, báo số người đang tải), đồng bộ nhóm đọc ảnh mặt.
+- Chỉ tải cho **Số ID đã là NV đang làm, chưa có ảnh**; không lưu ảnh người lạ, không tải lại ảnh đã có. 1 Số ID thử lại sau 30 phút nếu máy chưa có mặt.
+- Người đổi ảnh trên máy: phần mềm giữ ảnh cũ (chưa tự thay).
+- **Cài đặt `AcsCfg.saveFacePic` trên máy quyết định máy có giữ ảnh gửi xuống không.** MT05WE (máy 1) đang `false`: ảnh gửi qua FDSetUp chỉ dựng thành mẫu rồi bỏ, FDSearch vẫn trả `faceURL` nhưng GET báo 404, máy nhận diện được mà không có ảnh để hiện. DS-K1T671M (máy 2) `true`: ảnh đọc lại được. Ảnh đăng ký ngay trên máy thì máy 1 vẫn giữ. `uploadCapPic` / `saveCapPic` của máy 1 cũng `false` nên lượt chấm không kèm ảnh chụp.
+
 ## Đã kiểm / chưa kiểm (máy giả lập)
 - Đã kiểm bằng máy giả lập (test `test/may-ai-hikvision.test.mjs` + chạy thử giao diện): kết nối, chờ duyệt, lượt chấm → công,
   tự tạo NV, tải NV chia trang, đồng bộ nhóm máy AI, xoá NV, đẩy NV, Digest sai/đúng mật khẩu, lọc lượt thất bại.
