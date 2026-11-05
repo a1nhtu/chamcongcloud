@@ -116,6 +116,7 @@ function hikHandler(req, res) {
       return xml('<ResponseStatus><statusCode>1</statusCode></ResponseStatus>');
     }
     if (hm && hm[2] && req.method === 'POST') {   // gửi thử: máy POST nhịp tim thật về địa chỉ đang cài
+      if (H.noTest) return xml('<ResponseStatus><statusCode>4</statusCode><statusString>Invalid Operation</statusString><subStatusCode>methodNotAllowed</subStatusCode></ResponseStatus>', 400);   // đúng như máy thật MT05WE
       const h = H.hosts.find((x) => x.id === hm[1]);
       H.tested.push(h.id);
       const r = await post(+h.port, h.url, { ipAddress: '127.0.0.1', macAddress: 'aa:bb:cc:dd:ee:ff', dateTime: '2026-10-16T07:00:00+07:00', activePostCount: 1, eventType: 'heartBeat', eventState: 'inactive', eventDescription: 'test' }).catch(() => ({ status: 0 }));
@@ -253,6 +254,24 @@ test('lượt máy đã tự gửi rồi, lúc tải chấm công theo nút / l�
   const j = await waitJob((await call('POST /devices/:id/hik/:action', { params: { id, action: 'logs' }, body: { from: '2026-10-16', to: '2026-10-16' } })).out.job);
   assert.equal(j.state, 'done', j.msg);
   assert.equal(j.result.read, 1); assert.equal(j.result.added, 0);
+});
+test('máy không lọc eventAttribute (máy thật MT05WE): sự kiện cửa + lượt bị từ chối có Số ID không thành lượt chấm', async () => {
+  H.events = [
+    { major: 5, minor: 21, time: '2026-10-17T08:00:00+07:00' },                                    // cửa mở, không Số ID
+    { major: 5, minor: 6, time: '2026-10-17T08:00:30+07:00', employeeNoString: '101' },            // thẻ không có quyền
+    { major: 5, minor: 38, time: '2026-10-17T08:01:00+07:00', employeeNoString: '101' },           // vân tay thành công
+  ];
+  const j = await waitJob((await call('POST /devices/:id/hik/:action', { params: { id, action: 'logs' }, body: { from: '2026-10-17', to: '2026-10-17' } })).out.job);
+  assert.equal(j.state, 'done', j.msg);
+  assert.equal(j.result.read, 1); assert.equal(j.result.added, 1);
+  H.events = [];
+});
+test('máy trả 400 methodNotAllowed cho lệnh gửi thử (máy thật MT05WE) = không có lệnh gửi thử, không báo lỗi giả', async () => {
+  H.noTest = true;
+  const r = await call('POST /devices/:id/hik-push', { params: { id }, body: { host: '127.0.0.1', port: appPort } });
+  H.noTest = false;
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.test, '');
 });
 
 /* ======================= ĐẨY ẢNH KHUÔN MẶT ======================= */

@@ -54,7 +54,16 @@ Trang Máy chấm công → "Đẩy NV xuống máy" → tích **Kèm vân tay /
 Gửi `PUT /ISAPI/Intelligent/FDLib/FDSetUp?format=json` (multipart `FaceDataRecord` + `FaceImage`, thư viện `blackFD`, FPID = Số ID; có rồi thì thay),
 máy đời cũ không có FDSetUp thì `POST /ISAPI/Intelligent/FDLib/FaceDataRecord?format=json`. Tài liệu: E.186, E.190, F.6, F.161.
 
-## Đã kiểm / chưa kiểm
+## Đã kiểm trên máy thật (05/11/2026, v1.29.6 trên 8686)
+Máy khuôn mặt + vân tay + thẻ, SADP báo model MT05WE, firmware V3.9.50 build 260130, cùng LAN với máy chủ.
+- **Đạt:** đăng nhập Digest, đọc thông tin, tải NV, tải chấm công, đặt giờ (máy đang để UTC+8 đổi được về UTC+7), cài HTTP Listening (ghi từng ô `/httpHosts/<id>`),
+  nhịp tim 30 giây và lượt quẹt khuôn mặt + vân tay về phần mềm trong khoảng 1 giây (sự kiện cửa, thẻ lạ, vân tay trượt bị bỏ đúng), đẩy NV + ảnh mặt + thẻ, xoá NV (xoá luôn ảnh mặt),
+  khởi động lại (khoảng 30 giây, giữ giờ + địa chỉ nhận). Máy tự thêm `SubscribeEvent` cho `AccessControllerEvent`, không phải bật gì thêm trên web máy.
+- **Riêng máy này:** nhận `eventAttribute=attendance` nhưng không lọc (trả cả sự kiện cửa) → phần mềm tự lọc mã thành công khi gặp sự kiện không Số ID (từ v1.29.7).
+  Lệnh gửi thử `/httpHosts/<id>/test` trả HTTP 400 `methodNotAllowed` = máy không có lệnh này, phải quẹt thử để kiểm tra.
+- **Chưa kiểm trên máy thật:** lượt thẻ hợp lệ gửi tức thì, mở cửa từ xa, tên miền Cloudflare, máy khác đời.
+
+## Đã kiểm / chưa kiểm (máy giả lập)
 - Đã kiểm bằng máy giả lập (test `test/may-ai-hikvision.test.mjs` + chạy thử giao diện): kết nối, chờ duyệt, lượt chấm → công,
   tự tạo NV, tải NV chia trang, đồng bộ nhóm máy AI, xoá NV, đẩy NV, Digest sai/đúng mật khẩu, lọc lượt thất bại.
 - Đợt 2 (test `test/hikvision-tu-gui-anh-mat.test.mjs`): cài địa chỉ nhận vào ô trống / không đè ô phần mềm khác / hết ô, máy gửi thử,

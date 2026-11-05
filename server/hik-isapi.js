@@ -185,6 +185,9 @@ export async function hikLogs(dev, from, to, prog = () => {}) {
   let strict = false, read = 0;
   const onPage = (list, total) => {
     read += list.length;
+    // Máy thật (MT05WE, firmware 3.9.50) nhận eventAttribute nhưng KHÔNG lọc, vẫn trả cả sự kiện cửa không Số ID
+    // → gặp sự kiện đó thì tự lọc mã "thành công", kẻo lượt bị từ chối có Số ID (thẻ không có quyền…) lọt thành lượt chấm.
+    if (!strict && list.some((e) => !String(e.employeeNoString ?? e.employeeNo ?? '').trim())) strict = true;
     for (const e of list) {
       const l = hikEventLine(e, strict);
       if (!l) continue;
@@ -470,7 +473,10 @@ export async function hikSetupPush(dev, { host, port } = {}) {
   }
   let test = '';   // '' = máy không có lệnh gửi thử
   try { const t = await isapi(dev, 'POST', at + '/test', XML + node, { timeoutMs: 15000 }); test = tag(t.text, 'errorDescription') || 'ok'; }
-  catch (e) { if (e.code === 'CONN' || e.code === 'AUTH') throw e; test = e.code === 'ISAPI' && e.status === 404 ? '' : e.message; }
+  catch (e) {   // máy thật MT05WE trả HTTP 400 methodNotAllowed cho lệnh gửi thử = máy không có lệnh này, không phải lỗi đường truyền
+    if (e.code === 'CONN' || e.code === 'AUTH') throw e;
+    test = e.code === 'ISAPI' && (e.status === 404 || e.status === 405 || /methodNotAllowed|notSupport/i.test(e.message)) ? '' : e.message;
+  }
   const url = `${https ? 'https' : 'http'}://${host}${p === (https ? 443 : 80) ? '' : ':' + p}${path}`;
   db.prepare('UPDATE push_devices SET hik_push_url=? WHERE id=?').run(url, dev.id);
   return { slot: slot.id, url, test };
