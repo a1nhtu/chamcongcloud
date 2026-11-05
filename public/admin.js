@@ -5893,6 +5893,15 @@ async function pageDevices() {
       m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải dữ liệu chấm công (từ ngày – đến ngày)', fn: () => tcpLogsModal(m, 'hik') } : null,
       renameItem,
       { group: 'Cài đặt máy', label: '🔌 Sửa kết nối (IP / cổng / tài khoản)', fn: () => hikAddModal(m) },
+      { group: 'Cài đặt máy', hint: 'Các máy Hikvision CÙNG nhóm tự chép cho nhau người + thẻ + khuôn mặt + vân tay', label: '🔁 Nhóm đồng bộ' + (m.sync_group ? ': ' + m.sync_group : ''), fn: async () => {
+        const g = prompt('Nhóm đồng bộ: các máy Hikvision CÙNG nhóm tự chép cho nhau người + thẻ + ảnh khuôn mặt + vân tay (chỉ thêm, không xoá).\nĐể trống = không đồng bộ:', m.sync_group || '');
+        if (g == null) return;
+        try { await putDev({ sync_group: g }); } catch (e) { return toast(e.message, 'err'); }
+        const peers = d.rows.filter((x) => x.conn_type === 'hik' && x.active && x.id !== m.id && g.trim() && x.sync_group === g.trim()).length;
+        if (m.active && peers) tcpJob({ ...m, sync_group: g.trim() }, 'sync', {}, pageDevices, 'hik');
+        else { toast(g.trim() ? 'Đã đặt nhóm. Đặt cùng nhóm cho máy Hikvision thứ 2 là tự đồng bộ.' : 'Đã bỏ nhóm đồng bộ', 'ok'); pageDevices(); }
+      } },
+      m.active && m.sync_group ? { group: 'Cài đặt máy', hint: 'Chép ngay người / thẻ / mặt / vân tay còn thiếu giữa các máy cùng nhóm', label: '🔁 Đồng bộ nhóm ngay', fn: () => tcpJob(m, 'sync', {}, pageDevices, 'hik') } : null,
       m.active ? { group: 'Cài đặt máy', label: m.tcp_auto ? '⏱ Tắt tự động tải máy này' : '⏱ Bật tự động tải máy này', fn: async () => { try { await api(`/admin/hik-devices/${m.id}/auto`, { method: 'PUT', body: { on: !m.tcp_auto } }); toast(m.tcp_auto ? 'Đã tắt tự động tải cho máy này' : 'Đã bật tự động tải cho máy này', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null,
       m.active ? { group: 'Cài đặt máy', hint: 'Mỗi lần chấm, máy gửi ngay lượt chấm về phần mềm (HTTP Listening)', label: m.hik_push_url ? '📡 Máy tự gửi lượt chấm: ĐÃ CÀI (xem / cài lại)' : '📡 Cài máy tự gửi lượt chấm về phần mềm', fn: () => hikPushModal(m, d) } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy chủ', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ máy chủ (múi giờ Việt Nam)?\nKiểm tra đồng hồ máy tính cài phần mềm đúng trước.`)) tcpJob(m, 'set-time', {}, null, 'hik'); } } : null,
@@ -6402,6 +6411,15 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
       if (r.onDevice != null && r.onDevice !== r.read) out.append(line('Người trên máy', n(r.onDevice)));
       if (r.long) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px' }, `${n(r.long)} người trên máy có Số ID dài hơn 32 ký tự — phần mềm chưa nhận.`));
       if (r.fps != null) out.append(line('Mẫu vân tay đọc từ máy', n(r.fps)));
+    } else if (action === 'sync') {
+      msg.textContent = r.devices < 2 && r.note ? '⚠ ' + r.note : `✅ Đã đồng bộ nhóm "${r.group}" (${n(r.devices)} máy)`;
+      if (r.devices < 2 && r.note) msg.style.color = '#b45309';
+      out.append(line('Người có trên các máy trong nhóm', n(r.people)), line('Người chép sang máy còn thiếu', n(r.users)), line('Ảnh khuôn mặt đã chép', n(r.faces)), line('Vân tay đã chép', n(r.fps)), line('Thẻ đã chép', n(r.cards)));
+      for (const p of r.per || []) if (p.users || p.faces || p.fps || p.cards || p.failed) out.append(el('div', { class: 'map-hint', style: 'margin-top:4px' }, `→ ${p.device}: +${n(p.users)} người, +${n(p.faces)} mặt, +${n(p.fps)} vân tay, +${n(p.cards)} thẻ${p.failed ? `, lỗi ${n(p.failed)}` : ''}`));
+      if (r.nofp) out.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, `${n(r.nofp)} người có vân tay nhưng máy nhận không có đầu đọc vân tay — chỉ chép người / mặt / thẻ.`));
+      if (r.skipped) out.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, `Bỏ qua ${n(r.skipped)} Số ID đang nghi trùng.`));
+      if (r.errors?.length) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px;white-space:normal' }, 'Lỗi: ' + r.errors.join(' · ')));
+      if (!r.users && !r.faces && !r.fps && !r.cards && !r.errors?.length && r.devices >= 2) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Các máy đã giống nhau, không có gì cần chép.'));
     } else if (action === 'info') { msg.textContent = '✅ Đã đọc thông tin máy'; out.append(tcpInfoBox(r.info || {})); }
     else if (action === 'delete-users') {
       msg.textContent = `✅ Đã xoá ${n(r.deleted?.length)} nhân viên trên máy`;

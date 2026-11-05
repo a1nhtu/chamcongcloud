@@ -11,7 +11,7 @@ Lượt chấm của mọi hãng đổ chung một chỗ với máy ZKTeco → t
 | Chạy trên VPS / qua Internet | Được, khỏi mở port modem | Chỉ khi máy được mở port ra Internet |
 | Lượt chấm về phần mềm | Ngay lúc chấm | Ngay lúc chấm khi đã cài "📡 Máy tự gửi" (HTTP Listening); hoặc bấm "⬇ Tải chấm công" / tự tải theo lịch |
 | NV đăng ký trên máy → phần mềm | Ngay lúc đăng ký (tự tạo NV nháp) | Lúc tải NV / tải chấm công |
-| Đồng bộ vân tay / khuôn mặt giữa các máy | Có (các máy AI cùng "Nhóm đồng bộ") | Chưa (đợt sau) |
+| Đồng bộ vân tay / khuôn mặt giữa các máy | Có (các máy AI cùng "Nhóm đồng bộ") | Có từ v1.29.10 (các máy Hikvision cùng "Nhóm đồng bộ": người + thẻ + ảnh mặt + vân tay) |
 | Đẩy NV từ phần mềm xuống máy | Có (tên, thẻ, mật mã, mẫu) | Có (Số ID, tên, thẻ + ảnh khuôn mặt khi tích "Kèm vân tay / khuôn mặt") |
 | Code | `server/ai-device.js`, `server/ai-ws.js` | `server/hik-isapi.js`, `server/routes/hik-event.js` |
 
@@ -81,6 +81,15 @@ Máy đang có 3.977 người + 44.665 lượt chấm từ 04/2026 của khách.
   Thử trên bản chép DB demo (cổng 8899): tải 3.979 người trong 10 giây, ngày 10/04/2026 có 141 lượt của 53 người, 0 lượt chưa khớp, không báo nghi trùng.
   v1.29.8: thông tin máy ghi đúng số người trên máy; tải NV báo số người bị bỏ (giờ chỉ còn Số ID > 32 ký tự).
 - Lệnh gửi thử: không có (giống MT05WE).
+
+## Đồng bộ nhóm máy Hikvision (v1.29.10)
+- Đặt **cùng tên nhóm** cho các máy: ⋯ → 🔁 Nhóm đồng bộ. Đặt xong (có ≥ 2 máy đã duyệt) phần mềm chép ngay; sau đó bấm **🔁 Đồng bộ nhóm ngay** bất cứ lúc nào.
+- Vòng tự tải 15 phút: thấy số người trên máy nào đổi → tự đồng bộ cả nhóm. Thêm mặt / vân tay cho người **đã có** trên máy (số người không đổi) → bấm nút.
+- Máy Hikvision không tự đẩy dữ liệu đăng ký → phần mềm đọc từng máy qua ISAPI (UserInfo/Search, CardInfo/Search, FDSearch + tải ảnh, FingerPrintUpload) rồi ghi sang máy thiếu (UserInfo/SetUp, CardInfo/SetUp, FDSetUp, FingerPrint/SetUp). Tuần tự từng máy.
+- **Chỉ thêm / bổ sung**, không xoá gì. Bỏ NV đã **khoá** và Số ID đang nghi trùng. Muốn bỏ 1 người khỏi cả nhóm: khoá NV trong phần mềm rồi xoá trên máy (không khoá thì lần sau người đó lại được chép về từ máy khác).
+- Khuôn mặt chép **ảnh JPG** → máy nhận tự dựng mẫu (khác đời máy vẫn được). Vân tay ghi vào **đầu đọc có vân tay** của máy nhận: hỏi CardReaderCfg/<số> xem `cardReaderFunction` có `fingerPrint`; máy không có → báo "máy nhận không có đầu đọc vân tay", phần người / mặt / thẻ vẫn chép.
+- Máy mất kết nối giữa chừng: báo máy đó, các máy còn lại vẫn đồng bộ.
+- Thử thật 05/11 (bản sao DB 8686, chỉ 4 Số ID 9001, 9002, 2, 3032151722): máy 2 → máy 1 chép 2 người + 2 ảnh mặt; máy 1 → máy 2 chép 2 người + 1 ảnh mặt + 1 thẻ; chạy lại không ghi gì. **DS-K1T671M không có vân tay**: đầu đọc 1 chỉ `face`, đầu đọc 2 là cổng Wiegand trống (capabilities vẫn báo 2…2, ghi vào thì máy trả `cardReaderRecvStatus` 8). Ghi vân tay sang máy có vân tay mới thử trên máy giả lập (chưa có 2 máy thật cùng có vân tay).
 
 ## Đã kiểm / chưa kiểm (máy giả lập)
 - Đã kiểm bằng máy giả lập (test `test/may-ai-hikvision.test.mjs` + chạy thử giao diện): kết nối, chờ duyệt, lượt chấm → công,

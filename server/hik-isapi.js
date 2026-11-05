@@ -49,7 +49,7 @@ function rawReq(dev, method, path, body, auth, timeoutMs, ctype) {
     const req = (https ? httpsReq : httpReq)({ host: dev.tcp_ip, port: dev.tcp_port || 80, method, path, headers, rejectUnauthorized: false, timeout: timeoutMs }, (res) => {
       const chunks = []; let size = 0;
       res.on('data', (c) => { size += c.length; if (size > 64 * 1024 * 1024) { req.destroy(new Error('Máy trả dữ liệu quá lớn')); return; } chunks.push(c); });
-      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('end', () => { const buf = Buffer.concat(chunks); resolve({ status: res.statusCode, headers: res.headers, text: buf.toString('utf8'), buf }); });
       res.on('error', reject);
     });
     req.on('timeout', () => req.destroy(Object.assign(new Error('Máy không phản hồi (quá thời gian chờ).'), { code: 'TIMEOUT' })));
@@ -83,7 +83,7 @@ export async function isapi(dev, method, path, body = null, { timeoutMs = 20000,
     const why = st && (st.subStatusCode || st.statusString || st.errorMsg) || (/<subStatusCode>([^<]*)/.exec(r.text) || [])[1] || ('HTTP ' + r.status);
     throw Object.assign(new Error(`Máy Hikvision báo lỗi: ${why}`), { code: 'ISAPI', status: r.status, sub: st && st.subStatusCode });
   }
-  return { status: r.status, text: r.text, json };
+  return { status: r.status, text: r.text, json, buf: r.buf, type: r.headers['content-type'] || '' };   // buf: dữ liệu gốc (ảnh mặt)
 }
 const tag = (xml, t) => ((new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml) || [])[1] || '').trim();
 
@@ -110,7 +110,7 @@ export function saveHikInfo(id, info) {
 // Số ID dài nhất: hãng cho employeeNo tới 32 ký tự; máy thật DS-K1T671M (khách gửi thử) có 3.976 người Số ID 32 ký tự hex.
 // Máy ZK / máy khác vẫn 20 như cũ (giới hạn chỉ nới cho đường Hikvision).
 export const HIK_MAX_PIN = 32;
-const HIK_PIN = { maxPin: HIK_MAX_PIN };
+export const HIK_PIN = { maxPin: HIK_MAX_PIN };
 // 1 người trên máy → dòng "USER PIN=..\tName=.." (null = bỏ: Số ID rác, khách visitor, danh sách chặn)
 function userLine(u) {
   const pin = String(u.employeeNo ?? '').trim();
@@ -233,7 +233,7 @@ export function hikFacePhoto(pin) {
   const buf = Buffer.from(p.photo, 'base64');
   return buf.length > 100 && buf[0] === 0xff && buf[1] === 0xd8 ? buf : null;   // chỉ ảnh JPG
 }
-function multipart(parts) {
+export function multipart(parts) {
   const b = '----Digiplus' + randomBytes(8).toString('hex');
   const chunks = [];
   for (const p of parts) {
@@ -243,7 +243,7 @@ function multipart(parts) {
   return { body: Buffer.concat(chunks), type: 'multipart/form-data; boundary=' + b };
 }
 // Thư viện mặt của máy: lấy thư viện "blackFD" đầu tiên; máy không trả danh sách → mặc định FDID 1 (máy chấm công Hikvision)
-async function faceLib(dev) {
+export async function faceLib(dev) {
   try {
     const r = await isapi(dev, 'GET', '/ISAPI/Intelligent/FDLib?format=json');
     const libs = Array.isArray(r.json?.FDLib) ? r.json.FDLib : [];
@@ -253,7 +253,7 @@ async function faceLib(dev) {
   return { FDID: '1', faceLibType: 'blackFD' };
 }
 // máy trả HTTP 200 nhưng JSON statusCode ≠ 1 → cũng là lỗi
-const statusOk = (r) => {
+export const statusOk = (r) => {
   const j = r.json;
   if (j && j.statusCode != null && +j.statusCode !== 1) throw Object.assign(new Error(`Máy Hikvision báo lỗi: ${j.subStatusCode || j.statusString || j.errorMsg}`), { code: 'ISAPI' });
   return r;
@@ -263,9 +263,14 @@ const statusOk = (r) => {
 export async function hikPushFace(dev, pin, ctx = {}) {
   const img = hikFacePhoto(pin);
   if (!img) return false;
+  const name = pmNameFor(pin, true) || db.prepare('SELECT name FROM device_users WHERE pin=?').get(String(pin))?.name || String(pin);
+  await hikWriteFace(dev, pin, img, name, ctx);
+  return true;
+}
+// Ghi 1 ảnh JPG làm ảnh mặt của Số ID (có rồi thì thay). Dùng cho đẩy từ phần mềm + đồng bộ máy ↔ máy.
+export async function hikWriteFace(dev, pin, img, name, ctx = {}) {
   if (img.length > HIK_FACE_MAX) throw Object.assign(new Error(`ảnh khuôn mặt ${Math.round(img.length / 1024)} KB, máy chỉ nhận ảnh ≤ 200 KB`), { code: 'ISAPI' });
   ctx.lib = ctx.lib || await faceLib(dev);
-  const name = pmNameFor(pin, true) || db.prepare('SELECT name FROM device_users WHERE pin=?').get(String(pin))?.name || String(pin);
   const m = multipart([
     { name: 'FaceDataRecord', type: 'application/json', data: Buffer.from(JSON.stringify({ faceLibType: ctx.lib.faceLibType, FDID: ctx.lib.FDID, FPID: String(pin), name })) },
     { name: 'FaceImage', filename: 'face.jpg', type: 'image/jpeg', data: img },
@@ -276,10 +281,21 @@ export async function hikPushFace(dev, pin, ctx = {}) {
     if (e.code !== 'ISAPI') throw e;
     statusOk(await isapi(dev, 'POST', '/ISAPI/Intelligent/FDLib/FaceDataRecord?format=json', m.body, opt));   // máy đời cũ chưa có FDSetUp
   }
-  return true;
 }
 
 /* ---------- ghi / xoá NHÂN VIÊN trên máy ---------- */
+// Ghi 1 người (Số ID + tên, quyền mở cửa 1, hạn tới 2037). SetUp = có rồi thì sửa, chưa có thì thêm.
+export async function hikWriteUser(dev, pin, name) {
+  const body = { UserInfo: { employeeNo: pin, name, userType: 'normal',
+    Valid: { enable: true, beginTime: '2020-01-01T00:00:00', endTime: '2037-12-31T23:59:59', timeType: 'local' },
+    doorRight: '1', RightPlan: [{ doorNo: 1, planTemplateNo: '1' }] } };
+  try { await isapi(dev, 'PUT', '/ISAPI/AccessControl/UserInfo/SetUp?format=json', body); }
+  catch (e) {   // máy đời cũ chưa có SetUp → thêm mới (Record), trùng thì sửa (Modify)
+    if (e.code !== 'ISAPI') throw e;
+    try { await isapi(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Record?format=json', body); }
+    catch (e2) { if (e2.code !== 'ISAPI') throw e2; await isapi(dev, 'PUT', '/ISAPI/AccessControl/UserInfo/Modify?format=json', body); }
+  }
+}
 // Ghi Số ID + tên phần mềm (+ thẻ nếu đã biết) xuống máy. SetUp = có rồi thì sửa, chưa có thì thêm.
 // withFace: kèm ảnh khuôn mặt phần mềm đang có (ghi sau khi đã có người trên máy).
 export async function hikPushUsers(dev, pins, prog = () => {}, { withFace = false } = {}) {
@@ -288,17 +304,9 @@ export async function hikPushUsers(dev, pins, prog = () => {}, { withFace = fals
     const pin = String(p || '').trim(); if (!pin) continue;
     const u = db.prepare('SELECT name, card FROM device_users WHERE pin=?').get(pin) || {};
     const name = pmNameFor(pin, true) || u.name || pin;
-    const body = { UserInfo: { employeeNo: pin, name, userType: 'normal',
-      Valid: { enable: true, beginTime: '2020-01-01T00:00:00', endTime: '2037-12-31T23:59:59', timeType: 'local' },
-      doorRight: '1', RightPlan: [{ doorNo: 1, planTemplateNo: '1' }] } };
     let userOk = false;
     try {
-      try { await isapi(dev, 'PUT', '/ISAPI/AccessControl/UserInfo/SetUp?format=json', body); }
-      catch (e) {   // máy đời cũ chưa có SetUp → thêm mới (Record), trùng thì sửa (Modify)
-        if (e.code !== 'ISAPI') throw e;
-        try { await isapi(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Record?format=json', body); }
-        catch (e2) { if (e2.code !== 'ISAPI') throw e2; await isapi(dev, 'PUT', '/ISAPI/AccessControl/UserInfo/Modify?format=json', body); }
-      }
+      await hikWriteUser(dev, pin, name);
       if (u.card && u.card !== '0') {
         try { await isapi(dev, 'PUT', '/ISAPI/AccessControl/CardInfo/SetUp?format=json', { CardInfo: { employeeNo: pin, cardNo: String(u.card), cardType: 'normalCard' } }); }
         catch (e) { if (e.code !== 'ISAPI') throw e; }   // máy không có đầu đọc thẻ → bỏ qua thẻ
@@ -500,7 +508,7 @@ export async function hikSetupPush(dev, { host, port } = {}) {
 export const HIK_AUTO_CHOICES = [0, 5, 10, 15, 30, 60, 120, 240];
 export const hikAutoMinutes = () => { const n = parseInt(getSetting('hik_auto_min', '0'), 10) || 0; return n > 0 ? Math.max(1, n) : 0; };
 const autoBusy = busyFlag();
-async function autoOne(d, prog = () => {}) {
+async function autoOne(d, prog = () => {}, flags = {}) {
   const mark = (ok, msg, extra = {}) => {
     db.prepare('UPDATE push_devices SET tcp_auto_at=?, tcp_auto_ok=?, tcp_auto_msg=?, tcp_auto_logs=COALESCE(?, tcp_auto_logs), tcp_auto_users=COALESCE(?, tcp_auto_users) WHERE id=?')
       .run(new Date().toISOString(), ok ? 1 : 0, msg, extra.logs ?? null, extra.users ?? null, d.id);
@@ -513,7 +521,7 @@ async function autoOne(d, prog = () => {}) {
     saveHikInfo(d.id, { ...(JSON.parse(d.tcp_info || '{}')), ...info });
     const logsNow = Number.isFinite(info.logs) ? info.logs : null, usersNow = Number.isFinite(info.users) ? info.users : null;
     if (logsNow != null && logsNow === d.tcp_auto_logs && (usersNow == null || usersNow === d.tcp_auto_users)) return mark(true, 'Không có lượt chấm mới');
-    if (usersNow == null || usersNow !== d.tcp_auto_users) { prog(`${d.name || d.serial}: tải nhân viên…`); await hikUsers(d); }
+    if (usersNow == null || usersNow !== d.tcp_auto_users) { prog(`${d.name || d.serial}: tải nhân viên…`); await hikUsers(d); flags.users = true; }
     let added = 0;
     if (logsNow == null || logsNow !== d.tcp_auto_logs) {
       const today = vnDateStr(), last = d.tcp_sync_at ? vnDateStr(new Date(d.tcp_sync_at)) : '';
@@ -526,11 +534,21 @@ async function autoOne(d, prog = () => {}) {
 export async function hikAutoCycle(force = false, prog = () => {}) {
   if (!autoBusy.take()) return null;
   try {
-    const every = hikAutoMinutes() * 60000, out = [];
+    const every = hikAutoMinutes() * 60000, out = [], groups = new Set();
     for (const d of db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND active=1 AND tcp_auto=1 ORDER BY id").all()) {
       if (!force && d.tcp_auto_at && Date.now() - Date.parse(d.tcp_auto_at) < every - 5000) continue;
       if (!hikEnabled()) break;
-      out.push({ device: d.name || d.serial, msg: await autoOne(d, prog) });
+      const flags = {};
+      out.push({ device: d.name || d.serial, msg: await autoOne(d, prog, flags) });
+      if (flags.users && d.sync_group) groups.add(d.sync_group);   // số người trên máy đổi (vừa đăng ký / xoá) → đồng bộ nhóm
+    }
+    if (groups.size && hikEnabled()) {
+      const { hikSyncGroup, hikGroupDevices } = await import('./hik-sync.js');
+      for (const g of groups) {
+        if (hikGroupDevices(g).length < 2) continue;
+        try { const r = await hikSyncGroup(g, { prog }); out.push({ group: g, msg: `Đồng bộ nhóm: chép ${r.users || 0} người, ${r.faces || 0} mặt, ${r.fps || 0} vân tay, ${r.cards || 0} thẻ` + (r.failed ? `, lỗi ${r.failed}` : '') }); }
+        catch (e) { out.push({ group: g, msg: 'Đồng bộ nhóm lỗi: ' + e.message }); }
+      }
     }
     return out;
   } finally { autoBusy.done(); }

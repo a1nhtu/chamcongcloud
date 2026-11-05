@@ -14,6 +14,7 @@ import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isF
 import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
 import { hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
   hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush, hikKnock } from '../../hik-isapi.js';
+import { hikSyncGroup } from '../../hik-sync.js';
 import { unionEnabled, unionPort, unionStatus, unionOnline, unionInfo, unionUsers, unionLogs, unionSimple, unionDeleteUsers, unionClearUsers, syncUnion } from '../../union.js';
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
@@ -804,7 +805,7 @@ export function registerDeviceRoutes(r, { need }) {
       res.json({ ok: true, ...(await hikSetupPush(d, req.body || {})) });
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }
   });
-  const HIK_ACTIONS = { info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy' };
+  const HIK_ACTIONS = { info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy', sync: 'Đồng bộ nhóm máy Hikvision' };
   r.post('/devices/:id/hik/:action', need('devices'), hikOn, (req, res) => {
     const d = db.prepare("SELECT * FROM push_devices WHERE id=? AND conn_type='hik'").get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Hikvision' });
@@ -813,6 +814,8 @@ export function registerDeviceRoutes(r, { need }) {
     if (action !== 'info' && !d.active) return res.status(400).json({ error: 'Máy chưa được duyệt — duyệt máy trước (dán key bản quyền nếu được yêu cầu).' });
     const from = String(b.from || '').slice(0, 10), to = String(b.to || '').slice(0, 10);
     if (action === 'logs' && (from || to) && (!ISO.test(from) || !ISO.test(to) || to < from)) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
+    if (action === 'sync' && !d.sync_group) return res.status(400).json({ error: 'Máy chưa có Nhóm đồng bộ — đặt nhóm giống nhau cho các máy Hikvision trước (⋯ Thêm → 🔁 Nhóm đồng bộ).' });
+    const syncPins = action === 'sync' && Array.isArray(b.pins) ? b.pins.slice(0, 5000).map(String) : null;
     const j = startJob('hik-' + action, d.name || d.serial, async (prog) => {
       // luôn đọc Serial trước: IP này giờ là MÁY KHÁC (đổi máy / trùng IP) → dừng, không ghi nhầm dữ liệu
       prog('Đang kết nối máy…');
@@ -830,6 +833,7 @@ export function registerDeviceRoutes(r, { need }) {
       }
       if (action === 'set-time') { await hikSetTime(d); return { note: ['Đã đặt giờ máy theo máy chủ (múi giờ Việt Nam)'] }; }
       if (action === 'restart') { await hikRestart(d); return { note: ['Máy đang khởi động lại'] }; }
+      if (action === 'sync') return await hikSyncGroup(d.sync_group, { pins: syncPins, prog });
       return {};
     });
     res.json({ ok: true, job: j.id, title: HIK_ACTIONS[action] });
