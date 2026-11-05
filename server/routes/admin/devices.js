@@ -826,7 +826,7 @@ export function registerDeviceRoutes(r, { need }) {
         prog('Đang đọc nhân viên từ máy…');
         const u = await hikUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
         prog('Đang đọc dữ liệu chấm công từ máy…');
-        return { ...(await hikLogs(d, from, to, prog)), users: u.read, from, to };
+        return { ...(await hikLogs(d, from, to, prog)), users: u.read, long: u.long || 0, from, to };
       }
       if (action === 'set-time') { await hikSetTime(d); return { note: ['Đã đặt giờ máy theo máy chủ (múi giờ Việt Nam)'] }; }
       if (action === 'restart') { await hikRestart(d); return { note: ['Máy đang khởi động lại'] }; }

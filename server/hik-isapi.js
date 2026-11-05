@@ -116,17 +116,17 @@ function userLine(u) {
 }
 export async function hikUsers(dev, prog = () => {}) {
   const lines = [], searchID = randomUUID();
-  let pos = 0, fp = 0, face = 0, card = 0;
+  let pos = 0, fp = 0, face = 0, card = 0, long = 0;   // đếm theo TOÀN BỘ người trên máy (kể cả người phần mềm bỏ qua)
   for (let page = 0; page < 5000; page++) {
     const r = await isapi(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Search?format=json',
       { UserInfoSearchCond: { searchID, searchResultPosition: pos, maxResults: 30 } }, { timeoutMs: 30000 });
     const s = r.json?.UserInfoSearch || {};
     const list = Array.isArray(s.UserInfo) ? s.UserInfo : [];
     for (const u of list) {
-      const l = userLine(u);
-      if (!l) continue;
-      lines.push(l);
       fp += +u.numOfFP || 0; face += +u.numOfFace || 0; card += +u.numOfCard || 0;
+      const l = userLine(u);
+      if (!l) { if (String(u.employeeNo ?? '').trim().length > 20) long++; continue; }
+      lines.push(l);
     }
     pos += list.length;
     if (lines.length && lines.length % 300 < 30) prog(`Đã đọc ${lines.length} nhân viên…`);
@@ -139,10 +139,11 @@ export async function hikUsers(dev, prog = () => {}) {
   try {
     const d = db.prepare('SELECT tcp_info FROM push_devices WHERE id=?').get(dev.id);
     const info = d && d.tcp_info ? JSON.parse(d.tcp_info) : {};
-    Object.assign(info, { users: lines.length, fps: fp, faces: face, cards: card });
+    // máy thật DS-K1T671M (khách gửi thử) có 3.977 người Số ID 32 ký tự → trước ghi "users" = số dòng phần mềm nhận (1), lệch với máy
+    Object.assign(info, { users: pos, fps: fp, faces: face, cards: card });
     db.prepare('UPDATE push_devices SET tcp_info=? WHERE id=?').run(JSON.stringify(info), dev.id);
   } catch {}
-  return { read: lines.length, saved: seen.size };
+  return { read: lines.length, saved: seen.size, onDevice: pos, long };
 }
 
 /* ---------- tải LƯỢT CHẤM ---------- */
@@ -477,9 +478,16 @@ export async function hikSetupPush(dev, { host, port } = {}) {
     if (e.code === 'CONN' || e.code === 'AUTH') throw e;
     test = e.code === 'ISAPI' && (e.status === 404 || e.status === 405 || /methodNotAllowed|notSupport/i.test(e.message)) ? '' : e.message;
   }
+  // máy thật DS-K1T671M (firmware 3.2.30) chỉ giữ 1 ô: ghi ô này là ô kia về 0.0.0.0 → báo ô của phần mềm khác bị máy xoá
+  let lost = [];
+  try {
+    const now = parseHttpHosts((await isapi(dev, 'GET', '/ISAPI/Event/notification/httpHosts')).text);
+    lost = list.filter((h) => h.id !== slot.id && !free(h) && !h.url.includes(HIK_EVENT_PATH) && now.some((n) => n.id === h.id && free(n)))
+      .map((h) => (h.hostName || h.ipAddress) + (h.portNo ? ':' + h.portNo : ''));
+  } catch {}
   const url = `${https ? 'https' : 'http'}://${host}${p === (https ? 443 : 80) ? '' : ':' + p}${path}`;
   db.prepare('UPDATE push_devices SET hik_push_url=? WHERE id=?').run(url, dev.id);
-  return { slot: slot.id, url, test };
+  return { slot: slot.id, url, test, lost };
 }
 
 /* ---------- TỰ ĐỘNG TẢI THEO LỊCH ----------

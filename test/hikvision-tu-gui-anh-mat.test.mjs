@@ -59,7 +59,7 @@ function multipartAlert(a) {
 /* ---------- máy Hikvision giả lập (ISAPI + Digest) ---------- */
 const H = { user: 'admin', pass: 'Abc12345', realm: 'DS-K1T342', nonce: 'n2', serial: 'DS-K1T342MFX20230101V030200ENG87654321',
   hosts: [{ id: '1', ip: '10.0.0.5', port: '9000', url: '/khac' }, { id: '2', ip: '0.0.0.0', port: '80', url: '' }], put: [], tested: [],
-  users: { 556: 'Le Hoi' }, faces: [], faceRecord: [], noSetUp: false, faceCalls: 0, events: [] };
+  users: { 556: 'Le Hoi' }, faces: [], faceRecord: [], noSetUp: false, faceCalls: 0, events: [], oneSlot: false, moreUsers: [] };
 let hikSrv, hikPort, appSrv, appPort;
 function checkDigest(h, method, uri) {
   if (!String(h || '').startsWith('Digest ')) return false;
@@ -99,7 +99,7 @@ function hikHandler(req, res) {
         const list = c.EmployeeNoList.map((x) => x.employeeNo).filter((p) => H.users[p]).map((p) => ({ employeeNo: p, name: H.users[p], userType: 'normal' }));
         return json({ UserInfoSearch: { searchID: c.searchID, responseStatusStrg: 'OK', numOfMatches: list.length, totalMatches: list.length, UserInfo: list } });
       }
-      return json({ UserInfoSearch: { searchID: c.searchID, responseStatusStrg: 'OK', numOfMatches: 1, totalMatches: 1, UserInfo: [{ employeeNo: '101', name: 'Pham Van Hik', userType: 'normal' }] } });
+      return json({ UserInfoSearch: { searchID: c.searchID, responseStatusStrg: 'OK', numOfMatches: 1, totalMatches: 1, UserInfo: [{ employeeNo: '101', name: 'Pham Van Hik', userType: 'normal' }, ...H.moreUsers] } });
     }
     if (u.startsWith('/ISAPI/AccessControl/AcsEvent?')) {
       const c = JSON.parse(txt).AcsEventCond;
@@ -112,6 +112,7 @@ function hikHandler(req, res) {
     if (hm && req.method === 'PUT') {
       H.put.push(txt);
       const h = H.hosts.find((x) => x.id === hm[1]);
+      if (H.oneSlot) for (const o of H.hosts) if (o !== h) Object.assign(o, { ip: '0.0.0.0', port: '0', url: '' });   // như máy thật DS-K1T671M: chỉ giữ 1 ô
       Object.assign(h, { ip: tagOf(txt, 'ipAddress') || tagOf(txt, 'hostName'), port: tagOf(txt, 'portNo'), url: tagOf(txt, 'url'), fmt: tagOf(txt, 'parameterFormatType') });
       return xml('<ResponseStatus><statusCode>1</statusCode></ResponseStatus>');
     }
@@ -199,6 +200,7 @@ test('duyệt → bấm "Cài máy tự gửi": dùng ô còn trống, không đ
   assert.match(token, /^[0-9a-f]{32}$/);
   assert.equal(r.out.url, `http://127.0.0.1:${appPort}/hik/event/${token}`);
   assert.deepEqual(H.hosts[0], { id: '1', ip: '10.0.0.5', port: '9000', url: '/khac' }, 'ô của phần mềm khác giữ nguyên');
+  assert.deepEqual(r.out.lost, [], 'máy giữ nhiều ô → không báo mất ô nào');
   assert.deepEqual([H.hosts[1].ip, H.hosts[1].port, H.hosts[1].url, H.hosts[1].fmt], ['127.0.0.1', String(appPort), '/hik/event/' + token, 'JSON']);
   assert.match(H.put[0], /<addressingFormatType>ipaddress<\/addressingFormatType>/);
   // cài lại: vẫn ô 2, vẫn mã cũ (máy khỏi phải đổi)
@@ -272,6 +274,27 @@ test('máy trả 400 methodNotAllowed cho lệnh gửi thử (máy thật MT05WE
   H.noTest = false;
   assert.equal(r.code, 200, JSON.stringify(r.out));
   assert.equal(r.out.test, '');
+});
+test('máy chỉ giữ 1 ô (máy thật DS-K1T671M): ghi ô trống làm mất ô phần mềm khác → báo rõ ô bị mất', async () => {
+  const keep = H.hosts.map((h) => ({ ...h }));
+  H.hosts = [{ id: '1', ip: '10.0.0.5', port: '9000', url: '/khac' }, { id: '2', ip: '0.0.0.0', port: '0', url: '' }];
+  H.oneSlot = true;
+  const r = await call('POST /devices/:id/hik-push', { params: { id }, body: { host: '127.0.0.1', port: appPort } });
+  H.oneSlot = false;
+  assert.equal(r.code, 200, JSON.stringify(r.out));
+  assert.equal(r.out.slot, '2');
+  assert.deepEqual(r.out.lost, ['10.0.0.5:9000']);
+  H.hosts = keep;
+});
+test('tải NV: Số ID dài hơn 20 ký tự (máy thật DS-K1T671M) → báo số người bỏ qua, số người trên máy đếm đủ', async () => {
+  H.moreUsers = [{ employeeNo: 'a00b06f31e584aa6b651633651bb71f4', name: 'Dai 1', userType: 'normal', numOfFace: 1 },
+    { employeeNo: 'b00b06f31e584aa6b651633651bb71f5', name: 'Dai 2', userType: 'normal', numOfFace: 1 }];
+  const j = await waitJob((await call('POST /devices/:id/hik/:action', { params: { id, action: 'users' } })).out.job);
+  H.moreUsers = [];
+  assert.equal(j.state, 'done', j.msg);
+  assert.deepEqual([j.result.read, j.result.onDevice, j.result.long], [1, 3, 2]);
+  const info = JSON.parse(db.prepare('SELECT tcp_info FROM push_devices WHERE id=?').get(id).tcp_info);
+  assert.deepEqual([info.users, info.faces], [3, 2]);
 });
 
 /* ======================= ĐẨY ẢNH KHUÔN MẶT ======================= */

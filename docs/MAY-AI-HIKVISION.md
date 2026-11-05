@@ -64,7 +64,21 @@ Máy khuôn mặt + vân tay + thẻ, SADP báo model MT05WE, firmware V3.9.50 b
   Lệnh gửi thử `/httpHosts/<id>/test` trả HTTP 400 `methodNotAllowed` = máy không có lệnh này, phải quẹt thử để kiểm tra.
   Cấu hình máy ghi `heartbeat 30` nhưng KHÔNG gửi nhịp tim đều (theo dõi 100 giây không có tin) → chỉ gửi khi có sự kiện;
   "lần cuối máy gửi" lâu không đổi chưa chắc là mất kết nối.
-- **Chưa kiểm trên máy thật:** lượt thẻ hợp lệ gửi tức thì, mở cửa từ xa, tên miền Cloudflare, máy khác đời.
+- **Mở cửa từ xa:** đạt (Anh nghe rơ le nhảy).
+- **Chưa kiểm trên máy thật:** lượt thẻ hợp lệ gửi tức thì, tên miền Cloudflare.
+
+### Máy thứ 2: DS-K1T671M, firmware V3.2.30 build 230330 (máy khách gửi thử, 05/11/2026)
+Máy đang có 3.977 người + 44.665 lượt chấm từ 04/2026 của khách.
+- **Đạt:** đăng nhập, tải chấm công theo ngày (9001/9002 quẹt mặt → tự tạo NV nháp "NV 9001"/"NV 9002" vì máy không lưu tên, công dựng ngay),
+  cài máy tự gửi, đẩy NV + ảnh mặt (FDLib có FDID 1 blackFD + FDID 2 infraredFD), xoá NV.
+- **Máy chỉ giữ 1 địa chỉ nhận:** báo `hostNumber 2` nhưng ghi ô 2 thì ô 1 về `0.0.0.0` (và ngược lại).
+  Từ v1.29.8 phần mềm đọc lại danh sách sau khi ghi, ô của phần mềm khác bị máy xoá thì hiện cảnh báo (`lost`).
+- **Cài địa chỉ nhận lần đầu, máy gửi lại TOÀN BỘ sự kiện cũ** (`currentEvent:false`) khoảng 4 tin/giây, từ sự kiện cũ nhất →
+  44 nghìn sự kiện mất cỡ 3 giờ, lượt quẹt mới xếp hàng sau. Không có cài đặt bỏ qua (`EventOptimizationCfg` chỉ là gộp sự kiện,
+  `EventStorageCfg` báo notSupport). Trong lúc chờ: bấm "⬇ Tải chấm công" hôm nay là có ngay. Chỉ xoá sạch sự kiện trên máy mới bỏ được hàng đợi.
+- **Số ID 32 ký tự** (3.976 người, kiểu `a00b06f3…`): phần mềm chỉ nhận Số ID ≤ 20 ký tự → bỏ qua người + lượt chấm của họ.
+  Từ v1.29.8 tải NV báo rõ số người bị bỏ, và thông tin máy ghi đúng số người trên máy (trước ghi số người phần mềm nhận).
+- Lệnh gửi thử: không có (giống MT05WE).
 
 ## Đã kiểm / chưa kiểm (máy giả lập)
 - Đã kiểm bằng máy giả lập (test `test/may-ai-hikvision.test.mjs` + chạy thử giao diện): kết nối, chờ duyệt, lượt chấm → công,
