@@ -120,6 +120,16 @@ async function hikWriteCards(dev, pin, cards) {
   return cards.length;
 }
 
+// Còn chứa thêm được bao nhiêu người (UserInfo/capabilities maxRecordNum − UserInfo/Count). Máy MT05WE chỉ 500 người. Không đọc được = không giới hạn.
+async function userRoom(dev) {
+  try {
+    const max = +(await isapi(dev, 'GET', '/ISAPI/AccessControl/UserInfo/capabilities?format=json')).json?.UserInfo?.maxRecordNum;
+    const now = +(await isapi(dev, 'GET', '/ISAPI/AccessControl/UserInfo/Count?format=json')).json?.UserInfoCount?.userNumber;
+    if (max > 0 && now >= 0) return { max, room: Math.max(0, max - now) };
+  } catch (e) { if (FATAL.has(e.code)) throw e; }
+  return { max: 0, room: Infinity };
+}
+
 /* ---------- đồng bộ cả nhóm ---------- */
 const syncBusy = busyFlag();
 export const hikGroupDevices = (group) => (group ? db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND active=1 AND sync_group=? ORDER BY id").all(group) : []);
@@ -150,8 +160,8 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
       if (u.card > a.cardN) { a.card = d; a.cardN = u.card; }
       all.set(pin, a);
     }
-    const locked = lockedPins(), held = heldSet();
-    const tot = { users: 0, faces: 0, fps: 0, cards: 0, skipped: 0, nofp: 0 }, errors = [...offline], per = [];
+    const locked = lockedPins(), held = heldSet(), hasEmp = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>''");
+    const tot = { users: 0, faces: 0, fps: 0, cards: 0, skipped: 0, nofp: 0, full: 0 }, errors = [...offline], per = [];
     const cache = new Map(), srcCtx = new Map();   // dữ liệu đã đọc của từng Số ID (dùng lại cho máy nhận thứ 2, 3…)
     const ctxOf = (d) => { if (!srcCtx.has(d.serial)) srcCtx.set(d.serial, {}); return srcCtx.get(d.serial); };
     // 3) từng máy nhận: ghi người / thẻ / mặt / vân tay còn thiếu
@@ -162,6 +172,11 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
         const h = have.get(pin);
         return !h || (a.face && !h.face) || (a.fp && h.fp < a.fpN) || (a.card && h.card < a.cardN);
       });
+      // máy nhỏ không chứa hết → bổ sung người đã có trên máy trước, rồi NV có trong phần mềm, sau cùng người chỉ có trên máy khác
+      const rk = new Map(todo.map(([pin]) => [pin, have.has(pin) ? 0 : hasEmp.get(pin) ? 1 : 2]));
+      todo.sort((x, y) => rk.get(x[0]) - rk.get(y[0]));
+      const cap = todo.some(([pin]) => !have.has(pin)) ? await userRoom(t) : { max: 0, room: Infinity };
+      let full = 0;
       let i = 0;
       for (const [pin, a] of todo) {
         if (me.lost) break;
@@ -169,10 +184,15 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
         if (++i % 10 === 1) prog(`${t.name || t.serial}: đang chép ${i} / ${todo.length} người…`);
         if ([a.face, a.fp, a.card].some((s) => s && held.has(s.serial + '|' + pin))) { tot.skipped++; continue; }
         const h = have.get(pin), c = cache.get(pin) || {};
+        if (!h && me.users >= cap.room) { full++; continue; }   // máy nhận đã đầy → không ghi thêm người mới
         cache.set(pin, c);
         const name = pmNameFor(pin, true) || a.name || pin;
         try {
-          if (!h) { await hikWriteUser(t, pin, name); me.users++; ingestUserData(t.serial, 'USER', `USER PIN=${pin}\tName=${name}`, null, HIK_PIN); }
+          if (!h) {
+            await hikWriteUser(t, pin, name); me.users++;
+            // chỉ báo phần mềm khi Số ID đã là NV — đồng bộ máy↔máy KHÔNG tự tạo NV nháp (máy khách có thể cả nghìn người lạ)
+            if (hasEmp.get(pin)) ingestUserData(t.serial, 'USER', `USER PIN=${pin}\tName=${name}`, null, HIK_PIN);
+          }
           if (a.card && (!h || h.card < a.cardN)) {
             if (c.cards === undefined) c.cards = await hikReadCards(a.card, pin);
             me.cards += await hikWriteCards(t, pin, c.cards);
@@ -194,6 +214,7 @@ export async function hikSyncGroup(group, { pins = null, prog = () => {} } = {})
           me.failed++; if (errors.length < 15) errors.push(`${t.name || t.serial} · ${pin}: ${e.message}`);
         }
       }
+      if (full) { me.full = full; tot.full += full; errors.unshift(`${t.name || t.serial} ĐẦY: máy chỉ chứa ${cap.max || '?'} người — còn ${full} người chưa chép được.`); }
       for (const k of ['users', 'faces', 'fps', 'cards']) tot[k] += me[k];
       per.push(me);
     }

@@ -6416,6 +6416,7 @@ async function tcpJob(m, action, body, after, kind = 'tcp') {
       if (r.devices < 2 && r.note) msg.style.color = '#b45309';
       out.append(line('Người có trên các máy trong nhóm', n(r.people)), line('Người chép sang máy còn thiếu', n(r.users)), line('Ảnh khuôn mặt đã chép', n(r.faces)), line('Vân tay đã chép', n(r.fps)), line('Thẻ đã chép', n(r.cards)));
       for (const p of r.per || []) if (p.users || p.faces || p.fps || p.cards || p.failed) out.append(el('div', { class: 'map-hint', style: 'margin-top:4px' }, `→ ${p.device}: +${n(p.users)} người, +${n(p.faces)} mặt, +${n(p.fps)} vân tay, +${n(p.cards)} thẻ${p.failed ? `, lỗi ${n(p.failed)}` : ''}`));
+      if (r.full) out.append(el('div', { class: 'map-hint', style: 'margin-top:6px;color:#b45309' }, `${n(r.full)} người chưa chép vì máy nhận đã ĐẦY (xem từng máy ở trên). Máy nhỏ chỉ chứa được số người theo hãng — dùng máy lớn hơn hoặc bớt người.`));
       if (r.nofp) out.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, `${n(r.nofp)} người có vân tay nhưng máy nhận không có đầu đọc vân tay — chỉ chép người / mặt / thẻ.`));
       if (r.skipped) out.append(el('div', { class: 'map-hint', style: 'margin-top:6px' }, `Bỏ qua ${n(r.skipped)} Số ID đang nghi trùng.`));
       if (r.errors?.length) out.append(el('div', { class: 'dv-warn', style: 'margin-top:8px;white-space:normal' }, 'Lỗi: ' + r.errors.join(' · ')));

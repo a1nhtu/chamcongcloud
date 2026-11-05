@@ -89,6 +89,9 @@ Máy đang có 3.977 người + 44.665 lượt chấm từ 04/2026 của khách.
 - **Chỉ thêm / bổ sung**, không xoá gì. Bỏ NV đã **khoá** và Số ID đang nghi trùng. Muốn bỏ 1 người khỏi cả nhóm: khoá NV trong phần mềm rồi xoá trên máy (không khoá thì lần sau người đó lại được chép về từ máy khác).
 - Khuôn mặt chép **ảnh JPG** → máy nhận tự dựng mẫu (khác đời máy vẫn được). Vân tay ghi vào **đầu đọc có vân tay** của máy nhận: hỏi CardReaderCfg/<số> xem `cardReaderFunction` có `fingerPrint`; máy không có → báo "máy nhận không có đầu đọc vân tay", phần người / mặt / thẻ vẫn chép.
 - Máy mất kết nối giữa chừng: báo máy đó, các máy còn lại vẫn đồng bộ.
+- **Máy nhỏ** (v1.29.11): MT05WE chỉ chứa **500 người / 500 mặt** (UserInfo/capabilities maxRecordNum). Máy nhận sắp đầy → chép người đã có trên máy trước, rồi NV có trong phần mềm, rồi người lạ; đầy thì dừng, báo "máy … ĐẦY: còn N người chưa chép" (không ghi thử từng người rồi lỗi).
+- Đồng bộ máy↔máy **không tự tạo NV nháp** trong phần mềm (v1.29.11) — chỉ ghi nhận cho Số ID đã là NV.
+- Thử thật 05/11 12:10: xoá sạch máy 1 (UserInfoDetail/Delete mode all → 0 người, 0 mặt), đồng bộ chỉ 9001 + 9002 → máy 1 nhận 2 người + 2 ảnh mặt (0,6 giây). KHÔNG đặt nhóm cố định trên 8686: máy 2 có 3.979 người của khách, đặt nhóm thì vòng tự tải sẽ chép tới đầy 500 chỗ của máy 1.
 - Thử thật 05/11 (bản sao DB 8686, chỉ 4 Số ID 9001, 9002, 2, 3032151722): máy 2 → máy 1 chép 2 người + 2 ảnh mặt; máy 1 → máy 2 chép 2 người + 1 ảnh mặt + 1 thẻ; chạy lại không ghi gì. **DS-K1T671M không có vân tay**: đầu đọc 1 chỉ `face`, đầu đọc 2 là cổng Wiegand trống (capabilities vẫn báo 2…2, ghi vào thì máy trả `cardReaderRecvStatus` 8). Ghi vân tay sang máy có vân tay mới thử trên máy giả lập (chưa có 2 máy thật cùng có vân tay).
 
 ## Đã kiểm / chưa kiểm (máy giả lập)

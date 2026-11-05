@@ -65,6 +65,7 @@ function makeDev(serial, { reader = 1, noFP = false } = {}) {
       const json = (o, code = 200) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(o)); };
       const no = () => json({ statusCode: 4, statusString: 'Invalid Operation', subStatusCode: 'notSupport' }, 404);
       if (u === '/ISAPI/System/deviceInfo') { res.writeHead(200, { 'Content-Type': 'application/xml' }); return res.end(`<DeviceInfo><deviceName>${serial}</deviceName><model>DS-K1T671M</model><serialNumber>${serial}</serialNumber><macAddress>aa:bb:cc:00:00:0${reader}</macAddress><firmwareVersion>V3.2.30</firmwareVersion></DeviceInfo>`); }
+      if (u.startsWith('/ISAPI/AccessControl/UserInfo/capabilities')) return M.max ? json({ UserInfo: { maxRecordNum: M.max } }) : no();
       if (u.startsWith('/ISAPI/AccessControl/UserInfo/Count')) return json({ UserInfoCount: { userNumber: M.users.size } });
       if (u.startsWith('/ISAPI/AccessControl/AcsEventTotalNum')) return json({ AcsEventTotalNum: { totalNum: 0 } });
       if (u.startsWith('/ISAPI/AccessControl/UserInfo/Search')) {
@@ -232,6 +233,24 @@ test('1 máy trong nhóm mất kết nối: báo máy đó, 2 máy còn lại v�
     assert.equal(r.out.offline.length, 1); assert.match(r.out.offline[0], /HIKSYNC-C/);
     assert.ok(B.users.has('7005'), 'B vẫn nhận 7005 từ A');
   } finally { C.down = false; }
+});
+
+test('máy nhận nhỏ (đầy): chép tới khi đủ sức chứa rồi dừng, báo rõ còn bao nhiêu người chưa chép, NV phần mềm được ưu tiên', async () => {
+  for (let k = 0; k < 4; k++) A.users.set('80' + k, 'Khach ' + k);
+  db.prepare("INSERT INTO employees(code, full_name, username, password_hash, device_pin, active) VALUES('NV803','NV phan mem 803','nv803','x','803',1)").run();
+  C.max = C.users.size + 2;   // C chỉ còn chỗ cho 2 người
+  try {
+    const r = await sync(ids[A.serial]);
+    assert.equal(r.job.state, 'done', JSON.stringify(r.job));
+    const pc = r.out.per.find((x) => x.device === C.serial);
+    assert.equal(pc.users, 2); assert.equal(pc.full, 3); assert.equal(r.out.full, 3);   // C còn thiếu 7005 + 800…803 = 5 người, chỉ chứa thêm 2
+    assert.ok(C.users.has('803'), 'NV có trong phần mềm được chép trước');
+    assert.match(r.out.errors[0], /HIKSYNC-C ĐẦY: máy chỉ chứa \d+ người — còn 3 người/);
+    assert.ok(['800', '801', '802', '803'].every((p) => B.users.has(p)), 'máy B không giới hạn vẫn nhận đủ');
+    assert.equal(db.prepare("SELECT COUNT(*) n FROM employees WHERE device_pin IN ('7001','7002','7004','7005','7006','800','801','802')").get().n, 0, 'đồng bộ máy↔máy không tự tạo NV nháp');
+    const r2 = await sync(ids[A.serial]);   // bấm lại: không cố ghi vào máy đầy
+    assert.equal(r2.out.per.find((x) => x.device === C.serial).users, 0); assert.equal(r2.out.full, 3);
+  } finally { delete C.max; }
 });
 
 test('tắt tính năng máy Hikvision → không đồng bộ được (như cũ)', async () => {
