@@ -57,10 +57,13 @@ máy đời cũ không có FDSetUp thì `POST /ISAPI/Intelligent/FDLib/FaceDataR
 ## Đã kiểm trên máy thật (05/11/2026, v1.29.6 trên 8686)
 Máy khuôn mặt + vân tay + thẻ, SADP báo model MT05WE, firmware V3.9.50 build 260130, cùng LAN với máy chủ.
 - **Đạt:** đăng nhập Digest, đọc thông tin, tải NV, tải chấm công, đặt giờ (máy đang để UTC+8 đổi được về UTC+7), cài HTTP Listening (ghi từng ô `/httpHosts/<id>`),
-  nhịp tim 30 giây và lượt quẹt khuôn mặt + vân tay về phần mềm trong khoảng 1 giây (sự kiện cửa, thẻ lạ, vân tay trượt bị bỏ đúng), đẩy NV + ảnh mặt + thẻ, xoá NV (xoá luôn ảnh mặt),
+  lượt quẹt khuôn mặt + vân tay về phần mềm trong khoảng 1 giây, kể cả sau khi cài lại địa chỉ nhận (sự kiện cửa, thẻ lạ, vân tay trượt bị bỏ đúng),
+  đẩy NV + ảnh mặt + thẻ, xoá NV (xoá luôn ảnh mặt),
   khởi động lại (khoảng 30 giây, giữ giờ + địa chỉ nhận). Máy tự thêm `SubscribeEvent` cho `AccessControllerEvent`, không phải bật gì thêm trên web máy.
 - **Riêng máy này:** nhận `eventAttribute=attendance` nhưng không lọc (trả cả sự kiện cửa) → phần mềm tự lọc mã thành công khi gặp sự kiện không Số ID (từ v1.29.7).
   Lệnh gửi thử `/httpHosts/<id>/test` trả HTTP 400 `methodNotAllowed` = máy không có lệnh này, phải quẹt thử để kiểm tra.
+  Cấu hình máy ghi `heartbeat 30` nhưng KHÔNG gửi nhịp tim đều (theo dõi 100 giây không có tin) → chỉ gửi khi có sự kiện;
+  "lần cuối máy gửi" lâu không đổi chưa chắc là mất kết nối.
 - **Chưa kiểm trên máy thật:** lượt thẻ hợp lệ gửi tức thì, mở cửa từ xa, tên miền Cloudflare, máy khác đời.
 
 ## Đã kiểm / chưa kiểm (máy giả lập)
