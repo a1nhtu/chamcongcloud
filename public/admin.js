@@ -1325,11 +1325,11 @@ async function delPinsOnDevices(pins) {
   catch (e) { return toast('Đã xóa trong phần mềm nhưng chưa xoá được trên máy: ' + e.message, 'err'); }
   const box = el('div');
   devDelSummary(r, box, pins.length);
-  if (!r.job && !r.tcpNote && !r.idle?.length && r.push.length) return toast(`Đã gửi lệnh xoá ${pins.length} người xuống ${r.push.length} máy`, 'ok');
+  if (!r.job && !r.tcpNote && !r.idle?.length && !r.waiting?.length && r.push.length) return toast(`Đã gửi lệnh xoá ${pins.length} người xuống ${r.push.length} máy`, 'ok');
   const closeB = el('button', { class: 'btn', onclick: closeModal }, 'Đóng');
   openModal('Xóa nhân viên trên máy chấm công', [box], [closeB]);
   const res = await devDelWatchJob(r, box);
-  if (res?.devices?.some((x) => !x.ok)) box.append(el('div', { class: 'dv-warn' }, 'Máy chưa xoá được thì họ có thể tự về lại phần mềm. Bật máy lên rồi vào Máy chấm công › Xóa NV trên máy để xoá nốt.'));
+  if (res?.devices?.some((x) => !x.ok && !x.waiting)) box.append(el('div', { class: 'dv-warn' }, 'Máy chưa xoá được thì họ có thể tự về lại phần mềm. Bật máy lên rồi vào Máy chấm công › Xóa NV trên máy để xoá nốt.'));
 }
 
 // Trang "Bộ phận & Chức danh" — khai báo bộ phận CHA-CON + danh mục chức danh
@@ -6077,7 +6077,8 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       el('td', {}, ipEl, seenEl,
         direct && m.tcp_auto_at && m.tcp_auto && autoMin > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
-        m.unmatched ? el('div', { class: 'dv-warn', style: 'cursor:pointer;text-decoration:underline dotted', title: 'Bấm để xem Số ID nào chưa khớp nhân viên', onclick: () => unmatchedModal(m) }, m.unmatched + ' mã chưa khớp') : ''),
+        m.unmatched ? el('div', { class: 'dv-warn', style: 'cursor:pointer;text-decoration:underline dotted', title: 'Bấm để xem Số ID nào chưa khớp nhân viên', onclick: () => unmatchedModal(m) }, m.unmatched + ' mã chưa khớp') : '',
+        m.pending_del ? el('div', { class: 'dv-warn', title: 'Máy đang tắt khi xoá nhân viên. Máy bật lại là phần mềm tự xoá.' }, `⏳ Chờ xoá ${m.pending_del} NV`) : ''),
       el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : isHik || isUnion ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m, m.conn_type)) : null, doorBtn] : [doorBtn, timeBtn]), logBtn, moreBtn)),
     );
     tb.append(tr);
@@ -6322,7 +6323,8 @@ function devDelSummary(r, box, n) {
   if (r.push.length) box.append(el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, `✅ Đã gửi lệnh xoá xuống ${r.push.length} máy: ${r.push.join(', ')}. Máy đang kết nối xoá ngay, máy đang tắt sẽ xoá khi kết nối lại.`));
   if (r.tcpNote) box.append(el('div', { class: 'dv-warn' }, r.tcpNote));
   if (r.idle && r.idle.length) box.append(el('div', { class: 'dv-warn' }, `Máy đang tạm dừng / chờ duyệt chưa xoá: ${r.idle.join(', ')}. Bật lại máy rồi bấm Xóa lần nữa (hoặc xoá trên máy).`));
-  if (!r.push.length && !r.tcp.length && !r.job) box.append(el('div', { class: 'dv-warn' }, 'Chưa có máy nào đang dùng để xoá.'));
+  if (r.waiting && r.waiting.length) box.append(el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, `⏳ Máy TCP/IP đang tạm dừng: ${r.waiting.join(', ')}. Bật lại máy là phần mềm tự xoá.`));
+  if (!r.push.length && !r.tcp.length && !r.job && !r.waiting?.length) box.append(el('div', { class: 'dv-warn' }, 'Chưa có máy nào đang dùng để xoá.'));
 }
 // Máy TCP/IP / Hikvision / Union: xoá chạy nền → theo dõi tiến độ, ghi kết quả từng máy vào box
 async function devDelWatchJob(r, box) {
@@ -6334,9 +6336,9 @@ async function devDelWatchJob(r, box) {
     let j; try { j = await api('/admin/devices/tcp-jobs/' + r.job); } catch (e) { st.textContent = '❌ ' + e.message; return null; }
     if (j.state === 'run') { st.textContent = '⏳ ' + j.msg; continue; }
     if (j.state === 'err') { st.textContent = '❌ ' + j.msg; return null; }
-    st.textContent = '✅ Máy kết nối trực tiếp:';
+    st.textContent = (j.result?.devices || []).every((x) => x.ok) ? '✅ Máy kết nối trực tiếp:' : '⚠ Máy kết nối trực tiếp:';
     for (const x of (j.result?.devices || [])) box.append(el('div', { class: x.ok ? 'map-hint' : 'dv-warn', style: 'margin:2px 0' },
-      x.ok ? `• ${x.device}: đã xoá ${x.deleted} người` + (x.absent != null ? ` · ${x.absent} người không có trên máy (bỏ qua)` : ' (người không có trên máy này thì bỏ qua)') + (x.failed?.length ? ` — ⚠ máy không cho xoá: ${x.failed.slice(0, 20).join(', ')} (thử lại / xoá tay trên máy)` : '') : `• ${x.device}: ${x.error}`));
+      x.ok ? `• ${x.device}: đã xoá ${x.deleted} người` + (x.absent != null ? ` · ${x.absent} người không có trên máy (bỏ qua)` : ' (người không có trên máy này thì bỏ qua)') + (x.failed?.length ? ` — ⚠ máy không cho xoá: ${x.failed.slice(0, 20).join(', ')} (thử lại / xoá tay trên máy)` : '') : `• ${x.device}: ${x.error}` + (x.waiting ? '. Máy bật lại là phần mềm tự xoá.' : '')));
     return j.result;
   }
 }

@@ -5,7 +5,7 @@ import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, d
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
-import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
+import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, zkDeleteUsers, queuePendingDelete, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
   scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful, zkHello, isZkMac } from '../../zk-tcp.js';
 import { buildSched, schedLabel } from '../../reboot-schedule.js';
 import { setSetting } from '../../db.js';
@@ -60,6 +60,7 @@ export function registerDeviceRoutes(r, { need }) {
       d.fp_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type=1').get(d.serial).c;
       d.face_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)').get(d.serial).c;
       d.card_count = db.prepare("SELECT COUNT(*) c FROM device_users_serial WHERE serial=? AND card<>''").get(d.serial).c;
+      d.pending_del = db.prepare('SELECT COUNT(*) c FROM device_pending_deletes WHERE serial=?').get(d.serial).c;
       d.key_ok = deviceKeyOk(d);          // đã có key hợp lệ chưa
       delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
@@ -235,6 +236,7 @@ export function registerDeviceRoutes(r, { need }) {
     db.prepare('DELETE FROM push_devices WHERE id=?').run(req.params.id);
     db.prepare('DELETE FROM push_device_commands WHERE serial=?').run(d.serial);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(d.serial);
+    db.prepare('DELETE FROM device_pending_deletes WHERE serial=?').run(d.serial);
     db.prepare('UPDATE device_users_serial SET photo_ver=NULL WHERE serial=?').run(d.serial);   // thêm lại máy → đẩy lại ảnh
     db.prepare('DELETE FROM ai_templates WHERE serial=?').run(d.serial);
     aiKick(d.serial);   // máy AI đang kết nối → ngắt (kết nối lại sẽ hiện ở Chờ duyệt)
@@ -424,16 +426,6 @@ export function registerDeviceRoutes(r, { need }) {
     res.json(j);
   });
   // Xoá NV trên máy TCP/IP qua SDK: script in 'D <pin> <1 đã xoá | 0 vẫn còn | - không có trên máy>'.
-  // Người còn trên máy (xoá không được) thì GIỮ trong danh sách máy, để biết mà xoá tay trên máy.
-  const zkDeleteUsers = async (d, pins) => {
-    const deleted = [], failed = [], absent = [];
-    await zkRun(d, 'delete-users', { from: pins.join(','), timeoutMs: 5 * 60000 }, (k, c) => {
-      if (k === 'D') (c[1] === '1' ? deleted : c[1] === '0' ? failed : absent).push(c[0]);
-    });
-    forgetDeviceUsers(d.serial, pins.filter((p) => !failed.includes(p)));
-    dropConflicts(d.serial, deleted);
-    return { deleted, failed, absent };
-  };
   // Chạy 1 thao tác trên máy (chạy nền, giao diện hỏi tiến độ ở /devices/tcp-jobs/:job)
   const TCP_ACTIONS = {
     info: 'Đọc thông tin máy', users: 'Tải nhân viên', logs: 'Tải dữ liệu chấm công', 'set-time': 'Đặt giờ máy', restart: 'Khởi động lại máy',
@@ -681,16 +673,24 @@ export function registerDeviceRoutes(r, { need }) {
             if (info.serial && info.serial !== d.serial) throw new Error(`IP ${d.tcp_ip} giờ là máy khác (Serial ${info.serial}) — bỏ qua cho an toàn`);
             const st = await zkDeleteUsers(d, pins);
             out.push({ device: name, ok: true, deleted: st.deleted.length, failed: st.failed, absent: st.absent.length });
-          } catch (e) { out.push({ device: name, ok: false, error: e.message }); }
+          } catch (e) {
+            const waiting = e.code !== 'NOWIN';   // máy tắt / mất mạng → nhớ lại, máy lên tự xoá
+            if (waiting) queuePendingDelete(d.serial, pins);
+            out.push({ device: name, ok: false, error: e.message, waiting });
+          }
         }
         return { devices: out };
       }).id;
     }
     // Máy đang tạm dừng / chờ duyệt mà vẫn còn người này → báo để người dùng biết chưa xoá ở đó
     const ph = pins.map(() => '?').join(',');
-    const idle = db.prepare(`SELECT DISTINCT COALESCE(NULLIF(d.name,''), d.serial) AS n FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
-      WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins).map((x) => x.n);
-    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), direct: direct.map((d) => d.name || d.serial), job, track, tcpNote, idle });
+    const onIdle = db.prepare(`SELECT COALESCE(NULLIF(d.name,''), d.serial) AS n, d.serial, d.conn_type, s.pin FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
+      WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins);
+    const idle = [...new Set(onIdle.filter((x) => x.conn_type !== 'tcp').map((x) => x.n))];
+    // Máy TCP/IP đang tạm dừng: nhớ lại, bật lại thì tự xoá
+    const tcpIdle = onIdle.filter((x) => x.conn_type === 'tcp');
+    for (const x of tcpIdle) queuePendingDelete(x.serial, [x.pin]);
+    res.json({ ok: true, pins: pins.length, push: push.map((d) => d.name || d.serial), tcp: tcpAll.map((d) => d.name || d.serial), hik: hik.map((d) => d.name || d.serial), direct: direct.map((d) => d.name || d.serial), job, track, tcpNote, idle, waiting: [...new Set(tcpIdle.map((x) => x.n))] });
   });
 
   /* -------- MÁY AI (tự nối về qua WebSocket — server/ai-ws.js): thao tác = xếp lệnh, máy nhận khi đang kết nối -------- */

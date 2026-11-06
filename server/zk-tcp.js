@@ -11,8 +11,8 @@ import { connect } from 'node:net';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
-import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates, isFpV10 } from './device-sync.js';
-import { guardIncoming, heldSet } from './pin-guard.js';
+import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates, isFpV10, forgetDeviceUsers } from './device-sync.js';
+import { guardIncoming, heldSet, dropConflicts } from './pin-guard.js';
 import { vnDateStr } from './util.js';
 import { busyFlag, eachTenant, tenantKey } from './tenant.js';
 
@@ -310,7 +310,10 @@ export async function tcpSetServer(c, domain, port = '', { dhcp = false } = {}) 
 // → hiện ở Sinh trắc của NV, đẩy được sang máy khác. Tự tải theo chu kỳ thì không đọc vân tay (chậm, máy đứng "Đang làm việc").
 export async function tcpUsers(dev, prog = () => {}, { fp = false } = {}) {
   const lines = [], fp9 = [], fp10 = [];
+  try { await runPendingDeletes(dev); } catch (e) { console.error('[zk-tcp] xoá NV đang chờ lỗi:', e.message); }
+  const gone = pendingPins(dev.serial);   // còn chờ xoá (máy chưa xoá được) → không đọc về, kẻo tạo lại NV
   await zkRun(dev, 'users', fp ? { to: 'fp' } : {}, (k, c) => {
+    if ((k === 'U' || k === 'F') && gone.has(String(c[0]).trim())) return;
     if (k === 'F' && c[0] && c[4]) {
       const [pin, idx, flag, ver, tmp] = c;
       if (ver === '10') fp10.push(`BIODATA Pin=${pin}\tNo=${idx}\tIndex=${idx}\tValid=1\tDuress=${flag === '3' ? 1 : 0}\tType=1\tMajorVer=10\tMinorVer=0\tFormat=0\tTmp=${tmp}`);
@@ -402,6 +405,70 @@ export async function tcpLogs(dev, from, to, prog = () => {}) {
 
 /* ---------- việc chạy nền (giao diện hỏi tiến độ) ---------- */
 const jobs = new Map(); let seq = 0;
+// Xoá các Số ID trên máy TCP/IP. Người còn trên máy (xoá không được) thì GIỮ trong danh sách máy, để biết mà xoá tay trên máy.
+export async function zkDeleteUsers(d, pins) {
+  const deleted = [], failed = [], absent = [];
+  await zkRun(d, 'delete-users', { from: pins.join(','), timeoutMs: 5 * 60000 }, (k, c) => {
+    if (k === 'D') (c[1] === '1' ? deleted : c[1] === '0' ? failed : absent).push(c[0]);
+  });
+  forgetDeviceUsers(d.serial, pins.filter((p) => !failed.includes(p)));
+  dropConflicts(d.serial, deleted);
+  return { deleted, failed, absent };
+}
+
+/* ---------- XOÁ CHỜ MÁY BẬT LẠI ----------
+ * Máy ADMS tự lấy lệnh khi nối lại. Máy TCP/IP đang tắt thì phải nhớ lại ở đây: máy lên là phần mềm tự xoá,
+ * không thì lần tải sau NV đã xoá lại về phần mềm. Trong lúc chờ, tcpUsers không đọc các số này về. */
+export function queuePendingDelete(serial, pins) {
+  const own = db.prepare('SELECT id FROM employees WHERE device_pin=? AND active=1');
+  const add = db.prepare('INSERT OR REPLACE INTO device_pending_deletes(serial, pin, emp_id) VALUES(?,?,?)');
+  for (const p of pins) add.run(serial, p, own.get(p)?.id ?? null);
+}
+export const pendingPins = (serial) => new Set(db.prepare('SELECT pin FROM device_pending_deletes WHERE serial=?').all(serial).map((r) => r.pin));
+// Máy đang kết nối được → xoá hết số đang chờ của nó. Trả số người đã xoá; lỗi kết nối thì ném ra và giữ nguyên hàng chờ.
+export async function runPendingDeletes(d) {
+  const rows = db.prepare('SELECT pin, emp_id FROM device_pending_deletes WHERE serial=?').all(d.serial);
+  if (!rows.length) return 0;
+  const own = db.prepare('SELECT id FROM employees WHERE device_pin=? AND active=1');
+  const clear = db.prepare('DELETE FROM device_pending_deletes WHERE serial=? AND pin=?');
+  const pins = [];
+  for (const r of rows) {
+    const now = own.get(r.pin);
+    if (now && now.id !== r.emp_id) clear.run(d.serial, r.pin);   // số đã cấp cho người khác → không xoá nhầm họ
+    else pins.push(r.pin);
+  }
+  if (!pins.length) return 0;
+  const st = await zkDeleteUsers(d, pins);
+  // Máy từ chối thì cũng thôi: thử lại mỗi vài phút sẽ khoá máy ("Đang làm việc") liên tục
+  for (const p of pins) clear.run(d.serial, p);
+  if (st.failed.length) console.error('[zk-tcp]', d.name || d.serial, 'không cho xoá:', st.failed.join(', '));
+  return st.deleted.length;
+}
+const pendBusy = busyFlag();
+const pendTry = new Map();   // serial → lần thử gần nhất
+const PEND_EVERY = 2 * 60000;
+// Dò các máy TCP/IP còn số chờ xoá (chạy cả khi tắt tự tải; không có hàng chờ thì không đụng gì tới máy)
+export async function pendingCycle(force = false) {
+  if (!pendBusy.take()) return null;
+  try {
+    const out = [];
+    const list = db.prepare(`SELECT d.* FROM push_devices d WHERE d.conn_type='tcp' AND d.active=1
+      AND EXISTS (SELECT 1 FROM device_pending_deletes p WHERE p.serial=d.serial) ORDER BY d.id`).all();
+    for (const d of list) {   // TUẦN TỰ từng máy (quy tắc SDK)
+      if (!force && Date.now() - (pendTry.get(d.serial) || 0) < PEND_EVERY) continue;
+      pendTry.set(d.serial, Date.now());
+      if (!tcpEnabled()) break;
+      try {
+        if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) continue;
+        const info = await tcpInfo(d);
+        if (info.serial && info.serial !== d.serial) continue;   // IP này đang là máy khác
+        out.push({ device: d.name || d.serial, deleted: await runPendingDeletes(d) });
+      } catch (e) { console.error('[zk-tcp] xoá NV đang chờ', d.name || d.serial, e.message); }
+    }
+    return out;
+  } finally { pendBusy.done(); }
+}
+
 export function startJob(kind, devName, fn) {
   const j = { id: String(++seq) + '-' + Date.now().toString(36), kind, device: devName, state: 'run', msg: 'Đang kết nối máy…', result: null, at: Date.now() };
   Object.defineProperty(j, 'tk', { value: tenantKey() });   // việc của công ty nào (không trả ra giao diện)
@@ -415,7 +482,7 @@ export function startJob(kind, devName, fn) {
 export const getJob = (id) => { const j = jobs.get(id); return j && j.tk === tenantKey() ? j : null; };
 // Đang đọc/ghi máy TCP/IP (việc bấm tay hoặc tự tải theo lịch) → tự cập nhật chờ lượt sau: khởi động lại giữa chừng có thể bỏ máy
 // ở trạng thái khoá (EnableDevice false). Việc 'run' quá 30 phút coi như treo, không giữ cập nhật mãi.
-export const tcpBusy = (now = Date.now()) => autoBusy.any() || [...jobs.values()].some((j) => j.state === 'run' && now - j.at < 30 * 60000);
+export const tcpBusy = (now = Date.now()) => autoBusy.any() || pendBusy.any() || [...jobs.values()].some((j) => j.state === 'run' && now - j.at < 30 * 60000);
 
 /* ---------- TỰ ĐỘNG TẢI THEO LỊCH ----------
  * Cài đặt tcp_auto_min = cứ N phút tải 1 lần (0 = tắt). Mỗi lượt, với từng máy TCP/IP đã duyệt + đang bật tự tải (tuần tự từng máy):
@@ -436,8 +503,9 @@ async function autoOne(d, prog = () => {}) {
   try {
     prog(`${d.name || d.serial}: đang kết nối…`);
     if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) return mark(false, `Không thấy máy ở ${d.tcp_ip}:${d.tcp_port}`);
-    const info = await tcpInfo(d);
+    let info = await tcpInfo(d);
     if (info.serial && info.serial !== d.serial) return mark(false, `IP này đang là máy khác (Serial ${info.serial})`);
+    if (await runPendingDeletes(d)) info = await tcpInfo(d);
     saveInfo(d.id, info);
     const logsNow = Number.isFinite(info.logs) ? info.logs : null, usersNow = Number.isFinite(info.users) ? info.users : null;
     if (logsNow != null && logsNow === d.tcp_auto_logs && (usersNow == null || usersNow === d.tcp_auto_users)) return mark(true, 'Không có lượt chấm mới');
@@ -472,8 +540,9 @@ export function startTcpScheduler() {
   if (autoTimer || process.platform !== 'win32') return;
   const tick = Math.max(2000, parseInt(process.env.ZK_TCP_TICK_MS || '30000', 10) || 30000);
   autoTimer = setInterval(() => eachTenant(() => {
-    if (movingOut() || !tcpEnabled() || !autoMinutes()) return;   // đang chuyển máy: máy mới sẽ tự tải
-    return autoCycle(false).catch((e) => console.error('[zk-tcp] tự tải lỗi:', e.message));
+    if (movingOut() || !tcpEnabled()) return;   // đang chuyển máy: máy mới sẽ tự tải
+    return pendingCycle().catch((e) => console.error('[zk-tcp] xoá NV đang chờ lỗi:', e.message))
+      .then(() => (autoMinutes() ? autoCycle(false).catch((e) => console.error('[zk-tcp] tự tải lỗi:', e.message)) : null));
   }), tick);
   autoTimer.unref();
 }

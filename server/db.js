@@ -720,6 +720,12 @@ function migrateColumns() {
       new_pin     TEXT NOT NULL, conflict_id INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_pinremap_sp ON device_pin_remaps(serial, pin);`);
+  // Số ID chờ xoá trên máy TCP/IP đang tắt: phần mềm phải tự gọi máy nên lệnh không xếp sẵn được như máy ADMS.
+  // emp_id = NV đang mang số này lúc yêu cầu xoá (NULL = không ai) → số đã cấp cho người khác thì thôi không xoá.
+  db.exec(`CREATE TABLE IF NOT EXISTS device_pending_deletes (
+    serial TEXT NOT NULL, pin TEXT NOT NULL, emp_id INTEGER,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (serial, pin))`);
   // Giờ đọc từ máy (nút "Xem giờ trên máy"): clock_text = giờ máy trả về, clock_at = giờ máy chủ (VN) lúc nhận
   add('push_devices', 'clock_text', "TEXT DEFAULT ''");
   add('push_devices', 'clock_at',   "TEXT DEFAULT ''");
