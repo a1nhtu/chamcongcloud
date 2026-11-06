@@ -267,6 +267,15 @@ end;
 function InitializeSetup: Boolean;
 var I, N, Free: Integer; Found: array of String; Txt, Inst: String;
 begin
+  { Node 24 đóng gói kèm không chạy trên Windows dưới 10 / Server 2016 (Win7: thiếu hàm GetSystemTimePreciseAsFileTime, và Node tự từ chối).
+    Chặn ngay từ đầu, kẻo khách đi hết các bước rồi gặp lỗi kết nối "secure channel" hoặc cài xong phần mềm không chạy. }
+  if GetWindowsVersion < $0A000000 then begin
+    if not WizardSilent then
+      MsgBox('Digiplus Chấm Công cần Windows 10 hoặc Windows Server 2016 trở lên, nên không cài được trên máy này.' + #13#10 + #13#10 +
+             'Máy này vẫn dùng được phần mềm: cài trên một máy Windows 10 / máy chủ, rồi mở trang quản lý bằng trình duyệt (Chrome, Cốc Cốc...).', mbError, MB_OK);
+    Result := False;
+    Exit;
+  end;
   Result := True;
   Instance := ExpandConstant('{param:INSTANCE|}');
   if WizardSilent or (Instance <> '') then Exit;   { cài im lặng / đã chỉ định bản: không hỏi }

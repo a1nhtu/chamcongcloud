@@ -5813,6 +5813,9 @@ async function pageDevices() {
   tbl.innerHTML = `<thead><tr><th>Máy</th><th>Trạng thái</th><th class="c" title="Như Ronald Jack: ID lẻ (1, 3, 5…) = máy VÀO, ID chẵn (2, 4, 6…) = máy RA, 0 = máy chấm cả vào lẫn ra. Dùng khi chọn lịch trình vào ra &quot;Theo ID máy&quot;.">ID máy</th><th class="c">Nhân viên</th><th class="c">Vân tay</th><th class="c">Khuôn mặt</th><th class="c">Thẻ</th><th>Kết nối gần nhất</th><th class="c">Số quẹt</th><th></th></tr></thead>`;
   const tb = el('tbody');
   const countCells = {};   // serial -> {nv,fp,face,card} để tự làm mới số liệu
+  const statusCells = {};  // serial -> {tr,st,ip,seen} để trạng thái Online/Offline + kết nối gần nhất tự làm mới cùng số liệu
+  const seenText = (iso) => iso ? isoToHMS(iso) + ' · ' + iso.slice(8, 10) + '/' + iso.slice(5, 7) : '';
+  const onlineTitle = (on) => on ? 'Máy đang kết nối' : 'Máy không gọi về trong 2,5 phút gần đây';
   // Copy serial máy (để dán vào trang cấp key, khỏi gõ tay). Bản LAN chạy http → không có navigator.clipboard nên có dự phòng execCommand.
   const copySerial = async (serial, quiet) => {
     let ok = false;
@@ -5992,7 +5995,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
     const cCard = numTd(isHik && ti.cards >= 0 ? ti.cards : (m.card_count ?? 0));
     if (!useInfo) countCells[m.serial] = { cNV, cFP, cFace, cCard };
     // Online = máy có gọi server trong vòng 2,5 phút gần đây (máy ADMS gọi ~mỗi 10s); máy AI = đang giữ kết nối WebSocket
-    const online = isAi || isUnion ? !!m.online : !!(m.last_seen && (Date.now() - Date.parse(m.last_seen) < 150000));
+    const online = !!m.online;   // máy chủ tính bằng giờ của nó — không dùng đồng hồ máy đang xem (máy lệch giờ sẽ báo Offline sai)
     const chips = [
       isTcp ? el('span', { class: 'chip', title: 'Máy kết nối trực tiếp TCP/IP — phần mềm chủ động kết nối khi bấm tải' }, '🔌 TCP/IP') : '',
       isHik ? el('span', { class: 'chip', title: 'Máy Hikvision — phần mềm kết nối vào máy (ISAPI) khi bấm tải / theo lịch tự tải' }, '📷 Hikvision') : '',
@@ -6009,8 +6012,10 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       !direct && !isAi && !isUnion && !m.push_ver && m.active ? el('span', { class: 'chip', title: 'Máy chưa kết nối lại từ khi cập nhật phần mềm nên chưa biết đời cũ hay đời mới. Bấm "🕒 Đồng bộ giờ" (máy khởi động lại ~30 giây) rồi Làm mới để biết. Tải nhân viên vẫn làm được: phần mềm dùng cả hai cách.' + (m.firmware ? ' · ' + m.firmware : '') }, '❔ Chưa rõ đời') : '',
       m.reboot_sched ? el('span', { class: 'chip', title: 'Tự khởi động lại theo giờ hẹn' + (m.reboot_note ? ' — lần gần nhất: ' + m.reboot_note : '') }, '⏰ ' + rebootSchedLabel(m.reboot_sched)) : '',
     ].filter(Boolean);
-    const seen = m.last_seen ? isoToHMS(m.last_seen) + ' · ' + m.last_seen.slice(8, 10) + '/' + m.last_seen.slice(5, 7) : '';
-    tb.append(el('tr', { class: online || direct ? '' : 'off' },
+    const seenEl = el('div', { class: 'dv-sub' }, seenText(m.last_seen));
+    const ipEl = el('div', { class: 'dv-ip' }, direct ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—'));
+    const stEl = el('span', { class: 'st ' + (online ? 'on' : 'offl'), title: onlineTitle(online) }, el('i', {}), online ? 'Online' : 'Offline');
+    const tr = el('tr', { class: online || direct ? '' : 'off' },
       el('td', {},
         el('div', { class: 'dv-name' }, m.name || el('span', { style: 'color:#9ca3af;font-weight:500' }, 'Chưa đặt tên')),
         el('div', { class: 'dv-serial' }, m.serial,
@@ -6020,26 +6025,35 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
         direct ? (m.tcp_auto_at && m.tcp_auto && autoMin > 0
             ? el('span', { class: 'st ' + (m.tcp_auto_ok ? 'on' : 'offl'), title: `Lần tự tải gần nhất ${isoToHMS(m.tcp_auto_at)}: ${m.tcp_auto_msg || ''}` }, el('i', {}), m.tcp_auto_ok ? 'Kết nối tốt' : 'Không kết nối được')
             : el('span', { class: 'st', title: (isHik ? 'Máy Hikvision' : 'Máy TCP/IP') + ' không tự gọi về — phần mềm kết nối khi bấm tải hoặc theo lịch tự tải' }, 'Kết nối khi tải'))
-          : el('span', { class: 'st ' + (online ? 'on' : 'offl'), title: online ? 'Máy đang kết nối' : 'Máy không gọi về trong 2,5 phút gần đây' }, el('i', {}), online ? 'Online' : 'Offline'),
+          : stEl,
         m.active ? el('span', { class: 'pill ok' }, 'Đã duyệt') : el('span', { class: 'pill warn' }, 'Chờ duyệt'),
         // Máy đã có key thì ẩn nhãn cho đỡ rối; chỉ cảnh báo khi CHƯA có key
         (d.key_required && !m.key_ok) ? el('span', { class: 'pill warn' }, '🔑 Chưa có key') : '')),
       idCell(m),
       cNV, cFP, cFace, cCard,
-      el('td', {}, el('div', { class: 'dv-ip' }, direct ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—')), seen ? el('div', { class: 'dv-sub' }, seen) : '',
+      el('td', {}, ipEl, seenEl,
         direct && m.tcp_auto_at && m.tcp_auto && autoMin > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
         m.unmatched ? el('div', { class: 'dv-warn', style: 'cursor:pointer;text-decoration:underline dotted', title: 'Bấm để xem Số ID nào chưa khớp nhân viên', onclick: () => unmatchedModal(m) }, m.unmatched + ' mã chưa khớp') : ''),
       el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : isHik || isUnion ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m, m.conn_type)) : null, doorBtn] : [doorBtn, timeBtn]), logBtn, moreBtn)),
-    ));
+    );
+    tb.append(tr);
+    if (!direct) statusCells[m.serial] = { tr, st: stEl, ip: ipEl, seen: seenEl };
   }
   tbl.append(tb);
-  // Tự làm mới số NV/vân tay/mặt/thẻ mỗi 10s (tự dừng khi rời trang Máy chấm công)
+  // Tự làm mới số NV/vân tay/mặt/thẻ + trạng thái Online/Offline mỗi 10s (tự dừng khi rời trang Máy chấm công)
   const tickCounts = async () => {
     if (!document.body.contains(tbl)) return;          // đã rời trang → dừng hẳn
     try {
       const dd = await api('/admin/devices');
       for (const m of dd.rows) {
+        const sc = statusCells[m.serial];
+        if (sc) {
+          const on = !!m.online;
+          sc.st.className = 'st ' + (on ? 'on' : 'offl'); sc.st.title = onlineTitle(on); sc.st.lastChild.textContent = on ? 'Online' : 'Offline';
+          sc.tr.classList.toggle('off', !on);
+          sc.ip.textContent = m.last_ip || '—'; sc.seen.textContent = seenText(m.last_seen);
+        }
         const cc = countCells[m.serial]; if (!cc) continue;
         for (const [cell, v] of [[cc.cNV, m.emp_count], [cc.cFP, m.fp_count], [cc.cFace, m.face_count], [cc.cCard, m.card_count]]) {
           cell.textContent = String(v ?? 0); cell.classList.toggle('zero', !v);
@@ -6551,7 +6565,7 @@ function lanScanModal() {
       // trỏ đúng tên miền mà HTTPS lệch cổng (bật HTTPS + cổng HTTP, hoặc tắt HTTPS + cổng HTTPS) → máy không về được
       const httpsPort = ['443', '2053', '2083', '2087', '2096', '8443'].includes(String(x.svr_port || ''));
       const mismatch = x.points_here && x.svr_port && ((x.svr_ssl === '1' && !httpsPort) || (x.svr_ssl === '0' && httpsPort));
-      const offline = x.known && (!x.known.last_seen || Date.now() - Date.parse(x.known.last_seen) > 3 * 60000);
+      const offline = x.known && x.known.offline;
       if (mismatch) act.append(warn(`HTTPS ${x.svr_ssl === '1' ? 'đang BẬT' : 'đang TẮT'} nhưng cổng máy là ${x.svr_port} → máy không về được. Bấm "Trỏ lại" để sửa.`));
       else if (x.points_here && offline) act.append(warn('Máy trỏ đúng tên miền nhưng mấy phút nay không về phần mềm. Bấm "Trỏ lại" để ghi lại cài đặt.'));
       if (r.domain && !x.points_here) act.append(btnSm('➜ Trỏ về phần mềm này', () => point(x, r, act)));

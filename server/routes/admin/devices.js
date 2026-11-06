@@ -1,7 +1,7 @@
 // Nhóm route MÁY CHẤM CÔNG (ZKTeco ADMS push) — tách khỏi admin.js.
 import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
-import { rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
+import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
@@ -63,6 +63,7 @@ export function registerDeviceRoutes(r, { need }) {
       d.has_pass = !!d.dev_pass; delete d.dev_pass;      // không lộ mật khẩu máy Hikvision
       delete d.hik_push_token;                             // mã nhận sự kiện chỉ hiện trong hik_push_url (đã cài lên máy)
       try { d.tcp_info = d.tcp_info ? JSON.parse(d.tcp_info) : null; } catch { d.tcp_info = null; }
+      d.online = deviceOnline(d.last_seen);
       if (d.conn_type === 'ai') {   // máy AI: mẫu vân tay / khuôn mặt lưu bảng riêng
         d.online = aiOnline(d.serial);
         const bns = db.prepare('SELECT backupnum b FROM ai_templates WHERE serial=?').all(d.serial).map((r) => r.b);
@@ -351,7 +352,7 @@ export function registerDeviceRoutes(r, { need }) {
           Object.assign(row, await zkCareful({ tcp_ip: h.ip, tcp_port: row.port, tcp_key: 0, udp: !!h.udp }, tcpServerInfo));
           row.points_here = !!domain && row.svr_fun === '1' && row.svr_mode === '1' && (row.svr_url || '').toLowerCase() === domain;
           const k = row.serial && db.prepare('SELECT id, name, active, last_seen FROM push_devices WHERE serial=?').get(row.serial);
-          if (k) row.known = { id: k.id, name: k.name, active: !!k.active, last_seen: k.last_seen };
+          if (k) row.known = { id: k.id, name: k.name, active: !!k.active, last_seen: k.last_seen, offline: !k.last_seen || Date.now() - Date.parse(k.last_seen) > 3 * 60000 };
         } catch (e) {
           // MAC không phải ZKTeco mà máy im ở 4370 → nhiều khả năng là hãng khác, nói rõ để khỏi đi tìm "phần mềm khác"
           if (h.port && e.code === 'BUSY' && h.mac && !isZkMac(h.mac)) e.message += ` Địa chỉ MAC ${h.mac} không thuộc ZKTeco → hoặc máy hãng khác, hoặc IP ${h.ip} đang TRÙNG với thiết bị khác trong mạng: xem MAC trên máy (Menu → Comm → Ethernet / Thông tin hệ thống) — khác ${h.mac} là trùng IP, đổi IP máy chấm công sang IP trống rồi bấm Tìm lại.`;

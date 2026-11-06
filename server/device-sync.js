@@ -228,12 +228,16 @@ export function buildUserCommand(pin, targetSerial, pri, forceName = false) {
   return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=1\tVerify=0`;
 }
 
+// Máy ADMS gọi về ~10 giây/lần; im quá 2,5 phút = mất kết nối. Luôn tính bằng GIỜ MÁY CHỦ rồi gửi kết quả cho trang:
+// tính ở trình duyệt thì máy tính xem bị lệch giờ (hay gặp ở máy cũ) sẽ thấy Offline dù máy chấm công vẫn nối đều.
+export const deviceOnline = (lastSeen, now = Date.now()) => !!lastSeen && now - Date.parse(lastSeen) < 150000;
+
 // Quyền của 1 Số ID trên các máy đang hoạt động: [{ serial, name, online, onDevice, admin }]
 export function deviceRolesForPin(pin) {
   const devs = db.prepare(`SELECT serial, name, last_seen FROM push_devices WHERE active=1 AND ${ZK_TYPES} ORDER BY name, serial`).all();
   return devs.map((d) => {
     const s = db.prepare('SELECT privilege FROM device_users_serial WHERE serial=? AND pin=?').get(d.serial, pin);
-    return { serial: d.serial, name: d.name || d.serial, online: !!(d.last_seen && Date.now() - Date.parse(d.last_seen) < 150000),
+    return { serial: d.serial, name: d.name || d.serial, online: deviceOnline(d.last_seen),
       onDevice: !!s, admin: !!(s && s.privilege > 0) };
   });
 }

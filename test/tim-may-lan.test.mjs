@@ -125,7 +125,7 @@ test('trỏ về tên miền: ghi đủ 3 khoá, cổng 8081 (Cloudflare không 
   db.prepare("INSERT INTO push_devices(serial, name, active) VALUES('ZK0001','',0)").run();
   const again = await call('POST /devices/lan-scan');
   assert.equal(again.out.rows[0].points_here, true);
-  assert.deepEqual({ ...again.out.rows[0].known, id: 0, last_seen: null }, { id: 0, name: '', active: false, last_seen: null });
+  assert.deepEqual({ ...again.out.rows[0].known, id: 0, last_seen: null }, { id: 0, name: '', active: false, last_seen: null, offline: true });
 });
 
 test('cổng Cloudflare nhận (443) thì giữ nguyên', { skip: !WIN }, async () => {
