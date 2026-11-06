@@ -1274,10 +1274,10 @@ function moveDeptBulk(list) {
 async function delEmpBulk(list) {
   const n = list.length; if (!n) return;
   const names = list.slice(0, 10).map((e) => `• ${e.full_name} (${e.code})`).join('\n') + (n > 10 ? `\n… và ${n - 10} người khác` : '');
-  if (!confirm(`XÓA HẲN ${n} nhân viên đã chọn?\n\n${names}\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của những người này sẽ bị xóa.\n${n > 1 ? 'Phần mềm tự sao lưu trước khi xoá (phục hồi ở Cài đặt › Sao lưu).' : 'KHÔNG hoàn tác được.'}\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
-  if (n >= 5 && String(prompt(`Gõ số ${n} để xác nhận xoá ${n} nhân viên:`) ?? '').trim() !== String(n)) { toast('Đã huỷ — số xác nhận không khớp', 'err'); return; }
-  const where = await askDelWhere(list);
+  const where = await askDelWhere(list, `XÓA HẲN ${n} nhân viên đã chọn?`, names,
+    `TOÀN BỘ dữ liệu công/chấm công/phân ca/lương của những người này sẽ bị xóa.\n${n > 1 ? 'Phần mềm tự sao lưu trước khi xoá (phục hồi ở Cài đặt › Sao lưu).' : 'KHÔNG hoàn tác được.'}`);
   if (!where) return;
+  if (n >= 5 && String(prompt(`Gõ số ${n} để xác nhận xoá ${n} nhân viên:`) ?? '').trim() !== String(n)) { toast('Đã huỷ — số xác nhận không khớp', 'err'); return; }
   try {
     const r = await api('/admin/employees/purge-bulk', { method: 'POST', body: { ids: list.map((e) => e.id) } });
     empPicked.clear();
@@ -1287,8 +1287,7 @@ async function delEmpBulk(list) {
   } catch (err) { toast(err.message, 'err'); }
 }
 async function delEmp(e) {
-  if (!confirm(`XÓA HẲN nhân viên "${e.full_name}" (${e.code})?\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của người này sẽ bị xóa, KHÔNG hoàn tác được.\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
-  const where = await askDelWhere([e]);
+  const where = await askDelWhere([e], `XÓA HẲN nhân viên "${e.full_name}" (${e.code})?`, '', 'TOÀN BỘ dữ liệu công/chấm công/phân ca/lương của người này sẽ bị xóa, KHÔNG hoàn tác được.');
   if (!where) return;
   try {
     const r = await api('/admin/employees/' + e.id + '/purge', { method: 'DELETE' });
@@ -1296,19 +1295,24 @@ async function delEmp(e) {
     if (where === 'all') await delPinsOnDevices(r.pins);
   } catch (err) { toast(err.message, 'err'); }
 }
-// Xoá NV trong phần mềm mà họ còn trên máy thì lần đồng bộ sau họ lại về → hỏi xoá luôn trên mọi máy.
-// Trả 'all' (xoá cả trên máy) · 'soft' (chỉ phần mềm, cũng là khi không cần hỏi) · null (huỷ, kể cả đóng hộp bằng ×).
-function askDelWhere(list) {
+// Xác nhận xoá NV. Xoá trong phần mềm mà họ còn trên máy thì lần đồng bộ sau họ lại về → hỏi xoá luôn trên mọi máy NGAY Ở HỘP NÀY.
+// Không dùng máy / không ai có Số ID thì chỉ cần xác nhận như thường.
+// Trả 'all' (xoá cả trên máy) · 'soft' (chỉ phần mềm) · null (huỷ, kể cả đóng hộp bằng ×).
+function askDelWhere(list, title, names, warn) {
+  const keep = '(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)';
   const withPin = list.filter((e) => String(e.device_pin || '').trim());
-  if (!deviceEnabled() || !withPin.length) return Promise.resolve('soft');
+  if (!deviceEnabled() || !withPin.length) return Promise.resolve(confirm(`${title}\n\n${names ? names + '\n\n' : ''}${warn}\n\n${keep}`) ? 'soft' : null);
   return new Promise((done) => {
     const pick = (v) => () => { closeModal(); done(v); };
     const allB = el('button', { class: 'btn', style: 'background:#c0392b;border-color:#c0392b', onclick: pick('all') }, '🗑 Xóa trên tất cả máy');
     const softB = el('button', { class: 'btn ghost', onclick: pick('soft') }, 'Chỉ xóa trên phần mềm');
-    const names = withPin.slice(0, 8).map((e) => `🔌${e.device_pin} · ${e.full_name}`);
-    openModal('Xóa luôn trên tất cả máy chấm công?', [
-      el('div', {}, withPin.length === 1 ? 'Nhân viên này có Số ID trên máy chấm công:' : `${withPin.length} nhân viên có Số ID trên máy chấm công:`),
-      el('div', { class: 'map-hint', style: 'margin:6px 0 10px' }, ...names.flatMap((t, i) => [i ? el('br') : '', '• ' + t]), withPin.length > 8 ? el('span', {}, el('br'), `… và ${withPin.length - 8} người khác`) : ''),
+    const pinNames = withPin.slice(0, 8).map((e) => `🔌${e.device_pin} · ${e.full_name}`);
+    openModal(title, [
+      el('div', { style: 'white-space:pre-line' }, warn),
+      el('div', { class: 'map-hint', style: 'margin:6px 0 14px' }, keep),
+      el('div', { style: 'font-weight:700' }, 'Xóa luôn trên tất cả máy chấm công?'),
+      el('div', { style: 'margin-top:4px' }, withPin.length === 1 ? 'Có Số ID trên máy chấm công:' : `${withPin.length} người có Số ID trên máy chấm công:`),
+      el('div', { class: 'map-hint', style: 'margin:6px 0 10px' }, ...pinNames.flatMap((t, i) => [i ? el('br') : '', '• ' + t]), withPin.length > 8 ? el('span', {}, el('br'), `… và ${withPin.length - 8} người khác`) : ''),
       el('div', { class: 'dv-warn', style: 'font-size:13px' }, 'Nếu không xoá trên máy: họ vẫn còn trên máy nên sẽ tự đồng bộ về lại phần mềm.'),
     ], [allB, softB, el('button', { class: 'btn ghost', onclick: pick(null) }, 'Huỷ')]);
   });
