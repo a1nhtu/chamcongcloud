@@ -1276,17 +1276,56 @@ async function delEmpBulk(list) {
   const names = list.slice(0, 10).map((e) => `• ${e.full_name} (${e.code})`).join('\n') + (n > 10 ? `\n… và ${n - 10} người khác` : '');
   if (!confirm(`XÓA HẲN ${n} nhân viên đã chọn?\n\n${names}\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của những người này sẽ bị xóa.\n${n > 1 ? 'Phần mềm tự sao lưu trước khi xoá (phục hồi ở Cài đặt › Sao lưu).' : 'KHÔNG hoàn tác được.'}\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
   if (n >= 5 && String(prompt(`Gõ số ${n} để xác nhận xoá ${n} nhân viên:`) ?? '').trim() !== String(n)) { toast('Đã huỷ — số xác nhận không khớp', 'err'); return; }
+  const where = await askDelWhere(list);
+  if (!where) return;
   try {
     const r = await api('/admin/employees/purge-bulk', { method: 'POST', body: { ids: list.map((e) => e.id) } });
     empPicked.clear();
     toast(`Đã xóa ${r.deleted} nhân viên` + (r.self ? ' · bỏ qua tài khoản đang đăng nhập' : '') + (r.admins ? ` · bỏ qua ${r.admins} tài khoản Admin (không đủ quyền)` : ''), 'ok');
     pageEmployees();
+    if (where === 'all') await delPinsOnDevices(r.pins);
   } catch (err) { toast(err.message, 'err'); }
 }
 async function delEmp(e) {
   if (!confirm(`XÓA HẲN nhân viên "${e.full_name}" (${e.code})?\n\nTOÀN BỘ dữ liệu công/chấm công/phân ca/lương của người này sẽ bị xóa, KHÔNG hoàn tác được.\n\n(Chỉ muốn cho nghỉ việc mà GIỮ lịch sử → bấm "Khoá" thay vì Xóa.)`)) return;
-  try { await api('/admin/employees/' + e.id + '/purge', { method: 'DELETE' }); toast('Đã xóa nhân viên', 'ok'); pageEmployees(); }
-  catch (err) { toast(err.message, 'err'); }
+  const where = await askDelWhere([e]);
+  if (!where) return;
+  try {
+    const r = await api('/admin/employees/' + e.id + '/purge', { method: 'DELETE' });
+    toast('Đã xóa nhân viên', 'ok'); pageEmployees();
+    if (where === 'all') await delPinsOnDevices(r.pins);
+  } catch (err) { toast(err.message, 'err'); }
+}
+// Xoá NV trong phần mềm mà họ còn trên máy thì lần đồng bộ sau họ lại về → hỏi xoá luôn trên mọi máy.
+// Trả 'all' (xoá cả trên máy) · 'soft' (chỉ phần mềm, cũng là khi không cần hỏi) · null (huỷ, kể cả đóng hộp bằng ×).
+function askDelWhere(list) {
+  const withPin = list.filter((e) => String(e.device_pin || '').trim());
+  if (!deviceEnabled() || !withPin.length) return Promise.resolve('soft');
+  return new Promise((done) => {
+    const pick = (v) => () => { closeModal(); done(v); };
+    const allB = el('button', { class: 'btn', style: 'background:#c0392b;border-color:#c0392b', onclick: pick('all') }, '🗑 Xóa trên tất cả máy');
+    const softB = el('button', { class: 'btn ghost', onclick: pick('soft') }, 'Chỉ xóa trên phần mềm');
+    const names = withPin.slice(0, 8).map((e) => `🔌${e.device_pin} · ${e.full_name}`);
+    openModal('Xóa luôn trên tất cả máy chấm công?', [
+      el('div', {}, withPin.length === 1 ? 'Nhân viên này có Số ID trên máy chấm công:' : `${withPin.length} nhân viên có Số ID trên máy chấm công:`),
+      el('div', { class: 'map-hint', style: 'margin:6px 0 10px' }, ...names.flatMap((t, i) => [i ? el('br') : '', '• ' + t]), withPin.length > 8 ? el('span', {}, el('br'), `… và ${withPin.length - 8} người khác`) : ''),
+      el('div', { class: 'dv-warn', style: 'font-size:13px' }, 'Nếu không xoá trên máy: họ vẫn còn trên máy nên sẽ tự đồng bộ về lại phần mềm.'),
+    ], [allB, softB, el('button', { class: 'btn ghost', onclick: pick(null) }, 'Huỷ')]);
+  });
+}
+// Xoá các Số ID (của NV vừa xoá trong phần mềm) trên mọi máy. Có máy kết nối trực tiếp hoặc máy chưa xoá được thì mở hộp báo kết quả.
+async function delPinsOnDevices(pins) {
+  if (!pins || !pins.length) return;
+  let r;
+  try { r = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins } }); }
+  catch (e) { return toast('Đã xóa trong phần mềm nhưng chưa xoá được trên máy: ' + e.message, 'err'); }
+  const box = el('div');
+  devDelSummary(r, box, pins.length);
+  if (!r.job && !r.tcpNote && !r.idle?.length && r.push.length) return toast(`Đã gửi lệnh xoá ${pins.length} người xuống ${r.push.length} máy`, 'ok');
+  const closeB = el('button', { class: 'btn', onclick: closeModal }, 'Đóng');
+  openModal('Xóa nhân viên trên máy chấm công', [box], [closeB]);
+  const res = await devDelWatchJob(r, box);
+  if (res?.devices?.some((x) => !x.ok)) box.append(el('div', { class: 'dv-warn' }, 'Máy chưa xoá được thì họ có thể tự về lại phần mềm. Bật máy lên rồi vào Máy chấm công › Xóa NV trên máy để xoá nốt.'));
 }
 
 // Trang "Bộ phận & Chức danh" — khai báo bộ phận CHA-CON + danh mục chức danh
@@ -6273,6 +6312,30 @@ async function pushEmpModal(devRows, after) {
   render();
 }
 
+// Kết quả POST /devices/delete-users-all: bật hộp tiến trình máy ADMS, ghi tóm tắt vào box
+function devDelSummary(r, box, n) {
+  if (r.push.length) cmdTrack(`Xóa ${n} NV trên ${r.push.length} máy`, r.track);
+  if (r.push.length) box.append(el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, `✅ Đã gửi lệnh xoá xuống ${r.push.length} máy: ${r.push.join(', ')}. Máy đang kết nối xoá ngay, máy đang tắt sẽ xoá khi kết nối lại.`));
+  if (r.tcpNote) box.append(el('div', { class: 'dv-warn' }, r.tcpNote));
+  if (r.idle && r.idle.length) box.append(el('div', { class: 'dv-warn' }, `Máy đang tạm dừng / chờ duyệt chưa xoá: ${r.idle.join(', ')}. Bật lại máy rồi bấm Xóa lần nữa (hoặc xoá trên máy).`));
+  if (!r.push.length && !r.tcp.length && !r.job) box.append(el('div', { class: 'dv-warn' }, 'Chưa có máy nào đang dùng để xoá.'));
+}
+// Máy TCP/IP / Hikvision / Union: xoá chạy nền → theo dõi tiến độ, ghi kết quả từng máy vào box
+async function devDelWatchJob(r, box) {
+  if (!r.job) return null;
+  const st = el('div', { style: 'font-weight:600' }, `⏳ Đang xoá trên ${(r.direct || r.tcp).length} máy kết nối trực tiếp…`);
+  box.append(st);
+  for (;;) {
+    await new Promise((ok) => setTimeout(ok, 1000));
+    let j; try { j = await api('/admin/devices/tcp-jobs/' + r.job); } catch (e) { st.textContent = '❌ ' + e.message; return null; }
+    if (j.state === 'run') { st.textContent = '⏳ ' + j.msg; continue; }
+    if (j.state === 'err') { st.textContent = '❌ ' + j.msg; return null; }
+    st.textContent = '✅ Máy kết nối trực tiếp:';
+    for (const x of (j.result?.devices || [])) box.append(el('div', { class: x.ok ? 'map-hint' : 'dv-warn', style: 'margin:2px 0' },
+      x.ok ? `• ${x.device}: đã xoá ${x.deleted} người` + (x.absent != null ? ` · ${x.absent} người không có trên máy (bỏ qua)` : ' (người không có trên máy này thì bỏ qua)') + (x.failed?.length ? ` — ⚠ máy không cho xoá: ${x.failed.slice(0, 20).join(', ')} (thử lại / xoá tay trên máy)` : '') : `• ${x.device}: ${x.error}`));
+    return j.result;
+  }
+}
 // XÓA NV TRÊN TẤT CẢ MÁY 1 lần (NV nghỉ việc) → hỏi KHOÁ luôn để phần mềm không đồng bộ họ lại xuống máy
 async function deleteUsersAllModal(after) {
   const searchI = el('input', { type: 'search', placeholder: '🔍 Tìm Số ID, tên, mã, bộ phận…', style: 'flex:1;min-width:200px' });
@@ -6319,12 +6382,8 @@ async function deleteUsersAllModal(after) {
     let r;
     try { r = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins } }); }
     catch (e) { goBtn.disabled = false; return toast(e.message, 'err'); }
-    if (r.push.length) cmdTrack(`Xóa ${pins.length} NV trên ${r.push.length} máy`, r.track);
     result.innerHTML = '';
-    if (r.push.length) result.append(el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, `✅ Đã gửi lệnh xoá xuống ${r.push.length} máy: ${r.push.join(', ')}. Máy đang kết nối xoá ngay, máy đang tắt sẽ xoá khi kết nối lại.`));
-    if (r.tcpNote) result.append(el('div', { class: 'dv-warn' }, r.tcpNote));
-    if (r.idle && r.idle.length) result.append(el('div', { class: 'dv-warn' }, `Máy đang tạm dừng / chờ duyệt chưa xoá: ${r.idle.join(', ')}. Bật lại máy rồi bấm Xóa lần nữa (hoặc xoá trên máy).`));
-    if (!r.push.length && !r.tcp.length && !r.job) result.append(el('div', { class: 'dv-warn' }, 'Chưa có máy nào đang dùng để xoá.'));
+    devDelSummary(r, result, pins.length);
     // Hỏi KHOÁ luôn những người vừa xoá (đang hoạt động) → không bị đồng bộ lại xuống máy
     const toLock = rows.filter((u) => picked.has(u.pin) && u.active === true);
     if (toLock.length && hasPerm('employees') && confirm(`Khoá luôn ${toLock.length} nhân viên vừa xoá?\n\nKhoá = cho nghỉ việc: phần mềm sẽ KHÔNG đồng bộ lại họ xuống máy nữa, lịch sử công vẫn giữ (mở khoá lại được).\n\n${toLock.slice(0, 15).map((u) => '• ' + u.pin + ' · ' + (u.name || '')).join('\n')}${toLock.length > 15 ? `\n… và ${toLock.length - 15} người nữa` : ''}`)) {
@@ -6337,21 +6396,7 @@ async function deleteUsersAllModal(after) {
     picked.clear(); upd();
     try { rows = (await api('/admin/devices/all-users')).rows; } catch {}
     render();
-    // Máy TCP/IP: xoá chạy nền qua SDK → theo dõi tiến độ
-    if (r.job) {
-      const st = el('div', { style: 'font-weight:600' }, `⏳ Đang xoá trên ${(r.direct || r.tcp).length} máy kết nối trực tiếp…`);
-      result.append(st);
-      for (;;) {
-        await new Promise((ok) => setTimeout(ok, 1000));
-        let j; try { j = await api('/admin/devices/tcp-jobs/' + r.job); } catch (e) { st.textContent = '❌ ' + e.message; break; }
-        if (j.state === 'run') { st.textContent = '⏳ ' + j.msg; continue; }
-        if (j.state === 'err') { st.textContent = '❌ ' + j.msg; break; }
-        st.textContent = '✅ Máy kết nối trực tiếp:';
-        for (const x of (j.result?.devices || [])) result.append(el('div', { class: x.ok ? 'map-hint' : 'dv-warn', style: 'margin:2px 0' },
-          x.ok ? `• ${x.device}: đã xoá ${x.deleted} người` + (x.absent != null ? ` · ${x.absent} người không có trên máy (bỏ qua)` : ' (người không có trên máy này thì bỏ qua)') + (x.failed?.length ? ` — ⚠ máy không cho xoá: ${x.failed.slice(0, 20).join(', ')} (thử lại / xoá tay trên máy)` : '') : `• ${x.device}: ${x.error}`));
-        break;
-      }
-    }
+    await devDelWatchJob(r, result);
   };
   upd();
   openModal('Xóa nhân viên trên TẤT CẢ máy chấm công', [

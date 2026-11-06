@@ -463,14 +463,16 @@ export function registerEmployeeRoutes(r, { need }) {
     db.prepare('UPDATE device_punches SET employee_id=NULL WHERE employee_id=?').run(id);
     db.prepare('DELETE FROM employees WHERE id=?').run(id);
   };
+  // Số ID của những người vừa xoá, để giao diện xoá tiếp trên máy. Bỏ số mà NV khác còn đang mang (khỏi xoá nhầm họ trên máy).
+  const freePins = (pins) => [...new Set(pins)].filter((p) => !db.prepare('SELECT 1 FROM employees WHERE device_pin=?').get(p));
   r.delete('/employees/:id/purge', need('employees'), (req, res) => {
-    const emp = db.prepare('SELECT id, role FROM employees WHERE id=?').get(req.params.id);
+    const emp = db.prepare('SELECT id, role, device_pin FROM employees WHERE id=?').get(req.params.id);
     if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
     if (req.user && req.user.id != null && Number(req.user.id) === emp.id)
       return res.status(400).json({ error: 'Không thể tự xóa tài khoản đang đăng nhập' });
     try {
       purgeEmp(emp.id);
-      res.json({ ok: true });
+      res.json({ ok: true, pins: freePins([String(emp.device_pin || '').trim()].filter(Boolean)) });
     } catch (e) { sendCaughtError(res, 'DELETE /admin/employees/:id/purge', e, { status: 400 }); }
   });
   // XÓA CỨNG NHIỀU nhân viên 1 lần (tích chọn ở trang Nhân viên): body { ids: [...] }. Cả lô chạy trong 1 transaction.
@@ -478,8 +480,9 @@ export function registerEmployeeRoutes(r, { need }) {
   r.post('/employees/purge-bulk', need('employees'), (req, res) => {
     const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
     if (!ids.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
-    const q = db.prepare('SELECT id, role FROM employees WHERE id=?');
+    const q = db.prepare('SELECT id, role, device_pin FROM employees WHERE id=?');
     let deleted = 0, self = false, admins = 0, backup = '';
+    const gone = [];
     // Xoá từ 2 người trở lên → tự sao lưu CSDL trước (lỡ tay chọn cả công ty vẫn phục hồi được ở Cài đặt › Sao lưu)
     if (ids.length > 1) { try { backup = doBackup('predelete').name; } catch (e) { console.error('[purge-bulk backup]', e.message); } }
     db.exec('BEGIN');
@@ -489,10 +492,11 @@ export function registerEmployeeRoutes(r, { need }) {
         if (req.user && req.user.id != null && Number(req.user.id) === emp.id) { self = true; continue; }
         if (!guardUpdateTarget(req.user, emp, {}).ok) { admins++; continue; }
         purgeEmp(emp.id); deleted++;
+        const pin = String(emp.device_pin || '').trim(); if (pin) gone.push(pin);
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/purge-bulk', e, { status: 400 }); }
-    res.json({ ok: true, deleted, self, admins, backup });
+    res.json({ ok: true, deleted, self, admins, backup, pins: freePins(gone) });
   });
 
   // CHUYỂN BỘ PHẬN cho NHIỀU nhân viên 1 lần (tích chọn ở trang Nhân viên): body { ids: [...], department: 'Tên bộ phận' }.

@@ -4,6 +4,7 @@ import { db, getSetting } from '../../db.js';
 import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
+import { hasPerm } from '../../auth.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
   scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful, zkHello, isZkMac } from '../../zk-tcp.js';
 import { buildSched, schedLabel } from '../../reboot-schedule.js';
@@ -45,6 +46,8 @@ function tunnelDomain() {
 }
 
 export function registerDeviceRoutes(r, { need }) {
+  // Xoá NV ở trang Nhân viên kèm xoá trên máy: người có quyền Nhân viên không cần thêm quyền Máy chấm công
+  const needDevOrEmp = (req, res, next) => (hasPerm(req.user, 'employees') ? next() : need('devices')(req, res, next));
   r.get('/devices', need('devices'), (req, res) => {
     const rows = db.prepare('SELECT * FROM push_devices ORDER BY created_at').all();
     for (const d of rows) {
@@ -100,7 +103,7 @@ export function registerDeviceRoutes(r, { need }) {
     catch (e) { sendCaughtError(res, 'POST /admin/devices/resync', e, { status: 400 }); }
   });
   // Tiến độ lệnh vừa xếp cho máy đẩy (ADMS): from/to = mốc id lệnh nút bấm trả về (track), serials = máy theo dõi
-  r.get('/devices/cmd-progress', need('devices'), (req, res) => {
+  r.get('/devices/cmd-progress', needDevOrEmp, (req, res) => {
     const from = parseInt(req.query.from, 10) || 0, to = parseInt(req.query.to, 10) || 0;
     const serials = String(req.query.serials || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
     if (!from && !to) return res.status(400).json({ error: 'Thiếu mốc lệnh' });
@@ -415,7 +418,7 @@ export function registerDeviceRoutes(r, { need }) {
     });
     res.json({ ok: true, job: j.id, title: 'Tải dữ liệu chấm công tất cả máy TCP/IP' });
   });
-  r.get('/devices/tcp-jobs/:job', need('devices'), (req, res) => {
+  r.get('/devices/tcp-jobs/:job', needDevOrEmp, (req, res) => {
     const j = getJob(req.params.job);
     if (!j) return res.status(404).json({ error: 'Không còn thông tin việc này (máy chủ vừa khởi động lại?)' });
     res.json(j);
@@ -641,7 +644,7 @@ export function registerDeviceRoutes(r, { need }) {
     res.json({ rows });
   });
   // Xóa các Số ID đã chọn trên MỌI máy đang dùng: máy đẩy (ADMS) xếp lệnh chờ máy lấy; máy TCP/IP chạy nền qua SDK
-  r.post('/devices/delete-users-all', need('devices'), (req, res) => {
+  r.post('/devices/delete-users-all', needDevOrEmp, (req, res) => {
     const pins = cleanPins(req.body?.pins);
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all();
