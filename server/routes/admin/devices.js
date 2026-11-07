@@ -1,7 +1,7 @@
 // Nhóm route MÁY CHẤM CÔNG (ZKTeco ADMS push) — tách khỏi admin.js.
 import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
-import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
+import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
@@ -237,6 +237,7 @@ export function registerDeviceRoutes(r, { need }) {
     db.prepare('DELETE FROM push_device_commands WHERE serial=?').run(d.serial);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(d.serial);
     db.prepare('DELETE FROM device_pending_deletes WHERE serial=?').run(d.serial);
+    clearDeletedMarks([d.serial]);
     db.prepare('UPDATE device_users_serial SET photo_ver=NULL WHERE serial=?').run(d.serial);   // thêm lại máy → đẩy lại ảnh
     db.prepare('DELETE FROM ai_templates WHERE serial=?').run(d.serial);
     aiKick(d.serial);   // máy AI đang kết nối → ngắt (kết nối lại sẽ hiện ở Chờ duyệt)
@@ -589,6 +590,7 @@ export function registerDeviceRoutes(r, { need }) {
     const direct = [...hikDevs, ...tcpDevs];
     const directSet = new Set(direct.map((h) => h.serial));
     const from = cmdMark();
+    clearDeletedMarks(serials, pins);   // bấm đẩy = chủ động đưa người này về máy, không còn là "đã xoá" ở các máy này
     const r2 = pushEmployees(pins, { serials: serials.filter((s) => !directSet.has(s)), withBio: !!b.with_bio });
     const track = { from, to: cmdMark(), serials: serials.filter((s) => !directSet.has(s)) };
     for (const s of serials) if (!directSet.has(s)) aiPoke(s);

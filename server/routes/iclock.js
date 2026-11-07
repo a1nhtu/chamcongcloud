@@ -138,11 +138,14 @@ function ingestUserTables(sn, table, body, stamp, newOnly = false) {
           const tmplLines = lines.filter((l) => /^(FP|BIODATA|FINGERTMP)\b/i.test(l));
           const photoLines = lines.filter((l) => /^(USERPIC|BIOPHOTO)\b/i.test(l));
           const oplogLines = lines.filter((l) => /^OPLOG\b/i.test(l));   // nhật ký thao tác trên máy
-          if (userLines.length) ingestUserData(sn, 'USER', userLines.join('\n'), track);
+          // Đăng ký ngay trên máy (mốc đã có) — khác lúc máy gửi lại cả danh sách vì mốc về 0
+          track.realtime = !['', '0'].includes(String(db.prepare('SELECT oper_stamp FROM push_devices WHERE serial=?').get(sn)?.oper_stamp ?? '').trim());
           // dòng BIODATA (vân tay 10 / khuôn mặt) lưu đúng loại, không gộp vào vân tay ZKFinger 9 như dòng FP
           const bioLines = tmplLines.filter((l) => /^BIODATA\b/i.test(l)), fpLines = tmplLines.filter((l) => !/^BIODATA\b/i.test(l));
           if (fpLines.length) storeTemplates(sn, 'FP', fpLines.join('\n'), track);
           if (bioLines.length) storeTemplates(sn, 'BIODATA', bioLines.join('\n'), track);
+          // Sau mẫu vân tay: người mới dùng lại Số ID đã xoá được nhận nhờ mẫu mới, dòng người dùng đi sau mới giữ được tên
+          if (userLines.length) ingestUserData(sn, 'USER', userLines.join('\n'), track);
           if (photoLines.length) storeUserPhotos(sn, photoLines.join('\n'), track);
           if (oplogLines.length) storeDeviceOplogs(sn, oplogLines.join('\n'));
           if (sn) db.prepare('UPDATE push_devices SET oper_stamp=? WHERE serial=?').run(String(stamp), sn);

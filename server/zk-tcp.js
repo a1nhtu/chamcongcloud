@@ -11,7 +11,7 @@ import { connect } from 'node:net';
 import dgram from 'node:dgram';
 import { fileURLToPath } from 'node:url';
 import { db, getSetting } from './db.js';
-import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates, isFpV10, forgetDeviceUsers } from './device-sync.js';
+import { ingestAttlog, ingestUserData, buildUserCommand, storeTemplates, isFpV10, forgetDeviceUsers, rememberDeleted } from './device-sync.js';
 import { guardIncoming, heldSet, dropConflicts } from './pin-guard.js';
 import { vnDateStr } from './util.js';
 import { busyFlag, eachTenant, tenantKey } from './tenant.js';
@@ -411,7 +411,9 @@ export async function zkDeleteUsers(d, pins) {
   await zkRun(d, 'delete-users', { from: pins.join(','), timeoutMs: 5 * 60000 }, (k, c) => {
     if (k === 'D') (c[1] === '1' ? deleted : c[1] === '0' ? failed : absent).push(c[0]);
   });
-  forgetDeviceUsers(d.serial, pins.filter((p) => !failed.includes(p)));
+  const gone = pins.filter((p) => !failed.includes(p));
+  rememberDeleted(d.serial, gone);
+  forgetDeviceUsers(d.serial, gone);
   dropConflicts(d.serial, deleted);
   return { deleted, failed, absent };
 }

@@ -57,11 +57,14 @@ test('danh sách Số ID trên tất cả máy: thấy người + các máy đan
   assert.equal(u5.active, true);
 });
 
-test('CŨ (chưa khoá): xoá trên 1 máy → máy kia đẩy lại khi kết nối lại', () => {
+test('xoá trên 1 máy → máy kia KHÔNG đẩy lại khi kết nối lại (từ v1.31.4, trước đây đẩy lại); muốn đưa về thì bấm Đẩy NV', () => {
   S.deleteDeviceUsers('SN_A', ['7']);
   sendAll();
   S.syncFillDevice('SN_A');   // máy A khởi động / kết nối lại
-  assert.ok(pending('SN_A', '7').some((c) => c.startsWith('DATA UPDATE USERINFO PIN=7')), 'NV chưa khoá vẫn được đồng bộ lại như trước');
+  assert.deepEqual(pending('SN_A', '7').filter((c) => c.startsWith('DATA UPDATE')), [], 'không đẩy người đã xoá về lại máy A');
+  S.clearDeletedMarks(['SN_A'], ['7']);   // nút Đẩy NV xuống máy gỡ ghi nhớ
+  S.syncFillDevice('SN_A');
+  assert.ok(pending('SN_A', '7').some((c) => c.startsWith('DATA UPDATE USERINFO PIN=7')), 'gỡ ghi nhớ thì đồng bộ lại như thường');
   sendAll();
 });
 

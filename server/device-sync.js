@@ -9,7 +9,7 @@ import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
-import { heldSet, remapLoader, onUserAck, pmNameFor } from './pin-guard.js';
+import { heldSet, remapLoader, onUserAck, pmNameFor, normName } from './pin-guard.js';
 
 // Máy ZKTeco (đẩy ADMS 'push' / TCP-IP 'tcp'): CHỈ các máy này nhận lệnh + mẫu sinh trắc ZKTeco khi đồng bộ.
 // Máy hãng khác (AI 'ai', Hikvision 'hik') có cách đồng bộ riêng (server/ai-device.js, server/hik-isapi.js).
@@ -87,6 +87,7 @@ export function ingestUserData(serial, table, rawBody, track = null, opts = {}) 
   const held = heldSet();
   const prevUser = track && db.prepare('SELECT name,card,passwd,privilege FROM device_users WHERE pin=?');
   const force = pullRequested(serial);   // vừa bấm "Tải nhân viên từ máy" → tạo NV dù tắt tự tạo
+  const gone = deletedOn(serial);
   // Cả khối (VD máy gửi 600 NV một lần) ghi trong MỘT giao dịch — nhanh hơn nhiều so với ghi từng dòng
   db.exec('SAVEPOINT ingest_users');
   try {
@@ -108,6 +109,11 @@ export function ingestUserData(serial, table, rawBody, track = null, opts = {}) 
     const pri = kv.pri !== undefined ? (parseInt(kv.pri, 10) || 0) : null;   // null = dòng không ghi quyền → giữ nguyên
     // Số ID đang nghi trùng ở máy này: chỉ ghi theo máy, không đè dữ liệu chung / không tạo-sửa NV / không đồng bộ
     if (held.has(serial + '|' + pin)) { upsertDeviceUserSerial(serial, pin, name, card, pri); continue; }
+    // Số ID đã xoá trên máy này, chưa có NV: dòng người dùng không có gì khác người cũ thì chưa tính là người mới
+    if (gone?.has(pin) && !gone.hasEmp(pin)) {
+      if (!gone.differs(pin, name, card, !!track?.realtime)) continue;
+      gone.clear(pin);
+    }
     const pu = prevUser ? prevUser.get(pin) : null;
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
@@ -177,6 +183,7 @@ export function storeTemplates(serial, table, rawBody, track = null) {
   const pins = new Set();
   const held = heldSet();
   const force = pullRequested(serial);
+  const gone = deletedOn(serial), left = [], fresh = new Set();
   const prevTmp = track && db.prepare('SELECT tmp FROM device_bio_templates WHERE serial=? AND pin=? AND bio_type=? AND idx=?');
   const up = db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
     VALUES(?,?,?,?,?,?,?,?,?)
@@ -194,6 +201,10 @@ export function storeTemplates(serial, table, rawBody, track = null) {
     else { bioType = parseInt(kv.type || '1', 10) || 1; idx = parseInt(kv.no || kv.index || kv.fid || '0', 10) || 0; major = parseInt(kv.majorver || '10', 10) || 10; }
     const valid = parseInt(kv.valid ?? '1', 10); const duress = parseInt(kv.duress || '0', 10) || 0;
     const minor = parseInt(kv.minorver || '0', 10) || 0;
+    if (gone?.has(pin) && !held.has(serial + '|' + pin)) {
+      if (gone.isOld(pin, tmp)) { left.push({ pin, bioType, idx, isFinger9 }); continue; }   // mẫu của người đã xoá còn sót
+      fresh.add(pin);   // mẫu khác hẳn = người mới dùng lại Số ID
+    }
     const pt = prevTmp ? prevTmp.get(serial, pin, bioType, idx) : null;
     try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
     upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
@@ -202,6 +213,8 @@ export function storeTemplates(serial, table, rawBody, track = null) {
     pins.add(pin);
     if (track && (!pt || (!track.newOnly && pt.tmp !== tmp))) track.changed.add(pin);
   }
+  for (const pin of fresh) gone.clear(pin);
+  if (left.length) reDeleteLeftover(serial, left, fresh, gone);
   return pins;
 }
 
@@ -275,9 +288,10 @@ export function queryDeviceAttlog(serial, from, to) {
 // Lệnh tải log ĐÃ GỬI mà máy KHÔNG báo kết quả quá 5 phút (máy tính vừa ngủ dậy / mạng chập: lệnh lạc giữa đường,
 // máy không chạy) → đưa về hàng chờ gửi lại, tối đa 3 lần. Không gửi lại thì lượt quẹt lúc mất liên lạc mất luôn.
 // Lượt máy gửi trùng không sao (UNIQUE serial+pin+punch_at). Chỉ xét lệnh trong 1 ngày gần đây.
+// Lệnh XOÁ NV cũng vậy: mất lệnh là người đó còn nguyên trên máy, xoá lại nhiều lần không hại gì.
 export function resendLostAttlogQueries(serial) {
   return db.prepare(`UPDATE push_device_commands SET trans_time=NULL, resend=resend+1
-    WHERE serial=? AND content LIKE 'DATA QUERY ATTLOG%' AND response_at IS NULL AND resend < 3
+    WHERE serial=? AND (content LIKE 'DATA QUERY ATTLOG%' OR content LIKE 'DATA DELETE USERINFO%') AND response_at IS NULL AND resend < 3
       AND trans_time < datetime('now','-5 minutes') AND trans_time > datetime('now','-1 day')`).run(serial).changes;
 }
 // Kéo (tải) danh sách nhân viên + vân tay/khuôn mặt TỪ MÁY về phần mềm.
@@ -354,6 +368,7 @@ export function storeClockResult(id, body) {
 export function clearDeviceLog(serial) { queueCmd(serial, 'CLEAR LOG'); return 1; }
 // Xóa TOÀN BỘ dữ liệu trên máy (NV + vân tay + log) + dọn mirror local để đếm đúng
 export function clearDeviceAll(serial) {
+  rememberDeleted(serial, db.prepare('SELECT pin FROM device_users_serial WHERE serial=? UNION SELECT pin FROM device_bio_templates WHERE serial=?').all(serial, serial).map((r) => r.pin));
   queueCmd(serial, 'CLEAR DATA');
   db.prepare('DELETE FROM device_bio_templates WHERE serial=?').run(serial);
   db.prepare('DELETE FROM device_users_serial WHERE serial=?').run(serial);
@@ -361,6 +376,7 @@ export function clearDeviceAll(serial) {
 }
 // Xóa nhân viên trên máy theo Số ID (PIN)
 export function deleteDeviceUsers(serial, pins) {
+  rememberDeleted(serial, pins);
   let n = 0;
   for (const pin of (pins || [])) {
     const p = String(pin).trim(); if (!p) continue;
@@ -372,6 +388,84 @@ export function deleteDeviceUsers(serial, pins) {
     n++;
   }
   return n;
+}
+/* ---------- GHI NHỚ NGƯỜI ĐÃ XOÁ TRÊN MÁY (Norah 07/11/2026) ----------
+ * Trước đây xoá xong là phần mềm quên hẳn: máy nào còn sót dữ liệu (lệnh mất, xoá từng máy, máy bắt tay giữa chừng) gửi lên thì tự tạo
+ * lại NV "NV <số>", rồi đồng bộ người đó về lại các máy đã xoá. Giờ nhớ (máy, Số ID) đã xoá + hash các mẫu vân tay/mặt/ảnh của Số ID:
+ * - Mẫu trùng mẫu đã xoá → dữ liệu sót: không lưu, không tạo NV, không đồng bộ, xoá lại trên máy đó.
+ * - Mẫu khác → người mới dùng lại Số ID: nhận bình thường, gỡ ghi nhớ của máy đó.
+ * Chỉ áp dụng khi có xoá trên máy (ZK ADMS, TCP/IP); "Chỉ xóa trên phần mềm" không ghi gì. */
+const tmpHash = (tmp) => createHash('md5').update(String(tmp || '').trim()).digest('hex').slice(0, 16);
+export function rememberDeleted(serial, pins) {
+  const addTmp = db.prepare('INSERT OR IGNORE INTO device_deleted_tmps(pin, hash) VALUES(?,?)');
+  const addPin = db.prepare(`INSERT INTO device_deleted_pins(serial, pin, name, card) VALUES(?,?,?,?)
+    ON CONFLICT(serial, pin) DO UPDATE SET name=excluded.name, card=excluded.card, deleted_at=datetime('now')`);
+  for (const pin of (pins || [])) {
+    const p = String(pin).trim(); if (!p) continue;
+    const s = db.prepare('SELECT name, card FROM device_users_serial WHERE serial=? AND pin=?').get(serial, p) || {};
+    const u = db.prepare('SELECT name, card FROM device_users WHERE pin=?').get(p) || {};
+    addPin.run(serial, p, s.name || u.name || '', s.card || u.card || '');
+    // lấy mẫu ở MỌI máy: máy gửi lên đúng bản nó lưu, có thể khác bản đồng bộ đi từ máy khác
+    for (const t of db.prepare('SELECT DISTINCT tmp FROM device_bio_templates WHERE pin=?').all(p)) addTmp.run(p, tmpHash(t.tmp));
+    const ph = db.prepare('SELECT photo FROM device_user_photos WHERE pin=?').get(p);
+    if (ph?.photo) addTmp.run(p, tmpHash(ph.photo));
+  }
+}
+function forgetMark(serial, pin) {
+  db.prepare('DELETE FROM device_deleted_pins WHERE serial=? AND pin=?').run(serial, pin);
+  if (!db.prepare('SELECT 1 FROM device_deleted_pins WHERE pin=? LIMIT 1').get(pin)) db.prepare('DELETE FROM device_deleted_tmps WHERE pin=?').run(pin);
+}
+// Bấm "Đẩy NV xuống máy" = chủ động đưa người này về máy đó → gỡ ghi nhớ. pins bỏ trống = gỡ hết của máy (xoá máy khỏi phần mềm).
+export function clearDeletedMarks(serials, pins = null) {
+  for (const serial of (serials || [])) {
+    for (const p of (pins || db.prepare('SELECT pin FROM device_deleted_pins WHERE serial=?').all(serial).map((r) => r.pin))) forgetMark(serial, String(p).trim());
+  }
+}
+// Ghi nhớ của 1 máy. null = máy không có ai trong danh sách → chỗ nhận dữ liệu không tốn thêm gì.
+function deletedOn(serial) {
+  const marks = new Map(db.prepare('SELECT pin, name, card FROM device_deleted_pins WHERE serial=?').all(serial).map((r) => [r.pin, r]));
+  if (!marks.size) return null;
+  const q = db.prepare('SELECT 1 FROM device_deleted_tmps WHERE pin=? AND hash=?');
+  const any = db.prepare('SELECT 1 FROM device_deleted_tmps WHERE pin=? LIMIT 1');
+  const emp = db.prepare('SELECT 1 FROM employees WHERE device_pin=? OR code=? LIMIT 1');
+  const photo = db.prepare('SELECT photo FROM device_user_photos WHERE pin=?');
+  const isOld = (pin, tmp) => marks.has(pin) && !!q.get(pin, tmpHash(tmp));
+  return {
+    has: (pin) => marks.has(pin),
+    isOld,
+    isOldPhoto: (pin) => { const p = marks.has(pin) && photo.get(pin); return !!(p && p.photo) && isOld(pin, p.photo); },
+    hasTmps: (pin) => !!any.get(pin),
+    hasEmp: (pin) => !!emp.get(pin, pin),
+    clear: (pin) => { marks.delete(pin); forgetMark(serial, pin); },
+    // Dòng người dùng (không kèm mẫu) có phải người khác? Thẻ khác = khác người. Tên khác chỉ tin khi vừa đăng ký trên máy hoặc người cũ
+    // không có mẫu để đối chiếu: tên đẩy xuống máy có thể khác tên phần mềm đang lưu (tên NV, bỏ dấu, cắt 24 ký tự).
+    differs(pin, name, card, realtime) {
+      const m = marks.get(pin);
+      if (card && card !== m.card) return true;
+      if (!name || name === pin || name === `NV ${pin}`) return false;
+      const a = normName(name), b = normName(m.name);
+      if (b && (a.startsWith(b) || b.startsWith(a))) return false;
+      return realtime || !this.hasTmps(pin);
+    },
+  };
+}
+// Dữ liệu sót: chưa có NV mang Số ID này → xoá cả Số ID trên máy. Số đã về tay người mới → chỉ xoá đúng mẫu cũ, khỏi xoá nhầm người mới.
+function reDeleteLeftover(serial, left, fresh, gone) {
+  const tcp = db.prepare('SELECT conn_type FROM push_devices WHERE serial=?').get(serial)?.conn_type === 'tcp';
+  // xoá lại cách nhau ít nhất 1 giờ: máy gửi lại dữ liệu sót nhiều lần thì không xếp lệnh trùng
+  const recent = new Set(db.prepare("SELECT content FROM push_device_commands WHERE serial=? AND content LIKE 'DATA DELETE%' AND created_at > datetime('now','-1 hour')").all(serial).map((r) => r.content));
+  const send = (content) => { if (!recent.has(content)) { recent.add(content); queueCmd(serial, content); } };
+  const whole = new Set();
+  for (const it of left) {
+    if (!fresh.has(it.pin) && !gone.hasEmp(it.pin)) { whole.add(it.pin); continue; }
+    if (tcp || it.isPhoto) continue;
+    send(it.isFinger9 ? `DATA DELETE FINGERTMP PIN=${it.pin}\tFID=${it.idx}` : `DATA DELETE BIODATA Pin=${it.pin}\tType=${it.bioType}\tNo=${it.idx}`);
+  }
+  for (const pin of whole) {
+    if (tcp) db.prepare('INSERT OR IGNORE INTO device_pending_deletes(serial, pin, emp_id) VALUES(?,?,NULL)').run(serial, pin);
+    else send(`DATA DELETE USERINFO\tPIN=${pin}`);
+  }
+  console.log(`[device] ${serial}: chặn dữ liệu sót của ${new Set(left.map((x) => x.pin)).size} Số ID đã xoá`);
 }
 // Máy TCP/IP đã xoá xong (qua SDK) → chỉ dọn số đếm phía phần mềm cho khớp
 export function forgetDeviceUsers(serial, pins) {
@@ -427,6 +521,7 @@ export function storeUserPhotos(serial, rawBody, track = null) {
   const pins = new Set();
   const held = heldSet();
   const prevPhoto = track && db.prepare('SELECT photo FROM device_user_photos WHERE pin=?');
+  const gone = deletedOn(serial), left = [];
   const up = db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo)
     VALUES(?,?,?,?)
     ON CONFLICT(pin) DO UPDATE SET kind=excluded.kind,face_type=excluded.face_type,photo=excluded.photo,updated_at=datetime('now')`);
@@ -439,6 +534,11 @@ export function storeUserPhotos(serial, rawBody, track = null) {
     const content = (kv.content || '').trim();
     if (!pin || content.length < 100) continue;   // ảnh phải có nội dung base64
     if (held.has(serial + '|' + pin)) continue;   // nghi trùng: ảnh đã ghi vào cảnh báo, không đè ảnh của Số ID
+    if (gone?.has(pin)) {
+      if (gone.isOld(pin, content)) { left.push({ pin, isPhoto: true }); continue; }
+      if (gone.hasTmps(pin)) continue;   // máy có thể nén lại ảnh nên ảnh khác chưa đủ kết luận người mới; người mới có mẫu mới đi kèm
+      gone.clear(pin);
+    }
     const faceType = isFace ? (parseInt(kv.type || '9', 10) || 9) : 0;
     const pp = prevPhoto ? prevPhoto.get(pin) : null;
     try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
@@ -447,6 +547,7 @@ export function storeUserPhotos(serial, rawBody, track = null) {
     pins.add(pin);
     if (track && (!pp || (!track.newOnly && pp.photo !== content))) track.changed.add(pin);
   }
+  if (left.length) reDeleteLeftover(serial, left, new Set(), gone);
   return pins;
 }
 // Bảng mã thao tác trên máy ZKTeco (OPERLOG/OPLOG) — theo chuẩn ZKTeco.
@@ -536,12 +637,15 @@ export function syncPinsToGroup(sourceSerial, pins) {
   if (!targets.length) return 0;
   let n = 0;
   for (const t of targets) {
+    const gone = deletedOn(t.serial);
     for (const pin of pins) {
       if (held.has(t.serial + '|' + pin)) continue;   // máy đích đang có người khác mang Số ID này (nghi trùng)
+      let tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
+      // người đã xoá trên máy đích: không đẩy mẫu cũ; không còn mẫu nào mới thì thôi hẳn
+      if (gone?.has(pin)) { tmps = tmps.filter((tp) => !gone.isOld(pin, tp.tmp)); if (!tmps.length) continue; }
       queueCmd(t.serial, buildUserCommand(pin, t.serial), { pin, mkind: 'user' });
-      const tmps = db.prepare('SELECT * FROM device_bio_templates WHERE serial=? AND pin=?').all(sourceSerial, pin);
       for (const tp of tmps) { queueCmd(t.serial, buildBioCommand(tp), { pin: tp.pin, bio_type: tp.bio_type, idx: tp.idx, mkind: 'bio' }); n++; }
-      const pc = needPhoto(t.serial, pin) && buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc, { pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) máy đích còn thiếu
+      const pc = needPhoto(t.serial, pin) && !gone?.isOldPhoto(pin) && buildPhotoCommand(pin); if (pc) queueCmd(t.serial, pc, { pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) máy đích còn thiếu
     }
   }
   return n;
@@ -563,10 +667,12 @@ export function syncFillDevice(serial, force = false) {
   const others = db.prepare(`SELECT * FROM device_bio_templates WHERE serial IN (${ph})`).all(...groupSerials);
   const locked = lockedPins();   // NV đã khoá: không đẩy lại
   const held = heldSet();       // Số ID đang nghi trùng (ở máy nguồn hoặc máy này): chờ xử lý xong
+  const gone = deletedOn(serial);   // người đã xoá trên máy này: máy khác còn mẫu cũ cũng không đẩy về lại, kể cả đẩy lại toàn bộ
   const pushedPins = new Set();
   for (const t of others) {
     const key = `${t.pin}|${t.bio_type}|${t.idx}`;
     if (mine.has(key) || locked.has(String(t.pin).trim()) || held.has(t.serial + '|' + t.pin) || held.has(serial + '|' + t.pin)) continue;
+    if (gone?.isOld(t.pin, t.tmp)) continue;
     if (!pushedPins.has(t.pin)) {
       queueCmd(serial, buildUserCommand(t.pin, serial), { pin: t.pin, mkind: 'user' });
       const pc = (force || needPhoto(serial, t.pin)) && buildPhotoCommand(t.pin); if (pc) queueCmd(serial, pc, { pin: t.pin, mkind: 'photo' });   // đẩy ảnh (mặt/user) máy còn thiếu
@@ -578,7 +684,7 @@ export function syncFillDevice(serial, force = false) {
   const photoPins = db.prepare(`SELECT p.pin FROM device_user_photos p
      WHERE p.pin IN (SELECT DISTINCT pin FROM device_users_serial WHERE serial IN (${ph}))`).all(...groupSerials);
   for (const r of photoPins) {
-    if (pushedPins.has(r.pin) || locked.has(String(r.pin).trim()) || held.has(serial + '|' + r.pin)) continue;
+    if (pushedPins.has(r.pin) || locked.has(String(r.pin).trim()) || held.has(serial + '|' + r.pin) || gone?.isOldPhoto(r.pin)) continue;
     if (!force && !needPhoto(serial, r.pin)) continue;   // máy đã có đúng ảnh này
     const pc = buildPhotoCommand(r.pin); if (!pc) continue;
     queueCmd(serial, buildUserCommand(r.pin, serial), { pin: r.pin, mkind: 'user' });
@@ -626,6 +732,7 @@ export function cmdLabel(c) {
     : /^DATA UPDATE BIODATA/.test(c) ? (/\tType=1\b/.test(c) ? 'Đẩy vân tay' : 'Đẩy khuôn mặt')
     : /^DATA UPDATE (USERPIC|BIOPHOTO)/.test(c) ? 'Đẩy ảnh'
     : /^DATA DELETE USERINFO/.test(c) ? 'Xoá NV'
+    : /^DATA DELETE (FINGERTMP|BIODATA)/.test(c) ? 'Xoá mẫu cũ'
     : ({ CHECK: 'Kiểm tra dữ liệu (CHECK)', REBOOT: 'Khởi động lại máy', 'CLEAR LOG': 'Xoá log chấm công', 'CLEAR DATA': 'Xoá toàn bộ dữ liệu', AC_UNLOCK: 'Mở cửa' })[c] || c.slice(0, 40);
   return { what, pin };
 }
@@ -684,18 +791,19 @@ export function cmdProgress(from, to, serials = []) {
 // chỉ 1 lệnh/lượt hỏi (~10 giây) nên máy mới thêm vào nhóm phải chờ hàng giờ mới nhận đủ khuôn mặt (164, 30/10/2026).
 // Lệnh điều khiển (REBOOT, CHECK, CLEAR..., DATA QUERY) luôn đi riêng: máy khởi động lại giữa chừng sẽ làm mất lệnh sau.
 const BATCH_MAX = 10, BATCH_BYTES = 32 * 1024;
-const batchable = (c) => /^DATA (UPDATE|DELETE) /.test(c);
+// Lệnh gửi lại (resend > 0) đi riêng từng lệnh: đã mất 1 lần có thể do máy không xử lý hết cả lượt.
+const batchable = (r) => !r.resend && /^DATA (UPDATE|DELETE) /.test(r.content);
 export function nextCommand(serial) {
   // response_at IS NULL: lệnh chờ gửi lại mà máy báo kết quả muộn (đã chạy) thì thôi không gửi nữa
   const d = db.prepare('SELECT push_ver FROM push_devices WHERE serial=?').get(serial) || {};
   const max = d.push_ver && d.push_ver !== '-' ? BATCH_MAX : 1;
-  const rows = db.prepare('SELECT id,content FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL ORDER BY id LIMIT ?').all(serial, max);
+  const rows = db.prepare('SELECT id,content,resend FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL ORDER BY id LIMIT ?').all(serial, max);
   if (!rows.length) return '';
   const pick = [rows[0]];
   let bytes = rows[0].content.length;
-  if (batchable(rows[0].content)) {
+  if (batchable(rows[0])) {
     for (const r of rows.slice(1)) {
-      if (!batchable(r.content) || bytes + r.content.length > BATCH_BYTES) break;
+      if (!batchable(r) || bytes + r.content.length > BATCH_BYTES) break;
       pick.push(r); bytes += r.content.length;
     }
   }

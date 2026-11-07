@@ -726,6 +726,15 @@ function migrateColumns() {
     serial TEXT NOT NULL, pin TEXT NOT NULL, emp_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     PRIMARY KEY (serial, pin))`);
+  // Người đã xoá trên máy: nhớ theo từng máy + mẫu vân tay/mặt/ảnh của Số ID (hash, không giữ mẫu) để dữ liệu cũ còn sót không
+  // quay lại phần mềm hay lan sang máy khác; người mới dùng lại Số ID có mẫu khác nên vẫn được nhận. Xem server/device-sync.js.
+  db.exec(`CREATE TABLE IF NOT EXISTS device_deleted_pins (
+    serial TEXT NOT NULL, pin TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', card TEXT NOT NULL DEFAULT '',
+    deleted_at TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (serial, pin));
+    CREATE TABLE IF NOT EXISTS device_deleted_tmps (
+    pin TEXT NOT NULL, hash TEXT NOT NULL,
+    PRIMARY KEY (pin, hash));`);
   // Giờ đọc từ máy (nút "Xem giờ trên máy"): clock_text = giờ máy trả về, clock_at = giờ máy chủ (VN) lúc nhận
   add('push_devices', 'clock_text', "TEXT DEFAULT ''");
   add('push_devices', 'clock_at',   "TEXT DEFAULT ''");
