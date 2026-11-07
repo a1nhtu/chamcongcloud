@@ -163,7 +163,7 @@ writeFileSync(join(OUT, 'HUONG-DAN.txt'),
 `DIGIPLUS CHẤM CÔNG — HƯỚNG DẪN CÀI ĐẶT
 ========================================
 
-1. Giải nén thư mục này ra ổ đĩa (VD: C:\\DigiplusChamCong). KHÔNG để trong thư mục tạm.
+1. Giải nén thư mục này ra ổ đĩa (VD: D:\\ChamCong). KHÔNG để trong thư mục tạm.
 
 2. Double-click "CaiDat.bat".
    - Ứng dụng sẽ tự cài, tự chạy, và tự bật mỗi khi mở máy.
@@ -197,7 +197,7 @@ CHUYỂN SANG MÁY MỚI (CHÉP THƯ MỤC, KHÔNG CẦN BẤM PHỤC HỒI):
 2. Máy cũ: chép CẢ thư mục cài ra ổ ngoài. Phải chép TRƯỚC khi gỡ trong Apps.
 3. Máy cũ: KHỞI ĐỘNG LẠI máy, rồi mở http://localhost:<cổng>/admin. Không vào được nữa là đã tắt xong.
    Phải xong bước này mới cài máy mới. Còn sót tunnel ở máy cũ thì tên miền báo lỗi 502.
-4. Máy mới: chép thư mục vào C:\\DigiplusChamCong rồi chạy Setup.exe. Để chỗ khác thì bấm "Chọn..."
+4. Máy mới: chép thư mục vào D:\\ChamCong rồi chạy Setup.exe. Để chỗ khác thì bấm "Chọn..."
    và trỏ đúng thư mục đó. Chọn "Giữ cấu hình đang có". Dữ liệu, cổng, tên miền giữ nguyên.
 5. Máy mới: mở http://localhost:<cổng>/admin, gửi Mã máy mới cho Digiplus, dán license vừa nhận.
 6. Máy chấm công khai bằng tên miền: không phải đổi gì. Khai bằng IP máy tính: đặt máy mới

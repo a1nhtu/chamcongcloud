@@ -12,6 +12,9 @@
 ;   - NHIỀU BẢN TRÊN 1 MÁY (VPS nhiều khách): máy đã có bản Digiplus thì trình cài hỏi "cập nhật bản nào" hay "cài thêm bản mới";
 ;     mỗi bản một AppId riêng (hậu tố -2, -3...) → mỗi bản một thư mục, một mục gỡ cài đặt, một lối tắt.
 ; Cài im lặng: thêm /INSTANCE=2 để chỉ định bản (bỏ trống = bản đầu tiên).
+;   - THƯ MỤC MẶC ĐỊNH: D:\ChamCong (bản thêm: D:\ChamCong-2...) để cài lại Windows không mất dữ liệu. Máy không có ổ D dùng được
+;     (ổ DVD, ổ gần đầy, ổ khoá BitLocker) thì lấy ổ cứng kế tiếp, không có nữa mới về ổ hệ thống. Bản cũ đang ở C:\DigiplusChamCong:
+;     cập nhật vẫn ở nguyên chỗ cũ; đã gỡ nhưng còn dữ liệu thì vẫn gợi ý thư mục đó. Hộp Chọn... có nút Tạo thư mục mới (AppendDefaultDirName=no).
 ; Cài im lặng (thử nghiệm/tự động): /VERYSILENT /MODE=lan|domain|keep|move /PORT=8686|auto /SLUG=... /PASS=... /CREATE=1 /DEVICE=1 /PHONE=1 /SKIPAUTO=1 /DIR="..."
 ;   /MODE=move /MOVEFILE="D:\ChuyenMay-abc-20261104-2130.zip" = chuyển từ máy cũ (cổng theo file, /PORT để đổi)
 ;   - CHUYỂN TỪ MÁY CŨ: chọn file ChuyenMay-*.zip (máy cũ: Cài đặt › Sao lưu › "Chuyển sang máy khác") → lấy config.txt trong file
@@ -49,6 +52,7 @@ DisableProgramGroupPage=yes
 DisableReadyPage=no
 DirExistsWarning=no
 UsePreviousAppDir=yes
+AppendDefaultDirName=no
 PrivilegesRequired=admin
 PrivilegesRequiredOverridesAllowed=commandline
 OutputDir={#OutDir}
@@ -73,11 +77,20 @@ ButtonBack=< &Quay lại
 ButtonInstall=&Cài đặt
 ButtonCancel=Huỷ
 ButtonFinish=&Hoàn tất
-ButtonBrowse=&Chọn...
+ButtonWizardBrowse=&Chọn...
+ButtonNewFolder=&Tạo thư mục mới
+BrowseDialogTitle=Chọn thư mục
+BrowseDialogLabel=Chọn một thư mục trong danh sách rồi bấm OK.
+NewFolderName=Thư mục mới
 WizardSelectDir=Chọn thư mục cài đặt
 SelectDirDesc=Phần mềm sẽ được cài vào đâu?
 SelectDirLabel3=Trình cài đặt sẽ cài [name] vào thư mục dưới đây.
-SelectDirBrowseLabel=Bấm Tiếp tục để cài vào thư mục này. Muốn chọn thư mục khác, bấm Chọn.
+SelectDirBrowseLabel=Bấm Tiếp tục để cài vào thư mục này. Muốn chọn thư mục khác hoặc tạo thư mục mới, bấm Chọn.
+DiskSpaceMBLabel=Cần ít nhất [mb] MB dung lượng trống.
+DiskSpaceGBLabel=Cần ít nhất [gb] GB dung lượng trống.
+InvalidDirName=Tên thư mục không hợp lệ.
+InvalidPath=Hãy chọn một thư mục bên trong ổ đĩa, không cài thẳng vào ổ đĩa. Ví dụ: D:\ChamCong
+InvalidDrive=Ổ đĩa đã chọn không có hoặc không dùng được. Hãy chọn ổ khác.
 WizardReady=Sẵn sàng cài đặt
 ReadyLabel1=Trình cài đặt đã sẵn sàng cài [name] vào máy tính này.
 ReadyLabel2a=Bấm Cài đặt để bắt đầu, hoặc Quay lại nếu muốn xem/sửa lựa chọn.
@@ -200,9 +213,35 @@ begin
   Result := BASE_ID + InstSuffix;
 end;
 
-function DefDir(Param: String): String;
+function GetDriveType(lpRootPathName: String): Cardinal;
+  external 'GetDriveTypeW@kernel32.dll stdcall';
+
+{ Ổ cứng gắn trong máy, đọc được và còn ít nhất 2 GB (loại ổ DVD, USB, ổ mạng, ổ khoá BitLocker, phân vùng recovery gần đầy) }
+function DriveUsable(const Root: String): Boolean;
+var Free, Total: Int64;
 begin
-  Result := ExpandConstant('{sd}\DigiplusChamCong') + InstSuffix;
+  Result := (GetDriveType(Root) = 3) and GetSpaceOnDisk64(Root, Free, Total) and ((Free div 1048576) >= 2048);
+end;
+
+{ Ổ cài mặc định: D nếu dùng được, không thì ổ cứng kế tiếp, không có nữa mới dùng ổ hệ thống }
+function DefDrive: String;
+var I: Integer; Drive, Sys: String;
+begin
+  Sys := ExtractFileDrive(ExpandConstant('{sd}'));
+  for I := Ord('D') to Ord('Z') do begin
+    Drive := Chr(I) + ':';
+    if (CompareText(Drive, Sys) <> 0) and DriveUsable(Drive + '\') then begin Result := Drive; Exit; end;
+  end;
+  Result := Sys;
+end;
+
+function DefDir(Param: String): String;
+var Old: String;
+begin
+  { thư mục mặc định đời trước còn dữ liệu (đã gỡ phần mềm, giữ app\data + config.txt) → cài lại đúng chỗ đó, kẻo khách tưởng mất dữ liệu }
+  Old := ExpandConstant('{sd}\DigiplusChamCong') + InstSuffix;
+  if FileExists(Old + '\config.txt') then Result := Old
+  else Result := DefDrive + '\ChamCong' + InstSuffix;
 end;
 
 function InstNum(Param: String): String;
