@@ -13,7 +13,7 @@ import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dr
 // Máy hãng khác (công tắc riêng, mặc định tắt): máy AI tự nối về qua WebSocket · máy Hikvision phần mềm gọi ISAPI vào máy
 import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isFace } from '../../ai-device.js';
 import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
-import { hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
+import { HIK_MAX_PIN, hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
   hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush, hikKnock } from '../../hik-isapi.js';
 import { hikSyncGroup } from '../../hik-sync.js';
 import { unionEnabled, unionPort, unionStatus, unionOnline, unionInfo, unionUsers, unionLogs, unionSimple, unionDeleteUsers, unionClearUsers, syncUnion } from '../../union.js';
@@ -294,7 +294,7 @@ export function registerDeviceRoutes(r, { need }) {
   /* -------- MÁY KẾT NỐI TRỰC TIẾP TCP/IP (SDK zkemkeeper, cổng 4370) — xem server/zk-tcp.js -------- */
   const ISO = /^\d{4}-\d{2}-\d{2}$/;
   // Số ID gửi lên để xoá trên máy: bỏ trùng, chỉ nhận ký tự an toàn (truyền xuống script SDK)
-  const cleanPins = (v) => [...new Set((Array.isArray(v) ? v : []).map((p) => String(p).trim()).filter((p) => /^[0-9A-Za-z_-]{1,20}$/.test(p)))];
+  const cleanPins = (v, max = 20) => [...new Set((Array.isArray(v) ? v : []).map((p) => String(p).trim()).filter((p) => p.length <= max && /^[0-9A-Za-z_-]+$/.test(p)))];
   const tcpOn = (req, res, next) => (tcpEnabled() ? next() : res.status(400).json({ error: 'Chưa bật "Dùng máy chấm công kết nối TCP/IP" (trang Máy chấm công / Cài đặt).' }));
   const connOf = (b, old = {}) => {
     const ip = String(b.ip ?? old.tcp_ip ?? '').trim();
@@ -639,8 +639,9 @@ export function registerDeviceRoutes(r, { need }) {
   });
   // Xóa các Số ID đã chọn trên MỌI máy đang dùng: máy đẩy (ADMS) xếp lệnh chờ máy lấy; máy TCP/IP chạy nền qua SDK
   r.post('/devices/delete-users-all', needDevOrEmp, (req, res) => {
-    const pins = cleanPins(req.body?.pins);
+    const pins = cleanPins(req.body?.pins, HIK_MAX_PIN);
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
+    const short = pins.filter((p) => p.length <= 20);   // Số ID dài hơn 20 ký tự chỉ có trên máy Hikvision, không gửi sang máy khác
     const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all();
     const push = devs.filter((d) => (d.conn_type || 'push') === 'push' || d.conn_type === 'ai');
     const tcpAll = devs.filter((d) => d.conn_type === 'tcp');
@@ -649,7 +650,7 @@ export function registerDeviceRoutes(r, { need }) {
     const uni = devs.filter((d) => d.conn_type === 'union');
     const from = cmdMark();
     for (const d of push) {
-      if (d.conn_type === 'ai') { aiDeleteUsers(d.serial, pins); aiPoke(d.serial); } else deleteDeviceUsers(d.serial, pins);
+      if (d.conn_type === 'ai') { aiDeleteUsers(d.serial, short); aiPoke(d.serial); } else deleteDeviceUsers(d.serial, short);
       dropConflicts(d.serial, pins);
     }
     const track = { from, to: cmdMark(), serials: push.map((d) => d.serial) };
@@ -663,9 +664,10 @@ export function registerDeviceRoutes(r, { need }) {
         const out = [];
         for (const d of direct) {
           const name = d.name || d.serial;
+          if (d.conn_type !== 'hik' && !short.length) continue;
           prog(`Đang xoá trên máy ${name}…`);
           if (d.conn_type === 'hik' || d.conn_type === 'union') {
-            try { const r3 = await (d.conn_type === 'hik' ? hikDeleteUsers(d, pins) : unionDeleteUsers(d, pins)); dropConflicts(d.serial, pins); out.push({ device: name, ok: true, deleted: r3.deleted }); }
+            try { const r3 = await (d.conn_type === 'hik' ? hikDeleteUsers(d, pins) : unionDeleteUsers(d, short)); dropConflicts(d.serial, pins); out.push({ device: name, ok: true, deleted: r3.deleted }); }
             catch (e) { out.push({ device: name, ok: false, error: e.message }); }
             continue;
           }
@@ -673,11 +675,11 @@ export function registerDeviceRoutes(r, { need }) {
             if (!(await tcpProbe(d.tcp_ip, d.tcp_port))) throw new Error(`Không thấy máy ở ${d.tcp_ip}:${d.tcp_port}`);
             const info = await tcpInfo(d);
             if (info.serial && info.serial !== d.serial) throw new Error(`IP ${d.tcp_ip} giờ là máy khác (Serial ${info.serial}) — bỏ qua cho an toàn`);
-            const st = await zkDeleteUsers(d, pins);
+            const st = await zkDeleteUsers(d, short);
             out.push({ device: name, ok: true, deleted: st.deleted.length, failed: st.failed, absent: st.absent.length });
           } catch (e) {
             const waiting = e.code !== 'NOWIN';   // máy tắt / mất mạng → nhớ lại, máy lên tự xoá
-            if (waiting) queuePendingDelete(d.serial, pins);
+            if (waiting) queuePendingDelete(d.serial, short);
             out.push({ device: name, ok: false, error: e.message, waiting });
           }
         }

@@ -321,6 +321,19 @@ test('Hikvision: đẩy NV từ phần mềm xuống máy + xoá NV trên tất 
   assert.deepEqual(H.deleted, ['101']);
   assert.ok(!db.prepare('SELECT 1 FROM device_users_serial WHERE serial=? AND pin=?').get(H.serial, '101'));
 });
+test('Hikvision: xoá trên tất cả máy nhận Số ID 32 ký tự, không gửi Số ID đó sang máy ZK', async () => {
+  const long = 'a3f1c07e9b2d4e6f8a1b3c5d7e9f0a21';
+  db.prepare("INSERT OR IGNORE INTO push_devices(serial,name,active,sync_group) VALUES('ZK_LONG','May ZK',1,'')").run();
+  H.deleted.length = 0;
+  const del = await call('POST /devices/delete-users-all', { body: { pins: [long, 'x'.repeat(33), 'có dấu'] } });
+  assert.equal(del.code, 200);
+  assert.equal(del.out.pins, 1);   // quá 32 ký tự / ký tự lạ vẫn bị bỏ
+  await waitJob(del.out.job);
+  assert.deepEqual(H.deleted, [long]);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM push_device_commands WHERE serial='ZK_LONG'").get().c, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM device_deleted_pins WHERE serial='ZK_LONG'").get().c, 0);
+  db.prepare("DELETE FROM push_devices WHERE serial='ZK_LONG'").run();
+});
 test('Hikvision: dòng sự kiện — chỉ nhận mã xác thực thành công khi lọc tại phần mềm', () => {
   assert.equal(HIK.hikEventLine({ major: 5, minor: 76, time: '2026-10-15T08:00:00+07:00', employeeNoString: '1' }, true), null);
   assert.equal(HIK.hikEventLine({ major: 5, minor: 1, time: '2026-10-15T08:00:00+07:00', employeeNoString: '1', attendanceStatus: 'breakOut' }, true), '1\t2026-10-15 08:00:00\t1\t4');
