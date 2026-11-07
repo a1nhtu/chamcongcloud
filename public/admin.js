@@ -3929,19 +3929,27 @@ async function salaryBulkModal() {
 }
 
 /* ---------- Bảng lương + Phiếu lương ---------- */
+const dmyFull = (d) => d.split('-').reverse().join('/');
 async function salaryPayrollView(tabs) {
-  const monthI = el('input', { type: 'month', value: todayMonth() });
+  // Chọn tháng = kỳ lương đã cài (Cài đặt › Lương); sửa Từ ngày / Đến ngày rồi Áp dụng = tính đúng khoảng đó (VD trả lương 05 → 04 tháng sau)
+  const monthI = el('input', { type: 'month', value: todayMonth(), title: 'Chọn tháng: lấy theo kỳ lương đã cài' });
+  const fromI = el('input', { type: 'date', title: 'Từ ngày', style: 'width:auto;margin:0' });
+  const toI = el('input', { type: 'date', title: 'Đến ngày', style: 'width:auto;margin:0' });
+  let custom = false;
+  const dApply = dateApply(fromI, toI, () => { custom = true; load(); });
   const deptSel = el('select', {}, el('option', { value: '' }, '-- Tất cả phòng ban --'));
   const wrap = el('div', {}, loading());
   const vt = virtToggle(() => load());
-  setMain(head('Lương', monthI, deptSel, vt), tabs, wrap);
+  setMain(head('Lương', monthI, el('span', { class: 'muted' }, 'Từ'), fromI, el('span', { class: 'muted' }, 'đến'), toI, dApply.btn, deptSel, vt), tabs, wrap);
   try { const { rows } = await api('/reports/departments'); for (const d of rows) deptSel.append(el('option', { value: d }, d)); } catch {}
 
   const load = async () => {
     wrap.innerHTML = ''; wrap.append(loading());
     let data;
-    try { data = await api(`/admin/payroll?month=${monthI.value}&dept=${encodeURIComponent(deptSel.value)}` + (_virt && auditOn() ? '&virt=' + _virt : '')); }
+    const when = custom ? `from=${fromI.value}&to=${toI.value}` : `month=${monthI.value}`;
+    try { data = await api(`/admin/payroll?${when}&dept=${encodeURIComponent(deptSel.value)}` + (_virt && auditOn() ? '&virt=' + _virt : '')); }
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
+    fromI.value = data.from; toI.value = data.to; dApply.synced();
     const hourly = data.mode === 'hourly';
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = hourly
@@ -3963,11 +3971,12 @@ async function salaryPayrollView(tabs) {
     const totNet = data.rows.reduce((s, r) => s + (r.pay.net || 0), 0);
     wrap.innerHTML = '';
     wrap.append(
-      el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:4px' }, `Bảng lương tháng ${data.month}`),
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Kỳ lương: ${data.from} → ${data.to} · Tổng thực lĩnh: ${money(totNet)} đ`),
+      el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:4px' }, data.custom ? `Bảng lương từ ${dmyFull(data.from)} đến ${dmyFull(data.to)}` : `Bảng lương tháng ${data.month}`),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Kỳ lương: ${data.from} → ${data.to} · Tổng thực lĩnh: ${money(totNet)} đ` + (data.custom ? ' · Phụ cấp cố định tính đủ 1 lần cho kỳ đang chọn' : '')),
       el('div', { class: 'panel tbl-scroll' }, tbl));
   };
-  monthI.onchange = load; deptSel.onchange = load;
+  monthI.onchange = () => { custom = false; load(); };
+  deptSel.onchange = load;
   load();
 }
 
@@ -3998,13 +4007,13 @@ function payslipModal(emp, pay, ctx) {
     el('div', { style: 'text-align:center;margin-bottom:10px' },
       el('div', { style: 'font-weight:800;font-size:16px' }, ctx.company || 'Digiplus'),
       el('div', { style: 'font-size:18px;font-weight:800;margin-top:6px' }, 'PHIẾU LƯƠNG'),
-      el('div', { style: 'color:var(--muted);font-size:13px' }, `Tháng ${ctx.month} · Kỳ ${ctx.from} → ${ctx.to}`)),
+      el('div', { style: 'color:var(--muted);font-size:13px' }, ctx.custom ? `Kỳ ${dmyFull(ctx.from)} → ${dmyFull(ctx.to)}` : `Tháng ${ctx.month} · Kỳ ${ctx.from} → ${ctx.to}`)),
     el('div', { style: 'margin:10px 0;font-size:14px' },
       el('div', {}, el('b', {}, 'Nhân viên: '), `${emp.full_name} (${emp.code})`),
       el('div', {}, el('b', {}, 'Bộ phận: '), emp.department || '—')),
     el('div', {}, ...rows));
   const printBtn = el('button', { class: 'btn' }, '🖨 In phiếu');
-  printBtn.onclick = () => printNode(sheet, `Phiếu lương ${emp.code} ${ctx.month}`);
+  printBtn.onclick = () => printNode(sheet, `Phiếu lương ${emp.code} ${ctx.custom ? `${ctx.from} - ${ctx.to}` : ctx.month}`);
   openModal('Phiếu lương · ' + emp.full_name, [sheet], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), printBtn]);
 }
 
@@ -7258,7 +7267,7 @@ const REPORT_GROUPS = [
     ['summary', '👥', 'Tổng hợp nhân viên', 'Tổng công, giờ, tăng ca, trễ, sớm mỗi NV'],
     ['absence', '🚫', 'Vắng mặt / nghỉ phép', 'Số ngày làm, vắng, nghỉ phép, nghỉ lễ, thiếu ra'],
     ['leave', '🌴', 'Nghỉ phép / đơn từ', 'Tổng nghỉ phép và chi tiết theo loại'],
-    ['payroll', '💰', 'Bảng lương', 'Bảng lương tháng theo kỳ lương đã cấu hình'],
+    ['payroll', '💰', 'Bảng lương', 'Chọn trọn tháng = theo kỳ lương đã cài; chọn từ ngày đến ngày = đúng khoảng đó'],
   ]],
   ['Công ảo 3 mức', [
     ['audit3', '🎭', 'Tổng hợp tăng ca 3 mức', 'Mỗi NV: ngày đi làm, công, tăng ca THẬT và tăng ca Ảo 1 / Ảo 2 / Ảo 3 (giờ)'],
@@ -8389,7 +8398,7 @@ async function pageSettings() {
           el('b', {}, 'Trễ / sớm'), el('span', { style: 'color:var(--muted);font-size:13px' }, 'Theo khối phút'),
           el('div', { style: 'display:flex;align-items:center;gap:6px' }, lateBlockI, el('span', {}, 'phút')), el('span', { style: 'color:var(--muted);font-size:13px' }, 'Tới (lên)')),
         el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'VD công 0,866 → 2 số lẻ: lùi = 0,86 · tới = 0,87. Tăng ca 40 phút = 0,666 giờ → 2 số lẻ: lùi 0,66 giờ · tới 0,67 giờ. Theo khối 15 phút: tăng ca 47 phút → lùi 45 phút · tới 60 phút. Trễ / sớm khối 15 phút: đi trễ 1 phút tính 15 phút (trừ công 15 phút), trễ 16 phút tính 30 phút; để 0 = tính đúng số phút.')),
-      field('Ngày bắt đầu kỳ lương (1 = theo tháng dương lịch; VD 26 = 26 tháng trước→25 tháng này)', payStartI),
+      field('Ngày bắt đầu kỳ lương (1 = theo tháng dương lịch; VD 5 = 05 tháng trước→04 tháng này; 26 = 26 tháng trước→25 tháng này)', payStartI),
       el('div', { style: 'display:flex;gap:10px' }, saveCalc, ...(hasPerm('recompute') ? [recalcBtn] : [])),
       el('div', { class: 'map-hint' }, 'Đổi cấu hình ca/quy tắc xong nên bấm "Tính lại công" để áp cho dữ liệu cũ.'))) : null;
 

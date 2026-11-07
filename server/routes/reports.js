@@ -5,7 +5,7 @@ import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs, idmRows, stateRows } from '../attendance-calc.js';
 import { deviceMachineMap, pairDup } from '../device-sync.js';
-import { computePayrollTable } from '../payroll-calc.js';
+import { computePayrollTable, reportPayRange } from '../payroll-calc.js';
 import { resolveEffectiveShift, ioParamsFor } from '../shift-resolver.js';
 import { multiMissingFn } from '../multi-shift.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
@@ -1063,11 +1063,13 @@ function buildReportRaw(type, from, to, filter) {
       return { title: `Nghỉ phép / đơn từ ${PERIOD}`, columns, rows };
     }
 
-    /* --- Bảng lương (luôn theo THÁNG chứa ngày bắt đầu) --- */
+    /* --- Bảng lương: trọn 1 tháng = kỳ lương đã cài; khoảng khác = đúng từ ngày đến ngày --- */
     case 'payroll': {
       const [y, m] = from.split('-').map(Number);
-      const pt = computePayrollTable(y, m, filter);
+      const range = reportPayRange(from, to, parseInt(getSetting('pay_period_start_day', '1'), 10) || 1);
+      const pt = computePayrollTable(y, m, { ...filter, from: range.from, to: range.to });
       const pFrom = pt.from, pTo = pt.to;
+      const payTitle = range.custom ? `kỳ ${fmtDMY(pFrom)} - ${fmtDMY(pTo)}` : `tháng ${String(m).padStart(2, '0')}/${y} (kỳ ${fmtDMY(pFrom)} - ${fmtDMY(pTo)})`;
       // công ty có cả 2 kiểu: chỉ lấy NV chấm theo kiểu đang chọn (lương theo giờ và theo ca tính khác nhau)
       const pr = filter && filter.emode ? pt.rows.filter(({ pay }) => (pay.hourly ? 'hourly' : 'shift') === filter.emode) : pt.rows;
       const money = (n) => (n || 0).toLocaleString('vi-VN');
@@ -1082,7 +1084,7 @@ function buildReportRaw(type, from, to, filter) {
           days: pay.daysWorked ?? pay.workUnits, gio: pay.totalHours ?? 0, rate: money(pay.hourlyRate),
           workpay: money(pay.workSalary), allow: money(pay.allowance), net: money(pay.net),
         }));
-        return { title: `Bảng lương theo giờ tháng ${String(m).padStart(2, '0')}/${y} (kỳ ${fmtDMY(pFrom)} - ${fmtDMY(pTo)})`, columns, rows };
+        return { title: `Bảng lương theo giờ ${payTitle}`, columns, rows };
       }
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
@@ -1097,7 +1099,7 @@ function buildReportRaw(type, from, to, filter) {
         dayrate: money(pay.dailyRate), workpay: money(pay.workSalary), leavepay: money(pay.paidLeaveSalary),
         otpay: money(pay.otSalary), allow: money(pay.allowance), net: money(pay.net),
       }));
-      return { title: `Bảng lương tháng ${String(m).padStart(2, '0')}/${y} (kỳ ${fmtDMY(pFrom)} - ${fmtDMY(pTo)})`, columns, rows };
+      return { title: `Bảng lương ${payTitle}`, columns, rows };
     }
 
     default:

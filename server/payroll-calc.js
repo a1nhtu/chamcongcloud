@@ -20,6 +20,15 @@ export function payPeriod(year, month, startDay) {
   return { from: `${py}-${pad(pm)}-${pad(startDay)}`, to: `${year}-${pad(month)}-${pad(startDay - 1)}` };
 }
 
+// Báo cáo Bảng lương: chọn TRỌN 1 tháng dương lịch = kỳ lương đã cài (Cài đặt › Lương, như trước đây);
+// chọn khoảng khác (VD 05/10 → 04/11) = tính đúng từ ngày đến ngày đó.
+export function reportPayRange(from, to, startDay) {
+  const y = +from.slice(0, 4), m = +from.slice(5, 7);
+  const days = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  const wholeMonth = from === `${y}-${pad(m)}-01` && to === `${y}-${pad(m)}-${pad(days)}`;
+  return wholeMonth ? { ...payPeriod(y, m, startDay), custom: false } : { from, to, custom: true };
+}
+
 const DEFAULT_CFG = {
   basic_salary: 0, daily_rate: null, working_days_per_month: 26,
   ot_rate_weekday: 1.5, ot_rate_weekend: 2.0, ot_rate_holiday: 3.0, allowance: 0, hourly_rate: 0,
@@ -158,10 +167,11 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
 
 // Bảng lương cho tất cả NV theo "tháng lương"
 // filter: string dept (cũ) HOẶC {dept, depts:[], ids:[]} — ưu tiên ids > depts > dept.
+// filter.from + filter.to: tính đúng khoảng ngày này thay cho kỳ lương của tháng.
 export function computePayrollTable(year, month, filter) {
-  const startDay = parseInt(getSetting('pay_period_start_day', '1'), 10) || 1;
-  const { from, to } = payPeriod(year, month, startDay);
   const f = typeof filter === 'string' ? { dept: filter } : (filter || {});
+  const startDay = parseInt(getSetting('pay_period_start_day', '1'), 10) || 1;
+  const { from, to } = f.from && f.to ? { from: f.from, to: f.to } : payPeriod(year, month, startDay);
   const ids = (f.ids || []).map(Number).filter(Boolean);
   const depts = deptWithChildren((f.depts || []).length ? f.depts : f.dept ? [f.dept] : []);   // gồm cả bộ phận con
   let sql = `SELECT id, code, full_name, department FROM employees WHERE ${EMP_IN_PERIOD}` + adminAttWhere();

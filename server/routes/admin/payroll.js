@@ -43,16 +43,21 @@ export function registerPayrollRoutes(r, { need }) {
     catch (e) { res.status(400).json({ error: e.message }); }
   });
 
-  // Bảng lương tính sẵn cho 1 tháng (kèm chi tiết từng NV để in phiếu lương)
+  // Bảng lương tính sẵn (kèm chi tiết từng NV để in phiếu lương): theo tháng (kỳ lương đã cài) hoặc from + to = đúng từ ngày đến ngày
   r.get('/payroll', need('salary'), (req, res) => {
-    const month = (req.query.month || '').slice(0, 7);
+    const from = String(req.query.from || '').slice(0, 10), to = String(req.query.to || '').slice(0, 10);
+    const custom = !!(from || to);
+    const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d) && !Number.isNaN(Date.parse(d));
+    if (custom && !(isDay(from) && isDay(to))) return res.status(400).json({ error: 'Chọn đủ Từ ngày và Đến ngày' });
+    if (custom && to < from) return res.status(400).json({ error: 'Đến ngày phải sau Từ ngày' });
+    const month = custom ? '' : (req.query.month || '').slice(0, 7);
     const dept = req.query.dept || null;
-    const m = /^(\d{4})-(\d{2})$/.exec(month);
+    const m = custom ? /^(\d{4})-(\d{2})/.exec(from) : /^(\d{4})-(\d{2})$/.exec(month);
     if (!m) return res.status(400).json({ error: 'Thiếu tháng (YYYY-MM)' });
     const virt = virtLevel(req.query, req);   // 1|2|3 = lương ảo mức đó; tài khoản kiểm tra: luôn lương ảo
     if (virt && !req.forceVirt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
-    const data = computePayrollTable(+m[1], +m[2], { dept, virt, force: !!req.forceVirt });
-    res.json({ ...data, month, mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
+    const data = computePayrollTable(+m[1], +m[2], { dept, virt, force: !!req.forceVirt, ...(custom ? { from, to } : {}) });
+    res.json({ ...data, month, custom, mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
   });
 
   /* ----------------------------- NGÀY LỄ ----------------------------- */
