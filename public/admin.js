@@ -1057,6 +1057,44 @@ function empModal(e) {
   const pinField = el('div', {}, el('label', {}, 'Số ID máy chấm công' + (pinLocked ? ' 🔒' : '')),
     pinInput, el('div', { class: 'map-hint', style: 'margin-top:3px' }, pinHint));
 
+  // ẢNH KHUÔN MẶT ngay khi khai NV (như nền tảng Hikvision: thêm người kèm ảnh rồi phát xuống cửa).
+  // Lưu NV xong: gắn ảnh cho Số ID → (tích sẵn khi vừa chọn ảnh) đẩy NV + ảnh xuống các máy đã chọn.
+  const faceOn = deviceEnabled();
+  const canPush = faceOn && hasPerm('devices');
+  let faceB64 = null, devChks = [];
+  const faceImg = el('img', { alt: '', style: 'width:72px;height:72px;object-fit:cover;border-radius:12px;border:2px solid var(--brand,#E8541E);display:none' });
+  const faceFile = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+  const faceBtn = btnSm('📷 Chọn ảnh…', () => faceFile.click(), 'ghost');
+  faceBtn.type = 'button';
+  const pushChk = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+  const devWrap = el('div', { style: 'display:flex;gap:4px 14px;flex-wrap:wrap;margin:4px 0 0 22px' });
+  faceFile.onchange = async () => {
+    const fl = faceFile.files[0]; faceFile.value = ''; if (!fl) return;
+    try {
+      faceB64 = await faceJpeg(fl);
+      faceImg.src = 'data:image/jpeg;base64,' + faceB64; faceImg.style.display = '';
+      faceBtn.textContent = '📷 Đổi ảnh…'; pushChk.checked = true;
+    } catch (err) { toast(err.message, 'err'); }
+  };
+  if (canPush) api('/admin/devices').then((d) => {
+    const devs = (d.rows || []).filter((m) => m.active && m.conn_type !== 'union');
+    devChks = devs.map((m) => {
+      const c = el('input', { type: 'checkbox', value: m.serial, checked: '', style: 'width:auto;margin:0' });
+      devWrap.append(el('label', { style: 'display:flex;gap:5px;align-items:center;font-weight:500;color:var(--ink)' }, c, m.name || m.serial));
+      return c;
+    });
+    if (!devs.length) devWrap.append(el('span', { class: 'map-hint' }, 'Chưa có máy chấm công nào đang dùng.'));
+  }).catch(() => {});
+  if (faceOn && e && (e.device_pin || '').trim()) api('/admin/employees/' + e.id + '/biometrics').then((d) => {
+    if (d.photoData && !faceB64) { faceImg.src = d.photoData; faceImg.style.display = ''; faceBtn.textContent = '📷 Đổi ảnh…'; }
+  }).catch(() => {});
+  const faceField = faceOn ? el('div', { style: 'margin-top:4px;padding:10px 12px;border:1px solid var(--line,#eee);border-radius:12px' },
+    el('label', {}, '📸 Ảnh khuôn mặt (để chấm công bằng khuôn mặt)'),
+    el('div', { style: 'display:flex;gap:10px;align-items:center' }, faceImg, faceBtn, faceFile),
+    el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Ảnh chân dung chính diện, rõ mặt, lấy từ vai trở lên. Chụp bằng điện thoại được (ảnh iPhone gửi qua Zalo/Gmail sang máy tính để thành JPG). Phần mềm tự thu nhỏ ảnh. Cần có Số ID máy chấm công.'),
+    canPush ? el('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:8px;font-weight:600;color:var(--ink)' }, pushChk, 'Lưu xong đẩy NV + ảnh khuôn mặt xuống máy:') : '',
+    canPush ? devWrap : '') : null;
+
   const codeRow = el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name)));
   // ----- Các mục ít dùng: gom vào khung THU GỌN (mặc định gọn, có dòng tóm tắt) -----
   const attSel = el('select', { id: 'e-attmode' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v, ...((e?.att_mode || '') === v ? { selected: '' } : {}) },
@@ -1111,6 +1149,7 @@ function empModal(e) {
     codeRow,
     el('div', { class: 'two-col' }, deptField, posField),
     el('div', { class: 'two-col' }, field('Số điện thoại', mk('phone', '', e?.phone)), pinField),
+    faceField,
     accSec, advSec, auditSec,
   ].filter(Boolean);
   const save = el('button', { class: 'btn' }, e ? 'Lưu thay đổi' : 'Tạo nhân viên');
@@ -1130,11 +1169,33 @@ function empModal(e) {
     if (!pinLocked) body.device_pin = f.device_pin.value.trim();
     // Không gửi shift_id/work_schedule_id/office_ids → giữ nguyên phân ca & định vị đã gán ở màn riêng
     if (body.role !== 'admin') body.permissions = [...permState];
+    const pinNow = pinLocked ? String(e.device_pin).trim() : body.device_pin;
+    if (faceB64 && !pinNow) { toast('Nhập Số ID máy chấm công để gắn ảnh khuôn mặt cho nhân viên', 'err'); f.device_pin.focus(); return; }
+    const serials = devChks.filter((c) => c.checked).map((c) => c.value);
+    const doPush = canPush && pushChk.checked && !!pinNow;
+    if (doPush && !serials.length) { toast('Chọn ít nhất 1 máy để đẩy xuống, hoặc bỏ tích "Lưu xong đẩy…"', 'err'); return; }
+    let r;
     try {
-      const r = e ? await api('/admin/employees/' + e.id, { method: 'PUT', body }) : await api('/admin/employees', { method: 'POST', body });
-      toast(r && r.relinked ? `Đã lưu — gán ${r.relinked} lượt quẹt cũ của Số ID máy và tính lại công` : 'Đã lưu', 'ok');
-      closeModal(); pageEmployees();
-    } catch (err) { if (/tài khoản/i.test(err.message)) accSec.setOpen(true); toast(err.message, 'err'); }
+      r = e ? await api('/admin/employees/' + e.id, { method: 'PUT', body }) : await api('/admin/employees', { method: 'POST', body });
+    } catch (err) { if (/tài khoản/i.test(err.message)) accSec.setOpen(true); toast(err.message, 'err'); return; }
+    const saved = r && r.relinked ? `Đã lưu — gán ${r.relinked} lượt quẹt cũ của Số ID máy và tính lại công` : 'Đã lưu';
+    const empId = e ? e.id : r.id;
+    save.disabled = true;
+    if (faceB64) {
+      try { await api('/admin/employees/' + empId + '/face-photo', { method: 'PUT', body: { photo: faceB64 } }); }
+      catch (err) { toast('Đã lưu nhân viên nhưng chưa lưu được ảnh: ' + err.message, 'err'); closeModal(); pageEmployees(); return; }
+    }
+    if (doPush) {
+      try {
+        const p = await api('/admin/devices/push-employees', { method: 'POST', body: { pins: [pinNow], serials, with_bio: true } });
+        if (p.users) cmdTrack(`Đẩy NV ${body.full_name}${faceB64 ? ' + ảnh khuôn mặt' : ''} xuống máy`, p.track);
+        if (p.job) { toast(saved + (faceB64 ? ' + ảnh khuôn mặt' : '') + '. Đang ghi xuống máy…', 'ok'); closeModal(); hikPushJobModal(p.job, true, pageEmployees); return; }
+        toast(saved + '. ' + p.msg, p.users ? 'ok' : 'err');
+      } catch (err) { toast('Đã lưu nhân viên nhưng chưa đẩy được xuống máy: ' + err.message, 'err'); }
+      closeModal(); pageEmployees(); return;
+    }
+    toast(saved + (faceB64 ? ' + ảnh khuôn mặt. Đẩy xuống máy: Máy chấm công ▾ → Đẩy NV xuống máy.' : ''), 'ok');
+    closeModal(); pageEmployees();
   };
   // ----- 2 tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) -----
   let modalBody = body;
@@ -6281,7 +6342,8 @@ function unmatchedModal(m) {
 async function faceJpeg(file) {
   const url = URL.createObjectURL(file);
   try {
-    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('không đọc được ảnh')); i.src = url; });
+    const heic = /\.hei[cf]$/i.test(file.name || '') || /hei[cf]/i.test(file.type || '');
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error(heic ? 'ảnh iPhone dạng HEIC trình duyệt không đọc được — gửi ảnh qua Zalo/Gmail sang máy tính (tự thành JPG) hoặc trên iPhone chọn Cài đặt → Camera → Định dạng → Tương thích nhất' : 'không đọc được ảnh')); i.src = url; });
     const W = img.naturalWidth, H = img.naturalHeight;
     if (Math.min(W, H) < 120) throw new Error(`ảnh nhỏ quá (${W}×${H})`);
     const k = Math.min(1, 640 / Math.max(W, H));
@@ -6929,7 +6991,7 @@ async function hikPushJobModal(job, withFace, after) {
       if (x.tcp && x.failed_pins?.length) out.append(el('div', { class: 'dv-warn', style: 'margin-top:4px' }, 'Máy không nhận Số ID: ' + x.failed_pins.slice(0, 30).join(', ')));
       for (const er of x.errors || []) out.append(el('div', { class: 'dv-warn', style: 'margin-top:4px;white-space:normal' }, er));
     }
-    if (withFace && (j.result?.devices || []).some((x) => !x.tcp)) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Ảnh khuôn mặt lấy từ ảnh phần mềm đã có (ảnh máy khác gửi về). NV chưa có ảnh thì chỉ ghi Số ID + tên — đăng ký mặt trực tiếp trên máy.'));
+    if (withFace && (j.result?.devices || []).some((x) => !x.tcp)) out.append(el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Ảnh khuôn mặt lấy từ ảnh phần mềm đã có (ảnh tải lên ở form nhân viên, hoặc máy khác gửi về). NV chưa có ảnh thì chỉ ghi Số ID + tên — thêm ảnh ở form nhân viên hoặc đăng ký mặt trực tiếp trên máy.'));
     return;
   }
 }

@@ -382,6 +382,19 @@ test('tải ảnh khuôn mặt từ máy tính (tên file = Mã NV) → lưu kho
   assert.equal(db.prepare("SELECT kind FROM device_user_photos WHERE pin='35294'").get().kind, 'face');
 });
 
+test('khai NV mới kèm ảnh (form Thêm nhân viên): tạo NV → gắn ảnh cho Số ID → đẩy NV + ảnh xuống máy Hik', async () => {
+  H.noSetUp = false; H.faces.length = 0;
+  const img = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(3000, 7), Buffer.from([0xff, 0xd9])]);
+  const c = await call('POST /employees', { body: { code: 'NVANH9001', full_name: 'Nguyen Thu Anh', device_pin: '9001', role: 'employee' } });
+  assert.equal(c.code, 200, JSON.stringify(c.out));
+  assert.equal((await call('PUT /employees/:id/face-photo', { params: { id: c.out.id }, body: { photo: img.toString('base64') } })).code, 200);
+  const j = await waitJob((await call('POST /devices/push-employees', { body: { pins: ['9001'], serials: [H.serial], with_bio: true } })).out.job);
+  assert.equal(j.state, 'done', j.msg);
+  assert.deepEqual([j.result.devices[0].pushed, j.result.devices[0].faces], [1, 1]);
+  assert.equal(H.faces[0].rec.FPID, '9001'); assert.equal(H.faces[0].rec.name, 'Nguyen Thu Anh');
+  assert.ok(H.faces[0].img.equals(img), 'ảnh xuống máy đúng từng byte');
+});
+
 /* ======================= TẮT LẠI = NHƯ CŨ ======================= */
 test('tắt công tắc Hikvision: máy vẫn gửi nhưng phần mềm trả 404, không nhận thêm lượt chấm', async () => {
   setSetting('hik_device_enabled', '0');
