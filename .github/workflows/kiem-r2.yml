@@ -24,7 +24,7 @@ jobs:
           echo "LIST=$(api GET r2/buckets | codes)" >> "$GITHUB_ENV"
           echo "PUT=$(api PUT r2/buckets/digiplus-khong-ton-tai-kiem-quyen/objects/x.txt hi | codes)" >> "$GITHUB_ENV"
           echo "PAGES=$(api GET pages/projects/huongdan-digiplus | codes)" >> "$GITHUB_ENV"
-          echo "LIST/PUT/PAGES:"; env | grep -E '^(LIST|PUT|PAGES)='
+          grep -E '^(LIST|PUT|PAGES)=' "$GITHUB_ENV" || true
       - name: A - Token xem duoc Pages
         continue-on-error: true
         run: test "$PAGES" = ok
