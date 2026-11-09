@@ -1,0 +1,39 @@
+name: Kiem quyen R2 (tam thoi)
+
+# Kiểm 1 lần: token Cloudflare của CI có dùng được R2 không, tài khoản đã bật R2 chưa.
+# Chỉ đọc / thử ghi vào bucket KHÔNG tồn tại → không tạo, không đổi gì. Chạy xong sẽ xoá file này.
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/kiem-r2.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  kiem:
+    runs-on: ubuntu-latest
+    env:
+      TK: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      ACC: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Goi API
+        run: |
+          api() { curl -s -X "$1" -H "Authorization: Bearer $TK" "https://api.cloudflare.com/client/v4/accounts/$ACC/$2" ${3:+--data-binary "$3"}; }
+          codes() { python3 -c "import sys,json; d=json.load(sys.stdin); print('ok' if d.get('success') else ','.join(str(e.get('code')) for e in d.get('errors',[])))"; }
+          echo "LIST=$(api GET r2/buckets | codes)" >> "$GITHUB_ENV"
+          echo "PUT=$(api PUT r2/buckets/digiplus-khong-ton-tai-kiem-quyen/objects/x.txt hi | codes)" >> "$GITHUB_ENV"
+          echo "PAGES=$(api GET pages/projects/huongdan-digiplus | codes)" >> "$GITHUB_ENV"
+          echo "LIST/PUT/PAGES:"; env | grep -E '^(LIST|PUT|PAGES)='
+      - name: A - Token xem duoc Pages
+        continue-on-error: true
+        run: test "$PAGES" = ok
+      - name: B - Token co quyen doc R2 (khong bi 10000)
+        continue-on-error: true
+        run: test "$LIST" != "10000"
+      - name: C - Tai khoan da bat R2 (liet ke bucket duoc)
+        continue-on-error: true
+        run: test "$LIST" = ok
+      - name: D - Token co quyen GHI R2 (bucket khong ton tai chu khong bi 10000)
+        continue-on-error: true
+        run: test "$PUT" != "10000" && test -n "$PUT"
