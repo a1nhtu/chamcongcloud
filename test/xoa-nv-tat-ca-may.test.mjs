@@ -82,6 +82,17 @@ test('xoá trên TẤT CẢ máy 1 lần: mỗi máy nhận lệnh xoá, bỏ l�
   sendAll();
 });
 
+test('chọn máy để xoá (máy mất kết nối bỏ ra): chỉ máy được chọn nhận lệnh xoá; chọn 0 máy → báo lỗi', async () => {
+  const none = await call('POST /devices/delete-users-all', { pins: ['7'], serials: [] });
+  assert.equal(none.code, 400); assert.match(none.out.error, /Chưa chọn máy/);
+  const { code, out } = await call('POST /devices/delete-users-all', { pins: ['7'], serials: ['SN_B'] });
+  assert.equal(code, 200);
+  assert.deepEqual(out.push, ['Máy xưởng']);
+  assert.ok(pendingAll('SN_B').includes('DATA DELETE USERINFO\tPIN=7'), 'máy được chọn nhận lệnh xoá');
+  assert.ok(!pendingAll('SN_A').some((c) => c.startsWith('DATA DELETE USERINFO') && c.endsWith('PIN=7')), 'máy không chọn không bị xoá');
+  sendAll();
+});
+
 test('khoá hàng loạt theo Số ID (không khoá tài khoản đang đăng nhập)', async () => {
   const me = db.prepare("SELECT id FROM employees WHERE device_pin='6'").get().id;
   const { out } = await call('POST /employees/lock-by-pins', { pins: ['5', '6'] }, { id: me, role: 'admin' });

@@ -6512,8 +6512,32 @@ async function deleteUsersAllModal(after) {
   const box = el('div', { style: 'max-height:340px;overflow:auto;border:1px solid var(--line,#e5e5e5);border-radius:8px;padding:6px 10px;margin-top:8px' }, loading());
   const goBtn = el('button', { class: 'btn', style: 'background:#c0392b;border-color:#c0392b' }, '🗑 Xóa trên tất cả máy');
   const picked = new Set();
-  let rows = [];
-  const upd = () => { goBtn.textContent = `🗑 Xóa trên tất cả máy (${picked.size})`; goBtn.disabled = !picked.size; };
+  let rows = [], devChks = [];
+  // Chọn máy để xoá: máy mất kết nối thì bỏ tích (máy đẩy / TCP/IP vẫn nhận lệnh khi kết nối lại; máy Hikvision sẽ báo lỗi)
+  const devBox = el('div', { style: 'display:flex;flex-direction:column;gap:4px;margin-top:4px' }, loading());
+  const devPicked = () => devChks.filter((x) => x.cb.checked);
+  const upd = () => {
+    const n = devPicked().length, all = n === devChks.length;
+    goBtn.textContent = `🗑 Xóa trên ${all ? 'tất cả máy' : n + ' máy'} (${picked.size})`;
+    goBtn.disabled = !picked.size || !n;
+  };
+  const offNote = (m) => m.conn_type === 'hik' || m.conn_type === 'union' ? 'phần mềm phải nối được vào máy, mất kết nối sẽ báo lỗi'
+    : m.conn_type === 'tcp' ? 'nhớ lệnh, máy lên lại tự xoá' : 'máy nhận lệnh khi kết nối lại';
+  const renderDevs = (devs) => {
+    devBox.innerHTML = '';
+    if (!devs.length) { devBox.append(el('div', { class: 'map-hint' }, 'Chưa có máy chấm công nào đang dùng.')); return; }
+    devChks = devs.map((m) => {
+      const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(m.online ? { checked: '' } : {}) });
+      cb.onchange = upd;
+      const seen = m.last_seen ? new Date(m.last_seen).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+      devBox.append(el('label', { style: 'display:flex;align-items:flex-start;gap:8px;font-weight:500;color:var(--ink)' }, cb,
+        el('div', {}, el('b', {}, m.name || m.serial), ' ',
+          el('span', { class: 'pill ' + (m.online ? 'ok' : 'muted'), style: 'margin-left:4px' }, m.online ? '🟢 Đang kết nối' : '⚪ Mất kết nối'),
+          m.online ? '' : el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, (seen ? 'Lần cuối ' + seen + ' · ' : '') + 'tích vào: ' + offNote(m)))));
+      return { m, cb };
+    });
+    upd();
+  };
   const render = () => {
     const q = searchI.value.trim().toLowerCase();
     const list = rows.filter((u) => (!onlyLocked.checked || u.active === false)
@@ -6544,10 +6568,13 @@ async function deleteUsersAllModal(after) {
   goBtn.onclick = async () => {
     const pins = [...picked];
     if (!pins.length) return;
-    if (!confirm(`Xóa ${pins.length} nhân viên khỏi TẤT CẢ máy chấm công?\n\nVân tay / thẻ / khuôn mặt của họ trên máy sẽ bị xoá. Dữ liệu công trong phần mềm GIỮ NGUYÊN.`)) return;
+    const dsel = devPicked();
+    if (!dsel.length) return toast('Chọn ít nhất 1 máy', 'err');
+    const allDev = dsel.length === devChks.length;
+    if (!confirm(`Xóa ${pins.length} nhân viên khỏi ${allDev ? 'TẤT CẢ máy chấm công' : dsel.length + ' máy: ' + dsel.map((x) => x.m.name || x.m.serial).join(', ')}?\n\nVân tay / thẻ / khuôn mặt của họ trên máy sẽ bị xoá. Dữ liệu công trong phần mềm GIỮ NGUYÊN.`)) return;
     goBtn.disabled = true;
     let r;
-    try { r = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins } }); }
+    try { r = await api('/admin/devices/delete-users-all', { method: 'POST', body: { pins, serials: dsel.map((x) => x.m.serial) } }); }
     catch (e) { goBtn.disabled = false; return toast(e.message, 'err'); }
     result.innerHTML = '';
     devDelSummary(r, result, pins.length);
@@ -6559,21 +6586,24 @@ async function deleteUsersAllModal(after) {
         result.append(el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, `🔒 Đã khoá ${k.locked} nhân viên.` + (k.self ? ' (Không khoá tài khoản bạn đang đăng nhập.)' : '')));
       } catch (e) { toast(e.message, 'err'); }
     } else if (toLock.length) result.append(el('div', { class: 'dv-warn' }, `${toLock.length} người chưa khoá: nếu còn trên máy khác ngoài danh sách (VD máy đang tạm dừng) thì có thể bị đồng bộ lại. Muốn chắc chắn thì Khoá họ ở trang Nhân viên.`));
-    toast('Đã gửi lệnh xoá trên tất cả máy', 'ok');
+    toast(allDev ? 'Đã gửi lệnh xoá trên tất cả máy' : `Đã gửi lệnh xoá trên ${dsel.length} máy đã chọn`, 'ok');
     picked.clear(); upd();
     try { rows = (await api('/admin/devices/all-users')).rows; } catch {}
     render();
     await devDelWatchJob(r, result);
   };
   upd();
-  openModal('Xóa nhân viên trên TẤT CẢ máy chấm công', [
-    el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, 'Dùng khi nhân viên nghỉ việc: chọn người rồi bấm Xóa — phần mềm xoá họ trên MỌI máy 1 lần, khỏi vào từng máy. Sau đó phần mềm hỏi có Khoá luôn không: Khoá rồi thì không bị đồng bộ lại xuống máy.'),
+  openModal('Xóa nhân viên trên máy chấm công', [
+    el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, 'Dùng khi nhân viên nghỉ việc: chọn máy + chọn người rồi bấm Xóa — phần mềm xoá họ trên các máy đã chọn 1 lần, khỏi vào từng máy. Sau đó phần mềm hỏi có Khoá luôn không: Khoá rồi thì không bị đồng bộ lại xuống máy.'),
+    el('div', { style: 'padding:8px 10px;border:1px solid var(--line,#e5e5e5);border-radius:8px;margin-bottom:10px' },
+      el('div', { style: 'font-weight:600;color:var(--ink)' }, 'Xoá trên máy (máy mất kết nối mặc định không tích)'), devBox),
     el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, searchI,
       el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)' }, onlyLocked, 'Chỉ NV đã khoá')),
     el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:8px' },
       el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:600;color:var(--ink)' }, selAll, 'Chọn tất cả (theo lọc)'), cntLbl),
     box, result,
   ], [goBtn, el('button', { class: 'btn ghost', onclick: () => { closeModal(); after && after(); } }, 'Đóng')]);
+  api('/admin/devices').then((d) => renderDevs((d.rows || []).filter((m) => m.active))).catch((e) => { devBox.innerHTML = ''; devBox.append(el('div', { class: 'dv-warn' }, e.message)); });
   try { rows = (await api('/admin/devices/all-users')).rows; } catch (e) { box.innerHTML = ''; box.append(el('div', { class: 'dv-warn' }, e.message)); return; }
   render();
 }

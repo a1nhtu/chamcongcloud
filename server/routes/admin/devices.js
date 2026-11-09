@@ -643,7 +643,10 @@ export function registerDeviceRoutes(r, { need }) {
     const pins = cleanPins(req.body?.pins, HIK_MAX_PIN);
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     const short = pins.filter((p) => p.length <= 20);   // Số ID dài hơn 20 ký tự chỉ có trên máy Hikvision, không gửi sang máy khác
-    const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all();
+    // Chọn máy (máy đang mất kết nối thì bỏ ra): serials = các máy được chọn; không gửi serials = mọi máy như cũ
+    const pick = Array.isArray(req.body?.serials) ? new Set(req.body.serials.map((s) => String(s).trim()).filter(Boolean)) : null;
+    if (pick && !pick.size) return res.status(400).json({ error: 'Chưa chọn máy' });
+    const devs = db.prepare("SELECT * FROM push_devices WHERE active=1 ORDER BY name, serial").all().filter((d) => !pick || pick.has(d.serial));
     const push = devs.filter((d) => (d.conn_type || 'push') === 'push' || d.conn_type === 'ai');
     const tcpAll = devs.filter((d) => d.conn_type === 'tcp');
     let tcp = tcpAll;
@@ -689,7 +692,7 @@ export function registerDeviceRoutes(r, { need }) {
     }
     // Máy đang tạm dừng / chờ duyệt mà vẫn còn người này → báo để người dùng biết chưa xoá ở đó
     const ph = pins.map(() => '?').join(',');
-    const onIdle = db.prepare(`SELECT COALESCE(NULLIF(d.name,''), d.serial) AS n, d.serial, d.conn_type, s.pin FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
+    const onIdle = pick ? [] : db.prepare(`SELECT COALESCE(NULLIF(d.name,''), d.serial) AS n, d.serial, d.conn_type, s.pin FROM push_devices d JOIN device_users_serial s ON s.serial=d.serial
       WHERE d.active=0 AND s.pin IN (${ph})`).all(...pins);
     const idle = [...new Set(onIdle.filter((x) => x.conn_type !== 'tcp').map((x) => x.n))];
     // Máy TCP/IP đang tạm dừng: nhớ lại, bật lại thì tự xoá
