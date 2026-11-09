@@ -693,6 +693,7 @@ async function pageEmployees() {
   refreshBtn.onclick = () => pageEmployees();
   const devMenu = (hasPerm('devices') && deviceEnabled()) ? rowMenu([
     { label: '⬇ Đẩy NV xuống máy…', hint: 'Số ID + tên, kèm vân tay/mặt nếu có', fn: async () => { try { pushEmpModal((await api('/admin/devices')).rows, pageEmployees); } catch (e) { toast(e.message, 'err'); } } },
+    { label: '📸 Tải ảnh khuôn mặt + đẩy xuống máy…', hint: 'Chọn ảnh chân dung (tên file = Mã NV) → máy chấm mặt được', fn: async () => { try { pushEmpModal((await api('/admin/devices')).rows, pageEmployees, { face: true }); } catch (e) { toast(e.message, 'err'); } } },
     { label: '🗑 Xóa NV trên máy…', hint: 'NV nghỉ việc: xoá trên tất cả máy 1 lần rồi hỏi khoá luôn', fn: () => deleteUsersAllModal(pageEmployees) },
   ], '🔌 Máy chấm công ▾') : null;
   const headArgs = ['Nhân viên', refreshBtn, addBtn, excelMenu, devMenu].filter(Boolean);
@@ -1164,11 +1165,23 @@ async function loadEmpBio(e, box) {
   box.innerHTML = '';
   if (!(e.device_pin || '').trim()) { box.append(el('div', { class: 'map-hint' }, 'Nhân viên chưa gắn Số ID máy chấm công nên chưa có dữ liệu sinh trắc.')); return; }
   let d; try { d = await api('/admin/employees/' + e.id + '/biometrics'); } catch (err) { box.append(el('div', { class: 'map-hint' }, err.message)); return; }
-  if (d.photoData) {
-    box.append(el('div', { style: 'text-align:center;margin-bottom:14px' },
-      el('img', { src: d.photoData, alt: 'Ảnh NV', style: 'width:120px;height:120px;object-fit:cover;border-radius:14px;border:2px solid var(--brand,#E8541E)' }),
-      el('div', { style: 'font-size:12px;color:var(--muted);margin-top:4px' }, d.photo === 'face' ? '📸 Ảnh khuôn mặt đăng ký trên máy' : '📸 Ảnh người dùng từ máy')));
-  }
+  // ảnh khuôn mặt: tải từ máy tính (thay ảnh cũ) → đẩy xuống máy ở "Đẩy NV xuống máy · kèm khuôn mặt"
+  const fI = el('input', { type: 'file', accept: 'image/*', style: 'display:none' });
+  const upB = btnSm(d.photoData ? '📷 Đổi ảnh khuôn mặt…' : '📷 Tải ảnh khuôn mặt lên…', () => fI.click(), 'ghost');
+  fI.onchange = async () => {
+    const f = fI.files[0]; fI.value = ''; if (!f) return;
+    upB.disabled = true;
+    try { await api('/admin/employees/' + e.id + '/face-photo', { method: 'PUT', body: { photo: await faceJpeg(f) } }); toast('Đã lưu ảnh khuôn mặt. Đẩy xuống máy: Máy chấm công ▾ → Đẩy NV xuống máy (tích kèm khuôn mặt).', 'ok'); loadEmpBio(e, box); }
+    catch (err) { upB.disabled = false; toast(err.message, 'err'); }
+  };
+  const delB = d.photoData ? btnSm('Xoá ảnh', async () => {
+    if (!confirm('Xoá ảnh khuôn mặt của nhân viên này trong phần mềm? (Không xoá ảnh đã có trên máy chấm công.)')) return;
+    try { await api('/admin/employees/' + e.id + '/face-photo', { method: 'DELETE' }); loadEmpBio(e, box); } catch (err) { toast(err.message, 'err'); }
+  }, 'ghost') : null;
+  box.append(el('div', { style: 'text-align:center;margin-bottom:14px' },
+    d.photoData ? el('img', { src: d.photoData, alt: 'Ảnh NV', style: 'width:120px;height:120px;object-fit:cover;border-radius:14px;border:2px solid var(--brand,#E8541E)' }) : '',
+    d.photoData ? el('div', { style: 'font-size:12px;color:var(--muted);margin-top:4px' }, d.photo === 'face' ? '📸 Ảnh khuôn mặt (đẩy kèm xuống máy chấm mặt)' : '📸 Ảnh người dùng từ máy') : '',
+    el('div', { style: 'display:flex;gap:6px;justify-content:center;margin-top:6px' }, upB, delB || '', fI)));
   const stat = (icon, label, val) => el('div', { style: 'flex:1;min-width:110px;background:var(--soft,#fff3ec);border:1px solid #f2cdb8;border-radius:12px;padding:14px;text-align:center' },
     el('div', { style: 'font-size:24px;line-height:1' }, icon),
     el('div', { style: 'font-size:22px;font-weight:800;color:var(--brand-dark,#c0410f);margin-top:4px' }, String(val)),
@@ -6264,8 +6277,75 @@ function unmatchedModal(m) {
   ], [el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
 }
 
+// ẢNH KHUÔN MẶT từ máy tính: thu nhỏ ngay trên trình duyệt (cạnh dài ≤ 640 px) → JPG ≤ 150 KB (máy Hikvision nhận ≤ 200 KB). Trả base64.
+async function faceJpeg(file) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = () => no(new Error('không đọc được ảnh')); i.src = url; });
+    const W = img.naturalWidth, H = img.naturalHeight;
+    if (Math.min(W, H) < 120) throw new Error(`ảnh nhỏ quá (${W}×${H})`);
+    const k = Math.min(1, 640 / Math.max(W, H));
+    const c = document.createElement('canvas'); c.width = Math.round(W * k); c.height = Math.round(H * k);
+    const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+    for (const q of [0.9, 0.82, 0.74, 0.66, 0.58, 0.5]) {
+      const b64 = c.toDataURL('image/jpeg', q).split(',')[1];
+      if (b64.length * 0.75 <= 150 * 1024) return b64;
+    }
+    throw new Error('ảnh quá nặng');
+  } finally { URL.revokeObjectURL(url); }
+}
+// Khối "Tải ảnh khuôn mặt" (hộp Đẩy NV xuống máy): chọn nhiều ảnh / cả thư mục, tên file = Mã NV (hoặc Số ID máy).
+// Lưu xong gọi onSaved(danh sách NV đã có ảnh) để hộp đẩy chọn sẵn những người này + bật "kèm khuôn mặt".
+function faceUploadBox(onSaved) {
+  const pick = el('input', { type: 'file', accept: 'image/*', multiple: '', style: 'display:none' });
+  const pickDir = el('input', { type: 'file', multiple: '', webkitdirectory: '', style: 'display:none' });
+  const out = el('div');
+  const b1 = el('button', { class: 'btn sm' }, '📸 Chọn ảnh…'), b2 = el('button', { class: 'btn ghost sm' }, '📁 Chọn cả thư mục…');
+  b1.onclick = () => pick.click(); b2.onclick = () => pickDir.click();
+  const run = async (fileList) => {
+    const files = [...fileList].filter((f) => /^image\//.test(f.type) || /\.(jpe?g|png|bmp|webp)$/i.test(f.name));
+    pick.value = ''; pickDir.value = '';
+    if (!files.length) return toast('Không có file ảnh nào', 'err');
+    b1.disabled = b2.disabled = true;
+    out.innerHTML = '';
+    const st = el('div', { style: 'font-weight:600;margin-top:6px' }); out.append(st);
+    const res = { saved: [], unmatched: [], nopin: [], bad: [] };
+    let batch = [];
+    const flush = async () => {
+      if (!batch.length) return;
+      const r = await api('/admin/employees/face-photos', { method: 'POST', body: { items: batch } });
+      for (const k of Object.keys(res)) res[k].push(...(r[k] || []));
+      batch = [];
+    };
+    try {
+      for (let i = 0; i < files.length; i++) {
+        st.textContent = `⏳ Đang thu nhỏ + lưu ảnh ${i + 1} / ${files.length}…`;
+        const key = files[i].name.replace(/\.[^.]+$/, '');
+        try { batch.push({ key, photo: await faceJpeg(files[i]) }); } catch (e) { res.bad.push({ key, error: e.message }); }
+        if (batch.length >= 10) await flush();
+      }
+      await flush();
+    } catch (e) { st.textContent = '❌ ' + e.message; b1.disabled = b2.disabled = false; return; }
+    b1.disabled = b2.disabled = false;
+    st.textContent = `✅ Đã lưu ảnh khuôn mặt cho ${res.saved.length} / ${files.length} ảnh.` + (res.saved.length ? ' Những NV này đã được chọn sẵn bên dưới — chọn máy rồi bấm Đẩy.' : '');
+    const list = (a, f) => a.slice(0, 40).map(f).join(', ') + (a.length > 40 ? ` … (+${a.length - 40})` : '');
+    if (res.unmatched.length) out.append(el('div', { class: 'dv-warn' }, `${res.unmatched.length} ảnh không khớp Mã NV / Số ID nào (đặt tên file đúng Mã NV, VD TB035294.jpg): ${list(res.unmatched, (x) => x)}`));
+    if (res.nopin.length) out.append(el('div', { class: 'dv-warn' }, `${res.nopin.length} NV chưa có Số ID máy chấm công — sửa NV điền Số ID rồi tải lại ảnh: ${list(res.nopin, (x) => x.code + ' ' + x.name)}`));
+    if (res.bad.length) out.append(el('div', { class: 'dv-warn' }, `${res.bad.length} ảnh không dùng được: ${list(res.bad, (x) => x.key + ' (' + x.error + ')')}`));
+    const off = res.saved.filter((x) => !x.active).length;
+    if (off) out.append(el('div', { class: 'map-hint' }, `${off} NV đã khoá (nghỉ việc): ảnh vẫn lưu nhưng không đẩy xuống máy.`));
+    if (res.saved.length) onSaved(res.saved);
+  };
+  pick.onchange = () => run(pick.files); pickDir.onchange = () => run(pickDir.files);
+  return el('div', { style: 'border:1px dashed #f2cdb8;background:var(--soft,#fff3ec);border-radius:10px;padding:10px 12px;margin:0 0 10px' },
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('b', {}, 'Ảnh khuôn mặt từ máy tính'), b1, b2, pick, pickDir),
+    el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Ảnh chân dung chính diện, rõ mặt, không đội mũ/đeo kính râm. Đặt tên file = Mã NV (VD TB035294.jpg) hoặc Số ID máy. Phần mềm tự thu nhỏ ảnh; đẩy xuống máy là chấm bằng khuôn mặt được (máy Hikvision, máy ZKTeco nhận diện mặt ánh sáng thường).'),
+    out);
+}
+
 // ĐẨY NV TỪ PHẦN MỀM XUỐNG MÁY (bấm tay): chọn máy + chọn NV (đang làm, có Số ID), tuỳ chọn kèm sinh trắc phần mềm đang có
-async function pushEmpModal(devRows, after) {
+// opt.face: mở từ "Tải ảnh khuôn mặt + đẩy xuống máy" → hiện khối tải ảnh ở đầu hộp
+async function pushEmpModal(devRows, after, opt = {}) {
   const devs = (devRows || []).filter((m) => m.active && m.conn_type !== 'union');
   const devBox = el('div', { style: 'display:flex;gap:6px 14px;flex-wrap:wrap;margin:6px 0 10px' });
   const devChk = devs.map((m) => {
@@ -6294,12 +6374,21 @@ async function pushEmpModal(devRows, after) {
       const cb = el('input', { type: 'checkbox', style: 'width:auto', ...(picked.has(u.pin) ? { checked: '' } : {}) });
       cb.onchange = () => { cb.checked ? picked.add(u.pin) : picked.delete(u.pin); upd(); };
       box.append(el('label', { style: 'display:flex;gap:8px;align-items:center;padding:3px 0;margin:0;font-weight:500;color:var(--ink)' }, cb,
-        el('span', {}, el('b', {}, '🔌' + u.pin), ' · ' + (u.name || ''), u.department ? el('span', { class: 'muted' }, ' · ' + u.department) : ''),
+        el('span', {}, el('b', {}, '🔌' + u.pin), ' · ' + (u.name || ''), u.code && u.code !== u.pin ? el('span', { class: 'muted' }, ' · ' + u.code) : '', u.department ? el('span', { class: 'muted' }, ' · ' + u.department) : '', u.face ? el('span', { title: 'Có ảnh khuôn mặt — đẩy kèm khi tích "kèm khuôn mặt"' }, ' 📸') : ''),
         el('span', { class: 'map-hint', style: 'margin:0 0 0 auto' }, u.devices.length ? 'Có trên ' + u.devices.length + ' máy' : 'Chưa có trên máy')));
     }
   };
   searchI.oninput = render;
   selAll.onchange = () => { for (const u of rows.filter(match)) selAll.checked ? picked.add(u.pin) : picked.delete(u.pin); render(); upd(); };
+  const faceBox = faceUploadBox((saved) => {
+    const pins = new Set(saved.filter((x) => x.active).map((x) => String(x.pin)));
+    for (const u of rows) if (pins.has(u.pin)) { u.face = true; picked.add(u.pin); }
+    bioChk.checked = true; searchI.value = ''; render(); upd();
+  });
+  const faceBtn = el('button', { class: 'btn ghost sm' }, '📸 Tải ảnh khuôn mặt…');
+  if (!opt.face) faceBox.style.display = 'none';
+  faceBtn.onclick = () => { faceBox.style.display = ''; faceBtn.style.display = 'none'; };
+  if (opt.face) faceBtn.style.display = 'none';
   goBtn.onclick = async () => {
     const serials = devChk.filter((c) => c.checked).map((c) => c.value);
     if (!picked.size) return toast('Chưa chọn nhân viên', 'err');
@@ -6314,8 +6403,9 @@ async function pushEmpModal(devRows, after) {
     catch (e) { toast(e.message, 'err'); }
   };
   upd();
-  openModal('Đẩy nhân viên từ phần mềm xuống máy', [
-    el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, 'Ghi Số ID + tên trong phần mềm xuống máy. Sau đó đăng ký vân tay / mặt / thẻ ở 1 máy → tự sang các máy cùng nhóm đồng bộ và về phần mềm.'),
+  openModal(opt.face ? 'Tải ảnh khuôn mặt + đẩy xuống máy' : 'Đẩy nhân viên từ phần mềm xuống máy', [
+    el('div', { class: 'map-hint', style: 'margin:0 0 6px' }, 'Ghi Số ID + tên trong phần mềm xuống máy. Sau đó đăng ký vân tay / mặt / thẻ ở 1 máy → tự sang các máy cùng nhóm đồng bộ và về phần mềm. Hoặc tải ảnh khuôn mặt từ máy tính rồi đẩy kèm.', ' ', faceBtn),
+    faceBox,
     el('b', {}, 'Máy nhận'), devBox,
     el('label', { style: 'display:flex;gap:8px;align-items:center;margin:0 0 10px;font-weight:500;color:var(--ink)' }, bioChk, 'Kèm vân tay / khuôn mặt (nếu phần mềm đã có từ máy khác)' + (devs.some((m) => m.conn_type === 'hik') ? ' · máy Hikvision: kèm ảnh khuôn mặt' : '')),
     el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px' }, searchI,

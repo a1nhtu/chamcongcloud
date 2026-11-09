@@ -5,7 +5,7 @@ import { hashPassword, passwordHasher, PERMISSIONS, isInspector, hasPerm } from 
 import { licenseState } from '../../license.js';
 import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEmployeeFields } from '../../permission-guard.js';
 import { sendCaughtError } from '../../util.js';
-import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin } from '../../device-sync.js';
+import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin, saveUploadedFace } from '../../device-sync.js';
 import { onEmployeesSaved } from '../../pin-guard.js';
 import { doBackup } from '../../backup.js';
 import { ADMIN_DEPT } from '../../seed.js';
@@ -561,6 +561,41 @@ export function registerEmployeeRoutes(r, { need }) {
       for (const d of deviceRolesForPin(pin)) if (setDeviceAdmin(pin, d.serial, admins.has(d.serial), emp.full_name)) changed++;
     } catch (e) { return sendCaughtError(res, 'PUT /admin/employees/:id/device-roles', e, { status: 400 }); }
     res.json({ ok: true, changed });
+  });
+  // ẢNH KHUÔN MẶT TẢI LÊN TỪ PHẦN MỀM (tên file = Mã NV hoặc Số ID). Lưu kho ảnh chung; đẩy xuống máy ở "Đẩy NV xuống máy · kèm khuôn mặt".
+  // body { items: [{ key, photo }] } — mỗi lần tối đa 20 ảnh (trình duyệt chia đợt). photo = JPG base64 đã thu nhỏ.
+  r.post('/employees/face-photos', need('employees'), (req, res) => {
+    const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 20) : [];
+    if (!items.length) return res.status(400).json({ error: 'Chưa có ảnh' });
+    const byCode = db.prepare('SELECT id, code, full_name, device_pin, active FROM employees WHERE code=? COLLATE NOCASE ORDER BY active DESC, id LIMIT 1');
+    const byPin = db.prepare("SELECT id, code, full_name, device_pin, active FROM employees WHERE device_pin=? AND device_pin<>'' ORDER BY active DESC, id LIMIT 1");
+    const find = (k) => k && (byCode.get(k) || byPin.get(k));
+    const out = { saved: [], unmatched: [], nopin: [], bad: [] };
+    for (const it of items) {
+      const key = String(it?.key ?? '').trim().slice(0, 80);
+      // "TB035294.jpg" / "TB035294 - Đinh Hữu Cường.jpg" / "TB035294_1.jpg" → thử cả cụm đầu tên file
+      const e = find(key) || find(key.split(/[\s(（]+|\s*-\s+/)[0]) || find(key.split(/[\s_(（]+/)[0]);
+      if (!e) { out.unmatched.push(key); continue; }
+      const pin = String(e.device_pin || '').trim();
+      if (!pin) { out.nopin.push({ key, code: e.code, name: e.full_name }); continue; }
+      try { saveUploadedFace(pin, it.photo); out.saved.push({ key, pin, code: e.code, name: e.full_name, active: !!e.active }); }
+      catch (err) { out.bad.push({ key, error: err.message }); }
+    }
+    res.json(out);
+  });
+  // Ảnh khuôn mặt của 1 NV (tab Sinh trắc): tải lên / xoá
+  r.put('/employees/:id/face-photo', need('employees'), (req, res) => {
+    const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
+    if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    try { saveUploadedFace(emp.device_pin, req.body?.photo); } catch (e) { return res.status(400).json({ error: 'Không lưu được: ' + e.message }); }
+    res.json({ ok: true });
+  });
+  r.delete('/employees/:id/face-photo', need('employees'), (req, res) => {
+    const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
+    const pin = emp && String(emp.device_pin || '').trim();
+    if (!pin) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    db.prepare('DELETE FROM device_user_photos WHERE pin=?').run(pin);
+    res.json({ ok: true });
   });
   // Ảnh người dùng/khuôn mặt của NV (lấy từ máy) → trả JPG để hiện avatar
   r.get('/employees/:id/photo', need('employees'), (req, res) => {

@@ -630,10 +630,11 @@ export function registerDeviceRoutes(r, { need }) {
     const emps = new Map(db.prepare("SELECT id, code, full_name, department, active, device_pin FROM employees WHERE device_pin IS NOT NULL AND device_pin<>''").all()
       .map((e) => [String(e.device_pin).trim(), e]));
     const pins = new Set([...onDev.keys(), ...emps.keys()]);
+    const photo = new Set(db.prepare("SELECT pin FROM device_user_photos WHERE kind='face'").all().map((p) => String(p.pin)));   // có ảnh khuôn mặt để đẩy kèm
     const rows = [...pins].map((pin) => {
       const e = emps.get(pin), o = onDev.get(pin) || { devices: [], name: '' };
       return { pin, emp_id: e ? e.id : null, code: e ? e.code : '', name: e ? e.full_name : (o.name || ''), department: e ? (e.department || '') : '',
-        active: e ? !!e.active : null, devices: o.devices };
+        active: e ? !!e.active : null, devices: o.devices, face: photo.has(pin) };
     }).sort((a, b) => (Number(a.pin) - Number(b.pin)) || a.pin.localeCompare(b.pin));
     res.json({ rows });
   });

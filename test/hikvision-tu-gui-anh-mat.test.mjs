@@ -147,6 +147,7 @@ before(async () => {
   ZK = await import('../server/zk-tcp.js');
   const add = (m) => (p, ...h) => { routes[`${m} ${p}`] = h; };
   (await import('../server/routes/admin/devices.js')).registerDeviceRoutes({ get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') }, { need: () => (q, s, n) => n() });
+  (await import('../server/routes/admin/employees.js')).registerEmployeeRoutes({ get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') }, { need: () => (q, s, n) => n() });
   const express = (await import('express')).default;
   const app = express();
   app.use('/', (await import('../server/routes/hik-event.js')).default);   // gắn y như server/index.js (trước cổng bản quyền)
@@ -338,6 +339,47 @@ test('máy đời cũ chưa có FDSetUp → tự dùng FaceDataRecord; không t�
   j = await waitJob((await call('POST /devices/push-employees', { body: { pins: ['101', '556'], serials: [H.serial], with_bio: false } })).out.job);
   assert.deepEqual([j.result.devices[0].pushed, j.result.devices[0].faces], [2, 0]);
   assert.equal(H.faceCalls, calls, 'không gọi lệnh ảnh mặt nào');
+});
+test('tải ảnh khuôn mặt từ máy tính (tên file = Mã NV) → lưu kho ảnh → đẩy xuống máy Hik kèm đúng ảnh vừa tải (như nền tảng Hik "tải ảnh lên" rồi phát xuống cửa)', async () => {
+  H.noSetUp = false; H.faces.length = 0;
+  const up = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(4000, 9), Buffer.from([0xff, 0xd9])]);
+  const b64 = up.toString('base64');
+  db.prepare(`INSERT INTO employees(code, full_name, role, username, password_hash, device_pin, active) VALUES
+    ('TB035294','Dinh Huu Cuong','employee','nvtb035294','x','35294',1), ('TB000777','Chua Co So ID','employee','nvtb000777','x','',1)`).run();
+  const r = await call('POST /employees/face-photos', { body: { items: [
+    { key: 'tb035294 - Dinh Huu Cuong', photo: b64 },                    // chữ thường + tên đi kèm → vẫn khớp Mã NV
+    { key: 'TB000777', photo: b64 },                                      // NV chưa có Số ID máy
+    { key: 'KHONG_CO_AI', photo: b64 },
+    { key: '900', photo: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB' },   // khớp Số ID nhưng không phải JPG
+    { key: '101', photo: Buffer.concat([Buffer.from([0xff, 0xd8]), Buffer.alloc(201 * 1024, 1)]).toString('base64') },   // quá 200 KB
+  ] } });
+  assert.equal(r.code, 200);
+  assert.deepEqual(r.out.saved.map((x) => [x.code, x.pin, x.active]), [['TB035294', '35294', true]]);
+  assert.deepEqual(r.out.nopin.map((x) => x.code), ['TB000777']);
+  assert.deepEqual(r.out.unmatched, ['KHONG_CO_AI']);
+  assert.deepEqual(r.out.bad.map((x) => x.key), ['900', '101']);
+  assert.match(r.out.bad[1].error, /200 KB/);
+  assert.ok(Buffer.from(db.prepare("SELECT photo FROM device_user_photos WHERE pin='101'").get().photo, 'base64').equals(JPG), 'ảnh lỗi không đè ảnh cũ');
+  // danh sách trong hộp đẩy NV: có cờ ảnh khuôn mặt
+  const all = (await call('GET /devices/all-users')).out.rows;
+  assert.equal(all.find((u) => u.pin === '35294').face, true);
+  assert.equal(all.find((u) => u.pin === '900').face, false);
+  assert.equal(all.find((u) => u.pin === '556').face, false, 'ảnh người dùng (không phải ảnh mặt) không tính');
+  // đẩy xuống máy kèm khuôn mặt → máy nhận người + đúng ảnh vừa tải
+  const j = await waitJob((await call('POST /devices/push-employees', { body: { pins: ['35294'], serials: [H.serial], with_bio: true } })).out.job);
+  assert.equal(j.state, 'done', j.msg);
+  assert.deepEqual([j.result.devices[0].pushed, j.result.devices[0].faces], [1, 1]);
+  assert.equal(H.faces[0].rec.FPID, '35294'); assert.equal(H.faces[0].rec.name, 'Dinh Huu Cuong');
+  assert.ok(H.faces[0].img.equals(up), 'ảnh xuống máy đúng từng byte');
+  // 1 NV (tab Sinh trắc): chưa có Số ID thì báo lỗi; xoá ảnh; tải lại ảnh
+  const noPin = db.prepare("SELECT id FROM employees WHERE code='TB000777'").get().id;
+  const bad = await call('PUT /employees/:id/face-photo', { params: { id: noPin }, body: { photo: b64 } });
+  assert.equal(bad.code, 400); assert.match(bad.out.error, /Số ID/);
+  const eid = db.prepare("SELECT id FROM employees WHERE code='TB035294'").get().id;
+  assert.equal((await call('DELETE /employees/:id/face-photo', { params: { id: eid } })).code, 200);
+  assert.ok(!db.prepare("SELECT 1 FROM device_user_photos WHERE pin='35294'").get());
+  assert.equal((await call('PUT /employees/:id/face-photo', { params: { id: eid }, body: { photo: 'data:image/jpeg;base64,' + b64 } })).code, 200);
+  assert.equal(db.prepare("SELECT kind FROM device_user_photos WHERE pin='35294'").get().kind, 'face');
 });
 
 /* ======================= TẮT LẠI = NHƯ CŨ ======================= */

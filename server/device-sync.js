@@ -620,6 +620,23 @@ export function storeDeviceOplogs(serial, rawBody) {
   return n.count;
 }
 
+// ẢNH KHUÔN MẶT TẢI LÊN TỪ PHẦN MỀM (ảnh chân dung chính diện, như nền tảng Hik cho "tải ảnh lên" rồi phát xuống các cửa).
+// Ảnh vào kho ảnh chung device_user_photos (loại 'face') → "Đẩy NV xuống máy · kèm khuôn mặt" tự lấy:
+// máy Hikvision ghi ảnh vào thư viện mặt (máy tự dựng mẫu), máy ZK mặt ánh sáng thường nhận BIOPHOTO.
+// Trình duyệt đã thu nhỏ + nén JPG; ở đây chỉ kiểm lại cho chắc (máy Hikvision chỉ nhận JPG ≤ 200 KB).
+export const FACE_UPLOAD_MAX = 200 * 1024;
+export function saveUploadedFace(pin, b64) {
+  pin = String(pin || '').trim();
+  if (!pin) throw new Error('nhân viên chưa có Số ID máy chấm công');
+  const s = String(b64 || '').replace(/^data:image\/[a-z]+;base64,/i, '').replace(/\s/g, '');
+  const buf = /^[A-Za-z0-9+/]+=*$/.test(s) ? Buffer.from(s, 'base64') : null;
+  if (!buf || buf.length < 1000 || buf[0] !== 0xff || buf[1] !== 0xd8) throw new Error('ảnh không phải JPG');
+  if (buf.length > FACE_UPLOAD_MAX) throw new Error(`ảnh ${Math.round(buf.length / 1024)} KB, tối đa 200 KB`);
+  db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo) VALUES(?,'face',9,?)
+    ON CONFLICT(pin) DO UPDATE SET kind='face',face_type=9,photo=excluded.photo,updated_at=datetime('now')`).run(pin, buf.toString('base64'));
+  return buf.length;
+}
+
 // Lệnh đẩy ẢNH của 1 pin xuống máy (BIOPHOTO nếu là ảnh mặt, USERPIC nếu ảnh người dùng). null nếu không có ảnh.
 export function buildPhotoCommand(pin) {
   const p = db.prepare('SELECT * FROM device_user_photos WHERE pin=?').get(pin);
