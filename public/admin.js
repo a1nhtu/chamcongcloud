@@ -6523,20 +6523,35 @@ async function deleteUsersAllModal(after) {
   };
   const offNote = (m) => m.conn_type === 'hik' || m.conn_type === 'union' ? 'phần mềm phải nối được vào máy, mất kết nối sẽ báo lỗi'
     : m.conn_type === 'tcp' ? 'nhớ lệnh, máy lên lại tự xoá' : 'máy nhận lệnh khi kết nối lại';
+  // Máy Hikvision / TCP/IP: phần mềm nối vào máy theo lịch nên "lần cuối" có thể đã lâu dù máy vẫn bật → dò thẳng máy (/devices/reach)
+  const isDirect = (m) => m.conn_type === 'hik' || m.conn_type === 'tcp';
+  const setState = (x, on, checking) => {
+    x.pill.className = 'pill ' + (checking ? 'warn' : on ? 'ok' : 'muted');
+    x.pill.textContent = checking ? '⏳ Đang kiểm tra kết nối…' : on ? '🟢 Đang kết nối' : (isDirect(x.m) ? '⚪ Không kết nối được' : '⚪ Mất kết nối');
+    const seen = x.m.last_seen ? new Date(x.m.last_seen).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+    x.note.textContent = checking || on ? '' : (isDirect(x.m) ? `${x.m.tcp_ip} không trả lời · ` : (seen ? 'Lần cuối ' + seen + ' · ' : '')) + 'tích vào: ' + offNote(x.m);
+    x.note.style.display = x.note.textContent ? '' : 'none';
+    x.cb.checked = !checking && on;
+  };
   const renderDevs = (devs) => {
     devBox.innerHTML = '';
     if (!devs.length) { devBox.append(el('div', { class: 'map-hint' }, 'Chưa có máy chấm công nào đang dùng.')); return; }
     devChks = devs.map((m) => {
-      const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(m.online ? { checked: '' } : {}) });
+      const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
       cb.onchange = upd;
-      const seen = m.last_seen ? new Date(m.last_seen).toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+      const pill = el('span', { class: 'pill', style: 'margin-left:4px' });
+      const note = el('div', { class: 'map-hint', style: 'margin:2px 0 0' });
       devBox.append(el('label', { style: 'display:flex;align-items:flex-start;gap:8px;font-weight:500;color:var(--ink)' }, cb,
-        el('div', {}, el('b', {}, m.name || m.serial), ' ',
-          el('span', { class: 'pill ' + (m.online ? 'ok' : 'muted'), style: 'margin-left:4px' }, m.online ? '🟢 Đang kết nối' : '⚪ Mất kết nối'),
-          m.online ? '' : el('div', { class: 'map-hint', style: 'margin:2px 0 0' }, (seen ? 'Lần cuối ' + seen + ' · ' : '') + 'tích vào: ' + offNote(m)))));
-      return { m, cb };
+        el('div', {}, el('b', {}, m.name || m.serial), ' ', pill, note)));
+      const x = { m, cb, pill, note };
+      setState(x, !!m.online, isDirect(m) && !!m.tcp_ip);
+      return x;
     });
     upd();
+    if (devChks.some((x) => isDirect(x.m) && x.m.tcp_ip)) api('/admin/devices/reach').then((d) => {
+      for (const x of devChks) if (isDirect(x.m) && x.m.tcp_ip) setState(x, !!(d.reach || {})[x.m.serial], false);
+      upd();
+    }).catch(() => { for (const x of devChks) if (isDirect(x.m) && x.m.tcp_ip) setState(x, !!x.m.online, false); upd(); });
   };
   const render = () => {
     const q = searchI.value.trim().toLowerCase();

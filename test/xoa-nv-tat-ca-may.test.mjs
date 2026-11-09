@@ -93,6 +93,26 @@ test('chọn máy để xoá (máy mất kết nối bỏ ra): chỉ máy đư�
   sendAll();
 });
 
+test('hộp xoá dò thẳng máy Hikvision / TCP/IP: máy bật (lần tự tải cuối đã lâu) = đang kết nối; máy tắt = không kết nối được', async () => {
+  const http = await import('node:http');
+  const srv = http.createServer((q, s) => { s.statusCode = q.url.startsWith('/ISAPI/System/deviceInfo') ? 401 : 404; s.end(); });
+  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  const port = srv.address().port;
+  const dead = http.createServer(); await new Promise((ok) => dead.listen(0, '127.0.0.1', ok));
+  const deadPort = dead.address().port; await new Promise((ok) => dead.close(ok));   // cổng vừa đóng = máy tắt
+  db.prepare(`INSERT INTO push_devices(serial,name,active,conn_type,tcp_ip,tcp_port,last_seen) VALUES
+    ('HIK_ON','máy 2',1,'hik','127.0.0.1',?, '2026-11-09T07:09:00.000Z'), ('HIK_OFF','máy test 1',1,'hik','127.0.0.1',?, NULL),
+    ('TCP_OFF','máy TCP',1,'tcp','127.0.0.1',?, NULL), ('HIK_PAUSE','máy dừng',0,'hik','127.0.0.1',?, NULL)`).run(port, deadPort, deadPort, port);
+  try {
+    const { code, out } = await call('GET /devices/reach');
+    assert.equal(code, 200);
+    assert.deepEqual(out.reach, { HIK_ON: true, HIK_OFF: false, TCP_OFF: false });   // máy tạm dừng không dò; máy đẩy không có trong danh sách
+  } finally {
+    srv.close();
+    db.prepare("DELETE FROM push_devices WHERE serial IN ('HIK_ON','HIK_OFF','TCP_OFF','HIK_PAUSE')").run();
+  }
+});
+
 test('khoá hàng loạt theo Số ID (không khoá tài khoản đang đăng nhập)', async () => {
   const me = db.prepare("SELECT id FROM employees WHERE device_pin='6'").get().id;
   const { out } = await call('POST /employees/lock-by-pins', { pins: ['5', '6'] }, { id: me, role: 'admin' });

@@ -638,6 +638,17 @@ export function registerDeviceRoutes(r, { need }) {
     }).sort((a, b) => (Number(a.pin) - Number(b.pin)) || a.pin.localeCompare(b.pin));
     res.json({ rows });
   });
+  // Máy phần mềm kết nối vào (Hikvision / TCP/IP): "online" theo last_seen chỉ đúng lúc vừa tự tải → dò thẳng máy ngay lúc này.
+  // Hikvision: gõ cổng web ISAPI (không đăng nhập); TCP/IP: mở cổng 4370. Song song, mỗi máy tối đa ~2 giây. Trả { reach: { serial: true|false } }
+  r.get('/devices/reach', needDevOrEmp, async (req, res) => {
+    const devs = db.prepare("SELECT serial, conn_type, tcp_ip, tcp_port FROM push_devices WHERE active=1 AND conn_type IN ('hik','tcp') AND COALESCE(tcp_ip,'')<>''").all();
+    const reach = {};
+    await Promise.all(devs.map(async (d) => {
+      try { reach[d.serial] = d.conn_type === 'hik' ? await hikKnock(d.tcp_ip, d.tcp_port || 80, 2000) : await tcpProbe(d.tcp_ip, d.tcp_port || 4370, 2000); }
+      catch { reach[d.serial] = false; }
+    }));
+    res.json({ reach });
+  });
   // Xóa các Số ID đã chọn trên MỌI máy đang dùng: máy đẩy (ADMS) xếp lệnh chờ máy lấy; máy TCP/IP chạy nền qua SDK
   r.post('/devices/delete-users-all', needDevOrEmp, (req, res) => {
     const pins = cleanPins(req.body?.pins, HIK_MAX_PIN);
