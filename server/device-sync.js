@@ -604,6 +604,7 @@ export function storeDeviceOplogs(serial, rawBody) {
   const ins = db.prepare(`INSERT OR IGNORE INTO device_oplogs
     (serial, op_code, op_time, admin_pin, obj1, obj2, obj3, raw)
     VALUES (?,?,?,?,?,?,?,?)`);
+  const dels = [];
   for (const line of String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean)) {
     const m = line.match(/^OPLOG\b[\s\t]*/i);
     if (!m) continue;
@@ -615,9 +616,32 @@ export function storeDeviceOplogs(serial, rawBody) {
     const opCode = parseInt(others[0], 10);
     const adminPin = others[1] || '';
     const obj1 = others[2] || '', obj2 = others[3] || '', obj3 = others[4] || '';
-    try { const r = ins.run(serial, Number.isFinite(opCode) ? opCode : null, opTime, adminPin, obj1, obj2, obj3, line); if (r.changes) n.count++; } catch {}
+    try {
+      const r = ins.run(serial, Number.isFinite(opCode) ? opCode : null, opTime, adminPin, obj1, obj2, obj3, line);
+      if (r.changes) { n.count++; if (opCode === 9 && obj1 && obj1 !== '0') dels.push({ pin: obj1, time: opTime }); }   // dòng xoá MỚI (gửi lại dòng cũ thì bỏ qua)
+    } catch {}
   }
+  if (dels.length) noteMenuDeletes(serial, dels);
   return n.count;
+}
+/* XOÁ NGƯỜI DÙNG NGAY TRÊN MENU MÁY (Norah 09/11/2026). Máy chỉ báo dòng OPLOG mã 9 (obj1 = Số ID), không gửi gì khác →
+ * trước đây phần mềm vẫn tưởng máy còn người đó: đồng bộ lại / lưu NV / máy khác gửi lại mẫu là đẩy người đó về lại máy vừa xoá.
+ * Giờ coi như xoá trên máy đó: ghi nhớ (như nút xoá của phần mềm), bỏ khỏi danh sách của máy, huỷ lệnh ghi chưa gửi.
+ * Chỉ máy đó; máy khác cùng nhóm giữ nguyên. Đã đăng ký lại Số ID đó trên máy SAU giờ xoá (cùng lô / máy gửi lại dòng cũ) → bỏ qua. */
+const ENROLL_CODES = '6,7,8,29,30,34,70';   // đăng ký vân tay / mật khẩu / thẻ / người dùng mới / khuôn mặt; 70 máy ghi lúc khai người dùng
+function noteMenuDeletes(serial, dels) {
+  const reEnrolled = db.prepare(`SELECT 1 FROM device_oplogs WHERE serial=? AND obj1=? AND op_code IN (${ENROLL_CODES}) AND op_time > ? LIMIT 1`);
+  const marked = db.prepare('SELECT 1 FROM device_deleted_pins WHERE serial=? AND pin=?');
+  const pins = [];
+  for (const { pin, time } of dels) {
+    const p = String(pin).trim();
+    if (!p || reEnrolled.get(serial, p, time)) continue;
+    if (!marked.get(serial, p)) rememberDeleted(serial, [p]);   // phần mềm đã ghi nhớ (nút xoá) thì giữ tên/thẻ đã nhớ
+    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo')").run(serial, p);
+    forgetDeviceUsers(serial, [p]);
+    pins.push(p);
+  }
+  if (pins.length) console.log(`[device] ${serial}: xoá trên máy ${pins.length} Số ID (${pins.slice(0, 10).join(', ')}${pins.length > 10 ? '…' : ''})`);
 }
 
 // ẢNH KHUÔN MẶT TẢI LÊN TỪ PHẦN MỀM (ảnh chân dung chính diện, như nền tảng Hik cho "tải ảnh lên" rồi phát xuống các cửa).

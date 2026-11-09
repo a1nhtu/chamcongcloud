@@ -394,6 +394,8 @@ export function pushEmployees(pins, { serials = null, withBio = false } = {}) {
   const held = heldSet();
   const typeOf = new Map(db.prepare(`SELECT serial, conn_type FROM push_devices WHERE active=1 AND ${pushTypesSql()}`).all().map((r) => [r.serial, r.conn_type]));
   const emp = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND active=1");
+  // tự đẩy (lưu NV): máy đã xoá người này (nút xoá / menu máy) thì thôi — muốn đưa về thì bấm "Đẩy NV xuống máy" (chọn máy, gỡ ghi nhớ)
+  const gone = serials ? null : db.prepare('SELECT 1 FROM device_deleted_pins WHERE serial=? AND pin=?');
   let users = 0, bios = 0;
   const devs = new Set();
   for (const p of pins || []) {
@@ -401,6 +403,7 @@ export function pushEmployees(pins, { serials = null, withBio = false } = {}) {
     if (!pin || !emp.get(pin)) continue;
     for (const serial of (serials ? serials.filter((x) => typeOf.has(x)) : targetsFor(pin))) {
       if (held.has(serial + '|' + pin)) continue;   // máy đó đang có người khác mang Số ID này (nghi trùng)
+      if (gone?.get(serial, pin)) continue;
       const extra = extraPushers.get(typeOf.get(serial));
       if (extra) {   // máy hãng khác: ghi theo giao thức của hãng
         const r = extra(serial, pin, { withBio }) || {};
