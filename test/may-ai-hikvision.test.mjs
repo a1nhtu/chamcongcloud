@@ -83,7 +83,7 @@ function hikHandler(req, res) {
     if (u.startsWith('/ISAPI/AccessControl/AcsEventTotalNum')) return json({ AcsEventTotalNum: { totalNum: 4 } });
     if (u.startsWith('/ISAPI/AccessControl/UserInfo/Search')) {
       const pos = body.UserInfoSearchCond.searchResultPosition;
-      if (pos === 0) return json({ UserInfoSearch: { searchID: 'x', responseStatusStrg: 'MORE', numOfMatches: 1, totalMatches: 3, UserInfo: [{ employeeNo: '101', name: 'Pham Van Hik', userType: 'normal', numOfFP: 1, numOfFace: 1, numOfCard: 0 }] } });
+      if (pos === 0) return json({ UserInfoSearch: { searchID: 'x', responseStatusStrg: 'MORE', numOfMatches: 1, totalMatches: 3, UserInfo: [{ employeeNo: '101', name: 'Pham Van Hik', userType: 'normal', numOfFP: 1, numOfFace: 1, numOfCard: 0, PersonInfoExtends: [{ value: 'TB000101' }] }] } });
       return json({ UserInfoSearch: { searchID: 'x', responseStatusStrg: 'OK', numOfMatches: 2, totalMatches: 3, UserInfo: [{ employeeNo: '102', name: 'Do Thi Mat', userType: 'normal', numOfFace: 1 }, { employeeNo: '900', name: 'Khach', userType: 'visitor' }] } });
     }
     if (u.startsWith('/ISAPI/AccessControl/AcsEvent?')) {
@@ -333,6 +333,46 @@ test('Hikvision: xoá trên tất cả máy nhận Số ID 32 ký tự, không g
   assert.equal(db.prepare("SELECT COUNT(*) c FROM push_device_commands WHERE serial='ZK_LONG'").get().c, 0);
   assert.equal(db.prepare("SELECT COUNT(*) c FROM device_deleted_pins WHERE serial='ZK_LONG'").get().c, 0);
   db.prepare("DELETE FROM push_devices WHERE serial='ZK_LONG'").run();
+});
+test('Hikvision do nền tảng quản lý: Số ID 32 ký tự lấy mã TB làm Mã NV; Số ID mới cùng mã TB vẫn về NV cũ; Số ID ngắn như cũ', () => {
+  const SN = 'HIK_NEN_TANG';
+  db.prepare("INSERT OR IGNORE INTO push_devices(serial,name,active,conn_type,sync_group) VALUES(?,'Cua TB001',1,'hik','')").run(SN);
+  const A = '0ab3e50784f24f33b5ad9e176b2cf63b', B = 'f1'.repeat(16), C = '03c3735d077741949f8a8658cff5af9e';
+  // mã kèm theo chỉ nhận khi Số ID dài hơn 20 ký tự + mã gọn
+  assert.equal(HIK.hikExtCode({ PersonInfoExtends: [{ id: 1, value: 'TB034118' }] }, A), 'TB034118');
+  assert.equal(HIK.hikExtCode({ PersonInfoExtends: [{ value: 'TB034118' }] }, '101'), '');
+  assert.equal(HIK.hikExtCode({ PersonInfoExtends: [{ value: 'có dấu' }] }, A), '');
+  assert.equal(HIK.hikExtCode({}, A), '');
+  // máy Hik thường (Số ID 101) có PersonInfoExtends vẫn giữ Mã NV = Số ID như cũ
+  assert.equal(db.prepare("SELECT code FROM employees WHERE device_pin='101'").get().code, '101');
+  // NV nháp tạo từ bản cũ: mã = Số ID 32 ký tự → tải lại thấy mã TB thì đổi sang mã TB (tài khoản cũng đổi)
+  S.createDraftEmployee(C, 'Nguyen Thi Ngan');
+  const ing = (lines) => S.ingestUserData(SN, 'USER', lines.join('\n'), null, HIK.HIK_PIN);
+  ing([`USER PIN=${A}\tName=Hoang Cong Da\tCode=TB034118`, `USER PIN=${C}\tName=Nguyen Thi Ngan\tCode=TB030574`]);
+  const ea = db.prepare('SELECT id, code, username FROM employees WHERE device_pin=?').get(A);
+  assert.deepEqual([ea.code, ea.username], ['TB034118', 'nvTB034118']);
+  assert.equal(db.prepare('SELECT code FROM employees WHERE device_pin=?').get(C).code, 'TB030574');
+  // mã đã sửa tay thì giữ
+  db.prepare("UPDATE employees SET code='NV-TU-DAT' WHERE device_pin=?").run(C);
+  ing([`USER PIN=${C}\tName=Nguyen Thi Ngan\tCode=TB030574`]);
+  assert.equal(db.prepare('SELECT code FROM employees WHERE device_pin=?').get(C).code, 'NV-TU-DAT');
+  // người bị xoá rồi thêm lại trên nền tảng → Số ID mới B, cùng mã TB034118: KHÔNG tạo NV mới, lượt chấm về NV cũ
+  const n0 = db.prepare('SELECT COUNT(*) c FROM employees').get().c;
+  S.ingestAttlog(SN, HIK.hikEventLine({ employeeNoString: B, major: 5, minor: 75, time: '2026-11-03T07:55:00+07:00' }, true), { ask: () => {} });
+  assert.equal(db.prepare('SELECT employee_id FROM device_punches WHERE pin=?').get(B).employee_id, null);   // chưa biết người này
+  ing([`USER PIN=${B}\tName=Hoang Cong Da\tCode=TB034118`]);
+  assert.equal(db.prepare('SELECT COUNT(*) c FROM employees').get().c, n0);
+  assert.equal(db.prepare('SELECT employee_id FROM device_punches WHERE pin=?').get(B).employee_id, ea.id);   // lượt cũ gán lại
+  S.ingestAttlog(SN, HIK.hikEventLine({ employeeNoString: B, major: 5, minor: 75, time: '2026-11-04T07:56:00+07:00' }, true), { ask: () => {} });
+  assert.deepEqual(db.prepare("SELECT DISTINCT employee_id e FROM device_punches WHERE pin=?").all(B).map((r) => r.e), [ea.id]);
+  assert.ok(db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date='2026-11-04'").get(ea.id));
+  // người mới hoàn toàn trên nền tảng → NV nháp mã TB ngay từ đầu
+  const D = 'd4'.repeat(16);
+  ing([`USER PIN=${D}\tName=Tran Van Moi\tCode=TB099999`]);
+  assert.equal(db.prepare('SELECT code FROM employees WHERE device_pin=?').get(D).code, 'TB099999');
+  // Số ID ngắn có kèm Code (máy ZK / máy thường) → bỏ qua Code
+  ing(['USER PIN=777\tName=Ngan\tCode=TB777777']);
+  assert.equal(db.prepare("SELECT code FROM employees WHERE device_pin='777'").get().code, '777');
 });
 test('Hikvision: dòng sự kiện — chỉ nhận mã xác thực thành công khi lọc tại phần mềm', () => {
   assert.equal(HIK.hikEventLine({ major: 5, minor: 76, time: '2026-10-15T08:00:00+07:00', employeeNoString: '1' }, true), null);

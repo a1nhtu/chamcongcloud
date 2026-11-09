@@ -16,10 +16,15 @@ import { heldSet, remapLoader, onUserAck, pmNameFor, normName } from './pin-guar
 export const ZK_TYPES = "conn_type IN ('push','tcp')";
 
 // Tìm NV theo Số ID máy (device_pin) trước, sau đó fallback theo mã NV (code).
+// Cuối cùng: mã NV máy gửi kèm Số ID (máy Hik do nền tảng quản lý) → NV có mã đó (1 NV nhận được nhiều Số ID nền tảng).
 function findEmpByPin(pin) {
   return db.prepare("SELECT id, from_device FROM employees WHERE device_pin=? AND device_pin!='' AND active=1").get(pin)
-      || db.prepare('SELECT id, from_device FROM employees WHERE code=? AND active=1').get(pin);
+      || db.prepare('SELECT id, from_device FROM employees WHERE code=? AND active=1').get(pin)
+      || db.prepare("SELECT e.id, e.from_device FROM device_users u JOIN employees e ON e.code=u.code AND e.active=1 WHERE u.pin=? AND u.code<>''").get(pin);
 }
+// Mã NV đi kèm Số ID: chỉ nhận khi Số ID dài hơn 20 ký tự (Số ID nền tảng Hik) và mã gọn (chữ/số/_-)
+export const pinCodeOk = (pin, code) => String(pin).length > 20 && /^[0-9A-Za-z_-]{1,20}$/.test(String(code || ''));
+const autoCode = (emp, pin) => emp.code === pin || String(emp.code).startsWith(pin + '_');   // mã NV phần mềm tự đặt theo Số ID
 
 // Sinh giá trị chưa trùng cho cột UNIQUE (code / username)
 function uniqueValue(column, base) {
@@ -31,18 +36,36 @@ function uniqueValue(column, base) {
 
 // Tự tạo / cập nhật NV từ dữ liệu máy đẩy về (đăng ký vân tay hoặc USERINFO).
 // Trả về id NV (hoặc null nếu tắt auto-create và chưa có NV).
-export function upsertEmployeeFromDevice(pin, name, force = false) {
+// code: mã NV máy gửi kèm (máy Hik do nền tảng quản lý — Số ID 32 ký tự, mã thật VD TB034118); '' = như cũ.
+export function upsertEmployeeFromDevice(pin, name, force = false, code = '') {
   pin = String(pin || '').trim();
   if (!pin) return null;
   name = (name || '').trim();
+  code = pinCodeOk(pin, code) ? String(code).trim() : '';
 
   // Đã có NV khớp Số ID
-  let emp = db.prepare("SELECT id, full_name, from_device FROM employees WHERE device_pin=? AND device_pin!=''").get(pin);
+  let emp = db.prepare("SELECT id, code, username, full_name, from_device FROM employees WHERE device_pin=? AND device_pin!=''").get(pin);
   if (emp) {
     // Chỉ cập nhật tên nếu là NV nháp từ máy và máy gửi tên thật khác placeholder
     if (emp.from_device && name && name !== `NV ${pin}` && emp.full_name === `NV ${pin}`)
       db.prepare('UPDATE employees SET full_name=? WHERE id=?').run(name, emp.id);
+    // NV nháp tạo trước khi biết mã thật (mã = Số ID 32 ký tự) → đổi sang mã thật; mã đã sửa tay thì giữ
+    if (code && emp.from_device && emp.code !== code && autoCode(emp, pin)
+      && !db.prepare('SELECT 1 FROM employees WHERE code=?').get(code)) {
+      db.prepare('UPDATE employees SET code=? WHERE id=?').run(code, emp.id);
+      if (emp.username === `nv${pin}`) db.prepare('UPDATE employees SET username=? WHERE id=?').run(uniqueValue('username', `nv${code}`), emp.id);
+    }
     return emp.id;
+  }
+
+  // Số ID mới nhưng mã thật đã có NV (VD người bị xoá rồi thêm lại trên nền tảng → Số ID nền tảng mới) → vẫn là NV đó
+  if (code) {
+    const byReal = db.prepare('SELECT id, device_pin FROM employees WHERE code=? AND active=1').get(code);
+    if (byReal) {
+      if (!byReal.device_pin) db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin, byReal.id);
+      relinkQuiet(byReal.id, pin);
+      return byReal.id;
+    }
   }
 
   // NV cũ trùng mã (code) nhưng chưa gán Số ID → gán liên kết
@@ -55,13 +78,15 @@ export function upsertEmployeeFromDevice(pin, name, force = false) {
 
   // Tự tạo NV nháp (force=true khi nhập từ USB — luôn tạo dù tắt auto-create)
   if (!force && getSetting('device_autocreate', '1') !== '1') return null;
-  return createDraftEmployee(pin, name);
+  return createDraftEmployee(pin, name, code);
 }
 // Tạo NV nháp "từ máy" cho Số ID (mã NV / tài khoản tự sinh, mật khẩu mặc định) + gán lượt quẹt sẵn có của Số ID đó
-export function createDraftEmployee(pin, name) {
+// realCode: mã NV máy gửi kèm (nếu có) dùng làm mã NV thay cho Số ID
+export function createDraftEmployee(pin, name, realCode = '') {
   pin = String(pin || '').trim(); name = (name || '').trim();
-  const code = uniqueValue('code', pin);
-  const username = uniqueValue('username', `nv${pin}`);
+  const base = pinCodeOk(pin, realCode) ? String(realCode).trim() : pin;
+  const code = uniqueValue('code', base);
+  const username = uniqueValue('username', `nv${base}`);
   const fullName = name || `NV ${pin}`;
   const info = db.prepare(`INSERT INTO employees
     (code, full_name, department, position, phone, role, username, password_hash, device_pin, from_device, active)
@@ -115,9 +140,11 @@ export function ingestUserData(serial, table, rawBody, track = null, opts = {}) 
       gone.clear(pin);
     }
     const pu = prevUser ? prevUser.get(pin) : null;
+    const code = pinCodeOk(pin, kv.code) ? kv.code : '';   // mã NV thật máy gửi kèm (máy Hik do nền tảng quản lý)
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
+    if (code) db.prepare('UPDATE device_users SET code=? WHERE pin=?').run(code, pin);
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
-    const id = upsertEmployeeFromDevice(pin, name, force);
+    const id = upsertEmployeeFromDevice(pin, name, force, code);
     if (id) seen.add(pin);
     if (id && track && (!pu || (!track.newOnly && ((name && name !== pu.name) || (card && card !== pu.card)
       || (passwd && passwd !== pu.passwd) || (pri != null && pri !== pu.privilege))))) track.changed.add(pin);

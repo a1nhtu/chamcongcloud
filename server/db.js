@@ -758,6 +758,7 @@ function migrateColumns() {
   add('push_devices', 'tcp_auto_logs',  'INTEGER NOT NULL DEFAULT -1');   // số lượt chấm trên máy ở lần tự tải gần nhất (không đổi → khỏi tải)
   add('push_devices', 'tcp_auto_users', 'INTEGER NOT NULL DEFAULT -1');
   add('push_devices', 'tcp_no_range', 'INTEGER NOT NULL DEFAULT 0');   // máy TCP/IP không lọc lượt chấm theo ngày được (zk-tcp.js tcpLogs)
+  add('device_users', 'code', "TEXT DEFAULT ''");   // mã NV máy gửi kèm Số ID (máy Hik do nền tảng quản lý: Số ID 32 ký tự, mã thật 工号 VD TB034118)
   add('device_users_serial', 'photo_ver', 'TEXT');   // ảnh (mặt/user) máy này đang giữ — mã rút gọn nội dung (device-sync.js needPhoto)
   // Máy HÃNG KHÁC (công tắc riêng, mặc định TẮT): conn_type 'ai' (máy AI tự nối WebSocket về — server/ai-ws.js)
   // | 'hik' (Hikvision, phần mềm gọi ISAPI vào máy — server/hik-isapi.js; dùng chung tcp_ip/tcp_port/tcp_info/tcp_auto_*)

@@ -111,12 +111,23 @@ export function saveHikInfo(id, info) {
 // Máy ZK / máy khác vẫn 20 như cũ (giới hạn chỉ nới cho đường Hikvision).
 export const HIK_MAX_PIN = 32;
 export const HIK_PIN = { maxPin: HIK_MAX_PIN };
-// 1 người trên máy → dòng "USER PIN=..\tName=.." (null = bỏ: Số ID rác, khách visitor, danh sách chặn)
+// Máy do nền tảng Hik quản lý (综合安防管理平台): Số ID = mã hồ sơ người 32 ký tự của nền tảng (cùng 1 mã trên mọi cửa),
+// mã NV thật (工号, VD TB034118) nằm ở PersonInfoExtends. Chỉ lấy khi Số ID dài hơn 20 ký tự — máy Hik cài thường giữ như cũ.
+export function hikExtCode(u, pin) {
+  if (String(pin).length <= 20) return '';
+  for (const x of Array.isArray(u?.PersonInfoExtends) ? u.PersonInfoExtends : []) {
+    const v = String(x?.value ?? '').trim();
+    if (/^[0-9A-Za-z_-]{1,20}$/.test(v)) return v;
+  }
+  return '';
+}
+// 1 người trên máy → dòng "USER PIN=..\tName=..[\tCode=..]" (null = bỏ: Số ID rác, khách visitor, danh sách chặn)
 function userLine(u) {
   const pin = String(u.employeeNo ?? '').trim();
   if (!pin || /[\s=\t]/.test(pin) || pin.length > HIK_MAX_PIN) return null;
   if (u.userType && !['normal', ''].includes(String(u.userType))) return null;
-  return `USER PIN=${pin}\tName=${String(u.name || '').replace(/[\t\r\n]/g, ' ').trim()}`;
+  const code = hikExtCode(u, pin);
+  return `USER PIN=${pin}\tName=${String(u.name || '').replace(/[\t\r\n]/g, ' ').trim()}${code ? '\tCode=' + code : ''}`;
 }
 export async function hikUsers(dev, prog = () => {}) {
   const lines = [], searchID = randomUUID();
