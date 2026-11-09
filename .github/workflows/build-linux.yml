@@ -33,7 +33,10 @@ jobs:
         run: npm install --omit=dev --no-audit --no-fund
 
       - name: Tai cloudflared (Linux amd64)
-        run: curl -fsSL -o tools/cloudflared-linux-amd64 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+        # GitHub tải file đôi lúc trả 504 (09/11/2026 làm hỏng build) → thử lại, vẫn lỗi thì lấy bản cloudflared liền trước
+        run: |
+          curl -fsSL --retry 5 --retry-all-errors --retry-delay 20 -o tools/cloudflared-linux-amd64 https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+            || curl -fsSL --retry 5 --retry-all-errors --retry-delay 20 -o tools/cloudflared-linux-amd64 https://github.com/cloudflare/cloudflared/releases/download/2026.10.6/cloudflared-linux-amd64
 
       - name: Dong goi (build-linux.mjs)
         run: node tools/linux/build-linux.mjs

@@ -37,7 +37,18 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force tools | Out-Null
-          Invoke-WebRequest -Uri 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile 'tools/cloudflared.exe'
+          # GitHub tải file đôi lúc trả 504 (09/11/2026 làm hỏng build) → thử lại, vẫn lỗi thì lấy bản cloudflared liền trước
+          $urls = @('https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe',
+                    'https://github.com/cloudflare/cloudflared/releases/download/2026.10.6/cloudflared-windows-amd64.exe')
+          $ok = $false
+          foreach ($u in $urls) {
+            for ($i = 1; $i -le 5 -and -not $ok; $i++) {
+              try { Invoke-WebRequest -Uri $u -OutFile 'tools/cloudflared.exe'; $ok = (Get-Item 'tools/cloudflared.exe').Length -gt 1MB }
+              catch { Write-Host "Lan $i loi $u : $($_.Exception.Message)"; Start-Sleep -Seconds 20 }
+            }
+            if ($ok) { Write-Host "Da tai $u"; break }
+          }
+          if (-not $ok) { throw 'Khong tai duoc cloudflared.exe' }
 
       - name: Dong goi staging (build-package.mjs)
         run: node tools/build-package.mjs
