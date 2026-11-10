@@ -100,6 +100,28 @@ export function yesterdayOutOk(eid, yRow, nowMs = Date.now()) {
   return nowMs <= ruleWindow(yRow.work_date, shift, { toDayEnd: !night }).winEnd.getTime();
 }
 
+// CA ĐÊM VÀO TRỄ SAU NỬA ĐÊM (VD ca 22:00–06:00 mà 00:30 mới chấm vào): lượt chấm VÀO này thuộc ca đêm của HÔM QUA.
+// Trước đây ghi thành dòng công của hôm nay (ca đêm tối nay, 22:00 mới bắt đầu) → không trễ, lúc chấm ra thì 0 công + về sớm 1.440 phút.
+// Điều kiện: hôm qua xếp ca đêm và ca đó CÒN ĐANG CHẠY (chưa tới giờ kết thúc), hôm qua chưa có dòng công nào, và lúc này gần giờ
+// vào ca đêm đó hơn giờ vào ca của hôm nay (05:45 hôm nay có ca sáng 06:00 → là chấm vào ca sáng, không phải trễ ca đêm).
+// Trả { shift, source, date } (date = ngày công hôm qua) hoặc null.
+export function lateNightShiftFor(eid, today, atIso) {
+  const y = new Date(today + 'T12:00:00Z'); y.setUTCDate(y.getUTCDate() - 1);
+  const yd = y.toISOString().slice(0, 10);
+  const plan = resolveDayShifts(eid, yd);
+  if (plan.off || !plan.shifts.length) return null;
+  const t = Date.parse(atIso);
+  const running = plan.shifts.filter((s) => s.cross_midnight || s.end_time <= s.start_time)
+    .map((s) => ({ s, w: ruleWindow(yd, s) })).filter((x) => t > x.w.start.getTime() && t < x.w.end.getTime())
+    .sort((a, b) => b.w.start - a.w.start)[0];
+  if (!running) return null;
+  if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? LIMIT 1').get(eid, yd)) return null;
+  const late = t - running.w.start.getTime();
+  const tp = resolveDayShifts(eid, today);
+  if (!tp.off && tp.shifts.some((s) => Math.abs(ruleWindow(today, s).start.getTime() - t) <= late)) return null;
+  return { shift: running.s, source: plan.source === 'auto' ? 'schedule' : plan.source, date: yd };
+}
+
 // Bản ghi chấm công hôm nay (hỗ trợ nhiều ca/ngày)
 r.get('/today', (req, res) => {
   const date = vnDateStr();
@@ -161,12 +183,15 @@ r.post('/check-in', (req, res) => {
   const dchk = checkDevice(req);
   if (dchk.block) return res.status(403).json({ error: dchk.error, code: dchk.code });
 
-  const date = vnDateStr();
+  let date = vnDateStr();
   const at = nowIso();
   // Chế độ chấm công: 'hourly' = chỉ tính giờ, không ca, không muộn/sớm
   const hourly = empHourly(req.user.id);
+  // ca đêm hôm qua vào trễ sau nửa đêm → ngày công là HÔM QUA, ca là ca đêm đó
+  const lateNight = hourly ? null : lateNightShiftFor(req.user.id, date, at);
+  if (lateNight) date = lateNight.date;
   // TỰ ĐỘNG tìm ca theo giờ chấm (phân ca thủ công đè) → xác định ca đang VÀO (cho phép nhiều ca/ngày)
-  const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, date, at);
+  const rs = hourly ? { shift: null, source: 'hourly' } : lateNight || resolveEffectiveShift(req.user.id, date, at);
   const shift = rs.shift;
   const shiftKey = shift?.id ?? 0;
   const shiftLabel = shift ? `ca ${shift.name}` : 'ca';

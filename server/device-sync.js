@@ -988,8 +988,10 @@ export function relinkPunchesForPin(employeeId, pin) {
 function consumedByPrevDay(employeeId, workDate) {
   if (hourlyNoOvernight(employeeId)) return null;   // theo giờ KHÔNG qua đêm: lượt chấm hôm nay luôn là của hôm nay
   const prev = new Date(workDate + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
-  const r = db.prepare('SELECT MAX(check_out_at) m FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, prev.toISOString().slice(0, 10));
-  return r && r.m && r.m >= new Date(workDate + 'T00:00:00+07:00').toISOString() ? r.m : null;
+  const r = db.prepare('SELECT MAX(check_out_at) m, MAX(check_in_at) i FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, prev.toISOString().slice(0, 10));
+  // tính cả giờ VÀO của hôm trước nếu nằm sau nửa đêm (ca đêm vào trễ 00:30, chưa chấm ra) — lượt đó không phải giờ vào của hôm nay
+  const dayStart = new Date(workDate + 'T00:00:00+07:00').toISOString();
+  return [r && r.m, r && r.i].filter((x) => x && x >= dayStart).sort().pop() || null;
 }
 
 // CA ĐÊM QUÊN CHẤM VÀO + quy tắc biết hướng (Theo ID máy / Chọn từ máy): ngày này không có lượt quẹt nào (lượt RA nằm ở
@@ -1008,18 +1010,75 @@ function nightOutOnlyPunches(employeeId, workDate) {
     .all(employeeId, winStart.toISOString(), winEnd.toISOString());
 }
 
+const vnDayOf = (ms) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);   // ngày (giờ VN) của 1 mốc thời gian
+
+// CA ĐÊM VÀO TRỄ SAU NỬA ĐÊM (VD ca 22:00–06:00 mà 00:30 mới tới; quy tắc không biết hướng lượt chấm): tối đó không có lượt quẹt
+// nào, các lượt đều nằm ở rạng sáng hôm sau → trước đây KHÔNG ra dòng công nào (mất cả ca). Lấy các lượt rạng sáng đó dựng ca đêm của ngày này:
+//   - lượt đầu phải tới khi ca còn đang chạy (trước giờ kết thúc ca); chỉ có 1 lượt thì phải gần giờ vào ca hơn giờ ra ca
+//     (lượt lẻ sát giờ tan ca là quên chấm vào → vẫn bỏ qua như cũ)
+//   - không phải giờ vào của ca HÔM SAU (nằm trong khung vào ca hôm sau và gần giờ vào ca hôm sau hơn giờ vào ca đêm này)
+// Chỉ áp cho ngày xếp ĐÚNG 1 ca đêm (gán ca / ca mặc định / lịch 1 ca). usedTo: mốc các lượt đã thuộc ngày hôm trước.
+function lateNightInPunches(employeeId, workDate, usedTo) {
+  if (empHourly(employeeId)) return [];
+  const plan = resolveDayShifts(employeeId, workDate);
+  if (plan.off || plan.shifts.length !== 1) return [];
+  const shift = plan.shifts[0];
+  if (!isNightShift(shift) || ruleKnowsDir(plan.mergeRule, shift)) return [];
+  // ngày đã có dòng công không dựng từ máy (chấm điện thoại / nhập tay) → giữ nguyên, không đè
+  if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return [];
+  const { winEnd, start, end } = ruleWindow(workDate, shift);
+  const midnight = new Date(workDate + 'T00:00:00+07:00').getTime() + 24 * 3600000;   // 00:00 hôm sau
+  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+    .all(employeeId, new Date(midnight).toISOString(), winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
+  if (!rows.length) return [];
+  const a = Date.parse(rows[0].punch_at), st = start.getTime(), en = end.getTime();
+  if (a >= en) return [];
+  if (rows.length === 1 && a - st > en - a) return [];
+  const nd = vnDayOf(midnight);
+  const np = resolveDayShifts(employeeId, nd);
+  if (!np.off) for (const s of np.shifts) {
+    // khung nhận lượt VÀO của ca hôm sau đúng như lúc dựng công hôm sau (1 ca ngày/ngày: nhận từ đầu ngày — đến rất sớm 05:30 cho ca 08:00)
+    const w = ruleWindow(nd, s, { toDayEnd: np.shifts.length === 1 && !isNightShift(s) });
+    if (a >= w.winStart.getTime() && Math.abs(w.start.getTime() - a) < a - st) return [];
+  }
+  return rows;
+}
+
+// CA BẮT ĐẦU NGAY SAU NỬA ĐÊM (VD 00:00–08:00) ĐẾN SỚM TỪ TỐI HÔM TRƯỚC (23:50): lượt đó có ngày lịch là hôm trước nên ngày này
+// chưa có lượt quẹt nào của riêng nó → lấy các lượt tối hôm trước nằm trong khung VÀO của ca hôm nay, và hôm trước đã nhường
+// (gần giờ vào ca hôm nay hơn giờ ra ca hôm trước — cùng phép so của nextDayClaim) để dòng công hiện ngay khi vừa chấm vào.
+function prevEveningInPunches(employeeId, workDate) {
+  if (empHourly(employeeId)) return [];
+  const plan = resolveDayShifts(employeeId, workDate);
+  if (plan.off || plan.shifts.length !== 1) return [];
+  const w = ruleWindow(workDate, plan.shifts[0]);
+  const dayStart = new Date(workDate + 'T00:00:00+07:00');
+  if (!(w.winStart < dayStart)) return [];
+  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<? ORDER BY punch_at')
+    .all(employeeId, w.winStart.toISOString(), dayStart.toISOString());
+  if (!rows.length) return [];
+  const pd = vnDayOf(dayStart.getTime() - 12 * 3600000);
+  const pp = resolveDayShifts(employeeId, pd);
+  const pend = !pp.off && pp.shifts.length ? Math.max(...pp.shifts.map((s) => ruleWindow(pd, s).end.getTime())) : null;
+  const st = w.start.getTime();
+  return rows.filter((p) => { const t = Date.parse(p.punch_at); return pend == null || Math.abs(st - t) < Math.abs(t - pend); });
+}
+
 // Khung RA của ca hôm nay kéo sang sáng hôm sau (VD ca 14h–22h nhận ra tới 6h sáng): lượt quẹt sáng hôm sau nằm trong
 // khung VÀO của ca hôm sau và gần giờ bắt đầu ca hôm sau hơn giờ kết thúc ca hôm nay → là giờ VÀO hôm sau, không lấy làm giờ ra
 // (như HR-ERP). Trả hàm (punchIso, endCaHomNay) → true nếu lượt đó thuộc hôm sau; null nếu không cần xét.
 function nextDayClaim(employeeId, workDate, winEnd, hourly) {
   const nx = new Date(workDate + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
   const nd = nx.toISOString().slice(0, 10);
-  const ndStart = new Date(nd + 'T00:00:00+07:00');
-  if (hourly || winEnd <= ndStart) return null;
+  if (hourly) return null;
   const plan = resolveDayShifts(employeeId, nd);
   if (plan.off || !plan.shifts.length) return null;
   const firsts = plan.shifts.map((s) => ruleWindow(nd, s)).sort((a, b) => a.start - b.start)[0];
-  const from = Math.max(firsts.winStart.getTime(), ndStart.getTime()), st = firsts.start.getTime();
+  // Khung VÀO của ca hôm sau thường nằm trọn trong hôm sau; riêng ca bắt đầu ngay sau nửa đêm (00:00–08:00 nhận vào từ 22:00)
+  // thì khung đó bắt đầu từ TỐI HÔM NAY → lượt 23:50 tối nay là giờ vào ca hôm sau. (Trước đây chỉ xét lượt từ 00:00 hôm sau:
+  // lượt 23:50 thành dòng rác "trễ 1.430 phút" của hôm nay, và bị lấy nhầm làm giờ ra của ca 00:00–08:00 hôm nay.)
+  const from = firsts.winStart.getTime(), st = firsts.start.getTime();
+  if (winEnd.getTime() <= from) return null;
   return (iso, end) => { const t = Date.parse(iso); return t >= from && Math.abs(st - t) < Math.abs(t - end.getTime()); };
 }
 
@@ -1079,6 +1138,7 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
 export function rebuildDays(keys) {
   const all = new Set();
   const hasPunch = db.prepare('SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? LIMIT 1');
+  const hasFullRow = db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND check_in_at IS NOT NULL AND check_out_at IS NOT NULL LIMIT 1');
   for (const key of keys) {
     const [eid, date] = String(key).split('|');
     all.add(eid + '|' + date);
@@ -1087,7 +1147,8 @@ export function rebuildDays(keys) {
     // hôm trước KHÔNG có lượt quẹt nào: có thể là ca đêm quên chấm vào mà lượt RA nằm ở hôm nay (nightOutOnlyPunches) → dựng cả hôm trước
     const pv = new Date(date + 'T12:00:00Z'); pv.setUTCDate(pv.getUTCDate() - 1);
     const pd = pv.toISOString().slice(0, 10);
-    if (!hasPunch.get(+eid, pd)) all.add(eid + '|' + pd);
+    // hôm trước có lượt quẹt nhưng CHƯA có dòng công đủ vào–ra: có thể là ca đêm vào trễ sau nửa đêm, các lượt nằm cả ở hôm nay (lateNightInPunches)
+    if (!hasPunch.get(+eid, pd) || !hasFullRow.get(+eid, pd)) all.add(eid + '|' + pd);
   }
   const list = [...all].map((k) => k.split('|')).sort((a, b) => (+a[0] - +b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
   const outer = _batchCtx;
@@ -1145,15 +1206,22 @@ function rebuildDayCore(employeeId, workDate) {
   seedPhonePunches(employeeId, workDate);
   let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
   if (!prov.length) prov = nightOutOnlyPunches(employeeId, workDate);
-  if (!prov.length) return;
+  if (!prov.length) prov = prevEveningInPunches(employeeId, workDate);   // ca bắt đầu ngay sau nửa đêm, đến sớm từ tối hôm trước
+  const had = prov.length > 0;
   // Ngày chấm điện thoại mà chỉ có lượt THÊM TAY (bản cũ để lại): không dựng lại — dựng từ riêng lượt thêm tay sẽ đè mất các phiên chấm điện thoại
-  if (prov.every((p) => p.serial.startsWith('TAY_')) && db.prepare(`SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND ${PHONE_ROW} LIMIT 1`).get(employeeId, workDate)) return;
-  const mixed = prov.some((p) => p.serial.startsWith('DT_'));   // ngày có giờ chấm điện thoại đã gộp vào lượt chấm
+  if (had && prov.every((p) => p.serial.startsWith('TAY_')) && db.prepare(`SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND ${PHONE_ROW} LIMIT 1`).get(employeeId, workDate)) return;
+  let mixed = prov.some((p) => p.serial.startsWith('DT_'));   // ngày có giờ chấm điện thoại đã gộp vào lượt chấm
   const usedTo = consumedByPrevDay(employeeId, workDate);
   if (usedTo) prov = prov.filter((p) => p.punch_at > usedTo);
-  if (!prov.length) {   // mọi lượt quẹt của ngày đã là giờ ra ca đêm hôm trước → bỏ dòng công rác của ngày này
-    db.prepare('DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)').run(employeeId, workDate);
-    return;
+  if (!prov.length) {
+    // ngày không còn lượt quẹt nào của riêng nó: có thể là CA ĐÊM VÀO TRỄ SAU NỬA ĐÊM (các lượt nằm ở rạng sáng hôm sau)
+    prov = lateNightInPunches(employeeId, workDate, usedTo);
+    if (!prov.length) {
+      // mọi lượt quẹt của ngày đã là giờ ra ca đêm hôm trước → bỏ dòng công rác của ngày này
+      if (had) db.prepare('DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)').run(employeeId, workDate);
+      return;
+    }
+    mixed = mixed || prov.some((p) => p.serial.startsWith('DT_'));
   }
   const hourly = empHourly(employeeId);   // kiểu chấm công của RIÊNG nhân viên này (theo ca / theo giờ)
   const machineMap = deviceMachineMap();
@@ -1200,15 +1268,21 @@ function rebuildDayCore(employeeId, workDate) {
     // lượt sáng hôm sau gần giờ vào ca hôm sau → của hôm sau. Riêng quy tắc biết hướng đã ghép RA sáng hôm sau (overnightTail)
     // thì giữ nguyên các lượt tới đúng lượt RA đó (máy ra là giờ ra, bất kể ngày đêm)
     const claim = nextDayClaim(employeeId, workDate, winEnd, hourly);
-    if (claim) punches = punches.filter((p) => (wopts.extendEnd && ruleKnowsDir(mergeRule, shift) && p.punch_at <= wopts.extendEnd.toISOString()) || !claim(p.punch_at, end));
+    const mine = (p) => !claim || (wopts.extendEnd && ruleKnowsDir(mergeRule, shift) && p.punch_at <= wopts.extendEnd.toISOString()) || !claim(p.punch_at, end);
+    punches = punches.filter(mine);
+    prov = prov.filter(mine);   // lượt đã là giờ VÀO của ca hôm sau (ca bắt đầu ngay sau nửa đêm, đến sớm 23:50) không quay lại làm giờ vào / ra hôm nay
     if (!punches.length) punches = prov;
+    if (!punches.length) {   // mọi lượt quẹt của ngày đều là giờ vào ca hôm sau → ngày này không có công; bỏ dòng dựng từ máy còn sót
+      db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND shift_source='device'").run(employeeId, workDate);
+      return;
+    }
     ({ inIso, outIso, pairs = null } = mergeDayPunches(punches, shift, mergeRule, machineMap, workDate, wopts));
     if (!inIso && outIso && ruleKnowsDir(mergeRule, shift)) {
       // Theo ID máy / Chọn từ máy: chỉ có lượt RA (quên chấm vào) → dòng công chỉ có giờ ra, không tính trễ
     } else if (!inIso) {
       // Ca đêm: punch lẻ (thường là giờ RA sáng hôm sau) thuộc ca đêm NGÀY TRƯỚC → không tạo dòng rác ở ngày này
       const night = shift.cross_midnight || shift.end_time <= shift.start_time;
-      if (night) return;
+      if (night || !prov.length) return;
       inIso = prov[0].punch_at; outIso = prov.length > 1 ? prov[prov.length - 1].punch_at : null;
     }
   } else {

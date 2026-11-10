@@ -3891,8 +3891,14 @@ async function pageShiftReq() {
 async function reviewShiftReq(r, action) {
   let note = '';
   if (action === 'reject') { note = prompt('Lý do từ chối (tuỳ chọn):') ?? ''; }
-  try { await api('/shift-requests/' + r.id + '/review', { method: 'POST', body: { action, note } }); toast('Đã cập nhật', 'ok'); pageShiftReq(); }
-  catch (e) { toast(e.message, 'err'); }
+  try {
+    const x = await api('/shift-requests/' + r.id + '/review', { method: 'POST', body: { action, note } });
+    // duyệt xong máy chủ tự tính lại công ngày đó theo ca mới; tính lại lỗi thì nhắc bấm tay
+    if (x && x.recomputed === false) toast('Đã duyệt, nhưng chưa tính lại được công ngày ' + fmtD(r.work_date) + ' — vào Tính công bấm "Tính lại".', 'err');
+    else toast('Đã cập nhật', 'ok');
+    pageShiftReq();
+  }
+  catch (e) { toast(e.message, 'err'); pageShiftReq(); }
 }
 
 /* ---------- 5b) LƯƠNG ---------- */

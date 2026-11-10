@@ -4,7 +4,7 @@ import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js'
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays } from '../../device-sync.js';
-import { rulePairs } from '../../attendance-calc.js';
+import { rulePairs, ruleWindow } from '../../attendance-calc.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../../virtual-att.js';
@@ -35,6 +35,35 @@ function overnightBlocked(eid, inIso, outIso) {
   return `Giờ ra ${hm(outIso)} không sau giờ vào ${hm(inIso)}. Chấm công theo giờ đang KHÔNG cho qua đêm — nếu nhân viên làm qua đêm thì bật ô "Cho phép chấm qua đêm" ở Cài đặt.`;
 }
 const OVERNIGHT_MSG = 'Giờ ra không sau giờ vào. Chấm công theo giờ đang KHÔNG cho qua đêm — nếu nhân viên làm qua đêm thì bật ô "Cho phép chấm qua đêm" ở Cài đặt.';
+// Giờ quản lý gõ ở ô Vào / Ra: '' = bỏ trống · '8' → '08:00' · '830' / '8:30' / '08:30' → '08:30' · sai dạng → null
+// (trước đây '8', '83:0', '25:99' làm máy chủ báo lỗi 500 khó hiểu thay vì nhắc nhập lại)
+const HM_IN = /^([01]?\d|2[0-3])(?::?([0-5]\d))?$/;
+function normHm(v) {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  const m = HM_IN.exec(s);
+  return m ? m[1].padStart(2, '0') + ':' + (m[2] || '00') : null;
+}
+const BAD_TIME = 'Giờ không hợp lệ — nhập dạng 08:00 (giờ 00–23, phút 00–59).';
+const nextDayIso = (iso) => new Date(new Date(iso).getTime() + 86400000).toISOString();
+// Giờ vào / ra nhập tay của 1 NGÀY CÔNG → ISO. tIn / tOut: undefined = giữ giờ đang có (cur.in / cur.out), '' = bỏ trống, 'HH:MM' = giờ mới.
+// CA ĐÊM (giờ ra nhỏ hơn giờ vào, VD 22:00 → 06:00): giờ thuộc rạng sáng là của NGÀY HÔM SAU —
+//   · giờ VÀO sau nửa đêm (đến trễ 00:30): trước đây hiểu là 00:30 ĐẦU ngày công, sớm hơn giờ vào ca 21 tiếng → không trễ, đủ công
+//   · chỉ có giờ RA (quên chấm vào): 06:00 là sáng hôm sau
+// Giờ ra không sau giờ vào → sáng hôm sau (như cũ).
+function manualIso(eid, date, tIn, tOut, cur = {}) {
+  let inIso = tIn === undefined ? (cur.in || null) : vnToIso(date, tIn);
+  let outIso = tOut === undefined ? (cur.out || null) : vnToIso(date, tOut);
+  const ctx = payrollCtx(getSetting, db);
+  const shift = ctx.isHourly(eid) ? null : resolveEffectiveShift(eid, date, inIso || `${date}T00:00:00Z`, outIso || null).shift;
+  if (shift && (shift.cross_midnight || shift.end_time <= shift.start_time)) {
+    const { winStart, winEnd, start, end } = ruleWindow(date, shift);
+    // giờ vào: chỉ đẩy sang hôm sau khi lúc đó ca CÒN ĐANG CHẠY (trước giờ kết thúc ca)
+    if (tIn && inIso && new Date(inIso) < winStart && new Date(nextDayIso(inIso)) < end) inIso = nextDayIso(inIso);
+    if (tOut && outIso && !inIso && new Date(outIso) < start && new Date(nextDayIso(outIso)) <= winEnd) outIso = nextDayIso(outIso);
+  }
+  return { inIso, outIso };
+}
 // Tính lại các chỉ số cho 1 bản ghi khi admin nhập tay
 function computeManual(employeeId, workDate, inIso, outIso) {
   const ctx = payrollCtx(getSetting, db);
@@ -43,20 +72,16 @@ function computeManual(employeeId, workDate, inIso, outIso) {
   return computeDayMetrics(ctx, eff.shift, workDate, inIso, outIso, null, { hourly: ctx.isHourly(employeeId), empId: employeeId });
 }
 
-export function registerAttendanceRoutes(r, { need }) {
-  /* -------------------- TÍNH LẠI CÔNG (áp cho dữ liệu cũ) -------------------- */
-  r.post('/recompute', need('recompute'), (req, res) => {
-    const month = (req.query.month || '').slice(0, 7);
+/* -------------------- TÍNH LẠI CÔNG (áp cho dữ liệu cũ) -------------------- */
+// Dùng chung cho nút "Tính lại" và những nơi vừa đổi ca của ngày đã có giờ chấm (duyệt nhân viên chọn ca…).
+// Phạm vi: ids (vài NV) > deptList (nhiều phòng ban, đã gồm bộ phận con) > dept (1 phòng ban) > cả công ty;
+// thời gian: from–to ('YYYY-MM-DD') > month ('YYYY-MM') > tất cả. Trả số dòng công đã tính lại.
+export function recomputeAttendance({ month = '', from = '', to = '', ids = [], deptList = [], dept = '' } = {}) {
     // Đọc cấu hình + ngày lễ MỘT LẦN cho cả mẻ (thay vì query mỗi dòng)
     const ctx = payrollCtx(getSetting, db);
     const hourlyPairs = getSetting('hourly_merge_rule', 'filo') === 'pairs';
-
-    // Phạm vi: ids (vài NV) > depts (nhiều phòng ban) > dept (1 phòng ban) > cả công ty
-    const dept = (req.query.dept || '').trim();
-    const deptList = deptWithChildren(String(req.query.depts || dept).split(',').map((s) => s.trim()).filter(Boolean));   // gồm cả bộ phận con
-    const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
-    const rcFrom = String(req.query.from || '').slice(0, 10);
-    const rcTo = String(req.query.to || '').slice(0, 10);
+    const rcFrom = String(from || '').slice(0, 10);
+    const rcTo = String(to || '').slice(0, 10);
     const where = ['a.check_in_at IS NOT NULL']; const args = [];
     if (/^\d{4}-\d{2}-\d{2}$/.test(rcFrom) && /^\d{4}-\d{2}-\d{2}$/.test(rcTo)) { where.push('a.work_date>=? AND a.work_date<=?'); args.push(rcFrom, rcTo); }
     else if (month) { where.push('a.work_date LIKE ?'); args.push(month + '%'); }
@@ -121,6 +146,16 @@ export function registerAttendanceRoutes(r, { need }) {
       db.exec('ROLLBACK');
       throw e;
     }
+    return n;
+}
+
+export function registerAttendanceRoutes(r, { need }) {
+  r.post('/recompute', need('recompute'), (req, res) => {
+    // Phạm vi: ids (vài NV) > depts (nhiều phòng ban) > dept (1 phòng ban) > cả công ty
+    const dept = (req.query.dept || '').trim();
+    const deptList = deptWithChildren(String(req.query.depts || dept).split(',').map((s) => s.trim()).filter(Boolean));   // gồm cả bộ phận con
+    const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
+    const n = recomputeAttendance({ month: (req.query.month || '').slice(0, 7), from: req.query.from, to: req.query.to, ids, deptList, dept });
     res.json({ ok: true, updated: n });
   });
 
@@ -252,8 +287,9 @@ export function registerAttendanceRoutes(r, { need }) {
     const date = (b.work_date || '').slice(0, 10);
     if (!eid || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Thiếu nhân viên hoặc ngày hợp lệ' });
     if (!db.prepare('SELECT 1 FROM employees WHERE id=?').get(eid)) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
-    let inIso = vnToIso(date, b.check_in);
-    let outIso = vnToIso(date, b.check_out);
+    const tIn = normHm(b.check_in), tOut = normHm(b.check_out);
+    if (tIn === null || tOut === null) return res.status(400).json({ error: BAD_TIME });
+    let { inIso, outIso } = manualIso(eid, date, tIn, tOut);
     const blk = overnightBlocked(eid, inIso, outIso);
     if (blk) return res.status(400).json({ error: blk });
     if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString(); // qua đêm
@@ -280,8 +316,9 @@ export function registerAttendanceRoutes(r, { need }) {
     const b = req.body || {};
     const row = db.prepare('SELECT * FROM attendance WHERE id=?').get(req.params.id);
     if (!row) return res.status(404).json({ error: 'Không tìm thấy bản ghi' });
-    let inIso = b.check_in !== undefined ? vnToIso(row.work_date, b.check_in) : row.check_in_at;
-    let outIso = b.check_out !== undefined ? vnToIso(row.work_date, b.check_out) : row.check_out_at;
+    const tIn = b.check_in !== undefined ? normHm(b.check_in) : undefined, tOut = b.check_out !== undefined ? normHm(b.check_out) : undefined;
+    if (tIn === null || tOut === null) return res.status(400).json({ error: BAD_TIME });
+    let { inIso, outIso } = manualIso(row.employee_id, row.work_date, tIn, tOut, { in: row.check_in_at, out: row.check_out_at });
     const blk = overnightBlocked(row.employee_id, inIso, outIso);
     if (blk) return res.status(400).json({ error: blk });
     if (inIso && outIso && new Date(outIso) <= new Date(inIso)) outIso = new Date(new Date(outIso).getTime() + 86400000).toISOString();

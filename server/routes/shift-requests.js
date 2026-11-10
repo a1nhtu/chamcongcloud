@@ -5,6 +5,7 @@ import { db, getSetting, empHourly } from '../db.js';
 import { authRequired, permRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
+import { recomputeAttendance } from './admin/attendance.js';
 
 const r = Router();
 r.use(authRequired);
@@ -25,6 +26,15 @@ function applyToAssignment(employeeId, workDate, shiftId, isOff) {
   db.prepare('DELETE FROM daily_shift_assignments WHERE employee_id=? AND work_date=? AND is_off=1').run(employeeId, workDate); // bỏ "xin nghỉ" nếu có
   if (!db.prepare('SELECT 1 FROM daily_shift_assignments WHERE employee_id=? AND work_date=? AND COALESCE(shift_id,0)=?').get(employeeId, workDate, shiftId || 0))
     db.prepare('INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?,?,?,0)').run(employeeId, workDate, shiftId);
+}
+// Ca của ngày vừa đổi → ngày đó ĐÃ có giờ chấm thì tính lại công theo ca mới (trước đây vẫn giữ trễ / sớm / tăng ca của ca cũ
+// cho tới khi có người bấm "Tính lại"). Tính lại lỗi thì đơn vẫn coi là đã áp dụng — trả false để giao diện nhắc bấm "Tính lại".
+function recalcDay(employeeId, workDate) {
+  // ngày chưa có giờ chấm nào (đăng ký cho ngày sắp tới) → không có gì để tính lại
+  const has = (t) => db.prepare(`SELECT 1 FROM ${t} WHERE employee_id=? AND work_date=? LIMIT 1`).get(employeeId, workDate);
+  if (!has('attendance') && !has('device_punches')) return true;
+  try { recomputeAttendance({ ids: [employeeId], from: workDate, to: workDate }); return true; }
+  catch (e) { console.error('[chon-ca] tinh lai cong loi:', e.message); return false; }
 }
 
 /* ---------------- Phía nhân viên ---------------- */
@@ -57,7 +67,7 @@ r.post('/', (req, res) => {
   const info = db.prepare(`INSERT INTO shift_requests(employee_id, work_date, shift_id, is_off, status, reviewed_by, reviewed_at)
     VALUES (?,?,?,?,?,?,?)`)
     .run(req.user.id, workDate, shiftId, isOff, status, auto ? req.user.id : null, auto ? nowIso() : null);
-  if (auto) applyToAssignment(req.user.id, workDate, shiftId, isOff);
+  if (auto) { applyToAssignment(req.user.id, workDate, shiftId, isOff); recalcDay(req.user.id, workDate); }
   const row = db.prepare('SELECT * FROM shift_requests WHERE id=?').get(info.lastInsertRowid);
   res.json({ ok: true, auto, request: row });
 });
@@ -99,10 +109,14 @@ r.post('/:id/review', permRequired('shift_requests'), (req, res) => {
   if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: 'Hành động không hợp lệ' });
   const row = db.prepare('SELECT * FROM shift_requests WHERE id=?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Không tìm thấy đăng ký' });
+  // Chỉ xử lý đơn CÒN CHỜ: trước đây đơn đã duyệt vẫn "từ chối" lại được → đơn ghi Từ chối mà lịch vẫn giữ ca đã áp
+  if (row.status !== 'pending') return res.status(400).json({ error: `Đăng ký này đã được ${row.status === 'approved' ? 'duyệt' : 'từ chối'} rồi — tải lại danh sách.` });
+  // (req.user.id || null: tài khoản tổng có id 0, không phải nhân viên — ghi 0 vào reviewed_by là lỗi khoá ngoại, không duyệt được)
   db.prepare('UPDATE shift_requests SET status=?, reviewed_by=?, reviewed_at=?, review_note=? WHERE id=?')
-    .run(action === 'approve' ? 'approved' : 'rejected', req.user.id, nowIso(), note || '', row.id);
-  if (action === 'approve') applyToAssignment(row.employee_id, row.work_date, row.shift_id, row.is_off);
-  res.json({ ok: true });
+    .run(action === 'approve' ? 'approved' : 'rejected', req.user.id || null, nowIso(), note || '', row.id);
+  let recomputed = true;
+  if (action === 'approve') { applyToAssignment(row.employee_id, row.work_date, row.shift_id, row.is_off); recomputed = recalcDay(row.employee_id, row.work_date); }
+  res.json({ ok: true, recomputed });
 });
 
 export default r;

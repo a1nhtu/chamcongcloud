@@ -14,6 +14,9 @@ r.use(inspectorGuard([/^\/$/, /^\/types$/, /^\/balances$/, /^\/privileges$/])); 
 r.post('/', (req, res) => {
   const { type, from_date, to_date, reason } = req.body || {};
   if (!type || !from_date || !to_date) return res.status(400).json({ error: 'Thiếu thông tin đơn' });
+  // như đơn do quản lý thêm: loại đơn phải có trong danh mục, ngày đúng dạng (trước đây loại lạ / ngày sai dạng vẫn lưu thành đơn rác)
+  if (!leaveTypes().some((x) => x.type === type)) return res.status(400).json({ error: 'Loại đơn không hợp lệ — tải lại trang rồi chọn lại loại đơn.' });
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from_date) || !/^\d{4}-\d{2}-\d{2}$/.test(to_date)) return res.status(400).json({ error: 'Chọn từ ngày / đến ngày' });
   if (to_date < from_date) return res.status(400).json({ error: 'Đến ngày phải sau từ ngày' });
   const half = normHalf(req.body?.half, from_date, to_date);
   // phép năm: không cho xin vượt số phép còn lại (trừ khi Cài đặt cho phép)
@@ -209,6 +212,9 @@ r.post('/:id/review', permRequired('leaves'), (req, res) => {
   if (!['approve', 'reject'].includes(action)) return res.status(400).json({ error: 'Hành động không hợp lệ' });
   const row = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(req.params.id);
   if (!row) return res.status(404).json({ error: 'Không tìm thấy đơn' });
+  // Chỉ xử lý đơn CÒN CHỜ (2 quản lý cùng mở danh sách: người sau không lật ngược được đơn người trước đã duyệt / từ chối).
+  // Muốn bỏ đơn đã duyệt thì bấm Xoá.
+  if (row.status !== 'pending') return res.status(400).json({ error: `Đơn này đã được ${row.status === 'approved' ? 'duyệt' : 'từ chối'} rồi — tải lại danh sách.` });
   if (action === 'approve' && !req.body?.force) {
     const over = overQuotaMsg(row.employee_id, row, row.id);
     if (over) return res.status(409).json({ error: over, canForce: true });
