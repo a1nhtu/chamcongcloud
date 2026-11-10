@@ -4243,7 +4243,6 @@ async function pageEditAtt() {
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tb = el('tbody');
-    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: heads.length }, el('div', { class: 'empty' }, 'Không có dữ liệu trong khoảng ngày này.'))));
     const mkRow = (r) => {
       const cells = [
         el('td', {}, r.date.slice(8) + '/' + r.date.slice(5, 7)),
@@ -4274,15 +4273,19 @@ async function pageEditAtt() {
       ];
       return el('tr', {}, ...cells);
     };
-    const startLazy = lazyRows(tb, rows, mkRow, heads.length);   // vẽ dần, không tính lại gì
+    keepPage();
+    const pager = pagedRows(tb, rows, mkRow, heads.length, pageSt.detail, 'editatt_page_size');   // 20 / 50 / 100 dòng mỗi trang
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
-      el('div', { class: 'panel tbl-scroll' }, tbl));
-    startLazy(null);
+      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll' }, tbl), pager));
   };
+  // Giữ trang đang xem khi tải lại sau khi sửa giờ; đổi phạm vi (ngày / phòng ban / NV / tab) thì về trang 1
+  const pageSt = { detail: { page: 1 }, summary: { page: 1 } };
+  let lastScope = '';
+  const keepPage = () => { const s = view + '|' + scope() + '|' + markChkInput.checked; if (s !== lastScope) { pageSt.detail.page = 1; pageSt.summary.page = 1; lastScope = s; } };
 
   // Lưới TỔNG HỢP: mỗi NV 1 dòng + tick chọn để tính lại vài người
   const loadSummary = async () => {
@@ -4294,8 +4297,7 @@ async function pageEditAtt() {
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr><th>Mã</th><th>Họ tên</th><th>Bộ phận</th><th>Ngày công</th><th>Tổng công</th><th>Tổng giờ</th><th>OT(g)</th><th>Trễ</th><th>Sớm</th><th>Nghỉ</th><th></th></tr></thead>';
     const tb = el('tbody');
-    if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 11 }, el('div', { class: 'empty' }, 'Không có nhân viên trong phạm vi này.'))));
-    for (const r of rows) tb.append(el('tr', {},
+    const mkRow = (r) => el('tr', {},
       el('td', {}, r.code),
       el('td', {}, el('b', {}, r.name)),
       el('td', {}, r.dept || '—'),
@@ -4307,13 +4309,15 @@ async function pageEditAtt() {
       el('td', { style: 'text-align:center' }, r.earlyN ? `${r.earlyN} (${r.earlyM}p)` : '—'),
       el('td', { style: 'text-align:center' }, r.leaveN ? String(r.leaveN) : '—'),
       el('td', {}, btnSm('Chi tiết', () => { empPick.clear(); empPick.add(r.id); empCl.sync(); view = 'detail'; renderViewBar(); load(); })),
-    ));
+    );
+    keepPage();
+    const pager = pagedRows(tb, rows, mkRow, 11, pageSt.summary, 'editatt_page_size');
     tbl.append(tb);
     wrap.innerHTML = '';
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên. Chọn phòng ban / nhân viên (nút 🏢 / 👥) rồi bấm "↻ Tính lại" để tính lại đúng phạm vi. Bấm "Chi tiết" để xem/sửa 1 người.`),
-      el('div', { class: 'panel tbl-scroll' }, tbl));
+      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll' }, tbl), pager));
   };
 
   // Đổi Từ / Đến ngày KHÔNG tự tải → bấm "✓ Áp dụng" hoặc Enter
@@ -7582,6 +7586,31 @@ function lazyRows(tb, rows, mkRow, colspan) {
   };
 }
 
+// PHÂN TRANG bảng dài: người dùng chọn 20 / 50 / 100 dòng mỗi trang (mặc định 20, nhớ lựa chọn theo key trên trình duyệt này).
+// st = { page } giữ ngoài để tải lại (sửa giờ xong) vẫn đứng đúng trang. Trả thanh phân trang để đặt dưới bảng.
+const PAGE_SIZES = [20, 50, 100];
+function pagedRows(tb, rows, mkRow, colspan, st, key) {
+  let size = 20;
+  try { const v = +localStorage.getItem(key); if (PAGE_SIZES.includes(v)) size = v; } catch {}
+  const bar = el('div', { class: 'pager', style: 'display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font-size:13px' });
+  const sizeSel = el('select', { style: 'width:auto;padding:4px 8px' }, ...PAGE_SIZES.map((n) => el('option', { value: n, ...(n === size ? { selected: '' } : {}) }, n + ' dòng')));
+  const render = () => {
+    const pages = Math.max(1, Math.ceil(rows.length / size));
+    st.page = Math.min(Math.max(1, st.page || 1), pages);
+    const from = (st.page - 1) * size, part = rows.slice(from, from + size);
+    tb.replaceChildren(...(rows.length ? part.map(mkRow) : [el('tr', {}, el('td', { colspan }, el('div', { class: 'empty' }, 'Không có dữ liệu.')))]));
+    const go = (p) => { st.page = p; render(); bar.scrollIntoView({ block: 'nearest' }); };
+    const prev = el('button', { class: 'btn ghost sm', ...(st.page <= 1 ? { disabled: '' } : {}), onclick: () => go(st.page - 1) }, '‹ Trước');
+    const next = el('button', { class: 'btn ghost sm', ...(st.page >= pages ? { disabled: '' } : {}), onclick: () => go(st.page + 1) }, 'Sau ›');
+    bar.replaceChildren(
+      el('span', { style: 'color:var(--muted);margin-right:auto' }, rows.length ? `Hiện ${(from + 1).toLocaleString('vi')}–${(from + part.length).toLocaleString('vi')} / ${rows.length.toLocaleString('vi')} dòng` : ''),
+      'Mỗi trang:', sizeSel, prev, el('b', {}, `Trang ${st.page}/${pages}`), next);
+  };
+  sizeSel.onchange = () => { size = +sizeSel.value; st.page = 1; try { localStorage.setItem(key, String(size)); } catch {} render(); };
+  render();
+  return bar;
+}
+
 // KHOẢNG NGÀY Từ → Đến: đổi ngày KHÔNG tự tải (tránh tải 2 lần / tải khoảng quá dài khi đang chọn dở).
 // Nút "✓ Áp dụng" sáng xanh khi đã đổi mà chưa xem; bấm nút hoặc Enter trong ô ngày → run() 1 lần.
 // Trả { btn, synced }: gọi synced() sau mỗi lần đã tải theo ngày đang chọn (nút mờ lại).
@@ -7892,7 +7921,6 @@ async function pageReport() {
         c.sub ? c.label + '\n' + c.sub : c.grp ? c.grp + '\n' + c.label : c.label));
       tbl.append(el('thead', {}, thead));
       const tb = el('tbody');
-      if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: data.columns.length }, el('div', { class: 'empty' }, 'Không có dữ liệu.'))));
       let pinLefts = null;   // vị trí các cột ghim (tính sau khi vẽ) → áp cả cho dòng vẽ sau
       const mkRow = (row) => {
         // rp-off: ngày không đi làm (ô "Hiện cả ngày không đi làm"); rp-t7 / rp-cn: dòng thứ 7 / chủ nhật tô cam, T7 nhạt hơn CN (Anh 04/11/2026)
@@ -7910,17 +7938,18 @@ async function pageReport() {
         if (pinLefts) pinLefts.forEach((L, i) => { const td = tr.children[i]; if (td) { td.classList.add('pin'); td.style.left = L + 'px'; } });
         return tr;
       };
-      const startLazy = lazyRows(tb, data.rows, mkRow, data.columns.length);
+      // Xem trước chia trang 20 / 50 / 100 dòng (mặc định 20, nhớ lựa chọn) — Xuất Excel vẫn ra đủ mọi dòng
+      const pager = pagedRows(tb, data.rows, mkRow, data.columns.length, { page: 1 }, 'report_page_size');
       tbl.append(tb);
       wrap.innerHTML = '';
       // Khung bảng cao vừa màn hình, tự cuộn bên trong → thanh kéo ngang luôn nằm ở đáy khung (không phải kéo xuống cuối trang);
-      // dòng tiêu đề + 2 cột đầu (mã, tên) đứng yên khi cuộn.
-      const box = el('div', { class: 'panel rep-scroll' }, tbl);
-      wrap.append(...[lockNote(data.locks)].filter(Boolean), el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title), box);
+      // dòng tiêu đề + 2 cột đầu (mã, tên) đứng yên khi cuộn. Thanh chia trang nằm ngay dưới khung.
+      const box = el('div', { class: 'rep-scroll' }, tbl);
+      wrap.append(...[lockNote(data.locks)].filter(Boolean), el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:10px' }, data.title),
+        el('div', { class: 'panel', style: 'overflow:hidden' }, box, pager));
       const pinCols = data.columns.some(c => c.key.startsWith('d20')) ? (data.columns[0].key === 'stt' ? 4 : 2) : 0;
       setTimeout(() => {
-        box.style.maxHeight = Math.max(300, innerHeight - box.getBoundingClientRect().top - 16) + 'px';
-        startLazy(box);
+        box.style.maxHeight = Math.max(300, innerHeight - box.getBoundingClientRect().top - pager.offsetHeight - 16) + 'px';
         if (!pinCols) return;
         const ths = [...tbl.querySelectorAll('thead th')].slice(0, pinCols);
         let left = 0;
