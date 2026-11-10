@@ -305,6 +305,7 @@ table.sh-list tbody tr.on { background: #fff1e8; box-shadow: inset 3px 0 0 var(-
 td.att-inl { cursor: pointer; border-radius: 6px; }
 td.att-inl:hover { background: #fff4ec; box-shadow: inset 0 0 0 1px #f3b48a; }
 input.att-inl-in { width: 74px !important; padding: 5px 6px; margin: 0; text-align: center; font-weight: 600; }
+tr.emp-first:not(:first-child) > td { border-top: 2px solid #c9d3e0; }   /* Tính công xếp theo nhân viên: vạch ngăn giữa 2 người */
 
 /* Thêm giờ hàng loạt: lưới chọn ngày trong tháng */
 .bp-days { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; max-height: 220px; overflow: auto; padding: 8px; border: 1px solid var(--line); border-radius: 10px; }

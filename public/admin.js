@@ -4179,6 +4179,14 @@ async function pageEditAtt() {
   const markChkInput = el('input', { type: 'checkbox', style: 'width:auto', checked: '' });
   markChkInput.onchange = () => load();
   const markChk = el('label', { style: 'display:inline-flex;align-items:center;gap:5px;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer', title: 'Đánh dấu (*) các dòng giờ được sửa/thêm bằng tay' }, markChkInput, 'Dấu (*) sửa tay');
+  // SẮP XẾP tab Chi tiết: theo NHÂN VIÊN (1 người hết các ngày rồi mới sang người khác — mặc định) hoặc theo NGÀY (mỗi ngày đủ mọi người).
+  // Mỗi công ty quen 1 kiểu → nhớ lựa chọn trên trình duyệt.
+  let sortBy = 'emp';
+  try { if (localStorage.getItem('editatt_sort') === 'date') sortBy = 'date'; } catch {}
+  const sortSel = el('select', { style: 'width:auto;padding:4px 8px', title: 'Thứ tự các dòng ở tab Chi tiết' },
+    el('option', { value: 'emp' }, '👤 Xếp theo nhân viên'), el('option', { value: 'date' }, '📅 Xếp theo ngày'));
+  sortSel.value = sortBy;
+  sortSel.onchange = () => { sortBy = sortSel.value; try { localStorage.setItem('editatt_sort', sortBy); } catch {} load(); };
   const wrap = el('div');
 
   const scope = () => {
@@ -4236,6 +4244,7 @@ async function pageEditAtt() {
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     const rows = d.rows || [];
     const showNV = empPick.size !== 1;   // hiện cột NV trừ khi chọn đúng 1 người
+    sortDetailRows(rows, sortBy);
     const hrly = hourlyMode();
     // Chế độ tính theo GIỜ: bỏ Trễ/Sớm/OT/Công, hiện Tổng giờ + Tổng phút
     const metricHeads = hrly ? ['Tổng giờ', 'Tổng phút'] : ['Trễ(p)', 'Sớm(p)', 'OT(p)', 'Công'];
@@ -4271,7 +4280,8 @@ async function pageEditAtt() {
         el('td', {}, r.status || '—'),
         el('td', {}, !canEdit || _virt ? '' : r.att_id ? btnSm('Sửa', () => openEdit(r)) : (() => { const t = btnSm('+ Thêm', () => attEditModal(null, r.employee_id, load, { date: r.date }), 'ghost'); t.style.whiteSpace = 'nowrap'; return t; })()),
       ];
-      return el('tr', {}, ...cells);
+      // xếp theo nhân viên: kẻ vạch đậm ở dòng đầu mỗi người cho dễ nhìn ranh giới
+      return el('tr', r._first && showNV ? { class: 'emp-first' } : {}, ...cells);
     };
     keepPage();
     const pager = pagedRows(tb, rows, mkRow, heads.length, pageSt.detail, 'editatt_page_size');   // 20 / 50 / 100 dòng mỗi trang
@@ -4285,7 +4295,7 @@ async function pageEditAtt() {
   // Giữ trang đang xem khi tải lại sau khi sửa giờ; đổi phạm vi (ngày / phòng ban / NV / tab) thì về trang 1
   const pageSt = { detail: { page: 1 }, summary: { page: 1 } };
   let lastScope = '';
-  const keepPage = () => { const s = view + '|' + scope() + '|' + markChkInput.checked; if (s !== lastScope) { pageSt.detail.page = 1; pageSt.summary.page = 1; lastScope = s; } };
+  const keepPage = () => { const s = view + '|' + scope() + '|' + markChkInput.checked + '|' + sortBy; if (s !== lastScope) { pageSt.detail.page = 1; pageSt.summary.page = 1; lastScope = s; } };
 
   // Lưới TỔNG HỢP: mỗi NV 1 dòng + tick chọn để tính lại vài người
   const loadSummary = async () => {
@@ -4323,7 +4333,11 @@ async function pageEditAtt() {
   // Đổi Từ / Đến ngày KHÔNG tự tải → bấm "✓ Áp dụng" hoặc Enter
   const dApply = dateApply(fromI, toI, () => load());
   const applyB = dApply.btn;
-  const load = () => { dApply.synced(); view === 'summary' ? loadSummary() : loadDetail(); };
+  const load = () => {
+    dApply.synced();
+    sortSel.style.display = view === 'detail' ? '' : 'none';   // ô Sắp xếp chỉ dùng cho tab Chi tiết
+    view === 'summary' ? loadSummary() : loadDetail();
+  };
   recalcBtn.onclick = async () => {
     let scopeTxt;
     if (empPick.size) scopeTxt = empPick.size + ' nhân viên đã chọn';
@@ -4341,6 +4355,7 @@ async function pageEditAtt() {
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI, applyB,
     allChk, isInspector() ? null : markChk, isInspector() ? null : recalcBtn, virtToggle(() => load()));
+  bar.insertBefore(sortSel, allChk);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
 }
@@ -7589,6 +7604,16 @@ function lazyRows(tb, rows, mkRow, colspan) {
 // PHÂN TRANG bảng dài: người dùng chọn 20 / 50 / 100 dòng mỗi trang (mặc định 20, nhớ lựa chọn theo key trên trình duyệt này).
 // st = { page } giữ ngoài để tải lại (sửa giờ xong) vẫn đứng đúng trang. Trả thanh phân trang để đặt dưới bảng.
 const PAGE_SIZES = [20, 50, 100];
+// Tính công — Chi tiết: 'emp' = theo bộ phận → tên → mã NV, trong mỗi người theo ngày; 'date' = theo ngày rồi tên.
+// Đánh dấu r._first ở dòng đầu mỗi nhân viên (chế độ 'emp') để kẻ vạch ngăn cách.
+function sortDetailRows(rows, by) {
+  const cmp = (a, b) => (a || '').localeCompare(b || '', 'vi');
+  if (by === 'date') rows.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) || cmp(a.name, b.name) || cmp(a.code, b.code));
+  else rows.sort((a, b) => cmp(a.dept, b.dept) || cmp(a.name, b.name) || cmp(a.code, b.code) || (a.employee_id - b.employee_id) || (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  let prev = null;
+  for (const r of rows) { r._first = by !== 'date' && r.employee_id !== prev; prev = r.employee_id; }
+  return rows;
+}
 function pagedRows(tb, rows, mkRow, colspan, st, key) {
   let size = 20;
   try { const v = +localStorage.getItem(key); if (PAGE_SIZES.includes(v)) size = v; } catch {}
