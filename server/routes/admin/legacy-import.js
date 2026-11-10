@@ -3,7 +3,7 @@
 // Bước 2: chọn phần cần chuyển + khoảng ngày → chạy NỀN (job), giao diện hỏi tiến độ tới khi xong.
 import express from 'express';
 import { randomBytes } from 'node:crypto';
-import { readLegacy, summarize, applyLegacy } from '../../legacy-import.js';
+import { readLegacy, summarize, applyLegacy, unpackUpload } from '../../legacy-import.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { listDir, findLegacyFiles } from '../../legacy-files.js';
 import { tenantKey, MULTI } from '../../tenant.js';
@@ -23,11 +23,13 @@ function keep(data) {
 
 export function registerLegacyImportRoutes(r, { need }) {
   // Tải file lên: thân yêu cầu = nội dung file; ?kind=on39|we51|rj (phần mềm đã chọn) &password=
-  r.post('/legacy/parse-upload', need('devices'), express.raw({ type: () => true, limit: '1024mb' }), (req, res) => {
-    const buf = req.body;
-    if (!Buffer.isBuffer(buf) || buf.length < 4096) return res.status(400).json({ error: 'File rỗng hoặc không đọc được' });
-    try { res.json({ ok: true, ...keep(readLegacy(buf, String(req.query.password || ''), String(req.query.kind || ''))) }); }
-    catch (e) { res.status(400).json({ error: e.message }); }
+  // Trình duyệt nén gzip trước khi gửi (file .mdb nhỏ đi 4–11 lần → mạng chậm / qua tên miền gửi nhanh hơn nhiều); file thô vẫn nhận như cũ.
+  r.post('/legacy/parse-upload', need('devices'), express.raw({ type: () => true, limit: '1024mb' }), async (req, res) => {
+    try {
+      const buf = Buffer.isBuffer(req.body) ? await unpackUpload(req.body) : null;
+      if (!buf || buf.length < 4096) return res.status(400).json({ error: 'File rỗng hoặc không đọc được' });
+      res.json({ ok: true, ...keep(readLegacy(buf, String(req.query.password || ''), String(req.query.kind || ''))) });
+    } catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   // Đọc thẳng file theo đường dẫn TRÊN MÁY CÀI PHẦN MỀM (phần mềm cũ thường cùng máy) — khỏi mở hộp chọn file của trình duyệt

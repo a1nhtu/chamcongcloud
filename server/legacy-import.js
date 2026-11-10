@@ -6,6 +6,8 @@
 //  - applyLegacy: ghi vào DB. Lượt chấm đi qua ingestAttlog như máy chấm công gửi về (chống trùng, tự dựng lại ngày công),
 //    gắn đúng số serial máy cũ → sau này nối máy qua ADMS, máy gửi lại log cũ cũng không bị nhân đôi.
 //  - Nhập lại nhiều lần được: bộ phận / NV đã có thì bỏ qua (hoặc cập nhật nếu chọn), lượt chấm trùng tự bỏ.
+import { gunzip } from 'node:zlib';
+import { promisify } from 'node:util';
 import MDBReader from './vendor/mdb-reader.mjs';
 import { db } from './db.js';
 import { ingestAttlog } from './device-sync.js';
@@ -15,6 +17,14 @@ import { defaultPasswordHash } from './auth.js';
 export const LEGACY_LABEL = { on39: 'Wise Eye On39', we51: 'Wise Eye V5.1', rj: 'Ronald Jack Pro' };
 
 /* ------------------------------ đọc file ------------------------------ */
+// File tải lên: trình duyệt nén gzip trước khi gửi (nhận ra bằng 2 byte đầu 1F 8B — file Access luôn bắt đầu 00 01 00 00) → giải nén.
+// File thô (trình duyệt cũ không có CompressionStream) thì trả nguyên. Giới hạn 1 GB sau giải nén như giới hạn tải lên.
+const gunzipAsync = promisify(gunzip);
+export async function unpackUpload(buf) {
+  if (buf.length < 2 || buf[0] !== 0x1f || buf[1] !== 0x8b) return buf;
+  try { return await gunzipAsync(buf, { maxOutputLength: 1024 * 1048576 }); }
+  catch (e) { throw new Error('File gửi lên bị lỗi khi giải nén — chọn lại file: ' + e.message); }
+}
 // mdb-reader trả ngày giờ Access thành Date "UTC" mang đúng giờ đồng hồ ghi trong file (= giờ VN) → lấy thẳng các số
 const okDate = (d) => d instanceof Date && !isNaN(d) && d.getUTCFullYear() > 1900;
 const ymd = (d) => (okDate(d) ? d.toISOString().slice(0, 10) : '');

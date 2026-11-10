@@ -7183,16 +7183,37 @@ function legacyImportModal() {
   const upload = async (file) => {
     if (!file) return;
     if (!/\.(mdb|accdb)$/i.test(file.name)) return fail('Chọn file .mdb của ' + SOFT[kind].name);
-    busy(`Đang đọc ${file.name} (${fmtSize(file.size)})…`);
     try {
+      // Nén gzip ngay trong trình duyệt: file .mdb phần lớn là trang trống → nhỏ đi 4–11 lần (26 MB → 2,3 MB),
+      // máy chủ qua tên miền / mạng chậm nhận nhanh hơn hẳn. Trình duyệt cũ không có CompressionStream thì gửi file thô.
+      let body = file;
+      if (typeof CompressionStream === 'function') {
+        busy(`Đang nén ${file.name} (${fmtSize(file.size)})…`);
+        try { body = await new Response(file.stream().pipeThrough(new CompressionStream('gzip'))).blob(); } catch { body = file; }
+      }
       const q = `?kind=${kind}&password=${encodeURIComponent(kind !== 'rj' ? pass.value.trim() : '')}`;
-      const res = await fetch('/api/admin/legacy/parse-upload' + q, {
-        method: 'POST', headers: { Authorization: 'Bearer ' + getToken(), 'X-Device-Id': deviceId(), 'Content-Type': 'application/octet-stream' }, body: file });
-      const r = await res.json().catch(() => ({ error: 'Máy chủ trả lỗi ' + res.status }));
+      const r = await sendWithProgress('/api/admin/legacy/parse-upload' + q, body, (sent, total) => {
+        const pct = total ? Math.floor((sent / total) * 100) : 0;
+        busy(pct < 100 ? `Đang gửi ${file.name} lên máy chủ: ${fmtSize(sent)} / ${fmtSize(total)} (${pct}%)…`
+          : `Máy chủ đang đọc ${file.name}…`);
+      });
       if (r.ok) preview(r); else fail(r.error || 'Không đọc được file');
     } catch (e) { fail(e.message); }
     finally { fileI.value = ''; }   // chọn lại đúng file đó vẫn đọc lại được
   };
+  // fetch không báo tiến độ tải lên → dùng XHR để hiện % (file lớn qua mạng chậm khỏi tưởng treo)
+  const sendWithProgress = (url, body, onProgress) => new Promise((ok, no) => {
+    const x = new XMLHttpRequest();
+    x.open('POST', url);
+    x.setRequestHeader('Authorization', 'Bearer ' + getToken());
+    x.setRequestHeader('X-Device-Id', deviceId());
+    x.setRequestHeader('Content-Type', 'application/octet-stream');
+    x.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : body.size);
+    x.upload.onload = () => onProgress(body.size, body.size);
+    x.onload = () => { try { ok(JSON.parse(x.responseText)); } catch { ok({ error: 'Máy chủ trả lỗi ' + x.status }); } };
+    x.onerror = () => no(new Error('Mất kết nối tới máy chủ khi gửi file — kiểm tra mạng rồi chọn lại file'));
+    x.send(body);
+  });
   const fileI = el('input', { type: 'file', accept: '.mdb,.accdb', style: 'display:none' });
   fileI.onchange = () => upload(fileI.files[0]);
   const pickBtn = el('button', { class: 'btn' }, '📂 Chọn file .mdb…');
