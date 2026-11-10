@@ -409,20 +409,37 @@ export function ruleWindow(workDate, shift, opts = {}) {
 // qua đêm — tránh ca ngày 07–19 + ca đêm 19–07 lấy nhầm lượt 07:00 sáng hôm sau), lượt đó cách mốc giao ca ≤ 60', và ca
 // còn lại thiếu đúng phía đó (ca sau chưa có lượt nào gần giờ vào / ca trước chưa có lượt nào gần giờ ra).
 const SEAM_GAP = 30 * 60000, SEAM_NEAR = 60 * 60000;
-function shareSeamPunch(set, got, t, dayEnd) {
+// Khung "Bắt đầu – Kết thúc vào/ra" đã khai của ca (mốc ms) — null nếu chưa khai
+function seamWin(workDate, shift, a, b) {
+  if (!workDate || !shift || !shift[a] || !shift[b]) return null;
+  const s = vnInstant(workDate, shift[a]).getTime();
+  let e = vnInstant(workDate, shift[b]).getTime();
+  if (e < s) e += 24 * HH;
+  return [s, e];
+}
+function shareSeamPunch(set, got, t, dayEnd, workDate) {
   for (let i = 0; i + 1 < set.length; i++) {
     const A = set[i], B = set[i + 1];
     if (A.end > dayEnd || B.end > dayEnd) continue;
     if (Math.abs(B.start - A.end) > SEAM_GAP) continue;
     const seam = A.end;
     const near = (p) => p && Math.abs(t(p) - seam) <= SEAM_NEAR;
+    const inW = (w) => (p) => t(p) >= w[0] && t(p) <= w[1];
     const ga = got[i], gb = got[i + 1];
-    // ca sau thiếu giờ vào: chưa có lượt nào, hoặc lượt đầu gần giờ RA của nó hơn giờ VÀO
-    const bNoIn = !gb.length || Math.abs(t(gb[0]) - B.end) < Math.abs(t(gb[0]) - B.start);
+    // Ca đã khai khung VÀO / RA → "thiếu giờ vào/ra" xét theo khung: lượt quẹt GIỮA CA ngoài khung (VD Vệ sinh trankimxuyen
+    // bắt buộc quẹt 13h để chứng minh có mặt, không dùng tính công) không được coi là giờ ra/vào. Trước đây ca 06:30–16:00 có
+    // lượt 06:02 · 12:54 thì coi như "đã có giờ ra" nên không lấy lượt 16:01 (đã thuộc ca gãy 16–21) → ca 1 thiếu giờ ra.
+    const ciB = seamWin(workDate, B.shift, 'check_in_start', 'check_in_end');
+    const coA = seamWin(workDate, A.shift, 'check_out_start', 'check_out_end');
+    // ca sau thiếu giờ vào: chưa có lượt nào, hoặc lượt đầu gần giờ RA của nó hơn giờ VÀO (có khung vào: không lượt nào trong khung)
+    const bNoIn = ciB ? !gb.some(inW(ciB))
+      : !gb.length || Math.abs(t(gb[0]) - B.end) < Math.abs(t(gb[0]) - B.start);
     const aLast = ga[ga.length - 1];
     if (bNoIn && ga.length >= 2 && near(aLast)) { gb.unshift(aLast); continue; }
-    // ca trước thiếu giờ ra: chỉ có 1 lượt (giờ vào), ca sau có lượt đầu sát mốc giao ca và còn lượt ra của nó
-    const aNoOut = ga.length === 1 && Math.abs(t(ga[0]) - A.start) < Math.abs(t(ga[0]) - A.end);
+    // ca trước thiếu giờ ra: chỉ có 1 lượt (giờ vào) (có khung ra: ngoài lượt vào không lượt nào trong khung ra),
+    // ca sau có lượt đầu sát mốc giao ca và còn lượt ra của nó
+    const aNoOut = coA ? ga.length >= 1 && !ga.slice(1).some(inW(coA))
+      : ga.length === 1 && Math.abs(t(ga[0]) - A.start) < Math.abs(t(ga[0]) - A.end);
     if (aNoOut && gb.length >= 2 && near(gb[0])) ga.push(gb[0]);
   }
 }
@@ -449,7 +466,7 @@ export function pickShiftSet(cands, punches, workDate) {
       });
       if (bi >= 0) got[bi].push(p);
     }
-    shareSeamPunch(set, got, t, dayEnd);
+    shareSeamPunch(set, got, t, dayEnd, workDate);
     if (got.some((g) => !g.length)) continue;
     // Giờ VÀO của mỗi ca phải thuộc ngày này và không sớm hơn giờ vào ca quá 8 tiếng
     // (trước đây: làm ca sáng 05:52–11:33 thì lượt 05:55 sáng hôm sau bị lấy làm "vào Ca đêm" → 1 lượt dùng cho 2 ngày)

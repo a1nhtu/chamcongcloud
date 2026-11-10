@@ -40,8 +40,8 @@ before(() => {
   S.K1 = ins({ ...base, name: 'KT 1', code: 'K1', start_time: '06:00', end_time: '14:00', check_in_start: '04:30', check_in_end: '09:00', check_out_start: '12:00', check_out_end: '16:00' });
   S.K2 = ins({ ...base, name: 'KT 2', code: 'K2', start_time: '14:00', end_time: '22:00', check_in_start: '12:00', check_in_end: '17:00', check_out_start: '20:00', check_out_end: '23:59' });
   S.K3 = ins({ ...base, name: 'KT 3', code: 'K3', start_time: '22:00', end_time: '06:00', cross_midnight: 1, check_in_start: '20:00', check_in_end: '23:59', check_out_start: '04:00', check_out_end: '09:00' });
-  S.V1 = ins({ ...base, name: 'VS 1', code: 'V1', start_time: '06:30', end_time: '16:00', check_in_start: '04:30', check_in_end: '09:00', check_out_start: '14:00', check_out_end: '16:30' });
-  S.V2 = ins({ ...base, name: 'VS gãy', code: 'V2', start_time: '16:00', end_time: '21:00', check_in_start: '15:30', check_in_end: '17:30', check_out_start: '19:00', check_out_end: '23:30' });
+  S.V1 = ins({ ...base, name: 'VS 1', code: 'V1', start_time: '06:30', end_time: '16:00', check_in_start: '03:00', check_in_end: '11:30', check_out_start: '14:00', check_out_end: '18:00' });
+  S.V2 = ins({ ...base, name: 'VS gãy', code: 'V2', start_time: '16:00', end_time: '21:00', check_in_start: '15:00', check_in_end: '18:30', check_out_start: '18:30', check_out_end: '23:59' });
   S.AS = ins({ ...base, name: 'AN sáng', code: 'AS', start_time: '07:00', end_time: '19:00', check_in_start: '05:00', check_in_end: '09:00', check_out_start: '15:00', check_out_end: '20:00' });
   S.AD = ins({ ...base, name: 'AN đêm', code: 'AD', start_time: '19:00', end_time: '07:00', cross_midnight: 1, check_in_start: '18:00', check_in_end: '23:59', check_out_start: '04:00', check_out_end: '09:00' });
   W.KT = ws('KT', [S.K1, S.K2, S.K3]); W.VS = ws('VS', [S.V1, S.V2]); W.AN = ws('AN', [S.AS, S.AD]);
@@ -73,4 +73,18 @@ test('Kỹ thuật ca đơn và ca 3 qua đêm vẫn như cũ', () => {
 test('An ninh ca ngày nối ca ngày (07–19 / 19–07): lượt 07:00 hôm sau KHÔNG thành ra ca đêm', () => {
   assert.deepEqual(chay(W.AN, ['11-03 06:55', '11-03 19:02', '11-04 06:57', '11-04 19:01']), ['11-03 AS 06:55-19:02 1', '11-04 AS 06:57-19:01 1']);
   assert.deepEqual(chay(W.AN, ['11-03 18:50', '11-04 07:03']), ['11-03 AD 18:50-07:03 1']);
+});
+
+// Lượt 13h của Vệ sinh chỉ để chứng minh có mặt, không tính công (Anh chốt 10/11/2026). Trước đây ca 1 có 06:02 · 12:54 thì
+// coi như "đã có giờ ra" nên không dùng chung lượt 16:01 (thuộc ca gãy) → ca 1 thiếu giờ ra, mất 1 công.
+test('Vệ sinh: lượt 13h không chặn dùng chung lượt 16h khi lượt 16h rơi vào ca gãy', () => {
+  assert.deepEqual(chay(W.VS, ['10-26 06:02', '10-26 12:54', '10-26 16:01', '10-26 20:58']), ['10-26 V1 06:02-16:01 1', '10-26 V2 16:01-20:58 1']);
+  assert.deepEqual(chay(W.VS, ['10-13 06:03', '10-13 13:32', '10-13 16:16', '10-13 16:21', '10-13 21:01']).map((x) => x.split(' ').slice(0, 3).join(' ')),
+    ['10-13 V1 06:03-16:16', '10-13 V2 16:16-21:01']);
+});
+test('Vệ sinh: đến muộn / về muộn / đến sớm vẫn có dòng công; quên quẹt 16h thì ca 1 thiếu giờ ra', () => {
+  assert.equal(chay(W.VS, ['10-24 09:09', '10-24 12:58', '10-24 15:58'])[0].split(' ').slice(0, 3).join(' '), '10-24 V1 09:09-15:58');
+  assert.equal(chay(W.VS, ['10-23 04:15', '10-23 12:44', '10-23 15:58'])[0].split(' ').slice(0, 3).join(' '), '10-23 V1 04:15-15:58');
+  assert.equal(chay(W.VS, ['10-05 06:03', '10-05 13:06', '10-05 16:55'])[0].split(' ').slice(0, 3).join(' '), '10-05 V1 06:03-16:55');
+  assert.equal(chay(W.VS, ['11-04 05:56', '11-04 12:56', '11-04 20:56'])[0].split(' ').slice(0, 3).join(' '), '11-04 V1 05:56-null');
 });
