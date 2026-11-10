@@ -397,6 +397,25 @@ export function initSchema() {
   `);
 
   migrateColumns();
+  fixJunkEmployeeNames();
+}
+
+// TÊN RÁC chuyển từ phần mềm cũ (đọc hỏng tên dài trên máy ZK: chuỗi ký tự NUL + vài ký tự lạ) → lấy tên máy đã gửi lên;
+// máy chưa có tên thật thì để tên tạm "NV <Số ID>" (máy gửi tên thật sau sẽ thay). Chạy mỗi lần khởi động, không có tên rác thì không làm gì.
+function fixJunkEmployeeNames() {
+  try {
+    const bad = db.prepare("SELECT id, device_pin FROM employees WHERE instr(full_name, char(0)) > 0 OR full_name LIKE '%' || char(65533) || '%'").all();
+    if (!bad.length) return;
+    const devName = db.prepare("SELECT name FROM device_users WHERE pin=? AND name<>'' AND instr(name, char(0))=0 AND name NOT LIKE '%' || char(65533) || '%'");
+    const upd = db.prepare('UPDATE employees SET full_name=? WHERE id=?');
+    for (const e of bad) {
+      const pin = String(e.device_pin || '').trim();
+      upd.run((pin && devName.get(pin)?.name?.trim()) || (pin ? `NV ${pin}` : `NV ${e.id}`), e.id);
+    }
+    // tên rác cũng nằm ở bảng người dùng trên máy → xoá để không đẩy ngược tên rác xuống máy khác
+    db.prepare("UPDATE device_users SET name='' WHERE instr(name, char(0)) > 0").run();
+    db.prepare("UPDATE device_users_serial SET name='' WHERE instr(name, char(0)) > 0").run();
+  } catch (e) { console.error('[db] sửa tên rác lỗi:', e.message); }
 }
 
 // Dựng lại bảng attendance để BỎ ràng buộc UNIQUE(employee_id, work_date) → cho phép NHIỀU ca/ngày.

@@ -12,6 +12,7 @@ import MDBReader from './vendor/mdb-reader.mjs';
 import { db } from './db.js';
 import { ingestAttlog } from './device-sync.js';
 import { defaultPasswordHash } from './auth.js';
+import { cleanName, isJunkName } from './ten-nv.js';
 
 // Wise Eye V5.1 (we51) cùng cấu trúc bảng + mật khẩu file với On39 → đọc chung, chỉ khác tên hiện ra
 export const LEGACY_LABEL = { on39: 'Wise Eye On39', we51: 'Wise Eye V5.1', rj: 'Ronald Jack Pro' };
@@ -78,12 +79,12 @@ export function normalizeOn39(table) {
     .filter((u) => u.UserEnrollNumber > 0)
     .map((u) => {
       const pin = String(u.UserEnrollNumber);
-      const full = str(u.UserFullName);
+      const full = cleanName(u.UserFullName);   // tên rác (phần mềm cũ đọc hỏng tên dài) → bỏ
       const hire = ymd(u.UserHireDay);
       return {
         pin, code: str(u.UserFullCode) || pin,
         // Nhiều nơi chỉ gõ tên ở "Tên chấm công" (UserEnrollName), còn Họ tên để bằng mã số → lấy tên có chữ
-        name: (hasLetter(full) ? full : '') || str(u.UserEnrollName) || str(u.UserLastName) || full,
+        name: (hasLetter(full) ? full : '') || cleanName(u.UserEnrollName) || cleanName(u.UserLastName) || full,
         dept: deptKeys.has('D' + u.UserIDD) ? 'D' + u.UserIDD : null,
         position: titles.get(u.UserIDTitle) || '', phone: str(u.UserPhoneNumber), card: card(u.UserCardNo),
         start_date: hire, birth_date: birth(textDate(u.UserBirthDay), hire), id_number: idNo(u.UserIDCard),
@@ -126,7 +127,7 @@ export function normalizeRj(table) {
       const hire = ymd(n.NgayVaoLamViec);
       const pb = 'P' + str(n.MaPhongBan), k = 'K' + str(n.MaKhuVuc);
       return {
-        pin, code: str(n.MaNhanVien) || pin, name: str(n.TenNhanVien) || str(n.TenChamCong),
+        pin, code: str(n.MaNhanVien) || pin, name: cleanName(n.TenNhanVien) || cleanName(n.TenChamCong),   // tên rác → bỏ
         dept: deptKeys.has(pb) ? pb : deptKeys.has(k) ? k : null,
         position: str(n.ChucVu) || chucVu.get(str(n.MaChucVu)) || '', phone: str(n.DienThoaiLienHe), card: card(n.MaThe),
         start_date: hire, birth_date: birth(ymd(n.NgaySinh), hire), id_number: idNo(n.CMND),
@@ -269,7 +270,8 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
           const dept = deptFor(e.dept);
           const cur = matchEmp(e);
           if (!cur) {
-            const name = e.name || `NV ${e.pin}`;
+            // tên rác / trống: lấy tên máy đã gửi lên (nếu có), không thì tên tạm — máy gửi tên thật sau sẽ thay
+            const name = e.name || cleanName(db.prepare('SELECT name FROM device_users WHERE pin=?').get(e.pin)?.name) || `NV ${e.pin}`;
             const info = db.prepare(`INSERT INTO employees (code, full_name, department, position, phone, role, username, password_hash, device_pin, start_date, active)
               VALUES (?,?,?,?,?,'employee',?,?,?,?,1)`)
               .run(uniqueValue('code', e.code), name, dept, e.position, e.phone, uniqueValue('username', `nv${e.pin}`), pwHash, e.pin, e.start_date);
@@ -282,7 +284,7 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
           }
           const set = {};
           if (!cur.device_pin) { set.device_pin = e.pin; out.emps_linked++; }
-          const draft = cur.full_name === `NV ${e.pin}` || cur.full_name === `NV ${cur.device_pin}`;   // NV nháp máy tự tạo
+          const draft = cur.full_name === `NV ${e.pin}` || cur.full_name === `NV ${cur.device_pin}` || isJunkName(cur.full_name);   // NV nháp máy tự tạo / tên rác
           const fill = (col, val) => { if (val && val !== cur[col] && (o.overwrite || !cur[col])) set[col] = val; };
           if (e.name && e.name !== cur.full_name && (o.overwrite || draft || !cur.full_name)) set.full_name = e.name;
           fill('department', dept); fill('position', e.position); fill('phone', e.phone); fill('start_date', e.start_date);

@@ -10,6 +10,7 @@ import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
 import { heldSet, remapLoader, onUserAck, pmNameFor, normName } from './pin-guard.js';
+import { isJunkName, cleanName } from './ten-nv.js';
 
 // Máy ZKTeco (đẩy ADMS 'push' / TCP-IP 'tcp'): CHỈ các máy này nhận lệnh + mẫu sinh trắc ZKTeco khi đồng bộ.
 // Máy hãng khác (AI 'ai', Hikvision 'hik') có cách đồng bộ riêng (server/ai-device.js, server/hik-isapi.js).
@@ -46,8 +47,10 @@ export function upsertEmployeeFromDevice(pin, name, force = false, code = '') {
   // Đã có NV khớp Số ID
   let emp = db.prepare("SELECT id, code, username, full_name, from_device FROM employees WHERE device_pin=? AND device_pin!=''").get(pin);
   if (emp) {
-    // Chỉ cập nhật tên nếu là NV nháp từ máy và máy gửi tên thật khác placeholder
-    if (emp.from_device && name && name !== `NV ${pin}` && emp.full_name === `NV ${pin}`)
+    // Chỉ cập nhật tên nếu là NV nháp từ máy và máy gửi tên thật khác placeholder;
+    // hoặc tên đang lưu là TÊN RÁC (chuyển từ phần mềm cũ đọc hỏng tên dài) mà máy gửi tên thật → lấy tên trên máy
+    if (name && name !== `NV ${pin}` && !isJunkName(name)
+      && (emp.full_name === `NV ${pin}` || isJunkName(emp.full_name)))
       db.prepare('UPDATE employees SET full_name=? WHERE id=?').run(name, emp.id);
     // NV nháp tạo trước khi biết mã thật (mã = Số ID 32 ký tự) → đổi sang mã thật; mã đã sửa tay thì giữ
     if (code && emp.from_device && emp.code !== code && autoCode(emp, pin)
@@ -127,7 +130,7 @@ export function ingestUserData(serial, table, rawBody, track = null, opts = {}) 
     }
     const pin = (kv.pin || '').trim();
     if (!pin || pin.includes(' ') || pin.length > maxPin) continue; // bỏ dòng rác
-    let name = kv.name || '';
+    let name = cleanName(kv.name);   // tên rác (ký tự rỗng NUL…) → coi như máy không gửi tên
     if (name.includes('=') || name.length > 80) name = ''; // tên rác (firmware nhét FileName=/Content=)
     const card = kv.card && kv.card !== '0' ? kv.card : '';
     const passwd = kv.passwd && kv.passwd !== '0' ? kv.passwd : '';
