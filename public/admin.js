@@ -128,7 +128,8 @@ async function init() {
     $('#brand-mark').textContent = c.company_name;
     let ver = '';
     try { ver = (await fetch('/api/version').then(r => r.json())).version; } catch {}
-    $('#side-brand').innerHTML = `${c.company_name}<small>Chấm công${ver ? ' · v' + ver : ''}</small>`;
+    // tên công ty do người dùng nhập → chèn dạng CHỮ (không qua innerHTML) để tên có ký tự < > & không thành thẻ HTML
+    $('#side-brand').replaceChildren(c.company_name || '', el('small', {}, `Chấm công${ver ? ' · v' + ver : ''}`));
   } catch {}
   if ($('#li-remember')) $('#li-remember').checked = rememberLogin();
   await tokenFromOtherTab();

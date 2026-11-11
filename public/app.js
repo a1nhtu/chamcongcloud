@@ -322,7 +322,7 @@ async function doCheck(kind) {
     const gps = await getGps();
     if (gpsLine) gpsLine.innerHTML = '<span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span> Đang xác định địa chỉ…';
     const addr = await reverseGeocode(gps.lat, gps.lng);   // đổi toạ độ → địa chỉ (có dự phòng)
-    if (gpsLine) gpsLine.innerHTML = `📍 ${addr || 'Đã xác định vị trí'} · sai số ~${gps.accuracy}m`;
+    if (gpsLine) gpsLine.textContent = `📍 ${addr || 'Đã xác định vị trí'} · sai số ~${gps.accuracy}m`;   // địa chỉ lấy từ dịch vụ bản đồ bên ngoài → chèn dạng chữ
     // Đóng dấu chống gian lận: giờ thật + tên NV + ĐỊA CHỈ (kèm toạ độ) lên ảnh
     const stampTime = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
     const coords = `GPS ${gps.lat.toFixed(5)}, ${gps.lng.toFixed(5)}`;

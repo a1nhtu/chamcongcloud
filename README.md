@@ -18,8 +18,10 @@ Web app tự chủ cho **Digiplus**: nhân viên chấm công trên **điện th
 - **Duyệt / từ chối đơn từ**.
 - **Bảng công** theo tháng + **Xuất Excel**.
 
+> README này chỉ mô tả phần lõi (chấm công điện thoại + trang quản lý). Các phần thêm sau — máy chấm công ZKTeco / Hikvision / Union, phân ca, tính lương, nhân sự, suất ăn, máy chủ nhiều công ty, tự cập nhật — xem `docs/CAU-TRUC-CODE.md` và các trang trong `HuongDan/`.
+
 ## Yêu cầu
-- Node.js 20+ (khuyến nghị 22/24 — dùng SQLite tích hợp sẵn `node:sqlite`).
+- Node.js **22.13 trở lên** (bộ cài cho khách đóng kèm Node 24). Node 20 KHÔNG chạy được vì app dùng SQLite tích hợp sẵn `node:sqlite`.
 
 ## Chạy thử (local)
 ```bash
@@ -76,7 +78,7 @@ Chạy `caddy run` → Caddy tự xin và gia hạn SSL. App chạy `npm start` 
 > Khi đã có HTTPS qua domain, có thể tắt HTTPS tự ký (không cần thư mục `certs/`). App chỉ cần chạy HTTP 8080 sau reverse proxy.
 
 ### Gợi ý nơi đặt server
-VPS Việt Nam (Viettel IDC, VNG, Vietnix…) hoặc cloud (AWS Lightsail, DigitalOcean) 1–2 GB RAM là đủ cho vài trăm nhân viên. Cài Node 20+, copy mã nguồn, `npm install`, dùng `pm2` để chạy nền: `pm2 start server/index.js --name chamcong`.
+VPS Việt Nam (Viettel IDC, VNG, Vietnix…) hoặc cloud (AWS Lightsail, DigitalOcean) 1–2 GB RAM là đủ cho vài trăm nhân viên. Cài Node 22.13+ (nên dùng 24), copy mã nguồn, `npm install`, dùng `pm2` để chạy nền: `pm2 start server/index.js --name chamcong`.
 
 ## Cấu hình khi triển khai cho khách
 1. Đăng nhập `/admin` bằng `admin` → **Cài đặt**: đổi tên công ty + đổi mật khẩu admin.
@@ -96,10 +98,11 @@ server/        # Backend Express + SQLite
   index.js     # khởi động, gắn route, phục vụ web tĩnh
   db.js        # schema + kết nối SQLite
   auth.js      # JWT + phân quyền
-  util.js      # thời gian VN, Haversine, tính đi muộn
+  util.js      # thời gian VN, Haversine, che lỗi hệ thống
+  attendance-calc.js, day-metrics.js, shift-resolver.js   # công thức tính công, giải ca
   storage.js   # lưu ảnh selfie
   seed.js      # dữ liệu khởi tạo
-  routes/      # auth, attendance, leaves, admin, reports
+  routes/      # auth, attendance, leaves, admin/*, reports, iclock (máy chấm công)…
 public/        # Frontend (PWA nhân viên + trang admin)
 data/          # (tự tạo) file SQLite
 uploads/       # (tự tạo) ảnh chấm công

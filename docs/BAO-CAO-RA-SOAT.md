@@ -1,5 +1,14 @@
 # Báo cáo rà soát bảo mật — `server/routes/` và `server/auth.js`
 
+> **CẬP NHẬT 11/11/2026 (đối chiếu lại với code v1.33.5):** báo cáo này viết ngày 24/09/2026, lúc đó chưa sửa gì.
+> Tình trạng hiện nay: mục 1 **đã vá** (`server/permission-guard.js` + test `permission-guard.test.mjs`) ·
+> mục 2 **giữ nguyên có chủ ý** (tài khoản tổng dùng chung, Anh quyết) · mục 3 **đã vá** (`randomBytes` trong `server/auth.js`) ·
+> mục 4 **đã vá** (người không có quyền `employees` chỉ nhận danh sách đã bớt trường nhạy cảm — route này còn đổ danh sách chọn NV cho Báo cáo / Tính công nên không chặn hẳn; test `route-permissions.test.mjs`) ·
+> mục 5 **đã vá** (các route phân ca đã gắn `need('assignments')`) ·
+> mục 6 **đã vá** (`timingSafeStringEqual`) · mục 7 **đã vá** (header CSP cho `.svg` trong `server/index.js`) ·
+> mục 8 **đã vá phần lớn** (`sendCaughtError` trong `server/util.js`; còn vài route trả `e.message` của lỗi nghiệp vụ).
+> Phần mô tả bên dưới giữ nguyên làm lịch sử — số dòng trích dẫn không còn khớp code hiện tại.
+>
 > Chỉ đọc code, chưa sửa gì. Rà soát tập trung 4 nhóm: (1) thiếu kiểm tra quyền / IDOR,
 > (2) SQL nối chuỗi thay vì tham số hoá, (3) upload file thiếu kiểm tra, (4) lộ thông tin
 > trong thông báo lỗi. Mỗi mục dưới đây đều có bằng chứng cụ thể trong code hiện tại.

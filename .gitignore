@@ -63,3 +63,8 @@ tools/cloudflared-linux-amd64
 
 # biên dịch lúc build bộ cài từ tools/installer/MoPhanMem.cs
 tools/installer/MoPhanMem.exe
+
+# File rieng cua may lam viec (cau hinh Claude Code, bo nho tam Python, Wrangler) - khong dua len GitHub
+.claude/
+__pycache__/
+.wrangler/

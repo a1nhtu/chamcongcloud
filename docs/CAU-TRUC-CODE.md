@@ -22,7 +22,7 @@ cần cài driver ngoài), chạy 1 tiến trình duy nhất, phục vụ cả A
 | `shift-resolver.js` | **Bộ giải ca**: quyết định NV làm ca nào vào 1 ngày cụ thể, theo thứ tự ưu tiên xuyên suốt cả app: *phân ca theo ngày (đè tay)* → *phân ca theo khoảng ngày* → *lịch trình (nhiều ca xoay)* → *ca mặc định của NV* → *tự dò theo giờ chấm*. Có 2 chế độ: `resolveShift`/`resolveDayShifts` (chỉ để hiển thị, chưa biết giờ chấm) và `resolveEffectiveShift` (khi đã có giờ chấm, dùng `autoDetectShift` để phân biệt các ca trùng giờ vào). |
 | `device-sync.js` | Toàn bộ nghiệp vụ máy chấm công ZKTeco: parse dữ liệu ATTLOG/USERINFO/vân tay/khuôn mặt/ảnh máy đẩy về, tự tạo nhân viên nháp từ máy (`upsertEmployeeFromDevice`), dựng lại bản ghi `attendance` từ các lượt quẹt (`rebuildDay`/`ingestAttlog`), hàng đợi lệnh gửi xuống máy (đồng bộ NV/vân tay giữa các máy cùng nhóm, mở cửa, xoá dữ liệu máy...), và nhập dữ liệu từ USB. |
 | `storage.js` | Lưu ảnh selfie chấm công (`savePhoto`, giới hạn 3MB) và logo công ty (`saveBrandLogo`, giới hạn 2MB) từ data URL base64 xuống `uploads/`. |
-| `util.js` | Tiện ích dùng chung: giờ Việt Nam (`vnDateStr`, `vnParts`, UTC+7 cộng cứng), khoảng cách GPS Haversine (`distanceMeters`), định dạng hiển thị. *Lưu ý*: file này có một hàm `computeLate` **khác** với hàm cùng tên trong `attendance-calc.js` (bản này nhận `Date` hiện tại thay vì mốc chấm ISO+ngày công) — cần xem file nào đang import khi đọc code, tránh nhầm. |
+| `util.js` | Tiện ích dùng chung: giờ Việt Nam (`vnDateStr`, `vnParts`, UTC+7 cộng cứng), khoảng cách GPS Haversine (`distanceMeters`), định dạng phút (`humanMinutes`), che lỗi hệ thống khi trả về client (`userError`, `sendCaughtError`). Hàm `computeLate` cũ ở đây đã gỡ (11/11/2026) — tính đi muộn chỉ còn 1 nơi là `attendance-calc.js`. |
 | `license.js` | Bản quyền: license là chuỗi ký số Ed25519 (`payload_base64.chữ_ký_base64`), khoá công khai nhúng sẵn trong code, khoá riêng do Anh giữ ngoài repo. `machineId()` sinh mã máy từ `MachineGuid` Windows (hoặc hostname+MAC dự phòng) + mã khách (`CUSTOMER` env) để nhiều công ty dùng chung 1 VPS vẫn có license riêng biệt. |
 | `push.js` | Web Push tự cài bằng `node:crypto` (không dùng thư viện `web-push` ngoài) — chuẩn VAPID + mã hoá `aes128gcm`, dùng để báo cho quản lý khi có NV chấm vào/ra. |
 | `backup.js` | Sao lưu/phục hồi: sao lưu riêng file DB (`.db`) hoặc sao lưu toàn bộ gồm DB + ảnh (`.zip`, dùng `tar` của Windows). Phục hồi không áp ngay mà ghi file `<db>.restore`, việc thay thế thật sự xảy ra ở `db.js` lúc khởi động lại app (an toàn vì không sửa DB đang mở). Có `maybeAutoBackup` chạy định kỳ mỗi ngày vào giờ cấu hình. |
@@ -266,8 +266,7 @@ kịch bản cập nhật thủ công tương ứng với `CapNhat.bat` do `upda
   `Date` UTC (xem `util.js`, `attendance-calc.js`, `backup.js` — mỗi file tự làm lại phép cộng này
   thay vì dùng chung 1 hàm, có thể là chỗ dễ lệch nếu sửa không đồng bộ).
 - **`node:sqlite`** là module tích hợp sẵn của Node (không phải `better-sqlite3` hay tương tự) — cần
-  bản Node đủ mới mới có; **chưa rõ** version Node tối thiểu yêu cầu (không thấy khai báo `engines`
-  trong `package.json`).
-- Test hiện có (`test/*.test.mjs`) chỉ bao phủ 4 module thuần logic: `attendance-calc.js`,
-  `day-metrics.js`, `payroll-calc.js`, `shift-resolver.js` — các route Express, `device-sync.js`,
-  `update.js`, `license.js`... chưa có test tự động.
+  Node **22.13 trở lên** (bộ cài cho khách đóng kèm Node 24; `package.json` chưa khai báo `engines`).
+- Test (`test/*.test.mjs`, tới 11/11/2026 có 95 file / hơn 800 ca) đã phủ cả tính công, lương, phân quyền route, đồng bộ máy chấm công
+  (`device-sync.js`, máy TCP, Hikvision, Union giả lập), chuyển máy / license, suất ăn, xuất Excel. Phần chưa có test tự động: giao diện
+  `public/` và các thao tác cần máy chấm công thật.

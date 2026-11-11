@@ -1,4 +1,5 @@
-// Tiện ích chung: thời gian múi giờ VN, khoảng cách GPS, tính đi muộn/số giờ công
+// Tiện ích chung: thời gian múi giờ VN, khoảng cách GPS, che lỗi hệ thống khi trả về client
+// (Tính đi muộn / giờ công nằm ở attendance-calc.js — bản computeLate cũ ở đây đã bỏ vì không còn nơi nào dùng.)
 
 export const VN_OFFSET_MIN = 7 * 60; // UTC+7
 
@@ -24,23 +25,6 @@ export function vnDateStr(date = new Date()) {
   return `${p.y}-${pad(p.mo)}-${pad(p.d)}`;
 }
 
-// 'HH:MM' theo giờ VN
-export function vnTimeStr(date = new Date()) {
-  const p = vnParts(date);
-  return `${pad(p.h)}:${pad(p.mi)}`;
-}
-
-// Số phút kể từ 00:00 theo giờ VN
-export function vnMinutesOfDay(date = new Date()) {
-  const p = vnParts(date);
-  return p.h * 60 + p.mi;
-}
-
-export function hhmmToMinutes(hhmm) {
-  const [h, m] = String(hhmm).split(':').map(Number);
-  return (h || 0) * 60 + (m || 0);
-}
-
 // Khoảng cách Haversine (mét)
 export function distanceMeters(lat1, lng1, lat2, lng2) {
   const R = 6371000;
@@ -51,23 +35,6 @@ export function distanceMeters(lat1, lng1, lat2, lng2) {
     Math.sin(dLat / 2) ** 2 +
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
   return Math.round(2 * R * Math.asin(Math.sqrt(a)));
-}
-
-// Tính số phút đi muộn dựa trên ca làm + thời điểm chấm (giờ VN)
-export function computeLate(shift, checkDate = new Date()) {
-  if (!shift) return 0;
-  const nowMin = vnMinutesOfDay(checkDate);
-  const startMin = hhmmToMinutes(shift.start_time);
-  const grace = shift.late_grace_min || 0;
-  const late = nowMin - (startMin + grace);
-  return late > 0 ? late : 0;
-}
-
-// Định dạng khoảng cách thân thiện
-export function humanDistance(m) {
-  if (m == null) return '';
-  if (m < 1000) return `${m} m`;
-  return `${(m / 1000).toFixed(1)} km`;
 }
 
 // Định dạng phút -> 'Xg Ym'
