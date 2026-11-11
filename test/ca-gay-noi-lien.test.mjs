@@ -83,3 +83,8 @@ test('An ninh ca ngày nối ca ngày (07–19 / 19–07): lượt 07:00 hôm sa
   assert.deepEqual(chay(W.AN, ['11-03 06:55', '11-03 19:02', '11-04 06:57', '11-04 19:01']), ['11-03 AS 06:55-19:02 1', '11-04 AS 06:57-19:01 1']);
   assert.deepEqual(chay(W.AN, ['11-03 18:50', '11-04 07:03']), ['11-03 AD 18:50-07:03 1']);
 });
+test('An ninh làm liền ca ngày + ca đêm (24h): quẹt 19:00 ra + 19:01 vào → 2 dòng, mỗi ca 1 công; chỉ quẹt 1 lần 19h → không đủ 2 ca', () => {
+  assert.deepEqual(chay(W.AN, ['11-05 06:58', '11-05 19:00', '11-05 19:01', '11-06 07:00']), ['11-05 AS 06:58-19:00 1', '11-05 AD 19:01-07:00 1']);
+  const r = chay(W.AN, ['11-07 06:58', '11-07 19:00', '11-08 07:00']);
+  assert.ok(r.reduce((s, x) => s + +x.split(' ')[3], 0) <= 1, r.join(' | '));
+});
