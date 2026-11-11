@@ -2,7 +2,7 @@
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
-import { db, getSetting, setSetting, empHourly, hourlyNoOvernight } from './db.js';
+import { db, getSetting, setSetting, empHourly, hourlyNoOvernight, USER_TZ } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
@@ -268,7 +268,8 @@ export function buildUserCommand(pin, targetSerial, pri, forceName = false) {
     pri = (s && s.privilege) || 0;
   }
   const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
-  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=1\tVerify=0`;
+  // TZ: đủ 16 chữ số theo tài liệu hãng (xem USER_TZ ở db.js) — "TZ=1" làm máy SenseFace 4B báo "Khoảng thời gian không hợp lệ"
+  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=${USER_TZ}\tVerify=0`;
 }
 
 // Máy ADMS gọi về ~10 giây/lần; im quá 2,5 phút = mất kết nối. Luôn tính bằng GIỜ MÁY CHỦ rồi gửi kết quả cho trang:

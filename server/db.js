@@ -398,6 +398,23 @@ export function initSchema() {
 
   migrateColumns();
   fixJunkEmployeeNames();
+  fixPendingUserTz();
+}
+
+// KHOẢNG THỜI GIAN RA VÀO của người dùng ghi xuống máy ZKTeco (trường TZ của lệnh DATA UPDATE USERINFO, mục 12.1.1.1
+// Attendance PUSH Protocol): phải đủ 16 chữ số — 4 số đầu 0000 = dùng khoảng thời gian của NHÓM, 3 cụm 4 số sau = khoảng
+// thời gian riêng 1-2-3. Giá trị dưới đây đúng bằng giá trị máy tự gửi lên cho người đăng ký bình thường trên máy.
+// Trước v1.33.0 phần mềm gửi "TZ=1" (sai định dạng): máy SenseFace 4B (NF43VA, có kiểm soát cửa) hiểu thành "dùng khoảng
+// thời gian riêng nhưng để trống" → người vừa được đẩy xuống quẹt báo "Khoảng thời gian không hợp lệ" (aac, trankimxuyen 11/11/2026).
+export const USER_TZ = '0000000100000000';
+
+// Lệnh "đẩy NV" còn CHỜ GỬI (máy đang mất kết nối) mang TZ=1 → sửa lại trước khi tới máy. Lệnh đã gửi thì giữ nguyên để tra cứu.
+function fixPendingUserTz() {
+  try {
+    db.prepare(`UPDATE push_device_commands SET content = replace(content, char(9) || 'TZ=1' || char(9), char(9) || 'TZ=${USER_TZ}' || char(9))
+      WHERE serial IN (SELECT serial FROM push_devices) AND trans_time IS NULL
+        AND content LIKE 'DATA UPDATE USERINFO %' AND instr(content, char(9) || 'TZ=1' || char(9)) > 0`).run();
+  } catch (e) { console.error('[db] sửa lệnh đẩy NV chờ gửi lỗi:', e.message); }
 }
 
 // TÊN RÁC chuyển từ phần mềm cũ (đọc hỏng tên dài trên máy ZK: chuỗi ký tự NUL + vài ký tự lạ) → lấy tên máy đã gửi lên;
