@@ -1,7 +1,7 @@
 // ĐĂNG KÝ LÀM THÊM (lưới NV × ngày, số phút) + CHẤM CÔNG BẤT THƯỜNG (đi muộn / về sớm / làm thêm quá đăng ký…).
 // Quy tắc chặn tăng ca theo đăng ký: xem server/ot-reg.js. Đổi đăng ký → áp ngay lên dòng công đã có (không cần "Tính lại").
 import ExcelJS from 'exceljs';
-import { db, getSetting, setSetting, adminAttWhere, deptWithChildren } from '../../db.js';
+import { db, getSetting, setSetting, adminAttWhere, deptWithChildren, splitDeptList } from '../../db.js';
 import { syncOtReg, otRegRequired } from '../../ot-reg.js';
 import { vnDateStr, sendCaughtError } from '../../util.js';
 
@@ -32,7 +32,7 @@ function buildAbnormal(q) {
   const from = String(q.from || '').slice(0, 10), to = String(q.to || '').slice(0, 10);
   if (!ISO.test(from) || !ISO.test(to) || to < from) throw Object.assign(new Error('Khoảng ngày không hợp lệ'), { status: 400 });
   if (spanDays(from, to) > 93) throw Object.assign(new Error('Xem tối đa 3 tháng một lần'), { status: 400 });
-  const depts = deptWithChildren(String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean));
+  const depts = deptWithChildren(splitDeptList(q.depts));
   const ids = String(q.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
   const minLate = Math.max(1, parseInt(q.min_late, 10) || 1), minEarly = Math.max(1, parseInt(q.min_early, 10) || 1), minOt = Math.max(1, parseInt(q.min_ot, 10) || 1);
   let w = `e.active=1${adminAttWhere('e.role')}`; const args = [];

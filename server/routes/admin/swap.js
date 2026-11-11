@@ -1,7 +1,7 @@
 // ĐĂNG KÝ LÀM BÙ (hoán đổi ngày làm việc): quản lý khai NV đi làm ngày nghỉ (VD chủ nhật) để nghỉ 1 ngày khác (VD thứ 2).
 // Quy tắc tính: xem server/swap.js. Ngày nghỉ bù = 1 đơn nghỉ "Nghỉ bù" (đã duyệt) tự sinh, gắn leave_requests.swap_id.
 // Lưu / xoá xong trang quản lý gọi /admin/recompute cho ngày làm bù để công ngày đó tính lại theo quy tắc mới.
-import { db, adminAttWhere, deptWithChildren } from '../../db.js';
+import { db, adminAttWhere, deptWithChildren, splitDeptList } from '../../db.js';
 import { nowIso, sendCaughtError } from '../../util.js';
 import { SWAP_LEAVE } from '../../swap.js';
 
@@ -12,7 +12,7 @@ export function registerSwapRoutes(r, { need }) {
   r.get('/swap-days', need('attendance_edit'), (req, res) => {
     const from = String(req.query.from || '').slice(0, 10), to = String(req.query.to || '').slice(0, 10);
     if (!ISO.test(from) || !ISO.test(to) || to < from) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
-    const depts = deptWithChildren(String(req.query.depts || '').split(',').map((s) => s.trim()).filter(Boolean));
+    const depts = deptWithChildren(splitDeptList(req.query.depts));
     let w = `1=1${adminAttWhere('e.role')}`; const args = [];
     if (depts.length) { w += ` AND e.department IN (${depts.map(() => '?').join(',')})`; args.push(...depts); }
     const rows = db.prepare(`SELECT w.id, w.employee_id, w.work_date, w.off_date, w.note, w.created_by, w.created_at, e.code, e.full_name name, e.department dept,

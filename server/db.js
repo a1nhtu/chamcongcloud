@@ -1374,6 +1374,26 @@ export function deptWithChildren(names) {
   return [...out];
 }
 
+// Tách chuỗi "bộ phận 1,bộ phận 2" (tham số depts / dept trên URL) thành danh sách tên bộ phận.
+// Tên bộ phận được phép CÓ DẤU PHẨY (VD trankimxuyen 11/11/2026: "Làm sạch (2 ca, nhóm thường xuyên tăng ca, trực 7/7…)")
+// → không tách mù theo dấu phẩy: ghép các mảnh liền nhau thành tên DÀI NHẤT trùng một bộ phận có thật
+// (bảng departments hoặc cột employees.department). Tên không có dấu phẩy thì kết quả y như split(',') cũ.
+export function splitDeptList(raw) {
+  const parts = String(raw || '').split(',');
+  if (parts.length < 2) return parts.map((s) => s.trim()).filter(Boolean);
+  const known = new Set();
+  for (const r of db.prepare("SELECT name FROM departments UNION SELECT department FROM employees WHERE department LIKE '%,%'").all())
+    if (r.name) known.add(String(r.name).trim().normalize('NFC'));
+  const out = [];
+  for (let i = 0; i < parts.length;) {
+    let j = parts.length - 1;
+    for (; j > i; j--) if (known.has(parts.slice(i, j + 1).join(',').trim().normalize('NFC'))) break;
+    out.push(parts.slice(i, j + 1).join(',').trim());
+    i = j + 1;
+  }
+  return out.filter(Boolean);
+}
+
 export function adminAttWhere(col = 'role') {
   const p = col.includes('.') ? col.slice(0, col.indexOf('.') + 1) : '';
   return (getSetting('payroll_include_admin', '0') === '1' ? '' : ` AND ${col}!='admin'`) + ` AND IFNULL(${p}audit_only,0)=0`;

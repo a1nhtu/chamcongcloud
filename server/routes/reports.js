@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
-import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren } from '../db.js';
+import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren, splitDeptList } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs, idmRows, stateRows } from '../attendance-calc.js';
@@ -1800,7 +1800,7 @@ r.get('/departments', (req, res) => {
 // Bộ lọc NV từ query: ?ids=1,2,3 (NV cụ thể) hoặc ?depts=A,B (nhiều phòng ban) hoặc ?dept=A (cũ)
 function filterFromQuery(q, req) {
   const ids = String(q.ids || '').split(',').map(Number).filter(Boolean);
-  const depts = String(q.depts || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const depts = splitDeptList(q.depts);
   const m = (v) => (v === 'shift' || v === 'hourly' ? v : null);
   const force = !!(req && req.forceVirt);   // tài khoản kiểm tra: luôn công ảo
   return { ids, depts, dept: q.dept || null, mode: m(q.mode), emode: m(q.emode), virt: virtLevel(q, req), force, alldays: q.alldays === '1' };
