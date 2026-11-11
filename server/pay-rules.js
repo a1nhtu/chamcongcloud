@@ -123,6 +123,7 @@ export const SYSTEM_VARS = [
   ['GIO_TC', 'Tổng giờ tăng ca'], ['GIO_TC_THUONG', 'Giờ tăng ca ngày thường'], ['GIO_TC_NGHI', 'Giờ tăng ca ngày nghỉ'], ['GIO_TC_LE', 'Giờ tăng ca ngày lễ'],
   ['DI_TRE_PHUT', 'Tổng phút đi trễ'], ['DI_TRE_LAN', 'Số lần đi trễ'], ['VE_SOM_PHUT', 'Tổng phút về sớm'], ['VE_SOM_LAN', 'Số lần về sớm'],
   ['LUONG_CB', 'Lương cơ bản / tháng'], ['DON_GIA_NGAY', 'Đơn giá 1 ngày công'], ['DON_GIA_GIO', 'Đơn giá 1 giờ'],
+  ['GIO_LAM_DEM', 'Giờ làm đêm 22:00–06:00, gồm cả tăng ca đêm (khi bật Phụ cấp làm đêm)'], ['PHU_CAP_DEM', 'Tiền phụ cấp làm đêm (khi bật Phụ cấp làm đêm)'],
   ['LUONG_CONG', 'Lương theo công'], ['LUONG_PHEP', 'Lương ngày nghỉ có lương'], ['LUONG_TC', 'Tiền tăng ca'], ['PHU_CAP', 'Phụ cấp cố định (ô Phụ cấp ở cấu hình lương)'],
   ['LUONG_DONG_BH', 'Lương đóng bảo hiểm'], ['SO_NPT', 'Số người phụ thuộc'],
   ['THAM_NIEN_THANG', 'Thâm niên (tháng) tính tới cuối kỳ'],
@@ -187,6 +188,7 @@ export function computeSlip(base, ctx) {
     GIO_TC: +base.otHoursTotal || 0, GIO_TC_THUONG: +base.otHoursWeekday || 0, GIO_TC_NGHI: +base.otHoursWeekend || 0, GIO_TC_LE: +base.otHoursHoliday || 0,
     LUONG_CB: +ctx.basic || 0, DON_GIA_NGAY: +base.dailyRate || 0, DON_GIA_GIO: R(hourlyRate),
     LUONG_CONG: +base.workSalary || 0, LUONG_PHEP: +base.paidLeaveSalary || 0, LUONG_TC: +base.otSalary || 0, PHU_CAP: +base.allowance || 0,
+    GIO_LAM_DEM: (+base.nightHours || 0) + (+base.nightOtHours || 0), PHU_CAP_DEM: +base.nightPay || 0,
     SO_NPT: +prof.dependents || 0,
     LUONG_CO_SO: p.base_salary, LUONG_TOI_THIEU_VUNG: regionMin(p),
     DI_TRE_PHUT: 0, DI_TRE_LAN: 0, VE_SOM_PHUT: 0, VE_SOM_LAN: 0, NGAY_NGHI_KHONG_LUONG: 0, THAM_NIEN_THANG: 0,
@@ -201,6 +203,8 @@ export function computeSlip(base, ctx) {
   sys('LUONG_CONG', hourly ? `Lương theo giờ (${base.totalHours || 0} giờ)` : `Lương theo công (${cong} công)`, base.workSalary, base.workSalary);
   sys('LUONG_PHEP', `Lương ngày nghỉ có lương (${phep} ngày)`, base.paidLeaveSalary, base.paidLeaveSalary);
   sys('LUONG_TC', `Tăng ca (${base.otHoursTotal || 0} giờ)`, base.otSalary, otTaxable);
+  // phụ cấp làm đêm là phần trả CAO HƠN lương giờ ban ngày → miễn thuế cùng công tắc với phần chênh tăng ca
+  sys('PHU_CAP_DEM', `Phụ cấp làm đêm (${(+base.nightHours || 0) + (+base.nightOtHours || 0)} giờ)`, base.nightPay, p.ot_premium_exempt ? 0 : base.nightPay);
   sys('PHU_CAP', 'Phụ cấp', base.allowance, base.allowance);
 
   // ---- lương đóng BH: đặt riêng > tự tính (lương cơ bản + các khoản có tick "tính vào lương đóng BH") ----

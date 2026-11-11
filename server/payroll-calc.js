@@ -1,7 +1,7 @@
 // Tính lương (GĐ4) — theo công thức phần mềm mẫu ChamCongApp.
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, empHourly, deptWithChildren } from './db.js';
 import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
-import { splitOtTiers } from './attendance-calc.js';
+import { splitOtTiers, nightMinutes, shiftBounds } from './attendance-calc.js';
 import { virtualOt, applyVirtual } from './virtual-att.js';
 
 const pad = (n) => String(n).padStart(2, '0');
@@ -36,6 +36,31 @@ const DEFAULT_CFG = {
 
 // Số giờ chuẩn của 1 ngày công (Cài đặt > Quy tắc tính công) — đơn giá giờ = đơn giá ngày ÷ số này. Mặc định 8 = như trước đây.
 export function hoursPerDay() { const v = parseFloat(getSetting('pay_hours_per_day', '8')); return Number.isFinite(v) && v >= 1 && v <= 24 ? v : 8; }
+
+// PHỤ CẤP LÀM ĐÊM (công tắc night_pay, mặc định TẮT = bảng lương y như cũ). Điều 98 BLLĐ 2019 + Điều 55–57 NĐ 145/2020:
+//   · giờ làm trong ca rơi vào 22:00–06:00: trả thêm ít nhất 30% đơn giá giờ
+//   · giờ TĂNG CA rơi vào 22:00–06:00: ngoài tiền tăng ca, trả thêm 30% + 20% × lương giờ ban ngày của ngày đó
+//     (ngày thường 100% · ngày nghỉ = hệ số tăng ca ngày nghỉ · ngày lễ = hệ số tăng ca ngày lễ) → mức chuẩn 200% / 270% / 390%.
+//     Ngày thường đã tăng ca ban ngày rồi mới tăng ca đêm thì luật tính 210% — phần mềm tính mức 200%, chênh thì cộng tay.
+export function nightPayCfg() {
+  const pct = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v >= 0 && v <= 300 ? v : d; };
+  return { on: getSetting('night_pay', '0') === '1', pct: pct('night_pct', 30), otPct: pct('night_ot_pct', 20) };
+}
+// Số phút làm đêm của 1 dòng công: reg = trong giờ ca · ot = phần tăng ca. Không vượt quá giờ công / phút tăng ca đã tính của dòng đó.
+export function nightSplit(r) {
+  if (!r.check_in_at || !r.check_out_at) return { reg: 0, ot: 0 };
+  const inAt = new Date(r.check_in_at).getTime(), outAt = new Date(r.check_out_at).getTime();
+  const all = nightMinutes(inAt, outAt);
+  if (!all) return { reg: 0, ot: 0 };
+  const work = r.work_minutes || 0, otMin = r.ot_min || 0;
+  if (!work) return { reg: 0, ot: Math.min(otMin, all) };                         // cả ngày là tăng ca (ngày nghỉ / lễ)
+  if (!r.start_time || !r.end_time) return { reg: Math.min(work, all), ot: 0 };   // không rõ ca → coi là giờ làm thường
+  const { start, end } = shiftBounds(r.work_date, r);
+  const s = start.getTime(), e = end.getTime();
+  const inShift = nightMinutes(Math.max(inAt, s), Math.min(outAt, e));
+  const outShift = nightMinutes(inAt, Math.min(outAt, s)) + nightMinutes(Math.max(inAt, e), outAt);
+  return { reg: Math.min(work, inShift), ot: Math.min(otMin, outShift) };
+}
 
 // Hệ số tăng ca CHUNG của công ty (Cài đặt > Quy tắc tính công) — dùng cho NV chưa đặt lương riêng
 export function companyOtRates() {
@@ -92,8 +117,8 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   const hourlyRate = dailyRate / hoursPerDay();
 
   let rows = db.prepare(
-    `SELECT a.id, a.employee_id, a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,
-            s.ot_tier1_min, s.ot_tier2_min, s.ot_tier3_min, s.ot_tier2_rate, s.ot_tier3_rate, s.ot_tier4_rate
+    `SELECT a.id, a.employee_id, a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type, a.check_in_at, a.check_out_at,
+            s.start_time, s.end_time, s.ot_tier1_min, s.ot_tier2_min, s.ot_tier3_min, s.ot_tier2_rate, s.ot_tier3_rate, s.ot_tier4_rate
      FROM attendance a LEFT JOIN shifts s ON s.id = a.shift_id
      WHERE a.employee_id = ? AND a.work_date >= ? AND a.work_date <= ?`
   ).all(employeeId, from, to);
@@ -110,8 +135,12 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
     const hrs = totalMin / 60;
     const rate = cfg.hourly_rate || 0;
     const workSalary = hrs * rate;
-    const gross = workSalary + (cfg.allowance || 0);
+    const N = nightPayCfg();
+    const nightMin = N.on ? rows.reduce((s, r) => s + Math.min(r.work_minutes || 0, r.check_in_at && r.check_out_at ? nightMinutes(r.check_in_at, r.check_out_at) : 0), 0) : 0;
+    const nightPay = nightMin / 60 * rate * N.pct / 100;
+    const gross = workSalary + nightPay + (cfg.allowance || 0);
     return {
+      ...(N.on ? { nightHours: round2(nightMin / 60), nightOtHours: 0, nightPay: round0(nightPay) } : {}),
       hourly: true, totalHours: round2(hrs), daysWorked, hourlyRate: round0(rate),
       workUnits: round2(daysWorked), paidLeaveDays: 0,
       otHoursWeekday: 0, otHoursWeekend: 0, otHoursHoliday: 0, otHoursTotal: 0,
@@ -121,12 +150,20 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
     };
   }
 
+  const N = nightPayCfg();
+  let nightReg = 0, nightOt = 0, nightPay = 0;
   let workUnits = 0, otMinW = 0, otMinE = 0, otMinH = 0;
   // Tăng ca ngày thường chia mức TC1→TC4 theo giới hạn của ca; tiền OT ngày thường = Σ giờ mức × hệ số mức
   // (TC1 dùng hệ số OT ngày thường của NV; TC2–TC4 dùng hệ số đặt ở ca, để 0 = cũng theo hệ số ngày thường)
   const tierMin = [0, 0, 0, 0];
   let otPayWeekdayUnits = 0;   // Σ (phút × hệ số)
   for (const r of rows) {
+    if (N.on) {
+      const n = nightSplit(r);
+      const dayRate = r.ot_type === 'cuoi_tuan' ? cfg.ot_rate_weekend : r.ot_type === 'le' ? cfg.ot_rate_holiday : 1;
+      nightReg += n.reg; nightOt += n.ot;
+      nightPay += n.reg / 60 * hourlyRate * N.pct / 100 + n.ot / 60 * hourlyRate * (N.pct + N.otPct * dayRate) / 100;
+    }
     workUnits += r.work_unit || 0;
     if (r.ot_type === 'cuoi_tuan') otMinE += r.ot_min || 0;
     else if (r.ot_type === 'le') otMinH += r.ot_min || 0;
@@ -154,9 +191,10 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   const otSalary = (otPayWeekdayUnits / 60) * hourlyRate
                  + otH_e * hourlyRate * cfg.ot_rate_weekend
                  + otH_h * hourlyRate * cfg.ot_rate_holiday;
-  const gross = workSalary + paidLeaveSalary + otSalary + (cfg.allowance || 0);
+  const gross = workSalary + paidLeaveSalary + otSalary + nightPay + (cfg.allowance || 0);
 
   return {
+    ...(N.on ? { nightHours: round2(nightReg / 60), nightOtHours: round2(nightOt / 60), nightPay: round0(nightPay) } : {}),
     workUnits: round2(workUnits), paidLeaveDays: round2(paidLeaveDays),
     otHoursWeekday: round2(otH_w), otHoursWeekend: round2(otH_e), otHoursHoliday: round2(otH_h),
     otHoursTotal: round2(otH_w + otH_e + otH_h),

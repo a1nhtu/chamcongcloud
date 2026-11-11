@@ -10,6 +10,21 @@ function vnInstant(workDate, hhmm, addDays = 0) {
   return d;
 }
 
+// LÀM ĐÊM (Điều 106 BLLĐ 2019): 22:00 → 06:00 sáng hôm sau, giờ Việt Nam = 15:00Z → 23:00Z của CÙNG một ngày UTC.
+// Trả về số phút của khoảng [from, to] nằm trong khung làm đêm (khoảng dài nhiều ngày vẫn đúng).
+export function nightMinutes(from, to) {
+  if (from == null || to == null || from === '' || to === '') return 0;   // thiếu giờ vào / ra (new Date(null) = năm 1970 → không được tính)
+  const a = new Date(from).getTime(), b = new Date(to).getTime();
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 0;
+  const DAY = 24 * 3600000;
+  let total = 0;
+  for (let d = Math.floor(a / DAY) * DAY; d < b; d += DAY) {
+    const s = Math.max(a, d + 15 * 3600000), e = Math.min(b, d + 23 * 3600000);
+    if (e > s) total += e - s;
+  }
+  return Math.round(total / 60000);
+}
+
 // Mốc bắt đầu/kết thúc ca cho 1 ngày làm việc (xử lý ca đêm qua ngày)
 export function shiftBounds(workDate, shift) {
   const start = vnInstant(workDate, shift.start_time);

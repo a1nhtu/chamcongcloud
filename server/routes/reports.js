@@ -1095,6 +1095,9 @@ function buildReportRaw(type, from, to, filter) {
       // công ty có cả 2 kiểu: chỉ lấy NV chấm theo kiểu đang chọn (lương theo giờ và theo ca tính khác nhau)
       const pr = filter && filter.emode ? pt.rows.filter(({ pay }) => (pay.hourly ? 'hourly' : 'shift') === filter.emode) : pt.rows;
       const money = (n) => (n || 0).toLocaleString('vi-VN');
+      // Phụ cấp làm đêm (công tắc night_pay): thêm 2 cột trước Phụ cấp; tắt = bảng y như cũ
+      const NIGHT = pr.some(({ pay }) => pay.nightPay !== undefined);
+      const NIGHT_COLS = [{ key: 'nightgio', label: 'Giờ đêm', w: 9 }, { key: 'nightpay', label: 'Phụ cấp đêm', w: 12 }];
       if (HOURLY) {   // theo giờ: lương = tổng giờ × đơn giá giờ + phụ cấp
         const columns = [
           { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
@@ -1105,7 +1108,9 @@ function buildReportRaw(type, from, to, filter) {
           code: emp.code, name: emp.full_name, dept: emp.department || '',
           days: pay.daysWorked ?? pay.workUnits, gio: pay.totalHours ?? 0, rate: money(pay.hourlyRate),
           workpay: money(pay.workSalary), allow: money(pay.allowance), net: money(pay.net),
+          ...(NIGHT ? { nightgio: pay.nightHours ?? 0, nightpay: money(pay.nightPay) } : {}),
         }));
+        if (NIGHT) columns.splice(columns.length - 2, 0, ...NIGHT_COLS);
         return { title: `Bảng lương theo giờ ${payTitle}`, columns, rows };
       }
       const columns = [
@@ -1120,7 +1125,9 @@ function buildReportRaw(type, from, to, filter) {
         cong: pay.workUnits, phep: pay.paidLeaveDays, ot: pay.otHoursTotal,
         dayrate: money(pay.dailyRate), workpay: money(pay.workSalary), leavepay: money(pay.paidLeaveSalary),
         otpay: money(pay.otSalary), allow: money(pay.allowance), net: money(pay.net),
+        ...(NIGHT ? { nightgio: Math.round(((pay.nightHours || 0) + (pay.nightOtHours || 0)) * 100) / 100, nightpay: money(pay.nightPay) } : {}),
       }));
+      if (NIGHT) columns.splice(columns.length - 2, 0, ...NIGHT_COLS);
       return { title: `Bảng lương ${payTitle}`, columns, rows };
     }
 

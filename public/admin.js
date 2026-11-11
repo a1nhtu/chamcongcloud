@@ -3961,7 +3961,7 @@ async function pageSalary() {
   tbl.append(tb);
   const hint = el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, hourlyMode()
     ? 'Chế độ tính công theo giờ: Lương = Tổng giờ làm × đơn giá 1 giờ + phụ cấp.'
-    : 'Lương = Số công × đơn giá ngày + OT (giờ × đơn giá giờ × hệ số) + nghỉ phép có lương + phụ cấp. Đơn giá giờ = đơn giá ngày ÷ 8.');
+    : 'Lương = Số công × đơn giá ngày + OT (giờ × đơn giá giờ × hệ số) + nghỉ phép có lương + phụ cấp. Đơn giá giờ = đơn giá ngày ÷ số giờ chuẩn 1 ngày công (mặc định 8, đổi ở Cài đặt › Quy tắc tính công).');
   const howTo = canEdit ? el('div', { style: 'margin-bottom:8px;padding:9px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;font-size:13.5px' },
     '👉 Cài lương cho 1 người: bấm ', el('b', {}, 'Sửa'), ' ở cuối dòng nhân viên đó. Cài cho cả bộ phận (hoặc tất cả) một lần: bấm ', el('b', {}, '✎ Sửa hàng loạt'), ' ở góc trên.') : null;
   const bulkBtn = canEdit ? el('button', { class: 'btn sm', onclick: () => salaryBulkModal() }, '✎ Sửa hàng loạt') : null;
@@ -4034,17 +4034,19 @@ async function salaryPayrollView(tabs) {
     catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
     fromI.value = data.from; toI.value = data.to; dApply.synced();
     const hourly = data.mode === 'hourly';
+    const night = data.rows.some(({ pay }) => pay.nightPay !== undefined);   // đang bật Phụ cấp làm đêm
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = hourly
-      ? '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Tổng giờ</th><th>Đơn giá giờ</th><th>Lương giờ</th><th>Phụ cấp</th><th>Thực lĩnh</th><th></th></tr></thead>'
-      : '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Công</th><th>Phép</th><th>OT(g)</th><th>Đơn giá ngày</th><th>Lương công</th><th>Lương OT</th><th>Phụ cấp</th><th>Thực lĩnh</th><th></th></tr></thead>';
+      ? '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Tổng giờ</th><th>Đơn giá giờ</th><th>Lương giờ</th>' + (night ? '<th>Giờ đêm</th><th>Phụ cấp đêm</th>' : '') + '<th>Phụ cấp</th><th>Thực lĩnh</th><th></th></tr></thead>'
+      : '<thead><tr><th>Mã NV</th><th>Họ tên</th><th>Bộ phận</th><th>Công</th><th>Phép</th><th>OT(g)</th><th>Đơn giá ngày</th><th>Lương công</th><th>Lương OT</th>' + (night ? '<th>Giờ đêm</th><th>Phụ cấp đêm</th>' : '') + '<th>Phụ cấp</th><th>Thực lĩnh</th><th></th></tr></thead>';
     const tb = el('tbody');
-    if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: hourly ? 9 : 12 }, el('div', { class: 'empty' }, 'Chưa có nhân viên.'))));
+    if (!data.rows.length) tb.append(el('tr', {}, el('td', { colspan: (hourly ? 9 : 12) + (night ? 2 : 0) }, el('div', { class: 'empty' }, 'Chưa có nhân viên.'))));
     for (const { emp, pay } of data.rows) {
       const psBtn = btnSm('🧾 Phiếu lương', () => payslipModal(emp, pay, data));
       const cells = hourly
         ? [emp.code, emp.full_name, emp.department || '', pay.totalHours, money(pay.hourlyRate), money(pay.workSalary), money(pay.allowance), money(pay.net)]
         : [emp.code, emp.full_name, emp.department || '', pay.workUnits, pay.paidLeaveDays, pay.otHoursTotal, money(pay.dailyRate), money(pay.workSalary), money(pay.otSalary), money(pay.allowance), money(pay.net)];
+      if (night) cells.splice(cells.length - 2, 0, Math.round(((pay.nightHours || 0) + (pay.nightOtHours || 0)) * 100) / 100, money(pay.nightPay));
       const tr = el('tr', {});
       cells.forEach((c, i) => tr.append(el('td', i === 1 ? {} : {}, i === 1 ? el('b', {}, c) : String(c))));
       tr.append(el('td', {}, psBtn));
@@ -4073,6 +4075,7 @@ function payslipModal(emp, pay, ctx) {
     line('Số ngày có công', String(pay.daysWorked)),
     line('Đơn giá 1 giờ', money(pay.hourlyRate) + ' đ'),
     line('Lương theo giờ', money(pay.workSalary) + ' đ'),
+    ...(pay.nightPay ? [line(`Phụ cấp làm đêm (${pay.nightHours} giờ)`, money(pay.nightPay) + ' đ')] : []),
     line('Phụ cấp', money(pay.allowance) + ' đ'),
     line('THỰC LĨNH', money(pay.net) + ' đ', true),
   ] : [
@@ -4083,6 +4086,7 @@ function payslipModal(emp, pay, ctx) {
     line('Lương theo công', money(pay.workSalary) + ' đ'),
     line('Lương nghỉ phép', money(pay.paidLeaveSalary) + ' đ'),
     line(`Tăng ca (${pay.otHoursTotal} giờ)`, money(pay.otSalary) + ' đ'),
+    ...(pay.nightPay ? [line(`Phụ cấp làm đêm (${Math.round(((pay.nightHours || 0) + (pay.nightOtHours || 0)) * 100) / 100} giờ)`, money(pay.nightPay) + ' đ')] : []),
     line('Phụ cấp', money(pay.allowance) + ' đ'),
     line('THỰC LĨNH', money(pay.net) + ' đ', true),
   ];
@@ -8625,11 +8629,14 @@ async function pageSettings() {
   const otWdI = input('st-otwd', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekday ?? 1.5 });
   const otWkI = input('st-otwk', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekend ?? 2 });
   const otHoI = input('st-otho', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_holiday ?? 3 });
+  const nightChk = el('input', { type: 'checkbox', id: 'st-night', style: 'width:auto', ...(s.night_pay === '1' ? { checked: '' } : {}) });
+  const nightPctI = input('st-nightpct', { type: 'number', min: 0, max: 300, step: 1, value: s.night_pct ?? 30, style: 'width:80px' });
+  const nightOtPctI = input('st-nightotpct', { type: 'number', min: 0, max: 300, step: 1, value: s.night_ot_pct ?? 20, style: 'width:80px' });
   const hpdI = input('st-hpd', { type: 'number', min: 1, max: 24, step: 0.5, value: s.pay_hours_per_day ?? 8, style: 'width:90px' });
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value, pay_hours_per_day: hpdI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value, pay_hours_per_day: hpdI.value, night_pay: nightChk.checked, night_pct: nightPctI.value, night_ot_pct: nightOtPctI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -8674,7 +8681,10 @@ async function pageSettings() {
       el('div', {}, el('label', {}, 'Hệ số tăng ca (nhân với đơn giá giờ khi tính lương)'),
         el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px' }, field('Ngày thường', otWdI), field('Ngày cuối tuần', otWkI), field('Ngày lễ', otHoI)),
         el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Áp cho mọi nhân viên. Ai cần hệ số khác thì đặt riêng ở trang Lương (đặt riêng thì đổi ở đây không ảnh hưởng người đó).'),
-        el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap' }, el('span', {}, 'Số giờ chuẩn của 1 ngày công'), hpdI, el('span', { style: 'color:var(--muted);font-size:12.5px' }, 'giờ — đơn giá giờ = đơn giá ngày ÷ số này (mặc định 8; công ty làm ca 7,5 hoặc 12 giờ thì đổi cho đúng)'))),
+        el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap' }, el('span', {}, 'Số giờ chuẩn của 1 ngày công'), hpdI, el('span', { style: 'color:var(--muted);font-size:12.5px' }, 'giờ — đơn giá giờ = đơn giá ngày ÷ số này (mặc định 8; công ty làm ca 7,5 hoặc 12 giờ thì đổi cho đúng)')),
+        el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:10px;font-weight:600;color:var(--ink)' }, nightChk, 'Tính phụ cấp làm đêm (giờ làm từ 22:00 đến 06:00)'),
+        el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:6px;flex-wrap:wrap' }, el('span', {}, 'Giờ làm đêm trả thêm'), nightPctI, el('span', {}, '% đơn giá giờ · tăng ca vào ban đêm trả thêm nữa'), nightOtPctI, el('span', {}, '%')),
+        el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Mặc định TẮT (bảng lương như cũ). Bật thì bảng lương có thêm cột Giờ đêm và Phụ cấp đêm, tính từ giờ chấm vào / ra thật — không cần Tính lại công. Theo Điều 98 Bộ luật Lao động: làm đêm thêm ít nhất 30%; tăng ca ban đêm thêm 20% lương giờ ban ngày của ngày đó (ngày thường 200%, ngày nghỉ 270%, ngày lễ 390% khi hệ số tăng ca là 1,5 / 2 / 3). Ngày thường đã tăng ca ban ngày rồi tăng ca tiếp sang đêm thì luật tính 210% — phần mềm tính 200%, phần chênh cộng tay.')),
       el('div', {}, el('label', {}, 'Làm tròn (áp cho cả công ty)'),
         el('div', { style: 'display:grid;grid-template-columns:80px 1.3fr 1fr 1fr;gap:8px;align-items:center' },
           ...['', 'Kiểu', 'Mức', 'Làm tròn'].map((t) => el('span', { style: 'color:var(--muted);font-size:12px' }, t)),

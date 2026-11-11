@@ -31,6 +31,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       weekend_normal_depts: (() => { try { return JSON.parse(getSetting('weekend_normal_depts', '[]')) || []; } catch { return []; } })(),   // làm tròn LÊN đi trễ / về sớm theo khối phút (0 = không)
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       pay_hours_per_day: getSetting('pay_hours_per_day', '8'),
+      night_pay: getSetting('night_pay', '0'), night_pct: getSetting('night_pct', '30'), night_ot_pct: getSetting('night_ot_pct', '20'),
       ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
@@ -135,6 +136,13 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (!(Number.isFinite(v) && v > 0 && v <= 10)) return res.status(400).json({ error: 'Hệ số tăng ca phải từ 0,1 đến 10' });
       const old = parseFloat(getSetting(k, d));
       if (v !== old) db.prepare(`UPDATE salary_configs SET ${k} = ? WHERE ABS(${k} - ?) < 0.0001`).run(v, old);
+      setSetting(k, String(v));
+    }
+    if (b.night_pay != null) setSetting('night_pay', b.night_pay && b.night_pay !== '0' ? '1' : '0');
+    for (const k of ['night_pct', 'night_ot_pct']) {
+      if (b[k] == null) continue;
+      const v = parseFloat(b[k]);
+      if (!(Number.isFinite(v) && v >= 0 && v <= 300)) return res.status(400).json({ error: 'Phần trăm phụ cấp làm đêm phải từ 0 đến 300' });
       setSetting(k, String(v));
     }
     if (b.pay_hours_per_day != null) {
