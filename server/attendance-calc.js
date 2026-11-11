@@ -660,7 +660,8 @@ export function vnWeekday(workDate) {
   return dow === 0 ? 7 : dow;
 }
 
+// weekendDaysCsv = '' nghĩa là công ty bỏ tích HẾT ngày cuối tuần (không ngày nào) — chỉ null/undefined mới lấy mặc định CN
 export function isWeekendDay(workDate, weekendDaysCsv) {
-  const set = new Set((weekendDaysCsv || '7').split(',').map((x) => x.trim()).filter(Boolean));
+  const set = new Set(String(weekendDaysCsv ?? '7').split(',').map((x) => x.trim()).filter(Boolean));
   return set.has(String(vnWeekday(workDate)));
 }

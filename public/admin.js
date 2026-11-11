@@ -3718,7 +3718,7 @@ async function swapAddModal(done) {
   const workI = el('input', { type: 'date' }), offI = el('input', { type: 'date' });
   const noteI = el('input', { placeholder: 'Ghi chú (tuỳ chọn), VD: làm bù để nghỉ thứ 2 sau lễ' });
   const info = el('div', { class: 'map-hint' });
-  const wkSet = new Set(String(SETTINGS.weekend_days || '7').split(',').map((x) => +x.trim()));
+  const wkSet = new Set(String(SETTINGS.weekend_days ?? '7').split(',').map((x) => +x.trim()));
   const isWk = (d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return wkSet.has(w === 0 ? 7 : w); };
   const sync = () => {
     const a = workI.value, b = offI.value, parts = [];
@@ -4642,7 +4642,7 @@ function auditPanelEl(s) {
   const auWk = el('input', { type: 'checkbox', ...(s.audit_incl_weekend !== '0' ? { checked: '' } : {}) });
   const auHol = el('input', { type: 'checkbox', ...(s.audit_incl_holiday !== '0' ? { checked: '' } : {}) });
   // Chú thích đổi THEO Ô TÍCH (chỉ nói trạng thái đang chọn) + ghi chú hạn mức tuần
-  const wkName = (s.weekend_days || '7').split(',').map((x) => ({ 1: 'thứ 2', 2: 'thứ 3', 3: 'thứ 4', 4: 'thứ 5', 5: 'thứ 6', 6: 'thứ 7', 7: 'chủ nhật' }[x.trim()])).filter(Boolean).join(', ') || 'chủ nhật';
+  const wkName = String(s.weekend_days ?? '7').split(',').map((x) => ({ 1: 'thứ 2', 2: 'thứ 3', 3: 'thứ 4', 4: 'thứ 5', 5: 'thứ 6', 6: 'thứ 7', 7: 'chủ nhật' }[x.trim()])).filter(Boolean).join(', ') || 'cuối tuần';
   const wkHint = el('div', { class: 'map-hint', style: 'margin-top:2px' }), holHint = el('div', { class: 'map-hint', style: 'margin-top:2px' });
   const wkNote = el('span', { style: 'font-size:12.5px;color:var(--muted)' });
   const syncHints = () => {
@@ -8582,7 +8582,7 @@ async function pageSettings() {
   const panelProfile = (hasPerm('settings') || isMaster()) && !attOff() ? profilePanel(s) : null;   // chế độ tính công (gói cài đặt)
 
   // ----- Quy tắc tính công -----
-  const wkDays = new Set((s.weekend_days || '7').split(',').map(x => x.trim()).filter(Boolean));
+  const wkDays = new Set(String(s.weekend_days ?? '7').split(',').map(x => x.trim()).filter(Boolean));
   const wkBoxes = [1, 2, 3, 4, 5, 6, 7].map(d => el('label', { style: 'display:flex;align-items:center;gap:5px;font-weight:600;color:var(--ink)' },
     el('input', { type: 'checkbox', class: 'wk-day', value: d, style: 'width:auto', ...(wkDays.has(String(d)) ? { checked: '' } : {}) }),
     { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' }[d]));
