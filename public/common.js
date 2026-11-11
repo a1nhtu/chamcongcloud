@@ -82,7 +82,170 @@ export function el(tag, attrs = {}, ...kids) {
     else if (v != null) n.setAttribute(k, v);
   }
   for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : document.createTextNode(kid));
+  if (tag === 'input') viDate(n);
   return n;
+}
+
+/* ---------- Ô chọn NGÀY / THÁNG tiếng Việt trên MỌI máy (Anh 11/11/2026) ----------
+ * Ô gốc <input type="date|month"> hiện theo ngôn ngữ của Chrome: máy khách Chrome tiếng Anh ra "November 2026", lịch "Su Mo Tu…".
+ * viDate() đổi ô đó thành ô chữ hiện "01/11/2026" / "Tháng 11/2026" + lịch riêng (T2 … CN, Tháng 1 … 12) — KHÔNG đổi cách code dùng:
+ * .value vẫn đọc / ghi "YYYY-MM-DD" / "YYYY-MM", chọn xong vẫn phát sự kiện input + change, thuộc tính min / max vẫn dùng được.
+ * Gõ tay được: 1/11/2026, 01-11-2026, 11/2026 … (rời ô hoặc Enter thì nhận). Ô tạo bằng HTML (innerHTML) cũng tự đổi (MutationObserver). */
+const VI_NATIVE = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+const VD_ICON = "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='2'%3E%3Crect x='3' y='5' width='18' height='16' rx='2'/%3E%3Cpath d='M3 10h18M8 3v4M16 3v4'/%3E%3C/svg%3E\")";
+const pad2 = (x) => String(x).padStart(2, '0');
+const vdNorm = (kind, v) => {
+  v = String(v ?? '').trim();
+  if (kind === 'month') return /^\d{4}-\d{2}$/.test(v) ? v : /^\d{4}-\d{2}-\d{2}$/.test(v) ? v.slice(0, 7) : '';
+  return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : '';
+};
+const vdShow = (kind, iso) => (!iso ? '' : kind === 'month' ? `Tháng ${+iso.slice(5, 7)}/${iso.slice(0, 4)}` : `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`);
+const vdValid = (y, m, d) => m >= 1 && m <= 12 && (d == null || (d >= 1 && d <= new Date(Date.UTC(y, m, 0)).getUTCDate()));
+function vdParse(kind, txt) {   // chữ gõ tay → ISO ('' = bỏ trống, null = không hiểu)
+  const t = String(txt || '').trim().replace(/^tháng\s*/i, '');
+  if (!t) return '';
+  if (/^\d{4}-\d{2}(-\d{2})?$/.test(t)) return vdNorm(kind, t) || null;
+  const p = t.split(/[^\d]+/).filter(Boolean).map(Number);
+  if (kind === 'month') {
+    const [m, y] = p.length >= 3 ? [p[1], p[2]] : p;
+    return p.length >= 2 && y > 999 && vdValid(y, m) ? `${y}-${pad2(m)}` : null;
+  }
+  if (p.length < 2) return null;
+  const y = p[2] ? (p[2] < 100 ? 2000 + p[2] : p[2]) : +todayMonth().slice(0, 4);
+  return vdValid(y, p[1], p[0]) ? `${y}-${pad2(p[1])}-${pad2(p[0])}` : null;
+}
+export function viDate(inp) {
+  if (!inp || inp._viKind || !(inp instanceof HTMLInputElement)) return inp;
+  const kind = (inp.getAttribute('type') || '').toLowerCase();
+  if (kind !== 'date' && kind !== 'month') return inp;
+  let iso = vdNorm(kind, VI_NATIVE.get.call(inp) || inp.getAttribute('value'));
+  inp._viKind = kind;
+  inp.type = 'text';
+  inp.classList.add('vi-date');
+  inp.autocomplete = 'off';
+  if (!inp.getAttribute('size')) inp.size = kind === 'month' ? 13 : 10;
+  if (matchMedia('(pointer: coarse)').matches) inp.inputMode = 'none';   // điện thoại: bấm là mở lịch, không bật bàn phím
+  if (!inp.placeholder) inp.placeholder = kind === 'month' ? 'Tháng ../....' : 'dd/mm/yyyy';
+  Object.assign(inp.style, { backgroundImage: VD_ICON, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 9px center', paddingRight: '30px', cursor: 'pointer' });
+  Object.defineProperty(inp, 'value', {
+    configurable: true,
+    get: () => iso,
+    set: (v) => { iso = vdNorm(kind, v); VI_NATIVE.set.call(inp, vdShow(kind, iso)); },
+  });
+  VI_NATIVE.set.call(inp, vdShow(kind, iso));
+  // gõ tay: đổi chữ → ISO TRƯỚC mọi bộ nghe 'change' khác (pha capture chạy trước)
+  const take = () => {
+    const txt = VI_NATIVE.get.call(inp);
+    if (txt === vdShow(kind, iso)) return;
+    const v = vdParse(kind, txt);
+    if (v === null) { VI_NATIVE.set.call(inp, vdShow(kind, iso)); return; }
+    inp.value = v;
+  };
+  inp.addEventListener('change', take, true);
+  inp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { take(); vdClose(); }
+    else if (e.key === 'Escape') vdClose();
+    else if (e.key === 'ArrowDown' && e.altKey) vdOpen(inp);
+  });
+  inp.addEventListener('click', () => { if (!inp.disabled && !inp.readOnly) vdOpen(inp); });
+  return inp;
+}
+
+let vdBox = null, vdFor = null;
+function vdClose() { if (vdBox) { vdBox.remove(); vdBox = null; vdFor = null; } }
+function vdPick(inp, v) {
+  inp.value = v;
+  inp.dispatchEvent(new Event('input', { bubbles: true }));
+  inp.dispatchEvent(new Event('change', { bubbles: true }));
+  vdClose();
+}
+function vdOpen(inp) {
+  if (vdFor === inp) return;
+  vdClose();
+  const kind = inp._viKind;
+  const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const min = vdNorm(kind, inp.getAttribute('min')), max = vdNorm(kind, inp.getAttribute('max'));
+  const off = (v) => (min && v < min) || (max && v > max);
+  const cur = inp.value || (kind === 'month' ? today.slice(0, 7) : today);
+  let y = +cur.slice(0, 4), m = +cur.slice(5, 7);   // tháng / năm đang xem
+  let view = kind === 'month' ? 'months' : 'days';
+  const box = vdBox = el('div', { class: 'vd-pop' });
+  vdFor = inp;
+  box.addEventListener('mousedown', (e) => e.preventDefault());   // bấm trong lịch không làm ô mất focus
+  const btn = (txt, cls, fn, dis) => {
+    const b = el('button', { type: 'button', class: cls }, txt);
+    if (dis) b.disabled = true; else b.addEventListener('click', (e) => { e.stopPropagation(); fn(); });
+    return b;
+  };
+  const draw = () => {
+    box.innerHTML = '';
+    const head = el('div', { class: 'vd-head' });
+    if (view === 'days') {
+      head.append(btn('‹', 'vd-nav', () => { if (--m < 1) { m = 12; y--; } draw(); }),
+        btn(`Tháng ${m} / ${y}`, 'vd-title', () => { view = 'months'; draw(); }),
+        btn('›', 'vd-nav', () => { if (++m > 12) { m = 1; y++; } draw(); }));
+      const grid = el('div', { class: 'vd-grid' });
+      for (const w of ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN']) grid.append(el('div', { class: 'vd-wd' + (w === 'CN' ? ' vd-cn' : '') }, w));
+      const first = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7;   // thứ 2 đứng đầu tuần
+      const n = new Date(Date.UTC(y, m, 0)).getUTCDate();
+      for (let i = 0; i < first; i++) grid.append(el('div'));
+      for (let d = 1; d <= n; d++) {
+        const v = `${y}-${pad2(m)}-${pad2(d)}`;
+        const wd = (first + d - 1) % 7;
+        grid.append(btn(String(d), 'vd-d' + (v === inp.value ? ' vd-sel' : '') + (v === today ? ' vd-today' : '') + (wd === 6 ? ' vd-cn' : wd === 5 ? ' vd-t7' : ''), () => vdPick(inp, v), off(v)));
+      }
+      box.append(head, grid, el('div', { class: 'vd-foot' },
+        btn('Hôm nay', 'vd-link', () => vdPick(inp, today), off(today)), btn('Xoá', 'vd-link', () => vdPick(inp, ''))));
+    } else {
+      head.append(btn('‹', 'vd-nav', () => { y--; draw(); }), btn(`Năm ${y}`, 'vd-title', () => {}), btn('›', 'vd-nav', () => { y++; draw(); }));
+      const grid = el('div', { class: 'vd-mgrid' });
+      for (let k = 1; k <= 12; k++) {
+        const v = `${y}-${pad2(k)}`;
+        const sel = kind === 'month' ? v === inp.value : v === (inp.value || '').slice(0, 7);
+        grid.append(btn('Tháng ' + k, 'vd-m' + (sel ? ' vd-sel' : '') + (v === today.slice(0, 7) ? ' vd-today' : ''),
+          () => { if (kind === 'month') vdPick(inp, v); else { m = k; view = 'days'; draw(); } },
+          kind === 'month' && off(v)));
+      }
+      box.append(head, grid);
+      if (kind === 'month') box.append(el('div', { class: 'vd-foot' }, btn('Tháng này', 'vd-link', () => vdPick(inp, today.slice(0, 7)), off(today.slice(0, 7))), btn('Xoá', 'vd-link', () => vdPick(inp, ''))));
+    }
+  };
+  draw();
+  document.body.append(box);
+  const r = inp.getBoundingClientRect(), bw = box.offsetWidth, bh = box.offsetHeight;
+  box.style.left = Math.max(6, Math.min(r.left, innerWidth - bw - 6)) + 'px';
+  box.style.top = (r.bottom + bh + 6 > innerHeight && r.top - bh - 6 > 0 ? r.top - bh - 4 : r.bottom + 4) + 'px';
+}
+if (typeof document !== 'undefined' && !window._viDateOn) {
+  window._viDateOn = true;
+  // bấm ra ngoài / cuộn trang / đổi cỡ cửa sổ → đóng lịch
+  document.addEventListener('mousedown', (e) => { if (vdBox && !vdBox.contains(e.target) && e.target !== vdFor) vdClose(); }, true);
+  addEventListener('scroll', (e) => { if (vdBox && !vdBox.contains(e.target)) vdClose(); }, true);
+  addEventListener('resize', vdClose);
+  const scan = (root) => { if (root.querySelectorAll) for (const i of root.querySelectorAll('input[type=date],input[type=month]')) viDate(i); };
+  const st = document.createElement('style');
+  st.textContent = `.vd-pop{position:fixed;z-index:100000;background:#fff;border:1px solid #e4e7ec;border-radius:12px;box-shadow:0 12px 32px rgba(16,24,40,.18);padding:10px;width:264px;font:14px 'Segoe UI',system-ui,sans-serif;color:#1d2939}
+.vd-pop button{border:none;background:none;font:inherit;color:inherit;cursor:pointer;border-radius:8px;padding:0}
+.vd-pop button:disabled{color:#d0d5dd;cursor:default}
+.vd-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.vd-nav{width:32px;height:30px;font-size:20px!important;line-height:1}.vd-nav:hover,.vd-title:hover{background:#f2f4f7}
+.vd-title{font-weight:700;padding:5px 10px!important}
+.vd-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.vd-wd{font-size:12px;font-weight:700;color:#667085;padding:4px 0}
+.vd-d{height:32px}.vd-d:hover:not(:disabled),.vd-m:hover:not(:disabled){background:#fff1e6}
+.vd-t7{color:#b45309!important}.vd-cn{color:#dc2626!important}
+.vd-today{box-shadow:inset 0 0 0 1px var(--brand,#f97316)}
+.vd-sel{background:var(--brand,#f97316)!important;color:#fff!important;font-weight:700}
+.vd-mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.vd-m{height:38px}
+.vd-foot{display:flex;justify-content:space-between;margin-top:8px;border-top:1px solid #f2f4f7;padding-top:6px}
+.vd-link{color:var(--brand,#f97316)!important;font-weight:700;padding:4px 8px!important}`;
+  const boot = () => {
+    document.head.append(st);
+    scan(document);
+    new MutationObserver((ms) => { for (const mu of ms) for (const nd of mu.addedNodes) if (nd.nodeType === 1) { if (nd.matches('input[type=date],input[type=month]')) viDate(nd); else scan(nd); } })
+      .observe(document.documentElement, { childList: true, subtree: true });
+  };
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
 }
 
 /* ---------- Định dạng thời gian (chuẩn, KHÔNG bị lỗi 1899) ---------- */
