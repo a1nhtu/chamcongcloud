@@ -665,7 +665,7 @@ const empPicked = new Set();                      // id NV đang tích chọn (x
 let empSort = null;   // { key, dir: 1 tăng | -1 giảm } — null = mặc định: nhóm theo bộ phận
 const empDeptClosed = new Set(); let _empTreeInit = false;   // mặc định THU GỌN mọi bộ phận có cấp con
 // Cột sắp xếp được ở bảng Nhân viên: [khoá, nhãn, gợi ý]
-const EMP_SORT_COLS = [['code', 'Mã'], ['device_pin', 'Số ID', 'Số ID trên máy chấm công'], ['full_name', 'Họ tên'], ['position', 'Chức danh'],
+const EMP_SORT_COLS = [['code', 'Mã'], ['device_pin', 'Số ID', 'Số ID trên máy chấm công'], ['full_name', 'Họ tên'], ['department', 'Bộ phận', 'Bộ phận nhân viên đang thuộc'], ['position', 'Chức danh'],
   ['username', 'Tài khoản'], ['role', 'Quyền'], ['active', 'TT']];
 // So sánh 2 NV theo cột: số so như số (2 < 10), chữ so tiếng Việt; ô trống luôn nằm CUỐI dù tăng hay giảm
 function empCompare({ key, dir }) {
@@ -769,10 +769,10 @@ async function pageEmployees() {
       const allow = sel ? new Set(sel.names) : null;
       const q = empSearch.trim().toLowerCase();
       // Cột Số ID máy chấm công: chỉ hiện khi đang dùng máy chấm công (chỉ chấm định vị/điện thoại thì ẩn)
-      const showPin = deviceEnabled(), NCOL = (showPin ? 8 : 7) + (canEdit ? 1 : 0);
+      const showPin = deviceEnabled(), NCOL = (showPin ? 9 : 8) + (canEdit ? 1 : 0);
       if (empSort && empSort.key === 'device_pin' && !showPin) empSort = null;
       const list = rows.filter((e) => (!allow || allow.has(e.department || NONE))
-        && (!q || [e.code, e.full_name, e.username, e.device_pin, e.position].some((v) => String(v || '').toLowerCase().includes(q))))
+        && (!q || [e.code, e.full_name, e.username, e.device_pin, e.position, e.department].some((v) => String(v || '').toLowerCase().includes(q))))
         .sort(empSort ? empCompare(empSort) : (x, y) => (orderOf.get(x.department || NONE) ?? 9999) - (orderOf.get(y.department || NONE) ?? 9999) || x.full_name.localeCompare(y.full_name, 'vi'));
       countLbl.innerHTML = '';
       countLbl.append(list.length + ' nhân viên' + (sel ? ' · ' + sel.label : ''));
@@ -825,6 +825,7 @@ async function pageEmployees() {
           el('td', {}, el('b', {}, e.full_name),
             e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px', title: 'Tự tạo khi đăng ký vân tay trên máy — bổ sung thông tin rồi lưu' }, 'nháp từ máy') : '',
             (e.device_admin_on || []).length ? el('span', { class: 'pill', style: 'margin-left:6px;background:#fdf0df;color:#a25a08', title: 'Quản trị MÁY chấm công (vào được menu máy) tại: ' + e.device_admin_on.join(', ') }, '👑 QT máy') : ''),
+          el('td', {}, e.department || el('span', { class: 'muted' }, '—')),   // cột Bộ phận (Anh 11/11/2026)
           el('td', {}, e.position || '—'),
           el('td', {}, e.username),
           el('td', {}, e.audit_only && !isInspector() ? el('span', { class: 'pill', style: 'background:#fef3c7;color:#92400e' }, '🔍 Kiểm tra · Ảo ' + (+e.audit_only || 1)) : roleLabel(e.role)),
