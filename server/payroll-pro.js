@@ -5,7 +5,7 @@
 //     · pay_items (khoản cố định / nhập theo kỳ) · pay_formula (công thức) · pay_approve (gửi duyệt) · pay_app_slip (NV xem phiếu trên app)
 //   · chỉ ghi vào bảng riêng pay_* (db.js), không ghi vào chấm công / salary_configs (trừ nút "Lấy lương từ hợp đồng" do người dùng bấm)
 import { db, getSetting, setSetting, EMP_IN_PERIOD, adminAttWhere, deptWithChildren } from './db.js';
-import { payPeriod, computePayrollForEmployee, getSalaryConfig } from './payroll-calc.js';
+import { payPeriod, computePayrollForEmployee, getSalaryConfig, hoursPerDay } from './payroll-calc.js';
 import { virtualOt } from './virtual-att.js';
 import { leaveTypeOf, leaveDaysIn } from './leave-quota.js';
 import { userError } from './util.js';
@@ -456,7 +456,7 @@ export function computeProRows(period, opts = {}) {
     const lt = late.get(e.id) || {};
     const slip = computeSlip(base, {
       params, flags, profile: prof.get(e.id) || { ins_on: 1, tax_mode: 'progressive', dependents: 0 },
-      basic: cfg.basic_salary || 0, workDays: cfg.working_days_per_month || 26,
+      basic: cfg.basic_salary || 0, workDays: cfg.working_days_per_month || 26, hoursPerDay: hoursPerDay(),
       comps: empComps, periodItems: items.get(e.id) || {}, advance: adv.get(e.id) || 0,
       vars: {
         DI_TRE_PHUT: lt.lm || 0, DI_TRE_LAN: lt.ln || 0, VE_SOM_PHUT: lt.em || 0, VE_SOM_LAN: lt.en || 0,

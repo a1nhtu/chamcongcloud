@@ -48,7 +48,8 @@ export function verifyPassword(pw, hash) {
 
 export function signToken(employee) {
   return jwt.sign(
-    { id: employee.id, code: employee.code, role: employee.role, name: employee.full_name },
+    // pv = số lần đã đổi mật khẩu lúc cấp phiên: đổi mật khẩu (tự đổi / quản lý đặt lại) thì các phiên cũ bị từ chối
+    { id: employee.id, code: employee.code, role: employee.role, name: employee.full_name, pv: employee.pw_ver || 0 },
     getSecret(),
     { expiresIn: '30d' }
   );
@@ -90,6 +91,7 @@ export function authRequired(req, res, next) {
     }
     const emp = db.prepare('SELECT * FROM employees WHERE id = ? AND active = 1').get(payload.id);
     if (!emp) return res.status(401).json({ error: 'Tài khoản không hợp lệ' });
+    if ((payload.pv || 0) !== (emp.pw_ver || 0)) return res.status(401).json({ error: 'Mật khẩu đã đổi — vui lòng đăng nhập lại' });
     req.user = emp;
     next();
   } catch {

@@ -433,7 +433,6 @@ export function kitchenScope(given) {
   for (const k of db.prepare("SELECT * FROM meal_kitchens WHERE screen_key <> ''").all()) if (same(k.screen_key)) return { kitchen: k };
   return null;
 }
-export const kitchenKeyOk = (given) => kitchenScope(given) != null;
 
 // Lượt quẹt mới (id > sinceId) trong 3 giờ qua, mỗi lượt gắn tên NV + món đã chọn (hoặc "có đăng ký ăn") của đúng bữa ăn lượt quẹt đó thuộc về.
 // Lượt quẹt ngoài mọi khung giờ chốt không phải bữa ăn → bỏ qua (nhưng vẫn đẩy `last_id` lên để lần sau không quét lại).

@@ -347,7 +347,7 @@ export function registerEmployeeRoutes(r, { need }) {
           if (sets.length) { args.push(existing.id); db.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE id=?`).run(...args); }
           if (sets.includes('device_pin=?')) relinkSafe(existing.id, pin);
           if (name || sets.includes('device_pin=?')) savedPins.push(sets.includes('device_pin=?') ? pin : existing.device_pin);
-          if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(pwHash(cellStr(row, 10)), existing.id);
+          if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=?, pw_ver=IFNULL(pw_ver,0)+1 WHERE id=?').run(pwHash(cellStr(row, 10)), existing.id);
           if (basic > 0) setBasicSalary(existing.id, basic);
           updated++;
         }
@@ -395,7 +395,7 @@ export function registerEmployeeRoutes(r, { need }) {
         newPerms,
         b.active != null ? (b.active ? 1 : 0) : emp.active, emp.id);
       if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
-      if (b.password) db.prepare('UPDATE employees SET password_hash=? WHERE id=?').run(hashPassword(b.password), emp.id);
+      if (b.password) db.prepare('UPDATE employees SET password_hash=?, pw_ver=IFNULL(pw_ver,0)+1 WHERE id=?').run(hashPassword(b.password), emp.id);
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
       saveLeaveFields(emp.id, b);
       saveAuditOnly(req.user, emp.id, b);

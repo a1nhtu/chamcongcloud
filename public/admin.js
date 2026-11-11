@@ -3543,9 +3543,10 @@ async function empMultiPicker(emps, maxH = 260) {
 /* ---------- CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…) ---------- */
 // Trong khoảng ngày áp dụng, nhân viên được đến muộn / về sớm số phút đã khai — không tính trễ/sớm, không trừ công.
 const PRIV_PRESETS = [
-  ['Mang thai từ tháng 7 — về sớm 60 phút', 'Mang thai', { early_min: 60 }],
+  ['Mang thai — về sớm 60 phút', 'Mang thai', { early_min: 60 }],
   ['Nuôi con dưới 12 tháng — 30 phút giữa giờ + 30 phút cuối ca', 'Nuôi con nhỏ', { mid_out_min: 30, early_min: 30 }],
   ['Nuôi con dưới 12 tháng — đến muộn 30 + về sớm 30', 'Nuôi con nhỏ', { late_min: 30, early_min: 30 }],
+  ['Hành kinh — nghỉ 30 phút (về sớm cuối ca)', 'Hành kinh', { early_min: 30 }],
 ];
 const privTxt = (p) => [['Đến muộn', p.late_min], ['Về sớm trước nghỉ trưa', p.mid_out_min], ['Đến muộn sau nghỉ trưa', p.mid_in_min], ['Về sớm cuối ca', p.early_min]]
   .filter(([, v]) => v > 0).map(([k, v]) => `${k} ${v}'`).join(' · ');
@@ -3585,7 +3586,7 @@ async function pagePrivileges() {
       el('td', {}, el('div', { style: 'display:flex;gap:6px' }, btnSm('Sửa', () => privModal(r)), del))));
   }
   setMain(head('Chế độ ưu đãi', back, addBtn),
-    el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Lao động nữ mang thai từ tháng thứ 7 (tháng thứ 6 nếu làm nghề nặng nhọc / vùng khó khăn) và nuôi con dưới 12 tháng được giảm 60 phút mỗi ngày, vẫn hưởng đủ lương. Khai số phút ở đúng vị trí: đến muộn đầu ca, về sớm trước nghỉ trưa, đến muộn sau nghỉ trưa, về sớm cuối ca — phần nằm trong số phút này không tính trễ/sớm và không trừ công. Nghỉ hẳn thai sản thì thêm đơn loại "Thai sản" ở Đơn từ.'),
+    el('div', { class: 'map-hint', style: 'margin:-6px 0 10px' }, 'Theo Điều 137 Bộ luật Lao động 2019 (đều hưởng đủ lương): lao động nữ làm việc nặng nhọc, độc hại khi mang thai được giảm 1 giờ làm việc mỗi ngày, tới khi con đủ 12 tháng · nuôi con dưới 12 tháng được nghỉ 60 phút mỗi ngày · thời gian hành kinh được nghỉ 30 phút mỗi ngày. (Mang thai từ tháng thứ 7 — tháng thứ 6 ở vùng cao, vùng sâu, vùng xa, biên giới, hải đảo — và nuôi con dưới 12 tháng: không xếp làm đêm, làm thêm giờ, đi công tác xa.) Khai số phút ở đúng vị trí: đến muộn đầu ca, về sớm trước nghỉ trưa, đến muộn sau nghỉ trưa, về sớm cuối ca — phần nằm trong số phút này không tính trễ/sớm và không trừ công. Nghỉ hẳn thai sản thì thêm đơn loại "Thai sản" ở Đơn từ.'),
     el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 async function privModal(row) {
@@ -3594,7 +3595,7 @@ async function privModal(row) {
   if (!edit) { try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); } }
   const pick = edit ? null : await empMultiPicker(emps, 200);
   const picked = pick ? pick.picked : new Set();
-  const kindSel = el('select', {}, ...['Mang thai', 'Nuôi con nhỏ', 'Khác'].map((k) => el('option', { value: k, ...(row && row.kind === k ? { selected: '' } : {}) }, k)));
+  const kindSel = el('select', {}, ...['Mang thai', 'Nuôi con nhỏ', 'Hành kinh', 'Khác'].map((k) => el('option', { value: k, ...(row && row.kind === k ? { selected: '' } : {}) }, k)));
   const fromI = el('input', { type: 'date', value: row ? row.from_date : todayVN() });
   const toI = el('input', { type: 'date', value: row ? row.to_date || '' : '' });
   const num = (v) => el('input', { type: 'number', min: 0, max: 480, step: 5, value: v || 0 });
@@ -8418,7 +8419,8 @@ async function pageSettings() {
   const newP = input('st-new', { type: 'password' });
   const savePw = el('button', { class: 'btn' }, 'Đổi mật khẩu');
   savePw.onclick = async () => {
-    try { await api('/auth/change-password', { method: 'POST', body: { oldPassword: oldP.value, newPassword: newP.value } }); toast('Đã đổi mật khẩu', 'ok'); oldP.value = newP.value = ''; }
+    try { const r = await api('/auth/change-password', { method: 'POST', body: { oldPassword: oldP.value, newPassword: newP.value } }); if (r && r.token) setToken(r.token, rememberLogin());   // đổi mật khẩu → phiên cũ hết hiệu lực, dùng phiên mới máy chủ vừa cấp
+      toast('Đã đổi mật khẩu — các máy khác đang đăng nhập tài khoản này phải đăng nhập lại', 'ok'); oldP.value = newP.value = ''; }
     catch (e) { toast(e.message, 'err'); }
   };
 
@@ -8623,10 +8625,11 @@ async function pageSettings() {
   const otWdI = input('st-otwd', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekday ?? 1.5 });
   const otWkI = input('st-otwk', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_weekend ?? 2 });
   const otHoI = input('st-otho', { type: 'number', min: 0.1, max: 10, step: 0.1, value: s.ot_rate_holiday ?? 3 });
+  const hpdI = input('st-hpd', { type: 'number', min: 1, max: 24, step: 0.5, value: s.pay_hours_per_day ?? 8, style: 'width:90px' });
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value, pay_hours_per_day: hpdI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -8670,7 +8673,8 @@ async function pageSettings() {
           wkNormBox)),
       el('div', {}, el('label', {}, 'Hệ số tăng ca (nhân với đơn giá giờ khi tính lương)'),
         el('div', { style: 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px' }, field('Ngày thường', otWdI), field('Ngày cuối tuần', otWkI), field('Ngày lễ', otHoI)),
-        el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Áp cho mọi nhân viên. Ai cần hệ số khác thì đặt riêng ở trang Lương (đặt riêng thì đổi ở đây không ảnh hưởng người đó).')),
+        el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Áp cho mọi nhân viên. Ai cần hệ số khác thì đặt riêng ở trang Lương (đặt riêng thì đổi ở đây không ảnh hưởng người đó).'),
+        el('div', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px;flex-wrap:wrap' }, el('span', {}, 'Số giờ chuẩn của 1 ngày công'), hpdI, el('span', { style: 'color:var(--muted);font-size:12.5px' }, 'giờ — đơn giá giờ = đơn giá ngày ÷ số này (mặc định 8; công ty làm ca 7,5 hoặc 12 giờ thì đổi cho đúng)'))),
       el('div', {}, el('label', {}, 'Làm tròn (áp cho cả công ty)'),
         el('div', { style: 'display:grid;grid-template-columns:80px 1.3fr 1fr 1fr;gap:8px;align-items:center' },
           ...['', 'Kiểu', 'Mức', 'Làm tròn'].map((t) => el('span', { style: 'color:var(--muted);font-size:12px' }, t)),

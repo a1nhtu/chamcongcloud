@@ -1,111 +1,60 @@
-# Digiplus — Hệ thống chấm công bằng điện thoại (ảnh + GPS)
+# Digiplus Chấm Công
 
-Web app tự chủ cho **Digiplus**: nhân viên chấm công trên **điện thoại** (chụp ảnh selfie + định vị GPS), quản lý theo dõi & xuất báo cáo trên **máy tính**. Không phụ thuộc Google Sheet/Drive — toàn bộ dữ liệu do Digiplus sở hữu.
+Phần mềm chấm công cho doanh nghiệp Việt Nam của **Digiplus**: nhân viên chấm bằng **điện thoại** (ảnh + GPS) hoặc **máy chấm công**,
+quản lý xem công, phân ca, tính lương và xuất báo cáo trên trình duyệt. Dữ liệu nằm trên máy của chính công ty (SQLite), không phụ thuộc
+dịch vụ bên ngoài.
 
-## Tính năng
+## Làm được gì
 
-**App nhân viên (PWA — cài về màn hình như app):**
-- Đăng nhập theo tài khoản nhân viên; đồng hồ + ngày realtime.
-- **Vào ca / Ra ca**: chụp ảnh xác nhận + lấy GPS, tính khoảng cách tới văn phòng, cảnh báo *đi muộn* và *chấm ngoài văn phòng*.
-- **Báo cáo**: ngày công / tổng giờ / số lần đi muộn.
-- **Đơn từ**: gửi đơn nghỉ phép / công tác, xem trạng thái duyệt.
-- **Bảng công**: xem chi tiết vào/ra/giờ theo tháng.
+- **Chấm công điện thoại** (PWA, cài về màn hình như app): chụp ảnh đóng dấu giờ + địa chỉ, kiểm tra phạm vi chi nhánh, khoá thiết bị chống chấm hộ.
+- **Máy chấm công**: ZKTeco (tự đẩy ADMS hoặc kết nối TCP/IP), Hikvision, Union / Virdi, máy AI — nhận lượt chấm, đồng bộ nhân viên /
+  vân tay / khuôn mặt giữa các máy, mở cửa từ xa, hẹn giờ khởi động lại.
+- **Ca & phân ca**: ca ngày / ca đêm / ca gãy, lịch trình xoay ca, phân ca theo ngày hoặc khoảng ngày, nhập - xuất Excel, nhân viên tự đăng ký ca.
+- **Tính công**: đi trễ, về sớm, tăng ca (ngày thường / ngày nghỉ / lễ), làm bù, chế độ ưu đãi (thai sản, nuôi con nhỏ), đơn từ và phép năm,
+  sửa công tay có nhật ký.
+- **Báo cáo**: bảng công ngang, ký hiệu, tổng hợp, chi tiết, đi trễ, tăng ca, giờ công… xem trước và xuất Excel; mẫu báo cáo riêng.
+- **Lương**: bảng lương cơ bản; phân hệ Tiền lương nâng cao (thành phần lương, bảo hiểm, thuế TNCN, phiếu lương trên app) bật bằng công tắc.
+- **Nhân sự** (hồ sơ, hợp đồng, thuyên chuyển, nghỉ việc) và **Suất ăn** (đăng ký ăn, màn hình bếp, định lượng nguyên liệu) — bật bằng công tắc.
+- **Vận hành**: phân quyền chi tiết, nhật ký thao tác, sao lưu tự động, chuyển máy bằng 1 file, tự cập nhật khi có bản mới,
+  chuyển dữ liệu từ Wise Eye / Ronald Jack, máy chủ nhiều công ty.
 
-**Trang quản lý `/admin` (Admin / Quản lý):**
-- Tổng quan hôm nay: số đã chấm/chưa chấm/đi muộn/ngoài VP + bảng kèm **ảnh chấm công**.
-- Quản lý **nhân viên** & **phân quyền** (Admin / Quản lý / Nhân viên).
-- Cấu hình **ca làm** (giờ vào/ra, cho phép muộn, ngày làm) & **chi nhánh/vị trí** (toạ độ + bán kính).
-- **Duyệt / từ chối đơn từ**.
-- **Bảng công** theo tháng + **Xuất Excel**.
+## Cài cho khách
 
-> README này chỉ mô tả phần lõi (chấm công điện thoại + trang quản lý). Các phần thêm sau — máy chấm công ZKTeco / Hikvision / Union, phân ca, tính lương, nhân sự, suất ăn, máy chủ nhiều công ty, tự cập nhật — xem `docs/CAU-TRUC-CODE.md` và các trang trong `HuongDan/`.
+Dùng bộ cài đóng sẵn (GitHub Release `base` của repo này, CI tự đóng mỗi lần lên bản):
 
-## Yêu cầu
-- Node.js **22.13 trở lên** (bộ cài cho khách đóng kèm Node 24). Node 20 KHÔNG chạy được vì app dùng SQLite tích hợp sẵn `node:sqlite`.
+| Bộ cài | Dùng khi |
+|---|---|
+| `DigiplusChamCong-Setup.exe` (hoặc `-Setup.zip`) | Cài trên máy tính Windows của khách, kiểu Next – Next |
+| `DigiplusChamCong-lan.zip` | Chỉ dùng trong mạng nội bộ |
+| `DigiplusChamCong-base.zip` | Bản gốc có tunnel, dùng để dựng bản có tên miền riêng cho khách |
+| `DigiplusChamCong-linux.tar.gz` | Máy chủ Linux (cài 1 lệnh, chạy bằng systemd) |
 
-## Chạy thử (local)
+Hướng dẫn cài đặt và sử dụng: thư mục `HuongDan/` (đăng tại trang hướng dẫn của Digiplus). Phần mềm cần **kích hoạt bản quyền** theo mã máy.
+Liên hệ Digiplus: **0372 669 992**.
+
+## Cho người lập trình
+
+Yêu cầu: **Node.js 22.13 trở lên** (bộ cài đóng kèm Node 24; Node 20 không chạy được vì app dùng `node:sqlite`).
+
 ```bash
 npm install
-npm start
+npm test     # bắt buộc đạt trước khi đẩy mã
+npm start    # http://localhost:8080  (đổi cổng: PORT=8686 npm start)
 ```
-Server chạy đồng thời:
-- **HTTP** (trên chính máy này): `http://localhost:8080/` · `/admin`
-- **HTTPS** (cho điện thoại/LAN): `https://<IP-LAN>:8444/` — cần thiết để dùng camera + GPS trên điện thoại.
 
-Chứng chỉ HTTPS tự ký nằm trong `certs/`. Nếu chưa có hoặc đổi mạng (IP LAN khác), chạy:
-```bash
-npm run cert
+- Lần đầu chạy tự tạo `data/digiplus.db`, tài khoản `admin` / `admin123` (đổi ngay), 4 bộ phận và 4 ca mẫu.
+- Điện thoại trong mạng nội bộ cần HTTPS để dùng camera + GPS: app tự tạo chứng chỉ tự ký và mở thêm cổng `8444`.
+- Biến môi trường: `PORT`, `HTTPS_PORT`, `DB_PATH` (đổi nơi đặt CSDL — bản sao lưu nằm cạnh file CSDL), `MULTI_TENANT=1` (máy chủ nhiều công ty).
+- Nhánh `main` là kênh phát hành: máy khách tự cập nhật khi `version` trong `package.json` tăng. Quy tắc làm việc: xem `CLAUDE.md`.
+
 ```
-(script tự dò IP LAN và tạo lại chứng chỉ; cần Git for Windows/openssl).
-
-**Tài khoản mặc định (đổi ngay sau khi cài):**
-| Vai trò | Tài khoản | Mật khẩu |
-|---|---|---|
-| Admin | `admin` | `admin123` |
-
-Mới cài có sẵn: bộ phận Hành chính · Văn phòng · Kế toán · Quản trị (admin nằm ở Quản trị); 4 ca (Hành chính, Sáng, Chiều, Đêm); lịch trình vào ra "Giờ đầu - Giờ cuối" (mặc định) và "Tự động - Qua đêm"; lịch trình ca "Hành chính" (HC-Sáng-Chiều) và "Theo ca" (HC-Đêm). Không có nhân viên mẫu.
-
-Đổi port: `PORT=9000 npm start`. Đổi vị trí file DB: đặt biến `DB_PATH`.
-
-## Test qua mạng LAN nội bộ (điện thoại + máy tính cùng WiFi)
-1. Máy tính và điện thoại **cùng một mạng WiFi/LAN**.
-2. Trên máy tính: `npm start`. Ghi lại dòng `https://<IP-LAN>:8444/` (VD `https://172.16.1.38:8444/`).
-3. **Mở cổng qua Windows Firewall** (chạy 1 lần, trong PowerShell **Admin**):
-   ```powershell
-   New-NetFirewallRule -DisplayName "Digiplus ChamCong" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 8080,8444
-   ```
-4. Trên điện thoại, mở trình duyệt (Chrome/Safari) vào `https://<IP-LAN>:8444/`.
-5. Điện thoại báo *"Kết nối không an toàn"* (do chứng chỉ tự ký) → bấm **Nâng cao → Tiếp tục/Truy cập**. (Bình thường vì chứng chỉ tự tạo cho mạng nội bộ.)
-6. Thêm 1 nhân viên ở trang Admin (mật khẩu để trống = `123456`), đăng nhập tài khoản đó → bấm **Vào ca** → **cho phép Camera và Vị trí** khi được hỏi.
-
-> Lưu ý: **bắt buộc dùng `https://...:8444`** trên điện thoại. Nếu mở `http://<IP>:8080` thì trình duyệt sẽ **chặn camera/GPS**.
-
-## Đưa lên HTTPS thật để triển khai (có tên miền)
-Chứng chỉ tự ký chỉ hợp cho test LAN. Khi chạy thật cho khách, dùng **tên miền + chứng chỉ hợp lệ** (miễn phí Let's Encrypt). 3 cách phổ biến:
-
-**Cách 1 — Caddy (khuyên dùng, tự động SSL).** Cài Caddy trên VPS, trỏ tên miền `chamcong.digiplus.vn` về IP server, tạo `Caddyfile`:
-```
-chamcong.digiplus.vn {
-    reverse_proxy localhost:8080
-}
-```
-Chạy `caddy run` → Caddy tự xin và gia hạn SSL. App chạy `npm start` phía sau (chỉ cần HTTP 8080).
-
-**Cách 2 — Nginx + Certbot.** Reverse proxy `localhost:8080`, chạy `certbot --nginx -d chamcong.digiplus.vn` để cấp SSL tự động.
-
-**Cách 3 — Cloudflare Tunnel (không cần mở port/không cần IP tĩnh).** `cloudflared tunnel --url http://localhost:8080` cho ngay một URL `https://...` để test nhanh; hoặc gắn tên miền qua Cloudflare Zero Trust cho bản chạy thật.
-
-> Khi đã có HTTPS qua domain, có thể tắt HTTPS tự ký (không cần thư mục `certs/`). App chỉ cần chạy HTTP 8080 sau reverse proxy.
-
-### Gợi ý nơi đặt server
-VPS Việt Nam (Viettel IDC, VNG, Vietnix…) hoặc cloud (AWS Lightsail, DigitalOcean) 1–2 GB RAM là đủ cho vài trăm nhân viên. Cài Node 22.13+ (nên dùng 24), copy mã nguồn, `npm install`, dùng `pm2` để chạy nền: `pm2 start server/index.js --name chamcong`.
-
-## Cấu hình khi triển khai cho khách
-1. Đăng nhập `/admin` bằng `admin` → **Cài đặt**: đổi tên công ty + đổi mật khẩu admin.
-2. **Chi nhánh**: sửa toạ độ đúng văn phòng khách (nút *"Lấy vị trí hiện tại"* khi đứng tại văn phòng) + đặt bán kính (VD 150–300 m).
-3. **Ca làm**: đặt giờ vào/ra, số phút cho phép muộn.
-4. **Nhân viên**: tạo tài khoản cho từng người, gán ca + chi nhánh, cấp tài khoản/mật khẩu.
-
-## Ghi chú kỹ thuật
-- **Múi giờ**: xử lý theo `Asia/Ho_Chi_Minh`; lưu mốc thời gian chuẩn ISO-8601 UTC → **không còn lỗi `1899-12-30`** như bản trong video.
-- **Dữ liệu**: SQLite tại `data/digiplus.db`; ảnh tại `uploads/`. Sao lưu = copy 2 thư mục này (bản cài Windows: kèm `config.txt` cạnh thư mục `app/`). Muốn reset toàn bộ: xoá thư mục `data/` rồi chạy lại.
-- **Đổi logo/icon**: thay 2 file `public/icons/icon-192.png`, `icon-512.png` bằng logo Digiplus (nền vuông).
-- **Nâng cấp DB** (khi nhiều người dùng đồng thời/nhiều công ty): có thể chuyển sang PostgreSQL — cấu trúc bảng ở `server/db.js`.
-
-## Cấu trúc thư mục
-```
-server/        # Backend Express + SQLite
-  index.js     # khởi động, gắn route, phục vụ web tĩnh
-  db.js        # schema + kết nối SQLite
-  auth.js      # JWT + phân quyền
-  util.js      # thời gian VN, Haversine, che lỗi hệ thống
-  attendance-calc.js, day-metrics.js, shift-resolver.js   # công thức tính công, giải ca
-  storage.js   # lưu ảnh selfie
-  seed.js      # dữ liệu khởi tạo
-  routes/      # auth, attendance, leaves, admin/*, reports, iclock (máy chấm công)…
-public/        # Frontend (PWA nhân viên + trang admin)
-data/          # (tự tạo) file SQLite
-uploads/       # (tự tạo) ảnh chấm công
+server/        backend Express + SQLite (tính công: attendance-calc.js, day-metrics.js, shift-resolver.js; lương: payroll-calc.js, pay-rules.js)
+server/routes/ API (admin/*, reports, iclock = máy chấm công…)
+public/        giao diện web, không cần build
+test/          test bằng node:test
+tools/         đóng gói bộ cài, cấp bản quyền, giả lập máy
+HuongDan/      trang hướng dẫn cho khách
+docs/          tài liệu kỹ thuật (docs/CAU-TRUC-CODE.md là bản đồ mã)
 ```
 
 © Digiplus

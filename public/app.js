@@ -8,6 +8,8 @@ let currentTab = 'cham';
 let MODE = 'shift';   // 'shift' | 'hourly' (chỉ tính giờ)
 let SELF_SHIFT = false;   // cho nhân viên tự chọn ca
 let SELF_APPROVE = true;  // chọn ca cần admin duyệt
+// Hiện thông báo lỗi dạng CHỮ (không chèn qua innerHTML)
+function showErr(box, e) { box.replaceChildren(el('div', { class: 'empty' }, (e && e.message) || 'Có lỗi, vui lòng thử lại')); }
 let ATT_ON = true;        // Cấu hình hiển thị: công ty dùng chấm công (tắt = chỉ dùng suất ăn → app chỉ còn tab Suất ăn)
 
 /* ---------- Cài app vào máy (PWA) — Android: 1 chạm; iPhone: chỉ dẫn (Apple không cho tự cài) ---------- */
@@ -181,7 +183,7 @@ async function pushCard() {
 async function renderCham() {
   const c = $('#content'); c.innerHTML = '<div class="empty"><span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span></div>';
   let data;
-  try { data = await api('/attendance/today'); } catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  try { data = await api('/attendance/today'); } catch (e) { showErr(c, e); return; }
   if (data.mode === 'shift' || data.mode === 'hourly') MODE = data.mode;   // kiểu chấm công của RIÊNG nhân viên này (có thể khác cài đặt chung)
   const a = data.attendance;
   const hasIn = a && a.check_in_at;
@@ -356,14 +358,14 @@ async function renderMonan() {
   const c = $('#content'); c.innerHTML = '';
   const box = el('div'); c.append(box);
   try { const m = await import('/suatan/emp.js'); await m.renderMealTab(box); }
-  catch (e) { box.innerHTML = `<div class="empty">${e.message}</div>`; }
+  catch (e) { showErr(box, e); }
 }
 
 async function renderChonca() {
   const c = $('#content'); c.innerHTML = '<div class="empty"><span class="spin" style="border-color:#ddd;border-top-color:var(--brand)"></span></div>';
   let info;
   try { info = await api('/shift-requests/shifts'); }
-  catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  catch (e) { showErr(c, e); return; }
   if (!info.enabled) { c.innerHTML = '<div class="empty">Tính năng tự chọn ca đang tắt.</div>'; return; }
   c.innerHTML = '';
 
@@ -432,7 +434,7 @@ async function loadMyShiftReq() {
       if (r.review_note) item.append(el('div', { class: 'meta' }, 'Ghi chú: ' + r.review_note));
       list.append(item);
     }
-  } catch (e) { list.innerHTML = `<div class="empty">${e.message}</div>`; }
+  } catch (e) { showErr(list, e); }
 }
 
 /* ---------------- Tab BÁO CÁO ---------------- */
@@ -440,7 +442,7 @@ async function renderBaocao() {
   const c = $('#content'); c.innerHTML = '';
   let sum, mine;
   try { [sum, mine] = await Promise.all([api('/attendance/summary'), api('/attendance/mine')]); }
-  catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  catch (e) { showErr(c, e); return; }
 
   if (MODE === 'hourly') {
     c.append(el('div', { class: 'stat-row' },
@@ -576,7 +578,7 @@ async function loadMyLeaves() {
       if (r.review_note) item.append(el('div', { class: 'meta' }, 'Ghi chú: ' + r.review_note));
       list.append(item);
     }
-  } catch (e) { list.innerHTML = `<div class="empty">${e.message}</div>`; }
+  } catch (e) { showErr(list, e); }
 }
 const fmtD = (d) => d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
 
@@ -606,7 +608,7 @@ async function renderBangcong() {
     wrap.innerHTML = '<div class="empty">Đang tải…</div>';
     let data;
     try { data = await api('/attendance/calendar?month=' + $('#bc-month').value); }
-    catch (e) { wrap.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+    catch (e) { showErr(wrap, e); return; }
     wrap.innerHTML = '';
 
     // Lưới lịch
@@ -667,7 +669,7 @@ const mmyy = (p) => `${p.slice(5)}/${p.slice(0, 4)}`;
 async function renderLuong() {
   const c = $('#content'); c.innerHTML = '<div class="empty">Đang tải…</div>';
   let rows;
-  try { rows = (await api('/pay/slips')).rows; } catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  try { rows = (await api('/pay/slips')).rows; } catch (e) { showErr(c, e); return; }
   c.innerHTML = '';
   if (!rows.length) { c.append(el('div', { class: 'empty' }, 'Chưa có phiếu lương nào. Công ty gửi phiếu lương sau khi chốt bảng lương.')); return; }
   for (const s of rows) {
@@ -682,7 +684,7 @@ async function renderLuong() {
 async function showSlip(id) {
   const c = $('#content'); c.innerHTML = '<div class="empty">Đang tải…</div>';
   let d;
-  try { d = await api('/pay/slips/' + id); } catch (e) { c.innerHTML = `<div class="empty">${e.message}</div>`; return; }
+  try { d = await api('/pay/slips/' + id); } catch (e) { showErr(c, e); return; }
   const sl = d.slip || {}, b = d.base || {}, ins = sl.ins || {};
   const lines = (sl.lines || []).filter((l) => l.show !== 0);
   const tr = (k, v, bold) => el('tr', bold ? { style: 'font-weight:800' } : {}, el('td', { style: bold ? '' : 'color:var(--muted)' }, k), el('td', { style: 'text-align:right;white-space:nowrap' }, v));

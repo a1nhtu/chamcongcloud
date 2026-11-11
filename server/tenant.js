@@ -49,7 +49,6 @@ export function busyFlag() {
 // Danh sách công ty đang mở (máy chủ đăng ký vào đây khi nạp xong)
 const open = new Map();   // slug → tenant
 export const registerTenant = (t) => open.set(t.slug, t);
-export const unregisterTenant = (slug) => open.delete(slug);
 export const openTenants = () => [...open.values()];
 export const tenantBySlug = (slug) => open.get(String(slug || '').toLowerCase()) || null;
 

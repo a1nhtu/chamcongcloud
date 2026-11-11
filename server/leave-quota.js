@@ -52,13 +52,14 @@ export function leaveSettings() {
   };
 }
 
-// Số tháng làm việc trong năm y tính đến hết tháng `uptoMonth` (vào làm từ ngày 16 trở đi thì tháng đó không tính)
+// Số tháng làm việc trong năm y tính đến hết tháng `uptoMonth`. Tháng vào làm được tính trọn 1 tháng khi số ngày còn lại của tháng
+// (kể cả ngày vào làm) đạt từ 50% số ngày của tháng — NĐ 145/2020 Điều 66 khoản 2: vào ngày 16 tháng 30–31 ngày VẪN tính, ngày 17 thì không.
 function monthsWorked(start, y, uptoMonth) {
   let first = 1;
   if (start) {
     const sy = +start.slice(0, 4), sm = +start.slice(5, 7), sd = +start.slice(8, 10);
     if (sy > y) return 0;
-    if (sy === y) first = sd > 15 ? sm + 1 : sm;
+    if (sy === y) { const dim = new Date(Date.UTC(sy, sm, 0)).getUTCDate(); first = (dim - sd + 1) * 2 >= dim ? sm : sm + 1; }
   }
   return Math.max(0, uptoMonth - first + 1);
 }

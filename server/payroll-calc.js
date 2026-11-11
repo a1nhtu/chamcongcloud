@@ -34,6 +34,9 @@ const DEFAULT_CFG = {
   ot_rate_weekday: 1.5, ot_rate_weekend: 2.0, ot_rate_holiday: 3.0, allowance: 0, hourly_rate: 0,
 };
 
+// Số giờ chuẩn của 1 ngày công (Cài đặt > Quy tắc tính công) — đơn giá giờ = đơn giá ngày ÷ số này. Mặc định 8 = như trước đây.
+export function hoursPerDay() { const v = parseFloat(getSetting('pay_hours_per_day', '8')); return Number.isFinite(v) && v >= 1 && v <= 24 ? v : 8; }
+
 // Hệ số tăng ca CHUNG của công ty (Cài đặt > Quy tắc tính công) — dùng cho NV chưa đặt lương riêng
 export function companyOtRates() {
   const num = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v > 0 ? v : d; };
@@ -86,7 +89,7 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   const cfg = getSalaryConfig(employeeId);
   const workingDays = cfg.working_days_per_month || 26;
   const dailyRate = (cfg.daily_rate != null && cfg.daily_rate > 0) ? cfg.daily_rate : (cfg.basic_salary || 0) / workingDays;
-  const hourlyRate = dailyRate / 8;
+  const hourlyRate = dailyRate / hoursPerDay();
 
   let rows = db.prepare(
     `SELECT a.id, a.employee_id, a.work_date, a.work_unit, a.work_minutes, a.ot_min, a.ot_type,

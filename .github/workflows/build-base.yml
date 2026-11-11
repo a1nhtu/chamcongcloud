@@ -31,7 +31,7 @@ jobs:
           node-version: '24'
 
       - name: Cai dependencies (chi prod)
-        run: npm install --omit=dev --no-audit --no-fund
+        run: npm ci --omit=dev --no-audit --no-fund
 
       - name: Tai cloudflared.exe (Windows)
         shell: pwsh

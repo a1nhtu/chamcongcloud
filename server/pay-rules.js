@@ -180,7 +180,7 @@ export function computeSlip(base, ctx) {
   const hourly = !!base.hourly;
   const workDays = +ctx.workDays || 26;
   const cong = +base.workUnits || 0, phep = +base.paidLeaveDays || 0;
-  const hourlyRate = hourly ? (+base.hourlyRate || 0) : (+base.dailyRate || 0) / 8;
+  const hourlyRate = hourly ? (+base.hourlyRate || 0) : (+base.dailyRate || 0) / (+ctx.hoursPerDay > 0 ? +ctx.hoursPerDay : 8);   // số giờ chuẩn 1 ngày công (cài đặt pay_hours_per_day, mặc định 8)
   const vars = {
     CONG: cong, NGAY_PHEP: phep, CONG_HUONG_LUONG: cong + phep, CONG_CHUAN: workDays,
     GIO_LAM: hourly ? (+base.totalHours || 0) : 0,

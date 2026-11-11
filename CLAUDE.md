@@ -38,6 +38,10 @@ npm start       # chạy app (cần thư mục data/, không có trong repo)
 6. Môi trường cloud **không có** máy chấm công thật, database khách, Cloudflare Tunnel — đừng cố chạy/kiểm thử các phần đó;
    ghi rõ trong PR những gì chưa kiểm được để Anh test trên máy thật.
 
+7. `public/admin.js` (~9.000 dòng) **tách dần**: khi việc đụng tới một trang lớn (Máy chấm công, Phân ca, Báo cáo, Cài đặt) thì tách
+   trang đó ra file riêng như `hr.js` / `payroll.js` đã làm, không đổi hành vi. Không tách cả file trong một lần.
+8. Chạy máy chủ thử thì luôn đặt `DB_PATH` ở thư mục tạm và cổng khác 8686 (bản sao lưu đi theo file CSDL; ảnh và log vẫn ghi vào thư mục app).
+
 ## Khi tạo Pull Request (phiên cloud)
 - Mô tả bằng tiếng Việt: sửa gì, vì sao, file nào, kết quả `npm test`, phần nào cần Anh test tay.
 - Diff gọn, chỉ đụng đúng phần được giao.

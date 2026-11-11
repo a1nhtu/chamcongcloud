@@ -1,10 +1,11 @@
 // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…): trong khoảng ngày áp dụng, nhân viên được ưu đãi số phút ở 4 vị trí
 //   đầu ca được đến muộn · trước nghỉ trưa được về sớm · sau nghỉ trưa được đến muộn · cuối ca được về sớm.
 // Phần đến muộn / về sớm nằm trong số phút ưu đãi KHÔNG tính trễ/sớm và KHÔNG trừ giờ công (vẫn hưởng đủ công).
-// Luật: mang thai từ tháng 7 (tháng 6 ở vùng khó khăn) và nuôi con dưới 12 tháng được 60 phút/ngày.
+// Luật (Điều 137 BLLĐ 2019): làm việc nặng nhọc, độc hại khi mang thai được giảm 1 giờ/ngày tới khi con đủ 12 tháng; nuôi con dưới
+// 12 tháng nghỉ 60 phút/ngày; hành kinh nghỉ 30 phút/ngày. (Mốc tháng 7 / tháng 6 vùng cao là mốc KHÔNG làm đêm, làm thêm, công tác xa.)
 // (Module không tự mở CSDL — nhận `db` từ nơi gọi, để test tính công chạy được với CSDL giả.)
 
-export const PRIV_KINDS = ['Mang thai', 'Nuôi con nhỏ', 'Khác'];
+export const PRIV_KINDS = ['Mang thai', 'Nuôi con nhỏ', 'Hành kinh', 'Khác'];
 
 const active = (r, date) => r.from_date <= date && (!r.to_date || r.to_date >= date);
 function sum(rows) {

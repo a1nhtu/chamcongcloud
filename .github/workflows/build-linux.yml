@@ -30,7 +30,7 @@ jobs:
           node-version: '24'
 
       - name: Cai dependencies (chi prod)
-        run: npm install --omit=dev --no-audit --no-fund
+        run: npm ci --omit=dev --no-audit --no-fund
 
       - name: Tai cloudflared (Linux amd64)
         # GitHub tải file đôi lúc trả 504 (09/11/2026 làm hỏng build) → thử lại, vẫn lỗi thì lấy bản cloudflared liền trước

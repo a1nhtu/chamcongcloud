@@ -91,7 +91,6 @@ export function offload(patterns, postPatterns = [], stickyOf = null) {
     }).catch(() => next());
   };
 }
-export const heavyInfo = () => ({ off: OFF, workers: pool.length, broken });
 // Tắt hết luồng phụ (máy chủ nhiều công ty mở lại CSDL 1 công ty sau khi phục hồi: luồng phụ đang giữ file CSDL cũ).
 // Yêu cầu nặng kế tiếp tự sinh luồng mới.
 export async function stopHeavyWorkers() {

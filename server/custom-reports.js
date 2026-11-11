@@ -17,7 +17,6 @@ export const CR_BASES = [
 const BASE_SET = new Set(CR_BASES.map(([t]) => t));
 
 // Mã loại báo cáo của mẫu riêng: 'cr' + id (VD cr3)
-export const crType = (id) => 'cr' + id;
 export const crId = (type) => { const m = /^cr(\d+)$/.exec(String(type || '')); return m ? +m[1] : null; };
 
 export const DAYS_KEY = '@days';                      // gộp mọi cột ngày (d2026-10-01 …) thành 1 mục

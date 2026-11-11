@@ -1,7 +1,7 @@
 // Sao lưu / phục hồi cơ sở dữ liệu (SQLite) + sao lưu TOÀN BỘ (.zip gồm DB + ảnh + logo).
 import { copyFileSync, existsSync, mkdirSync, readdirSync, statSync, rmSync, writeFileSync, readFileSync, cpSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { db, dataDir, dbPath, getSetting, setSetting } from './db.js';
 import { hrFilesDir } from './hr.js';
 import { uploadDir } from './storage.js';
@@ -12,7 +12,9 @@ import { userError } from './util.js';
 export const winTar = () => { if (process.platform !== 'win32') return 'bsdtar'; const p = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'tar.exe'); return existsSync(p) ? p : 'tar'; };
 
 // Thư mục sao lưu của công ty đang phục vụ (bản 1 công ty: data/backups như cũ)
-export const backupDir = () => { const d = join(dataDir(), 'backups'); mkdirSync(d, { recursive: true }); return d; };
+// Sao lưu nằm CẠNH file CSDL đang dùng: bình thường vẫn là data/backups; chạy thử với DB_PATH ở nơi khác thì sao lưu theo về nơi đó
+// (trước đây máy chủ thử vẫn ghi vào data/backups của bản chính → bản thử chiếm chỗ, đẩy bản sao lưu thật ra khỏi N bản giữ lại).
+export const backupDir = () => { const d = join(dirname(dbPath()), 'backups'); mkdirSync(d, { recursive: true }); return d; };
 
 const pad = (n) => String(n).padStart(2, '0');
 // Giờ/ngày theo múi giờ VN (UTC+7)

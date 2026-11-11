@@ -34,8 +34,10 @@ r.post('/change-password', authRequired, (req, res) => {
     return res.status(400).json({ error: 'Mật khẩu mới tối thiểu 4 ký tự' });
   if (!verifyPassword(oldPassword || '', req.user.password_hash))
     return res.status(400).json({ error: 'Mật khẩu cũ không đúng' });
-  db.prepare('UPDATE employees SET password_hash = ? WHERE id = ?').run(hashPassword(newPassword), req.user.id);
-  res.json({ ok: true });
+  db.prepare('UPDATE employees SET password_hash = ?, pw_ver = IFNULL(pw_ver, 0) + 1 WHERE id = ?').run(hashPassword(newPassword), req.user.id);
+  // phiên cũ (kể cả trên máy khác) hết hiệu lực; trả phiên mới để chính người vừa đổi không bị đăng xuất
+  const me = db.prepare('SELECT * FROM employees WHERE id = ?').get(req.user.id);
+  res.json({ ok: true, token: signToken(me) });
 });
 
 export function publicUser(emp) {

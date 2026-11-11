@@ -30,6 +30,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       leave_carry_until_month: getSetting('leave_carry_until_month', '3'), leave_allow_over: getSetting('leave_allow_over', '0'),
       weekend_normal_depts: (() => { try { return JSON.parse(getSetting('weekend_normal_depts', '[]')) || []; } catch { return []; } })(),   // làm tròn LÊN đi trễ / về sớm theo khối phút (0 = không)
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
+      pay_hours_per_day: getSetting('pay_hours_per_day', '8'),
       ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
@@ -135,6 +136,11 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       const old = parseFloat(getSetting(k, d));
       if (v !== old) db.prepare(`UPDATE salary_configs SET ${k} = ? WHERE ABS(${k} - ?) < 0.0001`).run(v, old);
       setSetting(k, String(v));
+    }
+    if (b.pay_hours_per_day != null) {
+      const v = parseFloat(b.pay_hours_per_day);
+      if (!(Number.isFinite(v) && v >= 1 && v <= 24)) return res.status(400).json({ error: 'Số giờ chuẩn 1 ngày công phải từ 1 đến 24' });
+      setSetting('pay_hours_per_day', String(v));
     }
     if (b.geofence_enforce != null) setSetting('geofence_enforce', b.geofence_enforce ? '1' : '0');
     if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');

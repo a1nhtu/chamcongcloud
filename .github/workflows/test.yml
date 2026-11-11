@@ -1,0 +1,40 @@
+name: Chay test (npm test)
+
+# Chạy toàn bộ test mỗi lần đẩy lên main (hoặc bấm chạy tay) để có dấu xanh / đỏ ngay trên GitHub.
+# Lưu ý: máy khách tự cập nhật theo version trong package.json, KHÔNG chờ workflow này —
+# vẫn phải chạy `npm test` trên máy trước khi đẩy. Workflow này là lớp kiểm thứ hai.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - 'public/**'
+      - 'test/**'
+      - 'tools/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/test.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-latest   # cùng hệ điều hành với máy khách (test có dùng tar.exe của Windows)
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Cai dependencies (dung ban trong package-lock.json)
+        run: npm ci --no-audit --no-fund
+
+      - name: Chay test
+        run: npm test
