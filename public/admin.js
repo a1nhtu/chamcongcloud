@@ -7952,6 +7952,7 @@ async function pageReport() {
         const wk = row.wd === 'T7' || row.wd === 'CN';
         const cls = [row._off ? 'rp-off' : '', row.wd === 'T7' ? 'rp-t7' : row.wd === 'CN' ? 'rp-cn' : ''].filter(Boolean).join(' ');
         const tr = el('tr', cls ? { class: cls } : {});
+        if (row._total) tr.style.cssText = 'font-weight:800;background:#eff4fa';   // dòng TỔNG CỘNG (Bảng thống kê chấm công giờ)
         for (const c of data.columns) {
           const v = row[c.key];
           const isSym = type === 'symbol' && SYMBOL_COLOR[v];

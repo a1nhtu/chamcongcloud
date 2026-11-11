@@ -88,9 +88,10 @@ function openBook(res, file, sheet, opts) {
       await new Promise(setImmediate);
       if (res.destroyed) throw new Error('Người dùng đã huỷ tải file');   // đóng tab giữa chừng: thôi ghi tiếp
     },
-    async finish() {
+    async finish(more) {   // more(wb): ghi thêm sheet sau sheet chính (VD sheet ChiTiet của Bảng thống kê giờ)
       if (ws.lastRow) pushOut(ws.lastRow.number);
       await ws.commit();
+      if (more) await more(wb);
       await wb.commit();   // bộ ghi tự kết thúc res
     },
   };
@@ -641,6 +642,8 @@ function buildReportRaw(type, from, to, filter) {
         ...(ctx.missShift ? [MISS_COL] : []),
       ];
       let stt = 0;
+      const allMin = {};   // cộng PHÚT cho dòng TỔNG CỘNG (không cộng số giờ đã làm tròn): 'd<ngày>' / 'gio' / ot1…otH
+      const addMin = (k, m) => { allMin[k] = (allMin[k] || 0) + m; };
       const rows = ctx.employees.map((e) => {
         const row = { stt: ++stt, dept: e.department || '', code: e.code, name: e.full_name, hire: e.start_date ? fmtDMY(e.start_date) : '', ...leaveCounts(ctx, e.id, days) };
         let mins = 0, V = 0, lateN = 0, earlyN = 0;
@@ -651,7 +654,8 @@ function buildReportRaw(type, from, to, filter) {
           row['d' + d] = c && c.work_minutes > 0 ? round2(c.work_minutes / 60) : (lv ? lv.sym : 0);
           if (c) {
             mins += c.work_minutes || 0;
-            const om = otCellMin(c); for (const k in ot) ot[k] += om[k];
+            addMin('d' + d, c.work_minutes || 0); addMin('gio', c.work_minutes || 0);
+            const om = otCellMin(c); for (const k in ot) { ot[k] += om[k]; addMin(k, om[k]); }
             if (c.late_min > 0) lateN++;
             if (c.early_min > 0) earlyN++;
           }
@@ -662,6 +666,18 @@ function buildReportRaw(type, from, to, filter) {
         if (ctx.missShift) row.missShift = missDays(ctx, e.id, days);
         return row;
       });
+      // Dòng TỔNG CỘNG cuối bảng (khách cần tổng toàn bộ giờ): giờ từng ngày, tổng giờ, tăng ca = cộng từ phút;
+      // vắng / nghỉ / trễ / sớm = cộng số lần. Ô ký hiệu nghỉ (P, KL…) không cộng.
+      if (rows.length) {
+        const SKIP = new Set(['stt', 'dept', 'code', 'name', 'hire', 'missShift']);
+        const tot = { _total: true, stt: '', dept: '', code: '', name: 'TỔNG CỘNG', hire: '' };
+        for (const c of columns) {
+          if (SKIP.has(c.key)) continue;
+          tot[c.key] = c.key.startsWith('d') || c.key === 'gio' || c.grp ? round2((allMin[c.key] || 0) / 60)
+            : rows.reduce((s, r) => s + (typeof r[c.key] === 'number' ? r[c.key] : 0), 0);
+        }
+        rows.push(tot);
+      }
       return { title: `Bảng thống kê chấm công (giờ) ${PERIOD}`, columns, rows };
     }
 
@@ -738,6 +754,8 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
         { key: 'dept', label: 'Bộ phận', w: 12 }, { key: 'loai', label: 'Chỉ tiêu', w: 12 },
         ...dayCols, { key: 'total', label: 'Tổng', w: 9 },
+        // theo ca: thêm Tổng ngày công / phút trễ / phút sớm (ghi ở dòng đầu của NV) — giống các cột cuối bản Excel
+        ...(HOURLY ? [] : [{ key: 'cong', label: 'Tổng ngày công', w: 9 }, { key: 'lateM', label: 'Tổng phút trễ', w: 9 }, { key: 'earlyM', label: 'Tổng phút sớm', w: 9 }]),
         ...(ctx.missShift ? [MISS_COL] : []),
       ];
       const rows = [];
@@ -745,7 +763,7 @@ function buildReportRaw(type, from, to, filter) {
         const rIn = { code: e.code, name: e.full_name, dept: e.department || '', loai: 'Giờ Vào–Ra' };
         const rCong = { code: '', name: '', dept: '', loai: 'Giờ công' };
         const rOt = { code: '', name: '', dept: '', loai: 'Giờ tăng ca' };
-        let totalMin = 0, otMin = 0;
+        let totalMin = 0, otMin = 0, cong = 0, lateM = 0, earlyM = 0;
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           const io = ioOf(e.id, d, c);
@@ -759,9 +777,13 @@ function buildReportRaw(type, from, to, filter) {
           }
           rCong['d' + d + 'i'] = c ? round2((c.work_minutes || 0) / 60) : '';
           rOt['d' + d + 'i'] = c ? round2((c.ot_min || 0) / 60) : '';
-          if (c) { totalMin += c.work_minutes || 0; otMin += c.ot_min || 0; }
+          if (c) { totalMin += c.work_minutes || 0; otMin += c.ot_min || 0; cong += c.work_unit || 0; lateM += c.late_min || 0; earlyM += c.early_min || 0; }
         }
         rIn.total = ''; rCong.total = round2(totalMin / 60); rOt.total = round2(otMin / 60);
+        if (!HOURLY) {
+          Object.assign(rIn, { cong: round2(cong), lateM: Math.round(lateM), earlyM: Math.round(earlyM) });
+          for (const r of [rCong, rOt]) Object.assign(r, { cong: '', lateM: '', earlyM: '' });
+        }
         if (ctx.missShift) rIn.missShift = missDays(ctx, e.id, days);
         rows.push(rIn, rCong, ...(HOURLY ? [] : [rOt]));
       }
@@ -1313,9 +1335,10 @@ async function exportHourStatXlsx(res, from, to, filter, company, address, shown
     if (columns[col - 1].weekend) cell.fill = WK_CELL(columns[col - 1].weekend);
   }
   const AL = { horizontal: 'left', vertical: 'middle' }, AC = { horizontal: 'center', vertical: 'middle' };
+  const TOT_FILL = solid('FFEFF4FA'), TOT_FONT = { name: 'Times New Roman', bold: true };
   let r = H + 2;
   for (const row of rows) {
-    loopProg(PROG, ++pi, rows.length, 55, 88, 'Đang ghi dòng');
+    loopProg(PROG, ++pi, rows.length, 55, 80, 'Đang ghi dòng');
     for (let i = 0; i < N; i++) {
       const c = columns[i], cell = ws.getCell(r, i + 1);
       cell.value = row[c.key] ?? '';
@@ -1323,15 +1346,90 @@ async function exportHourStatXlsx(res, from, to, filter, company, address, shown
       cell.alignment = c.key === 'name' || c.key === 'dept' ? AL : AC;
       if (c.weekend) cell.fill = WK_CELL(c.weekend);
       if (c.key === 'missShift' && cell.value) { cell.fill = MISS_FILL; cell.font = MISS_FONT; }
+      if (row._total) { cell.fill = TOT_FILL; cell.font = TOT_FONT; }   // dòng TỔNG CỘNG
     }
     await flush(r);
     r++;
   }
   if (!rows.length) { ws.mergeCells(r, 1, r, N); ws.getCell(r, 1).value = 'Không có dữ liệu.'; }
 
-  PROG && PROG(90, 'Đang đóng gói file Excel…');
-  await finish();
+  PROG && PROG(82, 'Đang ghi sheet chi tiết vào / ra…');
+  await finish((wb) => hourStatDetailSheet(wb, from, to, filter, company, address));
   PROG && PROG(100, 'Xong');
+}
+
+/* Sheet 2 "ChiTiet" của Bảng thống kê chấm công (giờ): mỗi NV × mỗi ngày có chấm / có nghỉ 1 dòng —
+ * Vào 1 · Ra 1 · Vào 2 · Ra 2 … (mỗi lần chấm 1 cột), Giờ làm, Tăng ca, Tổng giờ (làm + TC), Ghi chú (loại nghỉ / thiếu ra);
+ * mỗi NV có dòng "Cộng", cuối sheet dòng TỔNG CỘNG — để soi lại từng ngày ra số giờ ở sheet 1. Theo giờ: bỏ Tăng ca + Tổng. */
+async function hourStatDetailSheet(wb, from, to, filter, company, address) {
+  const ctx = loadRange(from, to, filter);
+  const days = daysBetween(from, to);
+  const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
+  const HOURLY = ctx.hourly;
+  const NP = maxPairs(ctx, ioOf, days);
+  const cols = [['STT', 5], ['Mã NV', 10], ['Tên nhân viên', 22], ['Phòng ban', 14], ['Ngày', 11], ['Thứ', 6]];
+  for (let p = 1; p <= NP; p++) cols.push(['Vào ' + p, 8], ['Ra ' + p, 8]);
+  cols.push(['Giờ làm', 9]);
+  if (!HOURLY) cols.push(['Tăng ca (giờ)', 9], ['Tổng giờ (làm + TC)', 11]);
+  cols.push(['Ghi chú', 18]);
+  const n = cols.length;
+  const ws = wb.addWorksheet('ChiTiet', { views: [{ state: 'frozen', ySplit: 5, xSplit: 3 }] });
+  ws.columns = cols.map(([, w]) => ({ width: w }));
+  const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
+  const border = { top: thin, left: thin, bottom: thin, right: thin };
+  const AC = { horizontal: 'center', vertical: 'middle' }, AL = { horizontal: 'left', vertical: 'middle' };
+  ws.mergeCells(1, 1, 1, n); Object.assign(ws.getCell(1, 1), { value: 'Công ty: ' + company.toUpperCase(), font: { bold: true, size: 12 } });
+  ws.mergeCells(2, 1, 2, n); ws.getCell(2, 1).value = 'Địa chỉ: ' + (address || '');
+  ws.mergeCells(3, 1, 3, n);
+  Object.assign(ws.getCell(3, 1), { value: `CHI TIẾT GIỜ VÀO / RA VÀ GIỜ LÀM${HOURLY ? '' : ' + TĂNG CA'} (${fmtDMY(from)} → ${fmtDMY(to)})`, font: { size: 14, bold: true }, alignment: { horizontal: 'center' } });
+  ws.mergeCells(4, 1, 4, n);
+  Object.assign(ws.getCell(4, 1), { value: 'Mỗi nhân viên × mỗi ngày có chấm công / có nghỉ 1 dòng; dòng "Cộng" = tổng của nhân viên đó, khớp sheet ThongKeGio', font: { italic: true, size: 10, color: { argb: 'FF6B7280' } }, alignment: { horizontal: 'center' } });
+  ws.getRow(1).commit(); ws.getRow(2).commit(); ws.getRow(3).commit(); ws.getRow(4).commit();
+  const hr = ws.getRow(5);
+  cols.forEach(([lab], i) => Object.assign(hr.getCell(i + 1), { value: lab, font: { bold: true, color: { argb: 'FFFFFFFF' } }, fill: solid('FF0F7D7D'), alignment: { ...AC, wrapText: true }, border }));
+  hr.height = 30; hr.commit();
+
+  const SUB_FILL = solid('FFF3F4F6'), TOT_FILL = solid('FFEFF4FA'), BOLD = { bold: true };
+  let rn = 6, stt = 0, gW = 0, gO = 0;
+  const put = (vals, { fill, font, wk } = {}) => {
+    const row = ws.getRow(rn++);
+    vals.forEach((v, i) => {
+      const cell = row.getCell(i + 1);
+      cell.value = v ?? '';
+      cell.border = border;
+      cell.alignment = i === 2 || i === 3 || i === n - 1 ? AL : AC;
+      const f = fill || (wk ? WK_CELL(wk) : null);
+      if (f) cell.fill = f;
+      if (font) cell.font = font;
+    });
+    row.commit();
+  };
+  const tail = (w, o, note) => (HOURLY ? [round2(w / 60), note] : [round2(w / 60), round2(o / 60), round2((w + o) / 60), note]);
+  let pi = 0;
+  for (const e of ctx.employees) {
+    if (++pi % 50 === 0) await new Promise(setImmediate);   // nhường luồng: máy chủ nhiều công ty không bị đứng khi 3.000 NV
+    let eW = 0, eO = 0, any = false;
+    for (const d of days) {
+      const c = ctx.cell.get(e.id + '|' + d);
+      const lv = ctx.leaveDays.get(e.id + '|' + d);
+      if (!lv && !hasPunch(c) && !(c && (c.work_minutes || c.ot_min))) continue;   // ngày có giờ (kể cả công sửa tay) đều ghi → dòng Cộng khớp sheet 1
+      any = true;
+      const ps = c ? pairsHM(ioOf(e.id, d, c), c) : [];
+      const io = [];
+      for (let p = 0; p < NP; p++) io.push(ps[p] ? ps[p][0] : '', ps[p] ? ps[p][1] : '');
+      const w = c ? c.work_minutes || 0 : 0, o = c ? c.ot_min || 0 : 0;
+      eW += w; eO += o;
+      const wdN = new Date(d + 'T12:00:00Z').getUTCDay();
+      const note = [lv ? lv.label : '', c && !c.check_out_at && c.day_status !== 'mot_lan' ? 'Thiếu giờ ra' : ''].filter(Boolean).join(' · ');
+      put([++stt, e.code, e.full_name, e.department || '', fmtDMY(d), WD_LABEL[wdN], ...io, ...tail(w, o, note)], { wk: ctx.paintWeekend(d) });
+    }
+    if (!any) continue;
+    gW += eW; gO += eO;
+    put(['', e.code, 'Cộng: ' + e.full_name, '', '', '', ...Array(NP * 2).fill(''), ...tail(eW, eO, '')], { fill: SUB_FILL, font: BOLD });
+  }
+  if (stt) put(['', '', 'TỔNG CỘNG', '', '', '', ...Array(NP * 2).fill(''), ...tail(gW, gO, '')], { fill: TOT_FILL, font: { bold: true, size: 12 } });
+  else { ws.mergeCells(rn, 1, rn, n); ws.getCell(rn, 1).value = 'Không có dữ liệu.'; ws.getRow(rn).commit(); }
+  await ws.commit();
 }
 
 /* ===== Xuất Excel "Giờ công & tăng ca" — mẫu chi tiết 3 dòng/NV (giống file mẫu) ===== */
@@ -1347,12 +1445,17 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
   const NP = maxPairs(ctx, ioOf, days);   // nhiều lần vào/ra → mỗi ngày 2 × NP cột, mỗi lần chấm 1 cột
   const PER = NP * 2;
   const FIXED = 5;                 // STT, Phòng ban, Mã NV, Tên NV, Ngày vào làm
-  const missCol = ctx.missShift ? FIXED + days.length * PER + 1 : 0;   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" cuối bảng
-  const totalCols = missCol || FIXED + days.length * PER;
+  // Cột TỔNG cuối bảng (mỗi NV gộp dọc cả khối dòng): theo ca = giờ công, ngày công, giờ tăng ca, phút trễ, phút sớm; theo giờ = tổng giờ làm
+  const SUMS = HOURLY ? [['TỔNG GIỜ LÀM', 'gio']]
+    : [['TỔNG GIỜ CÔNG', 'gio'], ['TỔNG NGÀY CÔNG', 'cong'], ['TỔNG GIỜ TĂNG CA', 'ot'], ['TỔNG PHÚT TRỄ', 'late'], ['TỔNG PHÚT SỚM', 'early']];
+  const S0 = FIXED + days.length * PER + 1;   // cột tổng đầu tiên
+  const missCol = ctx.missShift ? S0 + SUMS.length : 0;   // công tắc nhiều ca BẬT: thêm cột "Thiếu ca" cuối bảng
+  const totalCols = missCol || S0 + SUMS.length - 1;
   const H = 5;
   const { ws, flush, finish } = openBook(res, `giocong_tangca_${from}_${to}.xlsx`, 'GioCong', { views: [{ state: 'frozen', ySplit: H + 1, xSplit: FIXED }] });
   ws.getColumn(1).width = 5; ws.getColumn(2).width = 14; ws.getColumn(3).width = 12; ws.getColumn(4).width = 20; ws.getColumn(5).width = 12;
   for (let i = 0; i < days.length * PER; i++) ws.getColumn(FIXED + i + 1).width = 7;
+  SUMS.forEach((_, i) => { ws.getColumn(S0 + i).width = 10; });
   if (missCol) ws.getColumn(missCol).width = MISS_COL.w;
   const thin = { style: 'thin', color: { argb: 'FFBFBFBF' } };
   const border = { top: thin, left: thin, bottom: thin, right: thin };
@@ -1374,12 +1477,14 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
     if (NP > 1) for (let p = 0; p < NP; p++) { ws.getCell(H + 1, c1 + p * 2).value = 'Vào ' + (p + 1); ws.getCell(H + 1, c1 + p * 2 + 1).value = 'Ra ' + (p + 1); }
     else { ws.mergeCells(H + 1, c1, H + 1, c1 + 1); ws.getCell(H + 1, c1).value = wd; }
   });
+  SUMS.forEach(([lab], i) => { ws.mergeCells(H, S0 + i, H + 1, S0 + i); ws.getCell(H, S0 + i).value = lab; });
   if (missCol) { ws.mergeCells(H, missCol, H + 1, missCol); ws.getCell(H, missCol).value = MISS_COL.label; }
+  ws.getRow(H + 1).height = 30;   // tiêu đề cột tổng 2–3 chữ: xuống dòng cho gọn
   for (let r = H; r <= H + 1; r++) {
     for (let c = 1; c <= totalCols; c++) {
       const cell = ws.getCell(r, c);
       cell.font = { bold: true, color: { argb: 'FFFFFFFF' } };
-      cell.alignment = { horizontal: 'center', vertical: 'middle' };
+      cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: c >= S0 };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: teal } };
       cell.border = border;
     }
@@ -1396,9 +1501,11 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
     const rIn = r, rCong = r + 1, rOt = r + 2;
     const fixedVals = [stt, e.department || '', e.code, e.full_name, hireDate(e)];
     fixedVals.forEach((v, i) => { mergeFast(ws, rIn, i + 1, r + NR - 1, i + 1); Object.assign(ws.getCell(rIn, i + 1), { value: v, alignment: { vertical: 'middle', horizontal: i === 3 ? 'left' : 'center' } }); });
+    const sum = { gio: 0, cong: 0, ot: 0, late: 0, early: 0 };
     for (let di = 0; di < days.length; di++) {
       const d = days[di], c1 = FIXED + di * PER + 1;
       const c = ctx.cell.get(e.id + '|' + d);
+      if (c) { sum.gio += c.work_minutes || 0; sum.cong += c.work_unit || 0; sum.ot += c.ot_min || 0; sum.late += c.late_min || 0; sum.early += c.early_min || 0; }
       const weekend = ctx.paintWeekend(d);
       const ps = pairsHM(ioOf(e.id, d, c), c);   // mỗi lần chấm 1 cột
       const lv = !c && ctx.leaveDays.get(e.id + '|' + d);   // ngày nghỉ (đơn đã duyệt) → ký hiệu loại nghỉ
@@ -1426,6 +1533,12 @@ async function exportWorkhoursXlsx(res, from, to, filter, company, address) {
       }
     }
     for (let i = 1; i <= FIXED; i++) ws.getCell(rIn, i).border = border;
+    const sumVal = { gio: round2(sum.gio / 60), cong: round2(sum.cong), ot: round2(sum.ot / 60), late: Math.round(sum.late), early: Math.round(sum.early) };
+    SUMS.forEach(([, k], i) => {
+      mergeFast(ws, rIn, S0 + i, rIn + NR - 1, S0 + i);
+      Object.assign(ws.getCell(rIn, S0 + i), { value: sumVal[k], alignment: { vertical: 'middle', horizontal: 'center' }, font: { bold: true } });
+      for (let k2 = 0; k2 < NR; k2++) ws.getCell(rIn + k2, S0 + i).border = border;
+    });
     if (missCol) {
       const mv = missDays(ctx, e.id, days);
       mergeFast(ws, rIn, missCol, rIn + NR - 1, missCol);
