@@ -404,9 +404,37 @@ export function ruleWindow(workDate, shift, opts = {}) {
 // Chọn tổ hợp lệch ít nhất; bằng nhau thì ưu tiên tổ hợp dùng NHIỀU lượt quẹt làm giờ vào/ra hơn (ca gãy 08-12 / 13-17), rồi ít ca hơn.
 // Trả [{ shift, punches }] theo thứ tự giờ; punches = các lượt quẹt (object có punch_at) thuộc ca đó.
 // MỖI LƯỢT QUẸT CHỈ DÙNG 1 LẦN (Anh chốt 11/11/2026): KHÔNG tự lấy 1 lượt làm cả giờ RA ca trước lẫn giờ VÀO ca sau
-// (v1.32.7–1.32.9 từng làm vậy cho ca nối liền — bỏ vì khách khác không muốn phần mềm "tự sinh giờ").
-// Người làm liền 2 ca nối nhau: quẹt riêng ra ca trước + vào ca sau (VD 16:00 / 16:01), HOẶC khai thêm 1 ca "cả ngày"
-// gộp 2 ca (VD Vệ sinh 06:30–21:00, Số công 2) vào lịch trình — quẹt 06h · 21h là đủ, lượt giữa ca (13h, 16h) bỏ qua.
+// (v1.32.7–1.32.9 từng làm vậy — bỏ). Làm liền 2 ca nối nhau thì phải quẹt 2 lần ở mốc giao ca (trankimxuyen: Vệ sinh 16:00 ra
+// + 16:01 vào, để không ai chỉ quẹt lúc đến và lúc về). Chỉ quẹt 1 lần ở mốc → ca kia thiếu giờ (đúng ý khách).
+// Lượt quẹt gán theo ca gần nhất nên 2 lượt cùng phía mốc (15:57 + 15:58, 16:16 + 16:21, KT 13:57 + 14:00) dồn hết vào 1 ca →
+// splitSeamPunches CHIA lại: lượt trước cho ca trước, lượt sau cho ca sau (chuyển, không nhân đôi).
+const SEAM_GAP = 30 * 60000, SEAM_NEAR = 60 * 60000;
+function seamWin(workDate, shift, a, b) {
+  if (!workDate || !shift || !shift[a] || !shift[b]) return null;
+  const s = vnInstant(workDate, shift[a]).getTime();
+  let e = vnInstant(workDate, shift[b]).getTime();
+  if (e < s) e += 24 * HH;
+  return [s, e];
+}
+function splitSeamPunches(set, got, t, dayEnd, workDate) {
+  for (let i = 0; i + 1 < set.length; i++) {
+    const A = set[i], B = set[i + 1];
+    if (A.end > dayEnd || B.end > dayEnd) continue;          // không áp cho ca qua đêm
+    if (Math.abs(B.start - A.end) > SEAM_GAP) continue;       // 2 ca không nối liền
+    const near = (p) => p && Math.abs(t(p) - A.end) <= SEAM_NEAR;
+    const inW = (w) => (p) => t(p) >= w[0] && t(p) <= w[1];
+    const ga = got[i], gb = got[i + 1];
+    const ciB = seamWin(workDate, B.shift, 'check_in_start', 'check_in_end');
+    const coA = seamWin(workDate, A.shift, 'check_out_start', 'check_out_end');
+    // ca sau chưa có giờ vào; ca trước có ≥ 2 lượt sát mốc ngoài giờ vào → lượt CUỐI của ca trước sang làm giờ vào ca sau
+    const bNoIn = ciB ? !gb.some(inW(ciB)) : !gb.length || Math.abs(t(gb[0]) - B.end) < Math.abs(t(gb[0]) - B.start);
+    if (bNoIn && ga.length >= 3 && near(ga[ga.length - 1]) && near(ga[ga.length - 2])) { gb.unshift(ga.pop()); continue; }
+    // ca trước chưa có giờ ra; ca sau có ≥ 2 lượt sát mốc ngoài giờ ra → lượt ĐẦU của ca sau về làm giờ ra ca trước
+    const aNoOut = coA ? !ga.slice(1).some(inW(coA)) : ga.length === 1;
+    if (aNoOut && ga.length >= 1 && gb.length >= 3 && near(gb[0]) && near(gb[1])) ga.push(gb.shift());
+  }
+}
+
 export function pickShiftSet(cands, punches, workDate) {
   const list = (cands || []).slice(0, 10).map((shift) => ({ shift, ...shiftBounds(workDate, shift) }));
   const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
@@ -429,6 +457,7 @@ export function pickShiftSet(cands, punches, workDate) {
       });
       if (bi >= 0) got[bi].push(p);
     }
+    splitSeamPunches(set, got, t, dayEnd, workDate);
     if (got.some((g) => !g.length)) continue;
     // Giờ VÀO của mỗi ca phải thuộc ngày này và không sớm hơn giờ vào ca quá 8 tiếng
     // (trước đây: làm ca sáng 05:52–11:33 thì lượt 05:55 sáng hôm sau bị lấy làm "vào Ca đêm" → 1 lượt dùng cho 2 ngày)
