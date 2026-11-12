@@ -144,6 +144,14 @@ export function roundOtMinutes(minutes, decimals = 2, mode = 0, block = 0) {
  * Tính đầy đủ chỉ số khi RA ca.
  * @returns {early_min, ot_min, work_minutes, work_unit, ot_type, day_status}
  */
+// Làm tròn SỐ CÔNG tới `factor` (= 10^số lẻ): mode 0 = lùi, 1 = tới, 2 = gần nhất (như cũ).
+// Lùi / tới cộng-trừ một sai số rất nhỏ (giống roundOtMinutes) để sai số số thực không làm hụt / dư 0,01 công:
+// 261/450*100 = 57,99999999999999 → lùi phải ra 0,58 (không phải 0,57); 264/480*100 = 55,00000000000001 → tới phải ra 0,55 (không phải 0,56).
+function roundUnit(v, factor, mode) {
+  const x = v * factor;
+  return (mode === 1 ? Math.ceil(x - 1e-9) : mode === 2 ? Math.round(x) : Math.floor(x + 1e-9)) / factor;
+}
+
 // Số công khi KHÔNG có ca (không xác định được giờ chuẩn theo ca):
 // tính theo TỈ LỆ so với 1 ngày công chuẩn (mặc định 8 giờ) → tránh cảnh 6 phút = 1 công.
 // Làm việc >= 1 ngày chuẩn thì tối đa 1 công.
@@ -151,8 +159,7 @@ export function noShiftUnit(work_minutes, opts = {}) {
   const { roundingDecimals = 2, roundingMode = 0, standardMinutes = 480 } = opts;
   const std = Math.max(1, standardMinutes);
   const factor = Math.pow(10, roundingDecimals);
-  const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor; // 0=lùi,1=tới,2=gần nhất
-  return Math.min(1, Math.max(0, roundFn((work_minutes / std) * factor) / factor));
+  return Math.min(1, Math.max(0, roundUnit(work_minutes / std, factor, roundingMode)));   // 0=lùi,1=tới,2=gần nhất
 }
 
 export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts = {}) {
@@ -272,8 +279,7 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);
   const rawUnit = baseUnit * work_minutes / standard;
-  const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor; // 0=lùi,1=tới,2=gần nhất
-  let work_unit = Math.min(baseUnit, roundFn(rawUnit * factor) / factor);
+  let work_unit = Math.min(baseUnit, roundUnit(rawUnit, factor, roundingMode));   // 0=lùi,1=tới,2=gần nhất
 
   const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
 
@@ -317,8 +323,7 @@ export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
   const work_minutes = Math.max(0, standard - late);
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);
-  const roundFn = roundingMode === 1 ? Math.ceil : roundingMode === 2 ? Math.round : Math.floor;
-  const work_unit = Math.min(baseUnit, roundFn(baseUnit * work_minutes / standard * factor) / factor);
+  const work_unit = Math.min(baseUnit, roundUnit(baseUnit * work_minutes / standard, factor, roundingMode));
   if (shiftIsOt(shift, isHoliday, isWeekend)) return { ...base, ot_min: work_minutes };
   return { ...base, work_minutes, work_unit };
 }
