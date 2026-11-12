@@ -38,6 +38,7 @@ import { startHrScheduler } from './hr.js';
 import { startHrRemindScheduler } from './hr-remind.js';
 import { startRebootScheduler } from './reboot-schedule.js';
 import { moveGuard, moveDownload } from './chuyen-may.js';
+import { adminBundle } from './admin-bundle.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -135,6 +136,18 @@ app.use('/uploads', (req, res, next) => {
 
 // Trang tĩnh (PWA nhân viên + trang admin)
 app.use('/suatan', mealStaticGate);   // giao diện Suất ăn: tắt công tắc meal_enabled → 404 (đặt TRƯỚC express.static)
+// Trang quản lý: /admin.js = các phần trong public/admin-parts ghép lại theo thứ tự (xem server/admin-bundle.js) — đặt TRƯỚC express.static
+app.get('/admin.js', (req, res, next) => {
+  let body;
+  try { body = adminBundle(); } catch (e) {
+    console.error('[admin.js] không ghép được trang quản lý:', e.message);
+    // Cập nhật chép thiếu thư mục admin-parts mà bản cũ (1 file public/admin.js) còn trên đĩa → dùng tạm bản cũ, không để trang trắng
+    if (existsSync(join(PUBLIC_DIR, 'admin.js'))) return next();
+    return res.status(500).type('application/javascript').send('console.error("Không nạp được trang quản lý — thiếu thư mục admin-parts");');
+  }
+  res.setHeader('Cache-Control', 'public, max-age=0');
+  res.type('application/javascript').send(body);
+});
 app.use(express.static(PUBLIC_DIR, { index: false }));
 // Trả HTML kèm cache-busting: chèn ?v=<version> vào js/css nội bộ để trình duyệt/Cloudflare
 // tự lấy bản mới mỗi khi lên version (khỏi phải xoá cache tay khi cập nhật).
@@ -147,11 +160,12 @@ function importMap(v) {
   const imports = {};
   const walk = (dir, rel) => {
     for (const f of readdirSync(dir, { withFileTypes: true })) {
-      if (f.isDirectory()) { if (!/^(node_modules|icons|uploads)$/.test(f.name)) walk(join(dir, f.name), rel + f.name + '/'); }
+      if (f.isDirectory()) { if (!/^(node_modules|icons|uploads|admin-parts)$/.test(f.name)) walk(join(dir, f.name), rel + f.name + '/'); }
       else if (f.name.endsWith('.js') && f.name !== 'sw.js') imports[rel + f.name] = rel + f.name + '?v=' + v;
     }
   };
   try { walk(PUBLIC_DIR, '/'); } catch { /* không đọc được thư mục → bỏ map, vẫn chạy như cũ */ }
+  imports['/admin.js'] = '/admin.js?v=' + v;   // /admin.js không còn là 1 file trên đĩa (ghép từ public/admin-parts) nên tự thêm vào map
   IMPORT_MAP = { v, tag: `<script type="importmap">${JSON.stringify({ imports })}</script>` };
   return IMPORT_MAP.tag;
 }

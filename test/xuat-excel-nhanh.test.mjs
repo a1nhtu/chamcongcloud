@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-xuat-excel-nhanh-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -47,7 +48,7 @@ before(async () => {
   app.use(markWrites);
   app.post('/ghi', (req, res) => res.json({ ok: 1 }));   // đại diện cho 1 thao tác ghi bất kỳ
   app.use('/api/reports', reportRoutes);
-  await new Promise((res) => { server = app.listen(0, '127.0.0.1', res); });
+  server = await moCong(app);
   root = `http://127.0.0.1:${server.address().port}`;
 });
 after(() => { server?.close(); for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} } });

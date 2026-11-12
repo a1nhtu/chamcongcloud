@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-xoa-nv-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -96,9 +97,9 @@ test('chọn máy để xoá (máy mất kết nối bỏ ra): chỉ máy đư�
 test('hộp xoá dò thẳng máy Hikvision / TCP/IP: máy bật (lần tự tải cuối đã lâu) = đang kết nối; máy tắt = không kết nối được', async () => {
   const http = await import('node:http');
   const srv = http.createServer((q, s) => { s.statusCode = q.url.startsWith('/ISAPI/System/deviceInfo') ? 401 : 404; s.end(); });
-  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  await moCong(srv);
   const port = srv.address().port;
-  const dead = http.createServer(); await new Promise((ok) => dead.listen(0, '127.0.0.1', ok));
+  const dead = http.createServer(); await moCong(dead);
   const deadPort = dead.address().port; await new Promise((ok) => dead.close(ok));   // cổng vừa đóng = máy tắt
   db.prepare(`INSERT INTO push_devices(serial,name,active,conn_type,tcp_ip,tcp_port,last_seen) VALUES
     ('HIK_ON','máy 2',1,'hik','127.0.0.1',?, '2026-11-09T07:09:00.000Z'), ('HIK_OFF','máy test 1',1,'hik','127.0.0.1',?, NULL),

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-goi-cai-dat-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -32,7 +33,7 @@ before(async () => {
   const pass = (req, res, next) => next();
   registerSettingsRoutes(r, { need: () => pass, adminOnly: pass });
   app.use('/api/admin', r);
-  await new Promise((res) => { server = app.listen(0, '127.0.0.1', res); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api/admin`;
 });
 after(() => { server?.close(); for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} } });

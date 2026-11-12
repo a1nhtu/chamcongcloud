@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-mix-'));
 process.env.DB_PATH = join(dir, 'test.db');
@@ -32,7 +33,7 @@ const overview = async (eid) => {
   return (await x.json()).rows.filter((r) => r.employee_id === eid);
 };
 
-before(() => {
+before(async () => {
   initSchema();
   setSetting('attendance_mode', 'hourly'); setSetting('hourly_merge_rule', 'pairs'); setSetting('punch_dedup_min', '15');
   const adm = Number(db.prepare("INSERT INTO employees(code, full_name, role, username, password_hash) VALUES ('ADM','Admin','admin','adm','x')").run().lastInsertRowid);
@@ -40,7 +41,7 @@ before(() => {
   const app = express(); app.use(express.json());
   app.use('/api/attendance', attRoutes);
   app.use('/api/reports', reportRoutes);
-  srv = app.listen(0); base = `http://127.0.0.1:${srv.address().port}`;
+  srv = await moCong(app); base = `http://127.0.0.1:${srv.address().port}`;
 });
 after(() => { srv.close(); try { db.close(); rmSync(dir, { recursive: true, force: true }); } catch {} });
 

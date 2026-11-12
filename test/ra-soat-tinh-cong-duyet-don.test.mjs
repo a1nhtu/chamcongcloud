@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-rasoat-'));
 process.env.DB_PATH = join(dir, 'test.db');
@@ -61,7 +62,7 @@ before(async () => {
   app.use('/api/admin', (await import('../server/routes/admin.js')).default);
   app.use('/api/attendance', (await import('../server/routes/attendance.js')).default);
   app.use((err, req, res, next) => { res.status(500).json({ error: 'LOI 500: ' + err.message }); });   // eslint-disable-line no-unused-vars
-  srv = app.listen(0); base = `http://127.0.0.1:${srv.address().port}`;
+  srv = await moCong(app); base = `http://127.0.0.1:${srv.address().port}`;
 });
 after(() => { mock.timers.reset(); srv.close(); try { db.close(); rmSync(dir, { recursive: true, force: true }); } catch {} });
 

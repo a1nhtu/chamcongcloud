@@ -11,6 +11,7 @@ import { rmSync } from 'node:fs';
 import ExcelJS from 'exceljs';
 import { parseFormula, evalFormula, checkFormula, orderByDeps } from '../server/pay-formula.js';
 import { progressiveTax, insuranceCalc, normalizeParams, computeSlip, annualSettlement, compileComponents, DEFAULT_PARAMS, makeCode } from '../server/pay-rules.js';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const ev = (f, v = {}) => evalFormula(parseFormula(f), v);
 
@@ -178,7 +179,7 @@ before(async () => {
   days(10).forEach((d, i) => ins.run(E.B1, d, 1, 480, i === 0 ? 10 : 0));
   const app = express(); app.use(express.json({ limit: '6mb' }));
   app.use('/api/admin', adminRoutes); app.use('/api/pay', payRoutes);
-  await new Promise((res) => { server = app.listen(0, '127.0.0.1', res); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api`;
 });
 after(() => { server?.close(); for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} } });

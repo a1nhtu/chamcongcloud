@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-phone-'));
 process.env.DB_PATH = join(dir, 'test.db');
@@ -24,7 +25,7 @@ const call = async (m, p, b) => {
 };
 const dayRows = (eid) => db.prepare('SELECT check_in_at i, check_out_at o FROM attendance WHERE employee_id=? AND work_date=? ORDER BY check_in_at').all(eid, D).map((a) => [hm(a.i), hm(a.o)]);
 
-before(() => {
+before(async () => {
   initSchema();
   setSetting('attendance_mode', 'hourly');
   const addEmp = (code) => db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active) VALUES (?,?,'x',?,'employee',1)").run(code, code.toLowerCase(), 'NV ' + code).lastInsertRowid;
@@ -38,7 +39,7 @@ before(() => {
   const app = express(); app.use(express.json());
   app.use((q, s, n) => { q.user = { id: 1, full_name: 'QL', role: 'admin' }; n(); });
   const r = express.Router(); registerAttendanceRoutes(r, { need: () => (q, s, n) => n() }); app.use('/admin', r);
-  srv = app.listen(0); base = `http://127.0.0.1:${srv.address().port}/admin`;
+  srv = await moCong(app); base = `http://127.0.0.1:${srv.address().port}/admin`;
 });
 after(() => { srv.close(); try { db.close(); rmSync(dir, { recursive: true, force: true }); } catch {} });
 

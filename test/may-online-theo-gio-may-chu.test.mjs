@@ -3,13 +3,12 @@
 // mà vẫn hiện Offline (aac 06/11/2026). Chạy: npm test
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 process.env.DB_PATH = join(tmpdir(), `dgp-online-test-${process.pid}.db`);
 const { deviceOnline } = await import('../server/device-sync.js');
-const admin = readFileSync(new URL('../public/admin.js', import.meta.url), 'utf8');
+const admin = (await import('../server/admin-bundle.js')).adminBundle();   // trang quản lý = các phần trong public/admin-parts ghép lại
 
 test('máy gọi về trong 2,5 phút = Online, im lâu hơn hoặc chưa từng gọi = Offline', () => {
   const now = Date.parse('2026-11-06T03:50:00.000Z');

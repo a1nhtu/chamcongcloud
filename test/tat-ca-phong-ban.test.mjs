@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-allpb-'));
 process.env.DB_PATH = join(dir, 'test.db');
@@ -25,7 +26,7 @@ const shiftOf = (eid, d) => rangedShiftAssignment(eid, d)?.shift_id ?? null;
 const addEmp = (code, dept) => Number(db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active, department) VALUES (?,?,'x',?,'employee',1,?)").run(code, code.toLowerCase(), 'NV ' + code, dept).lastInsertRowid);
 const assign = (departments, shift_id, from_date, to_date = '') => call('POST', '/admin/dept-shift-assignments', { departments, mode: 'shift', shift_id, from_date, to_date });
 
-before(() => {
+before(async () => {
   initSchema();
   const sh = db.prepare("INSERT INTO shifts(name, code, start_time, end_time) VALUES (?,?,'08:00','17:00')");
   HC = Number(sh.run('HC', 'HC').lastInsertRowid); CA2 = Number(sh.run('CA2', 'CA2').lastInsertRowid); CA3 = Number(sh.run('CA3', 'CA3').lastInsertRowid);
@@ -34,7 +35,7 @@ before(() => {
   const app = express(); app.use(express.json());
   app.use((q, s, n) => { q.user = { id: 1, full_name: 'QL', role: 'admin' }; n(); });
   const r = express.Router(); registerAssignmentRoutes(r, { need: () => (q, s, n) => n() }); app.use('/admin', r);
-  srv = app.listen(0); url = `http://127.0.0.1:${srv.address().port}`;
+  srv = await moCong(app); url = `http://127.0.0.1:${srv.address().port}`;
 });
 after(() => { srv.close(); try { db.close(); rmSync(dir, { recursive: true, force: true }); } catch {} });
 

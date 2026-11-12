@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-meal-phan-bep-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -44,7 +45,7 @@ before(async () => {
   tok.HR1 = signToken({ id: E.HR1, code: 'HR1', role: 'manager', full_name: 'Lan HR' });
   const app = express(); app.use(express.json());
   app.use('/api/admin', adminRoutes);
-  await new Promise((ok) => { server = app.listen(0, '127.0.0.1', ok); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api`;
   await call('PUT', '/admin/settings', { token: signMaster('sadmin'), body: { meal_enabled: true } });
   K1 = (await call('POST', '/admin/meal/kitchens', { token: tok.HR1, body: { name: 'Bếp 1' } })).body.kitchen;

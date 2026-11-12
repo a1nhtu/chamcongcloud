@@ -8,6 +8,7 @@ import { createServer } from 'node:http';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-chuyen-may-test-${process.pid}.db`);
 const clean = () => { for (const ext of ['', '-wal', '-shm', '.restore']) { try { rmSync(DBP + ext); } catch {} } };
@@ -168,7 +169,7 @@ test('máy mới đổi license: máy chủ từ chối → dừng + hiện lý 
       res.writeHead(reply.status, { 'content-type': 'application/json' }); res.end(JSON.stringify(reply.body));
     });
   });
-  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  await moCong(srv);
   process.env.DGP_HUB = 'http://127.0.0.1:' + srv.address().port;
   try {
     assert.equal(await NH.claimOnce(neu.app), 'refused');

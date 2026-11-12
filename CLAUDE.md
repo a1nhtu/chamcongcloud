@@ -11,7 +11,7 @@ Cổng mặc định trong code là 8080; bản cài của khách và máy Anh c
 
 - `server/` — backend. Logic tính công nằm ở `attendance-calc.js`, `day-metrics.js`, `shift-resolver.js`, `payroll-calc.js`.
 - `server/routes/` — API (`admin/*` là các submodule quản trị, `reports.js` báo cáo, `iclock.js` nhận dữ liệu máy chấm công).
-- `public/` — giao diện web (HTML/JS/CSS thuần, không build).
+- `public/` — giao diện web (HTML/JS/CSS thuần, không build). Trang quản lý: `public/admin-parts/*.js` (xem quy tắc 7).
 - `test/*.test.mjs` — test dùng `node:test`.
 - `docs/CAU-TRUC-CODE.md` — bản đồ code chi tiết (mở khi cần tra, không cần đọc hết).
 
@@ -38,8 +38,10 @@ npm start       # chạy app (cần thư mục data/, không có trong repo)
 6. Môi trường cloud **không có** máy chấm công thật, database khách, Cloudflare Tunnel — đừng cố chạy/kiểm thử các phần đó;
    ghi rõ trong PR những gì chưa kiểm được để Anh test trên máy thật.
 
-7. `public/admin.js` (~9.000 dòng) **tách dần**: khi việc đụng tới một trang lớn (Máy chấm công, Phân ca, Báo cáo, Cài đặt) thì tách
-   trang đó ra file riêng như `hr.js` / `payroll.js` đã làm, không đổi hành vi. Không tách cả file trong một lần.
+7. **Trang quản lý nằm trong `public/admin-parts/`** (16 file theo mục: `00-khung`, `20-nhan-vien-bo-phan`, `50-phan-ca`, `80-may-adms`, `90-cai-dat`…).
+   Máy chủ ghép chúng theo thứ tự tên thành `/admin.js` (`server/admin-bundle.js`) — trình duyệt vẫn nhận một file, chung một phạm vi biến.
+   Sửa đúng file phần; KHÔNG tạo lại `public/admin.js`; dòng `import` chỉ đặt trong `00-khung.js`; mục lớn mới = file phần mới (số nằm giữa hai phần liền kề).
+   Trình duyệt báo lỗi ở dòng N của admin.js: `node -e "import('./server/admin-bundle.js').then(m=>console.log(m.adminLocate(N)))"` ra đúng file + dòng.
 8. Chạy máy chủ thử thì luôn đặt `DB_PATH` ở thư mục tạm và cổng khác 8686 (bản sao lưu đi theo file CSDL; ảnh và log vẫn ghi vào thư mục app).
 
 ## Khi tạo Pull Request (phiên cloud)

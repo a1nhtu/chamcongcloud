@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { computeDayMetrics } from '../server/day-metrics.js';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const iso = (d, hm) => new Date(`${d}T${hm}:00+07:00`).toISOString();
 const WD = '2026-01-05'; // Thứ Hai
@@ -107,7 +108,7 @@ before(async () => {
   registerAttendanceRoutes(r, { need }); registerOrgRoutes(r, { need });
   for (const k of Object.keys(otReg)) if (/^register/.test(k)) otReg[k](r, { need });
   app.use('/admin', r); app.use('/reports', reportRoutes);
-  srv = app.listen(0); url = `http://127.0.0.1:${srv.address().port}`;
+  srv = await moCong(app); url = `http://127.0.0.1:${srv.address().port}`;
 });
 after(() => { srv?.close(); try { db.close(); rmSync(dir, { recursive: true, force: true }); } catch {} });
 

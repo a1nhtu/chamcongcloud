@@ -8,6 +8,7 @@ import { join } from 'node:path';
 import { rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import dgram from 'node:dgram';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const WIN = process.platform === 'win32';
 const DBP = join(tmpdir(), `dgp-lan-test-${process.pid}.db`);
@@ -83,7 +84,7 @@ const call = async (key, body = {}) => {
 
 before(async () => {
   devSrv = zkTcp();
-  await new Promise((ok) => devSrv.listen(0, '127.0.0.1', ok));
+  await moCong(devSrv);
   devPort = devSrv.address().port;
   process.env.ZK_SCAN_HOSTS = `127.0.0.1:${devPort}`;
   ZKM = await import('../server/zk-tcp.js');
@@ -181,7 +182,7 @@ test('đọc bảng ARP: lấy IP + MAC, nhận máy ZKTeco theo MAC 00:17', asy
 // máy giả chỉ mở cổng "8818" (cổng ngẫu nhiên thay cho 8818) ở 127.0.0.2, cổng 4370 đóng
 const with8818 = async (fn) => {
   const extra = createServer((s) => s.end());
-  await new Promise((ok) => extra.listen(0, '127.0.0.2', ok));
+  await moCong(extra, '127.0.0.2');
   const keep = process.env.ZK_SCAN_HOSTS, p = extra.address().port;
   process.env.ZK_SCAN_EXTRA_PORT = String(p);
   process.env.ZK_SCAN_HOSTS = `${keep},127.0.0.2:1`;
@@ -331,7 +332,7 @@ test('thiết bị Hikvision thật (gói UDP lạ, không phải ZK): không b�
   u.on('message', (m, from) => u.send(Buffer.from('<?xml version="1.0"?><Probe/>'), from.port, from.address));
   await new Promise((ok) => u.bind(0, '127.0.0.6', ok));
   const web = (await import('node:http')).createServer((q, s) => { s.writeHead(q.url === '/ISAPI/System/deviceInfo' ? 401 : 404, { 'WWW-Authenticate': 'Digest realm="DS-K1T"' }); s.end(); });
-  await new Promise((ok) => web.listen(0, '127.0.0.6', ok));
+  await moCong(web, '127.0.0.6');
   const keep = process.env.ZK_SCAN_HOSTS;
   process.env.ZK_SCAN_HOSTS = `127.0.0.6:${u.address().port},127.0.0.7:1`; process.env.ZK_SCAN_HIK_PORT = String(web.address().port);
   process.env.ZK_SCAN_ARP = '127.0.0.6 e0-ca-3c-5c-e7-af,127.0.0.7 44-19-b6-00-00-01';

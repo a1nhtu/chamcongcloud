@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const WIN = process.platform === 'win32';
 const T = (n) => join(tmpdir(), `dgp-day-nv-tcp-${n}-${process.pid}`);
@@ -77,7 +78,7 @@ let db, Z, S, srv;
 const routes = {};
 before(async () => {
   srv = createServer((s) => s.destroy());
-  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  await moCong(srv);
   const D = await import('../server/db.js');
   db = D.db; D.initSchema();
   D.setSetting('device_enabled', '1'); D.setSetting('tcp_device_enabled', '1');

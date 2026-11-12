@@ -10,6 +10,7 @@ import { join, dirname } from 'node:path';
 import { rmSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-meal-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -54,7 +55,7 @@ before(async () => {
   tok.master = signMaster('sadmin');
   const app = express(); app.use(express.json());
   app.use('/api/admin', adminRoutes); app.use('/api/meal', mealRoutes);
-  await new Promise((ok) => { server = app.listen(0, '127.0.0.1', ok); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api`;
 });
 after(() => { server?.close(); for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} } });

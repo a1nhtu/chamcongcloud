@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import ExcelJS from 'exceljs';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-bao-cao-tong-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -43,7 +44,7 @@ before(async () => {
   att.run(b, '2026-09-02', vn('2026-09-02', '08:00'), vn('2026-09-02', '19:00'), 1, 480, 0, 0, 120);
   const app = express(); app.use(express.json());
   app.use('/api/reports', reportRoutes);
-  await new Promise((res) => { server = app.listen(0, '127.0.0.1', res); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api/reports`;
 });
 after(() => { server?.close(); for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} } });

@@ -11,6 +11,7 @@ import { rmSync } from 'node:fs';
 import {
   recipeUnit, parseQty, parseMoney, splitByKitchen, buildNeeds, stockBalance, stockState, buildStockReport, pickRecipe, dishKey,
 } from '../server/meal-inv-rules.js';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-meal-inv-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -133,7 +134,7 @@ before(async () => {
   tok.master = signMaster('sadmin');
   const app = express(); app.use(express.json());
   app.use('/api/admin', adminRoutes); app.use('/api/meal', mealRoutes);
-  await new Promise((res) => { server = app.listen(0, '127.0.0.1', res); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api`;
   ok(await call('PUT', '/admin/settings', { token: tok.master, body: { meal_enabled: true } }));
 });

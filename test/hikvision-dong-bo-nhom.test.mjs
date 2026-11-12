@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-hik-sync-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -139,7 +140,7 @@ before(async () => {
   ZK = await import('../server/zk-tcp.js');
   const add = (m) => (p, ...h) => { routes[`${m} ${p}`] = h; };
   (await import('../server/routes/admin/devices.js')).registerDeviceRoutes({ get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') }, { need: () => (q, s, n) => n() });
-  for (const M of [A, B, C]) { await new Promise((ok) => M.srv.listen(0, '127.0.0.1', ok)); M.port = M.srv.address().port; }
+  for (const M of [A, B, C]) { await moCong(M.srv); M.port = M.srv.address().port; }
   setSetting('device_enabled', '1'); setSetting('hik_device_enabled', '1');
   // dữ liệu đăng ký sẵn trên từng máy
   A.users.set('7001', 'Nguyen Van An'); A.faces.set('7001', jpg(1)); A.fps.set('7001', [{ id: 1, data: 'FP-AN-1' }, { id: 6, data: 'FP-AN-6' }]); A.cards.set('7001', ['111']);

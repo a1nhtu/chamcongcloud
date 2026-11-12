@@ -9,6 +9,7 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CHAY_APP_BAT, GO_CAI_DAT_BAT, WATCH_EVERY_MIN, watchTaskName, watchTaskArgs } from '../server/autostart.js';
+import { congTrong, moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 test('lịch gác: 5 phút/lần chạy start-hidden.vbs; đủ quyền chạy bằng SYSTEM, không đủ quyền là lịch của user', () => {
   assert.equal(WATCH_EVERY_MIN, 5);
@@ -33,7 +34,7 @@ test('gỡ cài đặt xoá cả lịch gác và báo "chưa gỡ hết" nếu l
 const appCheck = CHAY_APP_BAT.split('\n').find((l) => l.startsWith('powershell') && l.includes('-LocalPort %PORT%'));
 const runCheck = (dir, port) => spawnSync('powershell', ['-NoProfile', '-Command', appCheck.slice(appCheck.indexOf('-Command "') + 10, appCheck.lastIndexOf('"')).replace(/%PORT%/g, String(port))],
   { env: { ...process.env, DGP_DIR: dir + '\\' }, windowsHide: true }).status;   // 0 = bật app, 1 = không bật
-const freePort = () => new Promise((ok) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => congTrong();
 
 test('ChayApp.bat: CHỜ khi đang cập nhật, cập nhật cũ quá 3 phút thì bật; cổng đang nghe thì không bật trùng', { skip: process.platform !== 'win32' }, async () => {
   assert.ok(appCheck, 'không thấy lệnh kiểm tra trong ChayApp.bat');
@@ -49,8 +50,7 @@ test('ChayApp.bat: CHỜ khi đang cập nhật, cập nhật cũ quá 3 phút t
     utimesSync(bat, old, old);
     assert.equal(runCheck(dir, port), 0, 'CapNhat.bat sót lại từ 10 phút trước (cập nhật hỏng) → vẫn bật');
     rmSync(bat);
-    const srv = createServer().listen(0, '0.0.0.0');
-    await new Promise((ok) => srv.on('listening', ok));
+    const srv = await moCong(createServer(), '0.0.0.0');
     try { assert.equal(runCheck(dir, srv.address().port), 1, 'cổng đang nghe → không bật trùng'); }
     finally { srv.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }

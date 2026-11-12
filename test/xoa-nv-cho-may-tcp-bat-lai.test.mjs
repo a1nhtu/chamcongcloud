@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const WIN = process.platform === 'win32';
 const opt = { skip: !WIN && 'cần PowerShell (Windows)' };
@@ -36,7 +37,7 @@ const pending = () => db.prepare("SELECT pin FROM device_pending_deletes WHERE s
 const seed = (...pins) => { for (const p of pins) S.upsertDeviceUserSerial('TCP001', p, 'NV ' + p, ''); };
 const setPort = (p) => db.prepare("UPDATE push_devices SET tcp_port=? WHERE serial='TCP001'").run(p);
 const closedPort = async () => {
-  const s = createServer(); await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const s = createServer(); await moCong(s);
   const p = s.address().port; await new Promise((ok) => s.close(ok)); return p;
 };
 const purgeOnAll = async (pins) => {
@@ -56,7 +57,7 @@ switch ($Action) {
 }
 `);
   srv = createServer((s) => s.destroy());
-  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  await moCong(srv);
   port = srv.address().port;
   const D = await import('../server/db.js');
   db = D.db; D.initSchema();

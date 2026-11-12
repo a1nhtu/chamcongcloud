@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createServer } from 'node:net';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const WIN = process.platform === 'win32';
 const DBP = join(tmpdir(), `dgp-xoa-nv-tcp-test-${process.pid}.db`);
@@ -74,7 +75,7 @@ switch ($Action) {
 }
 `);
   srv = createServer((s) => s.destroy());
-  await new Promise((ok) => srv.listen(0, '127.0.0.1', ok));
+  await moCong(srv);
   port = srv.address().port;
   const D = await import('../server/db.js');
   db = D.db; D.initSchema();

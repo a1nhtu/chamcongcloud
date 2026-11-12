@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-matran-'));
 process.env.DB_PATH = join(dir, 'test.db');
@@ -170,7 +171,7 @@ test('báo cáo danh sách: Theo ID máy / Chọn từ máy hiện từng lần 
   const adm = Number(db.prepare("INSERT INTO employees(code, full_name, role, username, password_hash) VALUES ('ADMX','Admin','admin','admx','x')").run().lastInsertRowid);
   const tok = signToken({ id: adm, code: 'ADMX', role: 'admin', full_name: 'Admin' });
   const app = express(); app.use(express.json()); app.use('/api/reports', reportRoutes);
-  const server = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
+  const server = await moCong(app);
   try {
     const row = async (rule, punches) => {
       chay('HC', rule, punches);

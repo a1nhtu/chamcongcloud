@@ -262,6 +262,9 @@ kịch bản cập nhật thủ công tương ứng với `CapNhat.bat` do `upda
 
 - **Không có bước build**: `public/` là HTML/JS/CSS thuần, sửa xong là chạy được ngay, không cần
   bundler.
+- **Trang quản lý** (`/admin.js`) viết thành 16 file theo mục trong `public/admin-parts/` (`00-khung.js`, `10-tong-quan.js`, … `90-cai-dat.js`).
+  `server/admin-bundle.js` ghép chúng theo thứ tự tên file thành một file khi trình duyệt xin `/admin.js` (không thêm bớt ký tự, đổi file là nhận ngay).
+  Mọi phần dùng chung một phạm vi biến như khi còn là 1 file; dòng `import` chỉ nằm ở `00-khung.js`. Test: `test/admin-ghep-tu-cac-phan.test.mjs`.
 - **Giờ giấc**: toàn bộ app quy về giờ Việt Nam UTC+7 bằng cách cộng thủ công `7 * 3600000` ms vào
   `Date` UTC (xem `util.js`, `attendance-calc.js`, `backup.js` — mỗi file tự làm lại phép cộng này
   thay vì dùng chung 1 hàm, có thể là chỗ dễ lệch nếu sửa không đồng bộ).

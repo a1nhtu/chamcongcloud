@@ -11,6 +11,7 @@ import { rmSync, existsSync, readdirSync, readFileSync, mkdtempSync } from 'node
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createServer, request } from 'node:http';
+import { congTrong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const TMP = mkdtempSync(join(tmpdir(), 'dgp-multi-'));
@@ -140,7 +141,7 @@ test('tra công ty theo tên miền: không nhận tên miền lạ / thiếu m�
 });
 
 /* ------------------------------ PHẦN 2: CHẠY server/index.js THẬT ------------------------------ */
-const freePort = () => new Promise((ok) => { const s = createServer(); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => ok(p)); }); });
+const freePort = () => congTrong();
 let PORT, child, out = '';
 function startServer() {
   out = '';

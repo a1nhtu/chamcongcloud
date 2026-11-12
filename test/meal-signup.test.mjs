@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { rmSync } from 'node:fs';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-meal-signup-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -46,7 +47,7 @@ before(async () => {
   db.prepare("INSERT INTO push_devices(serial, name, active) VALUES ('K1SN', 'Máy ăn bếp 1', 1), ('K2SN', 'Máy ăn bếp 2', 1)").run();
   const app = express(); app.use(express.json());
   app.use('/api/admin', adminRoutes); app.use('/api/meal', mealRoutes);
-  await new Promise((ok) => { server = app.listen(0, '127.0.0.1', ok); });
+  server = await moCong(app);
   base = `http://127.0.0.1:${server.address().port}/api`;
   await call('PUT', '/admin/settings', { token: tok.master, body: { meal_enabled: true } });
 });

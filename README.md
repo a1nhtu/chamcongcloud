@@ -50,7 +50,7 @@ npm start    # http://localhost:8080  (đổi cổng: PORT=8686 npm start)
 ```
 server/        backend Express + SQLite (tính công: attendance-calc.js, day-metrics.js, shift-resolver.js; lương: payroll-calc.js, pay-rules.js)
 server/routes/ API (admin/*, reports, iclock = máy chấm công…)
-public/        giao diện web, không cần build
+public/        giao diện web, không cần build (trang quản lý: public/admin-parts/*.js, máy chủ ghép thành /admin.js)
 test/          test bằng node:test
 tools/         đóng gói bộ cài, cấp bản quyền, giả lập máy
 HuongDan/      trang hướng dẫn cho khách

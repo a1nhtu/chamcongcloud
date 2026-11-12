@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-ca-dt-'));
 process.env.DB_PATH = join(dir, 'test.db');
@@ -28,7 +29,7 @@ const call = async (m, p, who, b) => {
 const rowsOf = (eid, d) => db.prepare('SELECT check_in_at i, check_out_at o FROM attendance WHERE employee_id=? AND work_date=? ORDER BY check_in_at').all(eid, d).map((a) => [hm(a.i), hm(a.o)]);
 const PUNCH = { lat: 21.0, lng: 105.8, photo: 'khong-phai-anh' };
 
-before(() => {
+before(async () => {
   initSchema();
   setSetting('attendance_mode', 'shift');
   setSetting('punch_dedup_min', '15');
@@ -39,7 +40,7 @@ before(() => {
   E.HC = emp('HC', S.HC); E.DEM = emp('DEM', S.Dem);
   const app = express(); app.use(express.json());
   app.use('/api/attendance', attMod.default);
-  srv = app.listen(0); base = `http://127.0.0.1:${srv.address().port}`;
+  srv = await moCong(app); base = `http://127.0.0.1:${srv.address().port}`;
 });
 after(() => { srv.close(); try { db.close(); rmSync(dir, { recursive: true, force: true }); } catch {} });
 

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { rmSync } from 'node:fs';
 import { createServer, request } from 'node:http';
 import { createHash } from 'node:crypto';
+import { moCong } from './_cong.mjs';   // cổng ngẫu nhiên an toàn (tránh cổng fetch cấm / cổng test khác đang dò)
 
 const DBP = join(tmpdir(), `dgp-ai-hik-test-${process.pid}.db`);
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} }
@@ -110,10 +111,10 @@ before(async () => {
   (await import('../server/routes/admin/devices.js')).registerDeviceRoutes({ get: add('GET'), post: add('POST'), put: add('PUT'), delete: add('DELETE') }, { need: () => (q, s, n) => n() });
   appSrv = createServer((req, res) => { res.writeHead(404); res.end(); });
   WS.attachAiWs(appSrv);
-  await new Promise((ok) => appSrv.listen(0, '127.0.0.1', ok));
+  await moCong(appSrv);
   appPort = appSrv.address().port;
   hikSrv = createServer(hikHandler);
-  await new Promise((ok) => hikSrv.listen(0, '127.0.0.1', ok));
+  await moCong(hikSrv);
   hikPort = hikSrv.address().port;
 });
 after(() => { appSrv?.closeAllConnections?.(); appSrv?.close(); hikSrv?.close(); });
