@@ -1009,9 +1009,15 @@ function nightOutOnlyPunches(employeeId, workDate) {
   if (!isNightShift(shift) || !ruleKnowsDir(plan.mergeRule, shift)) return [];
   // ngày đã có dòng công không dựng từ máy (chấm điện thoại / nhập tay) → giữ nguyên, không đè
   if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return [];
-  const { winStart, winEnd } = ruleWindow(workDate, shift);
-  return db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const { winStart, winEnd, end } = ruleWindow(workDate, shift);
+  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, winStart.toISOString(), winEnd.toISOString());
+  // Lượt VÀO từ giờ KẾT THÚC ca đêm trở đi (VD 08:00 sáng hôm sau ở máy vào, ca 19:00–07:00) không phải của ca đêm này (ca đã hết):
+  // trước đây vẫn lấy → dòng rác "vào 08:00 hôm sau, trễ 780'" ở ngày này. Cắt danh sách tại lượt VÀO đó (bỏ nó và các lượt sau).
+  // Lượt VÀO khi ca còn chạy (00:30 = vào trễ sau nửa đêm) vẫn là của ca đêm này như cũ. rebuildDayCore chỉ ghép tới lượt cuối trả về.
+  const dir = ruleDir(plan.mergeRule, shift, deviceMachineMap());
+  const cut = rows.findIndex((p) => dir(p) === 1 && Date.parse(p.punch_at) >= end.getTime());
+  return cut < 0 ? rows : rows.slice(0, cut);
 }
 
 const vnDayOf = (ms) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);   // ngày (giờ VN) của 1 mốc thời gian
@@ -1137,6 +1143,29 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
   return null;
 }
 
+// CA GÃY VỀ MUỘN (lịch nhiều ca/ngày, VD Sáng 08–12 + Chiều 13:30–17:30, tăng ca về 22:00): khung nhận lượt chấm của từng ca chỉ tới
+// cuối ca + 4 tiếng → lượt về sau 21:30 bị bỏ TRƯỚC khi chọn bộ ca: chỉ chọn được ca Sáng, rồi vì 1 ca lại lấy lượt tới hết ngày
+// (Sáng 08:00→22:00, tăng ca 600', mất dòng ca Chiều). Ca NGÀY kết thúc muộn nhất của ngày (không khai "Kết thúc ra") nhận lượt tới
+// HẾT NGÀY như nhánh 1 ca/ngày (toDayEnd) — chỉ nới phía CUỐI ngày; lượt nới thêm là giờ VÀO ca hôm sau (nextDayClaim) thì không lấy.
+// Ngày có ca đêm trong lịch: lượt buổi tối có thể là của ca đêm → không nới (như cũ).
+// seen: các lượt đã gom theo khung thường. Trả { shifts: Set ca được nới, at: mốc cuối ngày, punches: lượt chỉ có trong phần nới } hoặc null.
+function lateSplitTail(employeeId, workDate, shifts, seen, punchesInWin) {
+  if (shifts.some(isNightShift)) return null;
+  const wins = shifts.map((s) => ruleWindow(workDate, s));
+  const maxEnd = Math.max(...wins.map((w) => w.end.getTime()));
+  const at = new Date(new Date(`${workDate}T23:59:00+07:00`).getTime() + 59999);   // 23:59:59 — như toDayEnd của ruleWindow
+  const ext = new Set(), extra = new Map();
+  let claim;
+  shifts.forEach((s, i) => {
+    const w = wins[i];
+    if (w.end.getTime() !== maxEnd || s.check_out_end || !(at > w.winEnd)) return;
+    ext.add(s);
+    if (claim === undefined) claim = nextDayClaim(employeeId, workDate, at, false);
+    for (const p of punchesInWin(w.winEnd, at)) if (!seen.has(p.punch_at) && !(claim && claim(p.punch_at, w.end))) extra.set(p.punch_at, p);
+  });
+  return extra.size ? { shifts: ext, at, punches: [...extra.values()] } : null;
+}
+
 // Dựng lại nhiều ngày theo đúng THỨ TỰ (từng NV, ngày tăng dần) — ngày hôm trước phải xong trước để biết
 // lượt quẹt sáng sớm nào đã là giờ ra ca đêm. keys: Set/mảng 'empId|YYYY-MM-DD'. Tự thêm ngày kế tiếp (ca đêm lấn sang).
 export function rebuildDays(keys) {
@@ -1209,7 +1238,8 @@ function rebuildDayCore(employeeId, workDate) {
   // "+punch_at": ép dùng chỉ mục (NV, ngày) rồi mới sắp xếp — không thì SQLite có thể duyệt hết lượt quẹt của NV theo chỉ mục (NV, giờ)
   seedPhonePunches(employeeId, workDate);
   let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
-  if (!prov.length) prov = nightOutOnlyPunches(employeeId, workDate);
+  let nightTo = null;   // ngày dựng từ lượt trong khung ca đêm (nightOutOnlyPunches): chỉ ghép tới lượt cuối hàm đó trả về
+  if (!prov.length) { prov = nightOutOnlyPunches(employeeId, workDate); if (prov.length) nightTo = prov[prov.length - 1].punch_at; }
   if (!prov.length) prov = prevEveningInPunches(employeeId, workDate);   // ca bắt đầu ngay sau nửa đêm, đến sớm từ tối hôm trước
   const had = prov.length > 0;
   // Ngày chấm điện thoại mà chỉ có lượt THÊM TAY (bản cũ để lại): không dựng lại — dựng từ riêng lượt thêm tay sẽ đè mất các phiên chấm điện thoại
@@ -1242,13 +1272,24 @@ function rebuildDayCore(employeeId, workDate) {
     db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)").run(employeeId, workDate);
     const seen = new Map();
     for (const shift of plan.shifts) { const { winStart, winEnd } = ruleWindow(workDate, shift); for (const p of punchesInWin(winStart, winEnd)) seen.set(p.punch_at, p); }
-    const picked = pickShiftSet(plan.shifts, [...seen.values()], workDate);
+    let picked = pickShiftSet(plan.shifts, [...seen.values()], workDate);
+    // Ca gãy về muộn hơn cuối ca cuối + 4 tiếng (lateSplitTail): chọn lại bộ ca có cả lượt về muộn đó. Chỉ nhận khi ra ≥ 2 ca, ca nới là
+    // ca cuối (ca Chiều nhận giờ ra 22:00) và GIỮ NGUYÊN các ca đã chọn theo khung thường (chỉ thêm lại ca cuối bị mất) — không thì
+    // giữ đúng cách chọn cũ (VD vẫn 1 ca: ca đó đã nhận lượt tới hết ngày; đã chọn HC thì không đổi sang Sáng + Chiều).
+    const late = lateSplitTail(employeeId, workDate, plan.shifts, seen, punchesInWin);
+    let lateShift = null;
+    if (late) {
+      const p2 = pickShiftSet(plan.shifts, [...seen.values(), ...late.punches], workDate);
+      const last = p2.length >= 2 ? p2[p2.length - 1].shift : null;
+      if (last && late.shifts.has(last) && picked.every((x) => p2.some((y) => y.shift === x.shift))) { picked = p2; lateShift = last; }
+    }
     for (const { shift, punches } of picked) {
       // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
       const rule = (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || effectiveMergeRule(shift, null) || 'filo');
       const one = picked.length === 1;
       const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn() };
       if (one) wopts.extendEnd = overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo);
+      else if (shift === lateShift) wopts.extendEnd = late.at;   // giờ ra muộn của ca cuối không bị khung cuối ca + 4 tiếng loại
       // chỉ 1 ca → nhận lượt quẹt như ca đơn (tới hết ngày với ca ngày); nhiều ca → đúng các lượt đã chia cho ca đó
       const w = ruleWindow(workDate, shift, wopts);
       const { inIso, outIso, pairs } = mergeDayPunches(one ? punchesInWin(w.winStart, w.winEnd) : punches, shift, rule, machineMap, workDate, wopts);
@@ -1269,6 +1310,7 @@ function rebuildDayCore(employeeId, workDate) {
     wopts.extendEnd = overnightTail(employeeId, workDate, shift, mergeRule, wopts, hourly, usedTo);
     const { winStart, winEnd, end } = ruleWindow(workDate, shift, wopts);
     let punches = punchesInWin(winStart, winEnd);
+    if (nightTo) punches = punches.filter((p) => p.punch_at <= nightTo);   // lượt VÀO sau khi ca đêm đã hết → không phải của ngày này
     // lượt sáng hôm sau gần giờ vào ca hôm sau → của hôm sau. Riêng quy tắc biết hướng đã ghép RA sáng hôm sau (overnightTail)
     // thì giữ nguyên các lượt tới đúng lượt RA đó (máy ra là giờ ra, bất kể ngày đêm)
     const claim = nextDayClaim(employeeId, workDate, winEnd, hourly);
@@ -1306,6 +1348,10 @@ function rebuildDayCore(employeeId, workDate) {
     if (last) db.prepare('UPDATE attendance SET check_out_photo=?, check_out_lat=?, check_out_lng=?, check_out_distance_m=? WHERE id=?').run(last.check_out_photo, last.check_out_lat, last.check_out_lng, last.check_out_distance_m, existing.id);
     db.prepare('DELETE FROM attendance WHERE employee_id=? AND work_date=? AND id<>? AND (manual IS NULL OR manual=0)').run(employeeId, workDate, existing.id);
   }
+  // 1 ca/ngày chỉ có 1 dòng dựng từ máy. Đổi từ lịch NHIỀU ca/ngày (Sáng + Chiều) sang 1 ca / bỏ gán (tự dò) rồi "Tính lại": trước đây
+  // chỉ dòng đầu được ghi đè, dòng ca cũ còn lại (Chiều 0,5c) nằm cạnh dòng ca mới (HC 1c) → ngày đó cộng trùng thành 1,5 công.
+  // Bỏ các dòng KHÁC dựng từ máy của ngày này; dòng sửa tay và dòng chấm điện thoại giữ nguyên.
+  if (existing) db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND id<>? AND (manual IS NULL OR manual=0) AND shift_source='device'").run(employeeId, workDate, existing.id);
 }
 
 // Các cặp vào–ra của 1 NV (cho "↻ Tính lại" khi dùng quy tắc "Nhiều lần vào/ra"):
