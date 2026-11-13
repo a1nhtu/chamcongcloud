@@ -7,7 +7,7 @@ import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso, distanceMeters } from '../util.js';
 import { computeLate, computeCheckout, ruleWindow, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
-import { otRoundingFrom, payrollCtx, computeDayMetrics } from '../day-metrics.js';
+import { otRoundingFrom, payrollCtx, computeDayMetrics, standardMinutesFrom } from '../day-metrics.js';
 import { otRegCapper } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
 import { dayRules } from '../swap.js';
@@ -34,6 +34,7 @@ function dayFlags(date, empId = null) {
     isWeekend: compOff || (!swapWork && isWeekendDay(date, getSetting('weekend_days', '7')) && !isWeekendNormalEmp(empId)),
     roundingDecimals: parseInt(getSetting('workunit_rounding', '2'), 10) || 2,
     roundingMode: parseInt(getSetting('workunit_rounding_mode', '0'), 10) || 0,
+    standardMinutes: standardMinutesFrom(getSetting),   // ngày không có ca (theo giờ): phút làm ÷ số giờ chuẩn 1 ngày công ở Cài đặt = số công
     weekendOt: compOff || getSetting('weekend_work_as_ot', '1') === '1',
     weekendOtBefore: getSetting('weekend_ot_before', '0') === '1',
     lateBlock: Math.max(0, parseInt(getSetting('late_round_block', '0'), 10) || 0),

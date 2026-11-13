@@ -18,9 +18,17 @@ export function otRoundingFrom(getSetting) {
   const block = getSetting('ot_rounding_type', 'hour') === 'block' ? Math.max(1, parseInt(getSetting('ot_rounding_block', '15'), 10) || 15) : 0;
   return { decimals: Number.isFinite(dec) ? dec : 2, mode: parseInt(getSetting('ot_rounding_mode', '0'), 10) || 0, block };
 }
+// Số phút của 1 NGÀY CÔNG chuẩn = ô "Số giờ chuẩn của 1 ngày công" (Cài đặt > Quy tắc tính công, pay_hours_per_day) × 60.
+// Cùng luật đọc với hoursPerDay() ở payroll-calc.js: nhận 1–24 giờ, trống / sai → 8 giờ (= 480 phút, như trước khi có ô này).
+// Dùng làm mốc "1 công" cho ngày KHÔNG có ca (chế độ theo giờ / không dò được ca): noShiftUnit(work_minutes, { standardMinutes }).
+export function standardMinutesFrom(getSetting) {
+  const v = parseFloat(getSetting('pay_hours_per_day', '8'));
+  return Math.round((Number.isFinite(v) && v >= 1 && v <= 24 ? v : 8) * 60);
+}
 export function payrollCtx(getSetting, db) {
   const rules = dayRules(db);   // ngày lễ / nghỉ bù lễ / ngày làm bù
   return {
+    standardMinutes: standardMinutesFrom(getSetting),   // phút của 1 ngày công chuẩn — mốc 1 công của ngày không có ca
     weekend: getSetting('weekend_days', '7'),
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
     weekendOtBefore: getSetting('weekend_ot_before', '0') === '1',   // ngày nghỉ: tăng ca tính cả phần đến sớm trước giờ vào ca
@@ -77,6 +85,7 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
     isWeekend: compOff || (!swapWork && isWeekendDay(workDate, ctx.weekend) && !(opts.empId && ctx.weekendNormal && ctx.weekendNormal(opts.empId))),
     roundingDecimals: ctx.roundingDecimals,
     roundingMode: ctx.roundingMode,
+    standardMinutes: ctx.standardMinutes,   // ngày không có ca: phút làm ÷ số này = số công (undefined → 480 như cũ)
     lateBlock: ctx.lateBlock || 0,
     pairsFixedBreak: !!ctx.pairsFixedBreak,   // nhiều lần vào/ra + nghỉ trưa cố định: mỗi cặp trừ giờ nghỉ
     weekendOtBefore: !!ctx.weekendOtBefore,   // ngày nghỉ: đến sớm trước ca cũng là tăng ca
