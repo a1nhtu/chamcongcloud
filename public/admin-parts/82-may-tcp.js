@@ -134,7 +134,7 @@ function lanScanModal() {
   let extraSent = false;
   const extraRow = el('div', { style: 'margin:0 0 10px' },
     el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('span', { style: 'font-size:13px' }, 'Dò thêm dải / IP khác:'), extraI, btnSm('🔍 Dò', () => run(), 'ghost')),
-    el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Máy chấm công khác lớp mạng với máy tính (VD máy bắt Wi-Fi, máy tính cắm dây) mà ping vẫn thông: gõ dải của máy (192.168.1.x) hoặc đúng IP máy. Nhiều mục cách nhau bằng dấu phẩy.'));
+    el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Ping thông mà dò không ra (máy bắt Wi-Fi chập chờn, hoặc khác lớp mạng với máy tính): gõ đúng IP máy (VD 192.168.1.6) hoặc cả dải (192.168.1.x). Nhiều mục cách nhau bằng dấu phẩy.'));
   const warn = (t) => el('div', { style: 'margin:8px 0;padding:8px 12px;border-radius:8px;background:#fff7e0;color:#7a4b00;font-size:13px' }, t);
   let changed = false;
   const close = () => { closeModal(); if (changed) pageDevices(); };
@@ -175,7 +175,7 @@ function lanScanModal() {
       : warn('Bản cài này chưa có tên miền (bản LAN) — chỉ xem được máy, chưa trỏ tự động được. Trên máy chấm công điền IP + Port theo "Cách A".'));
     if (!r.enabled) box.append(warn('Phần mềm đang TẮT dùng máy chấm công — máy trỏ về sẽ chưa hiện. Liên hệ Digiplus để bật.'));
     if ((r.missing || []).length) box.append(warn(`Không thấy máy ở ${r.missing.join(', ')} (đã thử cổng 4370 TCP + UDP và ping). Kiểm tra lại IP trên máy chấm công (Menu → Comm → Ethernet / Wi-Fi).`));
-    if (!r.rows.length) return box.append(warn('Không thấy máy chấm công nào trong mạng. Kiểm tra máy đã bật, cắm dây mạng / Wi-Fi rồi bấm Tìm lại. Máy chấm công khác lớp mạng với máy tính (VD máy bắt Wi-Fi 192.168.1.x còn máy tính 10.x) thì gõ dải hoặc IP máy vào ô "Dò thêm" ở trên rồi bấm Dò.'));
+    if (!r.rows.length) return box.append(warn('Không thấy máy chấm công nào trong mạng. Kiểm tra máy đã bật, cắm dây mạng / Wi-Fi rồi bấm Tìm lại. Biết IP máy mà ping vẫn thông (máy bắt Wi-Fi chập chờn, hoặc khác lớp mạng với máy tính) thì gõ đúng IP máy vào ô "Dò thêm" ở trên rồi bấm Dò — phần mềm hỏi riêng máy đó, chờ lâu hơn.'));
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr><th>Máy</th><th>Đang gửi dữ liệu về</th></tr></thead>';
     const tb = el('tbody');

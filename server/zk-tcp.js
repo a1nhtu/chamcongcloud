@@ -272,16 +272,19 @@ export function parseExtraTargets(text) {
     if (m[4] && /^\d+$/.test(m[4])) { const ip = `${net}.${+m[4]}`; if (!hosts.includes(ip) && hosts.length < 20) hosts.push(ip); }
     else if (!nets.includes(net) && nets.length < 4) nets.push(net);
   }
-  return { nets, hosts: hosts.filter((ip) => !nets.includes(ip.split('.').slice(0, 3).join('.'))), bad };
+  return { nets, hosts, bad };
 }
 // extra = { nets, hosts } (parseExtraTargets): quét thêm cả dải / từng IP ngoài lớp mạng của máy tính
 export async function scanLan(ips, port = 4370, ms = 800, extra = {}) {
   const test = !!process.env.ZK_SCAN_HOSTS;
   const nets = [...new Set([...ips.map((ip) => ip.split('.').slice(0, 3).join('.')), ...(extra.nets || [])])];
-  const one = (extra.hosts || []).filter((ip) => !nets.includes(ip.split('.').slice(0, 3).join('.')));
+  // IP gõ riêng: luôn hỏi lại từ từ nếu lượt nhanh bỏ lỡ — kể cả IP cùng dải máy tính (máy bắt Wi-Fi chập chờn, ping lúc 15 ms lúc
+  // gần 1 giây → lỡ mốc 0,8 giây; MAC Wi-Fi không phải 00:17 nên cũng không được hỏi lại; khách triduc 13/11/2026)
+  const one = extra.hosts || [];
+  const inNets = (ip) => nets.includes(ip.split('.').slice(0, 3).join('.'));
   const hosts = test
     ? process.env.ZK_SCAN_HOSTS.split(',').map((h) => h.trim()).filter(Boolean).map((h) => ({ ip: h.split(':')[0], port: +h.split(':')[1] || port }))
-    : [...nets.flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port }))), ...one.map((ip) => ({ ip, port }))];
+    : [...nets.flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port }))), ...one.filter((ip) => !inNets(ip)).map((ip) => ({ ip, port }))];
   const probes = hosts.flatMap((h) => [{ ...h, sdk: true }, { ip: h.ip, port: extraPort() }]);
   const byIp = new Map();
   const hit = (ip) => byIp.get(ip) || byIp.set(ip, { ip, port: null, ports: [], mac: '' }).get(ip);
@@ -303,7 +306,7 @@ export async function scanLan(ips, port = 4370, ms = 800, extra = {}) {
   // Lượt dò nhanh bắn hàng trăm kết nối cùng lúc, chờ 0,8 giây → máy chậm trả lời (đang bận, mạng Wi-Fi, ARP chậm) bị lỡ.
   // Máy nào chưa thấy cổng 4370 thì hỏi lại từng máy một trước khi kết luận "đóng cổng" (máy Hikvision không cần: không dùng 4370).
   for (const x of byIp.values()) if (!x.port && !x.hik) await recheckHost(x, port);
-  // IP khách gõ riêng (khác lớp mạng → không có MAC trong ARP) mà lượt nhanh chưa thấy → hỏi lại từ từ; còn sống mới hiện
+  // IP khách gõ riêng mà lượt nhanh chưa thấy → hỏi lại từ từ (TCP chờ lâu × 2, UDP, ping); còn sống mới hiện
   for (const ip of one) {
     if (byIp.has(ip)) continue;
     const x = await recheckHost({ ip, port: null, ports: [], mac: '' }, port);

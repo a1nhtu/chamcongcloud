@@ -419,7 +419,7 @@ test('máy đang kết nối TCP/IP theo IP, hoặc gửi dhcp:false: KHÔNG b�
 test('ô "Dò thêm": hiểu dải 192.168.1.x / IP lẻ, chỉ nhận IP nội bộ', () => {
   const p = ZKM.parseExtraTargets('192.168.1.x, 192.168.5.133; 10.0.0.* 172.16.3.0/24  192.168.1.50  10.1.2');
   assert.deepEqual(p.nets, ['192.168.1', '10.0.0', '172.16.3', '10.1.2']);
-  assert.deepEqual(p.hosts, ['192.168.5.133'], 'IP lẻ nằm trong dải đã quét thì bỏ, khỏi dò 2 lần');
+  assert.deepEqual(p.hosts, ['192.168.5.133', '192.168.1.50'], 'IP lẻ giữ cả khi nằm trong dải: lượt nhanh lỡ thì vẫn được hỏi lại từ từ');
   assert.deepEqual(p.bad, []);
   assert.deepEqual(ZKM.parseExtraTargets('8.8.8.x 192.168.1.300 192.168.1.0 abc 127.0.0.1').bad, ['8.8.8.x', '192.168.1.300', '192.168.1.0', 'abc', '127.0.0.1']);
   assert.deepEqual(ZKM.parseExtraTargets(''), { nets: [], hosts: [], bad: [] });
