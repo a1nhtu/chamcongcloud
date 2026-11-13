@@ -122,6 +122,36 @@ export function lateNightShiftFor(eid, today, atIso) {
   return { shift: running.s, source: plan.source === 'auto' ? 'schedule' : plan.source, date: yd };
 }
 
+// CA BẮT ĐẦU NGAY SAU NỬA ĐÊM (VD 00:00–08:00) CHẤM VÀO SỚM TỪ TỐI NAY (23:50): ngày công là NGÀY MAI (ngày của ca), không trễ.
+// Trước đây thành dòng công của hôm nay — ca 00:00 hôm nay đã qua → trễ 1.430 phút, sáng mai không chấm ra được.
+// Điều kiện: lúc này nằm trong khung nhận VÀO của ca ngày mai và trước giờ bắt đầu ca; hôm nay không có ca đang mở (đã vào, chưa ra);
+// và lúc này gần giờ vào ca ngày mai HƠN HẲN giờ vào mọi ca của hôm nay (23:50 hôm nay có ca 16:00 → vẫn là ca ngày mai).
+// Trả { shift, source, date } (date = ngày mai) hoặc null.
+export function earlyNextDayShiftFor(eid, today, atIso) {
+  const nx = new Date(today + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
+  const nd = nx.toISOString().slice(0, 10);
+  const plan = resolveDayShifts(eid, nd);
+  if (plan.off || !plan.shifts.length) return null;
+  const t = Date.parse(atIso);
+  const next = plan.shifts.map((s) => ({ s, w: ruleWindow(nd, s) })).filter((x) => t >= x.w.winStart.getTime() && t < x.w.start.getTime())
+    .sort((a, b) => a.w.start - b.w.start)[0];
+  if (!next) return null;
+  if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND check_in_at IS NOT NULL AND check_out_at IS NULL LIMIT 1').get(eid, today)) return null;
+  const early = next.w.start.getTime() - t;
+  const tp = resolveDayShifts(eid, today);
+  if (!tp.off && tp.shifts.some((s) => Math.abs(ruleWindow(today, s).start.getTime() - t) <= early)) return null;
+  return { shift: next.s, source: plan.source === 'auto' ? 'schedule' : plan.source, date: nd };
+}
+
+// Dòng công ca ĐÊM vào trễ sau nửa đêm (lateNightShiftFor: dòng của HÔM QUA, giờ vào ở rạng sáng hôm nay): lúc chấm RA giữ đúng ca đêm
+// đã chọn lúc vào — dò lại theo giờ vào + giờ ra có thể ra ca khác của lịch nhiều ca (VD ra sớm 02:00 thành ca 14:00–22:00).
+function lateNightRowShift(row) {
+  const s = row.shift_id && getShift(row.shift_id);
+  if (!s || !(s.cross_midnight || s.end_time <= s.start_time) || !row.check_in_at) return null;
+  if (vnDateStr(new Date(row.check_in_at)) <= row.work_date) return null;
+  return { shift: s, source: row.shift_source || 'schedule' };
+}
+
 // Bản ghi chấm công hôm nay (hỗ trợ nhiều ca/ngày)
 r.get('/today', (req, res) => {
   const date = vnDateStr();
@@ -189,9 +219,12 @@ r.post('/check-in', (req, res) => {
   const hourly = empHourly(req.user.id);
   // ca đêm hôm qua vào trễ sau nửa đêm → ngày công là HÔM QUA, ca là ca đêm đó
   const lateNight = hourly ? null : lateNightShiftFor(req.user.id, date, at);
+  // ca bắt đầu ngay sau nửa đêm, vào sớm từ tối nay → ngày công là NGÀY MAI
+  const earlyNext = hourly || lateNight ? null : earlyNextDayShiftFor(req.user.id, date, at);
   if (lateNight) date = lateNight.date;
+  else if (earlyNext) date = earlyNext.date;
   // TỰ ĐỘNG tìm ca theo giờ chấm (phân ca thủ công đè) → xác định ca đang VÀO (cho phép nhiều ca/ngày)
-  const rs = hourly ? { shift: null, source: 'hourly' } : lateNight || resolveEffectiveShift(req.user.id, date, at);
+  const rs = hourly ? { shift: null, source: 'hourly' } : lateNight || earlyNext || resolveEffectiveShift(req.user.id, date, at);
   const shift = rs.shift;
   const shiftKey = shift?.id ?? 0;
   const shiftLabel = shift ? `ca ${shift.name}` : 'ca';
@@ -298,7 +331,7 @@ r.post('/check-out', (req, res) => {
   const at = nowIso();
   const hourly = empHourly(req.user.id);
   // DÒ LẠI ca bằng CẢ giờ vào + giờ ra (phân biệt ca cùng giờ vào: Sáng/Hành chính; và ca đêm)
-  const rs = hourly ? { shift: null, source: 'hourly' } : resolveEffectiveShift(req.user.id, wdate, row.check_in_at, at);
+  const rs = hourly ? { shift: null, source: 'hourly' } : lateNightRowShift(row) || resolveEffectiveShift(req.user.id, wdate, row.check_in_at, at);
   const shift = rs.shift;
 
   // Định vị GẦN NHẤT trong các định vị NV được phép chấm
