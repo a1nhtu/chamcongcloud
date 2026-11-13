@@ -10,6 +10,9 @@ export const getShift = (id) => q('SELECT * FROM shifts WHERE id = ?').get(id);
 const hhmm2min = (s) => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 function checkinMinVN(iso) { const d = new Date(iso); const t = new Date(d.getTime() + 7 * 3600000); return t.getUTCHours() * 60 + t.getUTCMinutes(); }
 function inWindow(min, start, end) { return start <= end ? (min >= start && min <= end) : (min >= start || min <= end); }
+// Khoảng cách 2 giờ trong ngày (phút) theo VÒNG 24 giờ: 00:30 cách 22:00 là 150 phút (không phải 1.290). Chỉ khác |a − b| khi hai
+// giờ cách nhau quá 12 tiếng — các trường hợp trong ngày giữ nguyên kết quả như cũ.
+const minDist = (a, b) => { const d = Math.abs(a - b) % 1440; return Math.min(d, 1440 - d); };
 
 // Các ca thuộc 1 lịch trình (đang hoạt động), theo thứ tự.
 export function scheduleShifts(scheduleId) {
@@ -37,7 +40,7 @@ export function autoDetectShift(checkInIso, candidates, checkOutIso) {
   const ciMatch = withWin.filter((s) => inWindow(inMin, hhmm2min(s.check_in_start), hhmm2min(s.check_in_end)));
   const pool = ciMatch.length ? ciMatch : (candidates ? all : []);
   if (!pool.length) return null;
-  const nearIn = (list) => [...list].sort((a, b) => Math.abs(hhmm2min(a.start_time) - inMin) - Math.abs(hhmm2min(b.start_time) - inMin))[0];
+  const nearIn = (list) => [...list].sort((a, b) => minDist(hhmm2min(a.start_time), inMin) - minDist(hhmm2min(b.start_time), inMin))[0];
   // Chưa biết giờ RA (lúc chấm VÀO) hoặc chỉ 1 ứng viên → chọn theo giờ vào gần nhất
   if (outMin == null || pool.length === 1) return nearIn(pool);
   // Có giờ RA + nhiều ca cùng khớp giờ vào → chấm điểm bằng cửa sổ RA (ưu tiên cửa sổ khai báo)
@@ -45,10 +48,27 @@ export function autoDetectShift(checkInIso, candidates, checkOutIso) {
     const explicit = !!(s.check_out_start && s.check_out_end);
     const [coS, coE] = outWin(s);
     const outOk = inWindow(outMin, coS, coE);
-    return { s, score: outOk ? (explicit ? 3 : 2) : 0, outDist: Math.abs(hhmm2min(s.end_time) - outMin), inDist: Math.abs(hhmm2min(s.start_time) - inMin) };
+    return { s, score: outOk ? (explicit ? 3 : 2) : 0, outDist: minDist(hhmm2min(s.end_time), outMin), inDist: minDist(hhmm2min(s.start_time), inMin) };
   });
   scored.sort((a, b) => b.score - a.score || a.outDist - b.outDist || a.inDist - b.inDist);
   return scored[0].s;
+}
+
+// Không gán ca, dòng công của NGÀY D mà giờ vào nằm ở RẠNG SÁNG HÔM SAU (ca đêm vào trễ sau nửa đêm — device-sync lateNightInPunches
+// dựng như vậy): dò theo giờ vào không ra ca nào (00:30 không nằm trong khung vào ca nào) → ca ĐÊM có khai khung giờ vào / ra, còn đang
+// chạy lúc vào (vào trước giờ kết thúc ca) và giờ ra nằm trong khung ra — đúng điều kiện lúc dựng, để "Tính lại" không làm mất ca.
+function lateNightAutoShift(workDate, checkInIso, checkOutIso) {
+  if (!workDate || !checkInIso || !checkOutIso) return null;
+  const nx = new Date(workDate + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
+  if (new Date(Date.parse(checkInIso) + 7 * 3600000).toISOString().slice(0, 10) !== nx.toISOString().slice(0, 10)) return null;
+  const inMin = checkinMinVN(checkInIso), outMin = checkinMinVN(checkOutIso);
+  if (!(Date.parse(checkOutIso) > Date.parse(checkInIso))) return null;
+  const cands = q("SELECT * FROM shifts WHERE active = 1 AND check_in_start IS NOT NULL AND check_in_start != ''").all()
+    .filter((s) => (s.cross_midnight || s.end_time <= s.start_time) && s.check_in_end && s.check_out_start && s.check_out_end)
+    .filter((s) => inMin < hhmm2min(s.end_time) && inWindow(outMin, hhmm2min(s.check_out_start), hhmm2min(s.check_out_end)));
+  if (!cands.length) return null;
+  const dIn = (s) => (inMin - hhmm2min(s.start_time) + 1440) % 1440;   // số phút từ đầu ca (tối hôm trước) tới giờ vào
+  return [...cands].sort((a, b) => minDist(hhmm2min(a.end_time), outMin) - minDist(hhmm2min(b.end_time), outMin) || dIn(a) - dIn(b))[0];
 }
 
 // Chuỗi phòng ban từ phòng của NV lên các cấp cha: [phòng, cha, ông…]
@@ -227,7 +247,7 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOut
     }
   }
   if (emp?.shift_id) { const s = getShift(emp.shift_id); if (s) return { off: false, shift: s, source: 'default', mergeRule: effectiveMergeRule(s, null) }; }
-  const auto = autoDetectShift(checkInIso, null, checkOutIso);
+  const auto = autoDetectShift(checkInIso, null, checkOutIso) || lateNightAutoShift(workDate, checkInIso, checkOutIso);
   if (auto) return { off: false, shift: auto, source: 'auto', mergeRule: effectiveMergeRule(auto, null) };
   // Không tìm được ca nào → tính theo các cặp vào/ra (1-2, 3-4…) thay vì đầu–cuối
   return { off: false, shift: null, source: 'none', mergeRule: 'pairs' };

@@ -1064,32 +1064,78 @@ const vnDayOf = (ms) => new Date(ms + 7 * 3600000).toISOString().slice(0, 10);  
 //   - lượt đầu phải tới khi ca còn đang chạy (trước giờ kết thúc ca); chỉ có 1 lượt thì phải gần giờ vào ca hơn giờ ra ca
 //     (lượt lẻ sát giờ tan ca là quên chấm vào → vẫn bỏ qua như cũ)
 //   - không phải giờ vào của ca HÔM SAU (nằm trong khung vào ca hôm sau và gần giờ vào ca hôm sau hơn giờ vào ca đêm này)
-// Chỉ áp cho ngày xếp ĐÚNG 1 ca đêm (gán ca / ca mặc định / lịch 1 ca). usedTo: mốc các lượt đã thuộc ngày hôm trước.
+// Ngày xếp ĐÚNG 1 ca đêm (gán ca / ca mặc định / lịch 1 ca): như trên. usedTo: mốc các lượt đã thuộc ngày hôm trước.
+// Lịch NHIỀU ca có ca đêm / KHÔNG gán ca (tự dò theo khung giờ) — mở 13/11/2026, giữ mọi chốt chặn trên và thêm (không đoán):
+//   - PHẢI có lượt thứ hai làm giờ ra (chỉ 1 lượt → không dựng); quy tắc biết hướng: lượt đầu là VÀO, sau đó có lượt RA
+//   - lượt sáng hôm sau là giờ vào / ra của ca hôm sau (nextDayClaim) không tính; lượt đầu gần giờ vào một ca hôm sau hơn giờ vào ca
+//     đêm (ca ngày hôm sau xét cả lượt từ đầu ngày, như lúc chỉ chọn 1 ca ngày) → của hôm sau
+//   - không gán ca: chỉ xét ca đêm có khai khung giờ vào / ra, lượt ra phải nằm trong khung ra của ca đó
+// Trả { rows, shift } — shift = ca đêm cần dựng (lịch nhiều ca / tự dò; null = ca của ngày như cũ); null = không phải.
 function lateNightInPunches(employeeId, workDate, usedTo) {
-  if (empHourly(employeeId)) return [];
+  if (empHourly(employeeId)) return null;
   const plan = resolveDayShifts(employeeId, workDate);
-  if (plan.off || plan.shifts.length !== 1) return [];
-  const shift = plan.shifts[0];
-  if (!isNightShift(shift) || ruleKnowsDir(plan.mergeRule, shift)) return [];
+  if (plan.off) return null;
+  const multi = plan.isSchedule && plan.shifts.length > 1;
+  const auto = !plan.shifts.length && plan.source === 'auto' && !plan.patternOff;   // không gán ca → tự dò theo khung giờ (autoDetectShift)
+  if (!multi && !auto && plan.shifts.length !== 1) return null;
   // ngày đã có dòng công không dựng từ máy (chấm điện thoại / nhập tay) → giữ nguyên, không đè
-  if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return [];
-  const { winEnd, start, end } = ruleWindow(workDate, shift);
+  if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return null;
   const midnight = new Date(workDate + 'T00:00:00+07:00').getTime() + 24 * 3600000;   // 00:00 hôm sau
-  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const rowsTo = (winEnd) => db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, new Date(midnight).toISOString(), winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
-  if (!rows.length) return [];
-  const a = Date.parse(rows[0].punch_at), st = start.getTime(), en = end.getTime();
-  if (a >= en) return [];
-  if (rows.length === 1 && a - st > en - a) return [];
   const nd = vnDayOf(midnight);
   const np = resolveDayShifts(employeeId, nd);
-  if (!np.off) for (const s of np.shifts) {
-    // khung nhận lượt VÀO của ca hôm sau đúng như lúc dựng công hôm sau (1 ca ngày/ngày: nhận từ đầu ngày — đến rất sớm 05:30 cho ca 08:00)
-    const w = ruleWindow(nd, s, { toDayEnd: np.shifts.length === 1 && !isNightShift(s) });
-    if (a >= w.winStart.getTime() && Math.abs(w.start.getTime() - a) < a - st) return [];
+  if (!multi && !auto) {
+    const shift = plan.shifts[0];
+    if (!isNightShift(shift) || ruleKnowsDir(plan.mergeRule, shift)) return null;
+    const { winEnd, start, end } = ruleWindow(workDate, shift);
+    const rows = rowsTo(winEnd);
+    if (!rows.length) return null;
+    const a = Date.parse(rows[0].punch_at), st = start.getTime(), en = end.getTime();
+    if (a >= en) return null;
+    if (rows.length === 1 && a - st > en - a) return null;
+    if (!np.off) for (const s of np.shifts) {
+      // khung nhận lượt VÀO của ca hôm sau đúng như lúc dựng công hôm sau (1 ca ngày/ngày: nhận từ đầu ngày — đến rất sớm 05:30 cho ca 08:00)
+      const w = ruleWindow(nd, s, { toDayEnd: np.shifts.length === 1 && !isNightShift(s) });
+      if (a >= w.winStart.getTime() && Math.abs(w.start.getTime() - a) < a - st) return null;
+    }
+    return { rows, shift: null };
   }
-  return rows;
+  const pool = auto ? autoShiftPool() : plan.shifts;
+  const nights = pool.filter((s) => isNightShift(s) && (!auto || (s.check_in_start && s.check_in_end && s.check_out_start && s.check_out_end)));
+  if (!nights.length) return null;
+  const nextShifts = np.off ? [] : np.shifts.length ? np.shifts : (np.source === 'auto' && !np.patternOff ? autoShiftPool() : []);
+  const machineMap = deviceMachineMap();
+  const claim = nextDayClaim(employeeId, workDate, new Date(midnight + 24 * 3600000), false);
+  const found = [];
+  for (const s of nights) {
+    const { winEnd, start, end } = ruleWindow(workDate, s);
+    const rows = rowsTo(winEnd).filter((p) => !claim || !claim(p.punch_at, end));
+    if (rows.length < 2) continue;
+    const a = Date.parse(rows[0].punch_at), st = start.getTime(), en = end.getTime();
+    if (a >= en) continue;
+    const rule = multi ? (plan.mergeRule || effectiveMergeRule(s, null) || 'filo') : (effectiveMergeRule(s, null) || 'filo');
+    const dir = ruleDir(rule, s, machineMap);
+    if (dir && (dir(rows[0]) !== 1 || !rows.slice(1).some((p) => dir(p) === 2))) continue;
+    const outs = dir ? rows.filter((p) => dir(p) === 2) : rows.slice(1);
+    const o = Date.parse(outs[outs.length - 1].punch_at);
+    if (auto) {   // lượt ra phải nằm trong khung ra (sáng hôm sau) của ca đêm này
+      let cos = Date.parse(`${workDate}T${s.check_out_start}:00+07:00`);
+      if (cos < st) cos += 24 * 3600000;
+      if (o < cos) continue;
+    }
+    if (nextShifts.some((s2) => {
+      const w = ruleWindow(nd, s2, { toDayEnd: !isNightShift(s2) });
+      return a >= w.winStart.getTime() && Math.abs(w.start.getTime() - a) < a - st;
+    })) continue;
+    found.push({ rows, shift: s, d: Math.abs(o - en), di: a - st });
+  }
+  if (!found.length) return null;
+  found.sort((x, y) => x.d - y.d || x.di - y.di);   // nhiều ca đêm cùng khớp: cuối ca gần giờ ra nhất, rồi đầu ca gần giờ vào nhất
+  return { rows: found[0].rows, shift: found[0].shift };
 }
+// Ca để tự dò khi không gán ca — đúng danh sách autoDetectShift xét (ca đang dùng có khai "Bắt đầu vào")
+const autoShiftPool = () => db.prepare("SELECT * FROM shifts WHERE active = 1 AND check_in_start IS NOT NULL AND check_in_start != ''").all();
 
 // CA BẮT ĐẦU NGAY SAU NỬA ĐÊM (VD 00:00–08:00) ĐẾN SỚM TỪ TỐI HÔM TRƯỚC (23:50): lượt đó có ngày lịch là hôm trước nên ngày này
 // chưa có lượt quẹt nào của riêng nó → lấy các lượt tối hôm trước nằm trong khung VÀO của ca hôm nay, và hôm trước đã nhường
@@ -1276,6 +1322,7 @@ function rebuildDayCore(employeeId, workDate) {
   seedPhonePunches(employeeId, workDate);
   let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
   let nightTo = null;   // ngày dựng từ lượt trong khung ca đêm (nightOutOnlyPunches): chỉ ghép tới lượt cuối hàm đó trả về
+  let lateNight = null; // ca đêm vào trễ sau nửa đêm của lịch nhiều ca / không gán ca (lateNightInPunches): dựng thẳng ca đó từ đúng các lượt đó
   if (!prov.length) { prov = nightOutOnlyPunches(employeeId, workDate); if (prov.length) nightTo = prov[prov.length - 1].punch_at; }
   if (!prov.length) prov = prevEveningInPunches(employeeId, workDate);   // ca bắt đầu ngay sau nửa đêm, đến sớm từ tối hôm trước
   const had = prov.length > 0;
@@ -1286,7 +1333,9 @@ function rebuildDayCore(employeeId, workDate) {
   if (usedTo) prov = prov.filter((p) => p.punch_at > usedTo);
   if (!prov.length) {
     // ngày không còn lượt quẹt nào của riêng nó: có thể là CA ĐÊM VÀO TRỄ SAU NỬA ĐÊM (các lượt nằm ở rạng sáng hôm sau)
-    prov = lateNightInPunches(employeeId, workDate, usedTo);
+    const ln = lateNightInPunches(employeeId, workDate, usedTo);
+    prov = ln ? ln.rows : [];
+    if (ln && ln.shift) lateNight = ln.shift;
     // quy tắc biết hướng: mọi lượt của ngày đã là giờ ra ca đêm hôm trước (giữa chuỗi đêm liền, quên vào đêm nay) → lượt RA sáng hôm
     // sau khớp cuối ca đêm hôm nay là dòng "chỉ giờ ra" của ca đêm hôm nay, như ngày không có lượt nào (nightOutOnlyPunches)
     if (!prov.length) { prov = nightOutOnlyPunches(employeeId, workDate, usedTo); if (prov.length) nightTo = prov[prov.length - 1].punch_at; }
@@ -1320,11 +1369,11 @@ function rebuildDayCore(employeeId, workDate) {
     const oneMemo = new Map();
     const oneWin = (s) => { if (!oneMemo.has(s.id)) { const w = ruleWindow(workDate, s, { toDayEnd: !isNightShift(s) }); oneMemo.set(s.id, punchesInWin(w.winStart, w.winEnd)); } return oneMemo.get(s.id); };
     const pick = (ps) => (dd ? pickDirShiftSet(plan.shifts, ps, workDate, dd.dir(machineMap), dup, { nextOutClaim: outClaim }) : pickShiftSet(plan.shifts, ps, workDate, { oneWin }));
-    let picked = pick([...seen.values()]);
+    let picked = lateNight ? [{ shift: lateNight, punches: prov }] : pick([...seen.values()]);
     // Ca gãy về muộn hơn cuối ca cuối + 4 tiếng (lateSplitTail): chọn lại bộ ca có cả lượt về muộn đó. Chỉ nhận khi ra ≥ 2 ca, ca nới là
     // ca cuối (ca Chiều nhận giờ ra 22:00) và GIỮ NGUYÊN các ca đã chọn theo khung thường (chỉ thêm lại ca cuối bị mất) — không thì
     // giữ đúng cách chọn cũ (VD vẫn 1 ca: ca đó đã nhận lượt tới hết ngày; đã chọn HC thì không đổi sang Sáng + Chiều).
-    const late = lateSplitTail(employeeId, workDate, plan.shifts, seen, punchesInWin);
+    const late = lateNight ? null : lateSplitTail(employeeId, workDate, plan.shifts, seen, punchesInWin);
     let lateShift = null;
     if (late) {
       const p2 = pick([...seen.values(), ...late.punches]);
@@ -1336,12 +1385,13 @@ function rebuildDayCore(employeeId, workDate) {
       const rule = dd ? dd.ruleOf(shift) : (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || effectiveMergeRule(shift, null) || 'filo');
       const one = picked.length === 1;
       const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn(), lateIn: true };
-      if (one) wopts.extendEnd = overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo);
+      if (one && !lateNight) wopts.extendEnd = overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo);
       else if (shift === lateShift) wopts.extendEnd = late.at;   // giờ ra muộn của ca cuối không bị khung cuối ca + 4 tiếng loại
       // chỉ 1 ca → nhận lượt quẹt như ca đơn (tới hết ngày với ca ngày); nhiều ca → đúng các lượt đã chia cho ca đó
       const w = ruleWindow(workDate, shift, wopts);
       // (quy tắc biết hướng, chỉ 1 CA ĐÊM: đúng các cặp / lượt đã chia cho ca — khung ca đêm còn chứa lượt VÀO sáng hôm sau của ca hôm sau)
-      const own = one && !(dd && isNightShift(shift));
+      // (ca đêm vào trễ sau nửa đêm: đúng các lượt rạng sáng đã chọn)
+      const own = one && !lateNight && !(dd && isNightShift(shift));
       const { inIso, outIso, pairs } = mergeDayPunches(own ? punchesInWin(w.winStart, w.winEnd) : punches, shift, rule, machineMap, workDate, wopts);
       if (!inIso && !(outIso && ruleKnowsDir(rule, shift))) continue;   // quên chấm vào (Theo ID máy / Chọn từ máy) → dòng chỉ có giờ ra
       if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
@@ -1353,7 +1403,8 @@ function rebuildDayCore(employeeId, workDate) {
   // 1 ca/ngày (gán ca / ca mặc định / tự dò): giữ 1 dòng/ngày
   let shift = plan.shifts[0] || null;
   let mergeRule = plan.mergeRule;
-  if (!shift && !hourly) { const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at); shift = eff.shift; mergeRule = eff.mergeRule; }
+  if (!shift && lateNight) { shift = lateNight; mergeRule = effectiveMergeRule(lateNight, null); }   // không gán ca: ca đêm vào trễ sau nửa đêm
+  else if (!shift && !hourly) { const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at); shift = eff.shift; mergeRule = eff.mergeRule; }
   let inIso, outIso, pairs = null;
   if (shift) {
     // Phân theo giờ, vào trễ quá khung vào: ca ĐÊM lấy giờ vào thật (lateIn); ca ngày giữ cách lùi về giờ đầu – giờ cuối bên dưới

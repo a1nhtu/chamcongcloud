@@ -86,14 +86,12 @@ const KHOA = [
   { ca: ['Z3', 'Z4', 'Z11'], kind: ['XOAY', 'BA'], rule: HUONG },                                            // lịch nhiều ca biết hướng: RA lẻ sáng = chỉ-giờ-ra ca đêm hôm trước (13/11/2026)
   { ca: ['Z3', 'Z4', 'Z11'], kind: ['XOAY', 'BA', 'TUDO'], rule: KHONG_HUONG },                              // Anh chốt 13/11/2026: không biết hướng + quên vào → GIỮ cách chọn ca như cũ
   { ca: ['Z5'], kind: ['DM1'] },                                                                             // vào trễ sau nửa đêm (tdhc có khung giờ: từ 13/11/2026 — giờ vào thật dù quá "Kết thúc vào")
+  { ca: ['Z5'], kind: ['XOAY', 'BA', 'TUDO'] },                                                              // vào trễ sau nửa đêm, lịch nhiều ca / không gán ca (13/11/2026)
   { ca: ['Z11'], kind: ['DM1'] },                                                                            // chỉ 1 lượt RA sáng
 ];
 
 // ===== Ô CHƯA CHỐT (đang sai hoặc chờ Anh quyết) — KHÔNG assert, hiện là test.todo. Mỗi dòng → 1 todo cho từng (ca × kind) =====
 const CHUA_CHOT = [
-  { ca: ['Z5'], kind: ['XOAY', 'TUDO'],
-    note: 'vào trễ 00:30 sau nửa đêm: đêm 02 không ra dòng; filo… dựng NHẦM ca HC 00:30→19:00, sai dây chuyền sang hôm sau (04[HC] 07:00→ 0c)' },
-  { ca: ['Z5'], kind: ['BA'], note: 'vào trễ 00:30 sau nửa đêm: đêm 02 không được tính; lượt RA 06:00 thành ca S6 (06:00→ / →06:00)' },
   { ca: ['Z9'], kind: ['DM1', 'XOAY', 'BA', 'TUDO'], win: [true],
     note: 'biến thể có khung giờ: lượt RA 23:00 nằm ngoài khung ra (04:00–11:00) → XOAY mọi quy tắc và tdhc ra 02[…] 19:00→ 0c (không sớm 480); filo… của DM1 / BA / TUDO vẫn 0,36 / 0,12 công — chờ Anh quyết' },
   { ca: ['Z9'], kind: ['BA'], rule: ['tdhc'], win: [false],
@@ -123,7 +121,7 @@ const EXPECT = {
     XOAY: huong('03[HC] 07:00→19:00 1c tc120 | 04[HC] 07:00→ 0c', '02[DM] →07:00 0c | 03[DM] 19:00→07:00 1c'),
     TUDO: '03[HC] 07:00→19:00 1c tc120 | 04[HC] 07:00→ 0c',
     BA: huong('03[S6] 06:00→ 0c | 03[D22] 22:00→06:00 1c', '02[D22] →06:00 0c | 03[D22] 22:00→06:00 1c') },
-  Z5: { DM1: '02[DM] 00:30→07:00 0.5c trễ330 | 03[DM] 19:00→07:00 1c' },
+  Z5: { ...dem('02[DM] 00:30→07:00 0.5c trễ330 | 03[DM] 19:00→07:00 1c'), BA: '02[D22] 00:30→06:00 0.68c trễ150 | 03[D22] 22:00→06:00 1c' },
   Z6: { XOAY: '02[HC] 08:00→ 0c | 03[DM] 19:00→07:00 1c', TUDO: '02[HC] 08:00→ 0c | 03[DM] 19:00→07:00 1c', BA: '02[S6] 06:00→ 0c | 03[D22] 22:00→06:00 1c',
     DM1: '03[DM] 19:00→07:00 1c' },
   Z7: { XOAY: '02[DM] 19:00→ 0c | 04[HC] 08:00→17:00 1c', TUDO: '02[DM] 19:00→ 0c | 04[HC] 08:00→17:00 1c', BA: '02[D22] 22:00→ 0c | 04[S6] 06:00→14:00 1c',
@@ -156,8 +154,8 @@ const ten = (c) => `${c.ca} · ${c.kind} · ${c.rule} · ${c.win ? 'có khung gi
 // Số ô đã khoá / chưa chốt (chốt cứng để không ai âm thầm thu hẹp phạm vi khoá)
 test('phạm vi: không ô nào vừa khoá vừa chưa chốt; số ô khoá / chưa chốt đúng như đã chốt', () => {
   assert.deepEqual(DA_KHOA.filter((c) => DO_TODO.includes(c)), []);
-  assert.equal(DA_KHOA.length, 358);
-  assert.equal(DO_TODO.length, 44);
+  assert.equal(DA_KHOA.length, 382);
+  assert.equal(DO_TODO.length, 20);
   for (const c of DA_KHOA) ky_vong(c);   // ô nào đã khoá đều có kết quả mong đợi
 });
 

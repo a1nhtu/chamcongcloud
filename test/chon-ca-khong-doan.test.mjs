@@ -4,6 +4,7 @@
 //          ca đêm hôm trước (cả giữa chuỗi đêm liền của lịch 1 ca đêm — mục 8).
 // Việc 2 — quy tắc KHÔNG biết hướng + lịch nhiều ca: lượt sát GIỜ VÀO ca sau là giờ vào ca sau (pickShiftSet), không gộp ngược.
 // Việc 3 — "Phân theo giờ": vào trễ quá "Kết thúc vào" vẫn ra dòng với giờ thật (ca đêm 1 ca + từng ca của lịch nhiều ca).
+// Việc 4 — ca đêm vào trễ SAU nửa đêm với lịch nhiều ca / không gán ca (lateNightInPunches); autoDetectShift đo theo vòng 24 giờ.
 // Lượt chấm nạp qua ingestAttlog như máy đẩy lên ("v" = máy số 1 lẻ = VÀO / phím 0, "r" = máy số 2 chẵn = RA / phím 1).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -16,6 +17,7 @@ process.env.DB_PATH = join(dir, 'test.db');
 const { db, initSchema } = await import('../server/db.js');
 const { ingestAttlog } = await import('../server/device-sync.js');
 const { recomputeAttendance } = await import('../server/routes/admin/attendance.js');
+const { autoDetectShift } = await import('../server/shift-resolver.js');
 const { pickDirShiftSet, pickShiftSet, stateDir, mergeDayPunches } = await import('../server/attendance-calc.js');
 
 const hm = (x) => (x ? new Date(Date.parse(x) + 7 * 3600e3).toISOString().slice(11, 16) : '-');
@@ -207,4 +209,75 @@ test('Việc 3 · nạp lượt máy: ca đêm 1 ca (S3, Z5) và lịch nhiều 
   kiem(f, ['03 07:00', '03 19:00', '04 07:00'], ['03[DMW] 19:00→07:00 1c'], 'Z4 (giữ)');
   const g = nv(); ganLich(g, schedWeek(['DMW']), 'tdhc');
   kiem(g, ['02 19:00', '02 23:00', '03 19:00', '04 07:00'], ['02[DMW] 19:00→- 0c', '03[DMW] 19:00→07:00 1c'], 'Z9 (giữ: thiếu ra)');
+});
+
+// ======================= VIỆC 4: ca đêm vào trễ sau nửa đêm — lịch nhiều ca / không gán ca; autoDetectShift vòng 24 giờ =======================
+const iso4 = (t) => vn('04 ' + t);
+const ca4 = (code, start, end) => ({ id: code, code, start_time: start, end_time: end, ...(end <= start ? { cross_midnight: 1 } : {}) });
+const BA4 = [ca4('S6', '06:00', '14:00'), ca4('C14', '14:00', '22:00'), ca4('D22', '22:00', '06:00')];
+const dò = (cands, vao, ra) => autoDetectShift(iso4(vao), cands, ra ? iso4(ra) : null)?.code;
+
+test('Việc 4 · autoDetectShift so giờ theo vòng 24 giờ (S5)', () => {
+  assert.equal(dò(BA4, '00:30'), 'D22');   // trước: S6 (|06:00 − 00:30| = 330 < |22:00 − 00:30| = 1.290 khi không vòng)
+  assert.equal(dò(BA4, '01:30'), 'D22');   // trước: S6
+  assert.equal(dò([ca4('C0', '00:00', '08:00'), ca4('C16', '16:00', '00:00')], '23:50'), 'C0');   // trước: C16
+  assert.equal(dò(BA4, '21:55', '06:05'), 'D22');
+  assert.equal(dò(BA4, '13:50', '00:10'), 'C14');
+});
+
+test('Việc 4 · autoDetectShift: mọi giờ cách các ca dưới 12 tiếng ra y như cách đo cũ', () => {
+  // cách đo cũ (không vòng) — chép lại phần chọn theo giờ vào / giờ ra của bản 1.33.10 cho ca không khai khung giờ
+  const m = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
+  const cu = (cands, vao, ra) => {
+    if (ra == null || cands.length === 1) return [...cands].sort((a, b) => Math.abs(m(a.start_time) - m(vao)) - Math.abs(m(b.start_time) - m(vao)))[0].code;
+    const ow = (s) => { const e = m(s.end_time); return [((e - 60) % 1440 + 1440) % 1440, (e + 480) % 1440]; };
+    const inW = (x, a, b) => (a <= b ? x >= a && x <= b : x >= a || x <= b);
+    return cands.map((s) => ({ s, sc: inW(m(ra), ...ow(s)) ? 2 : 0, od: Math.abs(m(s.end_time) - m(ra)), id: Math.abs(m(s.start_time) - m(vao)) }))
+      .sort((a, b) => b.sc - a.sc || a.od - b.od || a.id - b.id)[0].s.code;
+  };
+  const hh = (x) => `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+  const sets = [BA4, [ca4('HC', '08:00', '17:00'), ca4('SA', '08:00', '12:00'), ca4('CH', '13:30', '17:30')], [ca4('HC', '08:00', '17:00'), ca4('DM', '19:00', '07:00')]];
+  let n = 0;
+  for (const cands of sets) for (let v = 0; v < 1440; v += 10) for (const r of [null, ...Array.from({ length: 24 }, (_, i) => i * 60 + 5)]) {
+    const far = cands.some((s) => Math.abs(m(s.start_time) - v) > 720 || (r != null && Math.abs(m(s.end_time) - r) > 720));
+    if (far) continue;
+    n++;
+    assert.equal(dò(cands, hh(v), r == null ? null : hh(r)), cu(cands, hh(v), r == null ? null : hh(r)), `${cands.map((s) => s.code)} vào ${hh(v)} ra ${r == null ? '-' : hh(r)}`);
+  }
+  assert.ok(n > 1000, 'đủ nhiều trường hợp trong ngày');
+});
+
+test('Việc 4 · nạp lượt máy: lịch nhiều ca có ca đêm (HC / DM, 3 ca) — ca đêm vào trễ 00:30 thuộc đêm hôm trước, trễ đủ phút', () => {
+  for (const rule of ['filo', 'pairs', 'tdqd', 'idm', 'state']) {
+    const e = nv(); ganLich(e, schedAuto(['HC', 'DM']), rule);
+    kiem(e, ['03 00:30 v', '03 07:00 r', '03 19:00 v', '04 07:00 r'], ['02[DM] 00:30→07:00 0.5c trễ330', '03[DM] 19:00→07:00 1c'], 'XOAY Z5 ' + rule);
+  }
+  const b = nv(); ganLich(b, schedAuto(['S6', 'C14', 'D22']));
+  kiem(b, ['03 00:30 v', '03 06:00 r', '03 22:00 v', '04 06:00 r'], ['02[D22] 00:30→06:00 0.68c trễ150', '03[D22] 22:00→06:00 1c'], 'BA Z5');
+  const c = nv(); ganLich(c, schedAuto(['S6', 'C14', 'D22']));
+  kiem(c, ['04 00:30', '04 06:05'], ['03[D22] 00:30→06:05 0.68c trễ150'], 'S6');
+});
+
+test('Việc 4 · chốt chặn: chỉ 1 lượt / lượt đầu gần giờ vào ca hôm sau / Theo ID máy lượt đầu là RA → KHÔNG dựng ca đêm hôm trước', () => {
+  const ngay2 = (e) => cong(e).filter((x) => x.startsWith('02'));
+  const a = nv(); ganLich(a, schedAuto(['HC', 'DM']));
+  cham(a, ['03 00:30']); tinhLai(a);
+  assert.deepEqual(ngay2(a), [], 'chỉ 1 lượt 00:30 (không đoán giờ ra)');
+  const b = nv(); ganLich(b, schedAuto(['HC', 'DM']));
+  cham(b, ['03 05:00', '03 06:30']); tinhLai(b);
+  assert.deepEqual(ngay2(b), [], '05:00 gần giờ vào HC 08:00 hôm sau hơn giờ vào DM 19:00 hôm trước');
+  const c = nv(); ganLich(c, schedAuto(['HC', 'DM']), 'idm');
+  cham(c, ['03 00:30 r', '03 07:00 r']); tinhLai(c);
+  assert.ok(!ngay2(c).some((x) => x.includes('00:30→')), 'lượt RA không thành giờ vào ca đêm');
+});
+
+test('Việc 4 · không gán ca (tự dò theo khung giờ): ca đêm có khung, giờ ra trong khung ra; Tính lại không mất ca', () => {
+  const a = nv();   // không gán ca: tự dò trong các ca có khai khung giờ (SAW, CHW, DMW, HCW)
+  kiem(a, ['03 00:30', '03 07:00', '03 19:00', '04 07:00'], ['02[DMW] 00:30→07:00 0.5c trễ330', '03[DMW] 19:00→07:00 1c'], 'TUDO Z5');
+  const b = nv();   // giờ ra 03:30 nằm ngoài khung ra 04:00–11:00 → không dựng ca đêm hôm trước
+  cham(b, ['03 00:30', '03 03:30']); tinhLai(b);
+  assert.deepEqual(cong(b).filter((x) => x.startsWith('02')), [], 'ra ngoài khung ra');
+  const c = nv();   // chỉ 1 lượt
+  cham(c, ['03 00:30']); tinhLai(c);
+  assert.deepEqual(cong(c).filter((x) => x.startsWith('02')), [], 'chỉ 1 lượt');
 });
