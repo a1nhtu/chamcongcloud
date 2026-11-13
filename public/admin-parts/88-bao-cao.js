@@ -231,15 +231,15 @@ async function pageReport() {
   const sampleSrc = (v, H) => (REPORT_SAMPLES.includes(v) && !(H && REPORT_HOURLY_HIDE.includes(v)) ? `/mau-bao-cao/${v}${H ? '-gio' : ''}.png` : null);
   const sampleModal = (v, title, H, open = v) => {
     const src = sampleSrc(v, H);
-    // vừa khung (thấy cả bảng) ⇄ bấm vào ảnh: cỡ thật, kéo cuộn để đọc số
-    const img = el('img', { src, alt: 'Mẫu ' + title, style: 'display:block;width:100%;cursor:zoom-in', title: 'Bấm vào ảnh để phóng to / thu nhỏ' });
-    img.onclick = () => { const big = img.style.width === '100%'; img.style.width = big ? img.naturalWidth + 'px' : '100%'; img.style.maxWidth = big ? 'none' : ''; img.style.cursor = big ? 'zoom-out' : 'zoom-in'; };
+    // Mặc định CỠ THẬT (đọc được số, kéo thanh ngang / dọc xem hết các cột ngày — Anh 13/11/2026) ⇄ bấm vào ảnh: thu vừa khung xem toàn cảnh
+    const img = el('img', { src, alt: 'Mẫu ' + title, style: 'display:block;max-width:none;cursor:zoom-out', title: 'Bấm vào ảnh để thu nhỏ xem toàn cảnh / phóng to lại' });
+    img.onclick = () => { const fit = img.style.maxWidth === 'none'; img.style.maxWidth = fit ? '100%' : 'none'; img.style.cursor = fit ? 'zoom-in' : 'zoom-out'; };
     img.onerror = () => { img.replaceWith(el('div', { class: 'empty' }, 'Chưa có ảnh mẫu cho báo cáo này.')); };
     const go = el('button', { class: 'btn' }, '📄 Xem báo cáo này');
     go.onclick = () => { closeModal(); showReport(open); };
     openModal('👁 Mẫu: ' + title, [
-      el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Ảnh mẫu ${H ? 'theo giờ' : 'theo ca (công)'} dựng từ dữ liệu giả (8 nhân viên, 12 ngày, chỉ chụp góc trên). File xuất thật theo dữ liệu công ty và đủ kỳ Anh/Chị chọn.`),
-      el('div', { style: 'overflow:auto;max-height:68vh;border:1px solid var(--line,#e5e7eb);border-radius:8px;background:#fff' }, img),
+      el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Ảnh mẫu ${H ? 'theo giờ' : 'theo ca (công)'} dựng từ dữ liệu giả (8 nhân viên, 12 ngày). Kéo thanh cuộn ngang / dọc để xem hết; bấm vào ảnh để thu nhỏ xem toàn cảnh. File xuất thật theo dữ liệu công ty và đủ kỳ Anh/Chị chọn.`),
+      el('div', { class: 'mau-scroll', style: 'overflow:auto;max-height:66vh;border:1px solid var(--line,#e5e7eb);border-radius:8px;background:#fff' }, img),
     ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go]);
     $('#modal').style.maxWidth = 'min(1240px, 96vw)';
   };
