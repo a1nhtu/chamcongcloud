@@ -89,7 +89,7 @@ details summary{cursor:pointer;font-weight:700}
     <input id="l-company" placeholder="VD: Công ty TNHH ABC">
     <div class="row">
       <div><label>Loại bản quyền</label>
-        <select id="l-type"><option value="perm">Vĩnh viễn (mua đứt)</option><option value="exp">Có hạn (thuê bao)</option></select></div>
+        <select id="l-type"><option value="perm">Vĩnh viễn (mua đứt)</option><option value="y1">Thuê bao 1 năm</option><option value="y2">Thuê bao 2 năm</option><option value="exp">Có hạn (tự chọn ngày)</option></select></div>
       <div><label>Ngày hết hạn</label><input id="l-exp" type="date" disabled></div>
     </div>
     <label>Giới hạn số nhân viên (trống = không giới hạn)</label>
@@ -115,7 +115,7 @@ details summary{cursor:pointer;font-weight:700}
     <input id="d-company" placeholder="VD: Công ty TNHH ABC">
     <div class="row">
       <div><label>Loại key</label>
-        <select id="d-type"><option value="perm">Vĩnh viễn</option><option value="exp">Có hạn</option></select></div>
+        <select id="d-type"><option value="perm">Vĩnh viễn</option><option value="y1">1 năm</option><option value="y2">2 năm</option><option value="exp">Có hạn (tự chọn ngày)</option></select></div>
       <div><label>Ngày hết hạn</label><input id="d-exp" type="date" disabled></div>
     </div>
     <button class="btn" id="d-go">Tạo key máy</button>
@@ -153,8 +153,11 @@ details summary{cursor:pointer;font-weight:700}
 const $ = (id) => document.getElementById(id);
 // Nhớ mật khẩu trong phiên (tiện, không lưu vĩnh viễn)
 try { const p = sessionStorage.getItem('dp_lic_pass'); if (p) { $('pass').value = p; $('remember').checked = true; } } catch {}
-$('l-type').onchange = () => { $('l-exp').disabled = $('l-type').value !== 'exp'; };
-$('d-type').onchange = () => { $('d-exp').disabled = $('d-type').value !== 'exp'; };
+// Loại bản quyền: perm = vĩnh viễn · y1 / y2 = thuê bao 1 / 2 năm (tự điền ngày hết hạn = hôm nay + N năm, vẫn sửa được) · exp = tự chọn ngày
+const plusYears = (n) => { const d = new Date(Date.now() + 7 * 3600000); d.setUTCFullYear(d.getUTCFullYear() + n); return d.toISOString().slice(0, 10); };
+const typeChange = (t, e) => { const v = $(t).value; $(e).disabled = v === 'perm'; if (v === 'y1' || v === 'y2') $(e).value = plusYears(v === 'y1' ? 1 : 2); };
+$('l-type').onchange = () => typeChange('l-type', 'l-exp');
+$('d-type').onchange = () => typeChange('d-type', 'd-exp');
 
 function savePass() {
   try { if ($('remember').checked) sessionStorage.setItem('dp_lic_pass', $('pass').value); else sessionStorage.removeItem('dp_lic_pass'); } catch {}
@@ -177,8 +180,8 @@ async function call(endpoint, body, btn, errEl) {
 $('l-go').onclick = async () => {
   const machine = $('l-machine').value.trim(), company = $('l-company').value.trim();
   if (!machine || !company) { $('l-err').textContent = 'Nhập Mã máy và Tên công ty.'; return; }
-  const exp = $('l-type').value === 'exp' ? $('l-exp').value : '';
-  if ($('l-type').value === 'exp' && !exp) { $('l-err').textContent = 'Chọn ngày hết hạn.'; return; }
+  const exp = $('l-type').value !== 'perm' ? $('l-exp').value : '';
+  if ($('l-type').value !== 'perm' && !exp) { $('l-err').textContent = 'Chọn ngày hết hạn.'; return; }
   if (re && normMid(machine) === normMid(re.last.m) &&
     !confirm('Mã máy này GIỐNG mã máy lần cấp trước. Khách cài lại Win / đổi máy thì Mã máy phải khác.\nVẫn cấp?')) return;
   const d = await call('/api/gen-license', { machine, company, exp, max: $('l-max').value, rid: re ? re.id : '', by: $('by').value.trim() }, $('l-go'), $('l-err'));
@@ -192,8 +195,8 @@ $('l-go').onclick = async () => {
 $('d-go').onclick = async () => {
   const serial = $('d-serial').value.trim();
   if (!serial) { $('d-err').textContent = 'Nhập Serial máy.'; return; }
-  const exp = $('d-type').value === 'exp' ? $('d-exp').value : '';
-  if ($('d-type').value === 'exp' && !exp) { $('d-err').textContent = 'Chọn ngày hết hạn.'; return; }
+  const exp = $('d-type').value !== 'perm' ? $('d-exp').value : '';
+  if ($('d-type').value !== 'perm' && !exp) { $('d-err').textContent = 'Chọn ngày hết hạn.'; return; }
   const d = await call('/api/gen-device', { serial, company: $('d-company').value.trim(), exp }, $('d-go'), $('d-err'));
   if (!d) return;
   $('d-res').value = d.key;
