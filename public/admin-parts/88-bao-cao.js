@@ -210,7 +210,8 @@ async function pageReport() {
       const card = el('div', { class: 'panel', style: 'padding:16px;cursor:pointer;display:flex;gap:12px;align-items:flex-start' },
         el('div', { style: 'font-size:26px;line-height:1' }, '📌'),
         el('div', { style: 'flex:1' }, el('div', { style: 'font-weight:700;color:var(--ink)' }, t.name),
-          el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, 'Mẫu riêng — dựa trên: ' + baseName(t.base))), edit);
+          el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, 'Mẫu riêng — dựa trên: ' + baseName(t.base)),
+          sampleBtn(t.base, baseName(t.base) + ' (báo cáo gốc của mẫu riêng)', formSel.value === 'hourly', 'cr' + t.id)), edit);
       card.onclick = () => showReport('cr' + t.id);
       grid.append(card);
     }
@@ -223,6 +224,30 @@ async function pageReport() {
       grid.append(add);
     }
     return [el('div', { style: 'font-weight:800;color:var(--ink);margin:18px 0 10px;font-size:15px' }, '📌 Mẫu báo cáo riêng của công ty'), grid];
+  };
+
+  // XEM MẪU trước khi xuất (Anh 13/11/2026): ảnh chụp file Excel của báo cáo dựng từ dữ liệu GIẢ (public/mau-bao-cao/<loại>[-gio].png,
+  // tạo lại bằng tools/anh-mau-bao-cao/TaoAnhMau.bat khi đổi mẫu báo cáo). Mẫu theo giờ có ảnh riêng (-gio).
+  const sampleSrc = (v, H) => (REPORT_SAMPLES.includes(v) && !(H && REPORT_HOURLY_HIDE.includes(v)) ? `/mau-bao-cao/${v}${H ? '-gio' : ''}.png` : null);
+  const sampleModal = (v, title, H, open = v) => {
+    const src = sampleSrc(v, H);
+    // vừa khung (thấy cả bảng) ⇄ bấm vào ảnh: cỡ thật, kéo cuộn để đọc số
+    const img = el('img', { src, alt: 'Mẫu ' + title, style: 'display:block;width:100%;cursor:zoom-in', title: 'Bấm vào ảnh để phóng to / thu nhỏ' });
+    img.onclick = () => { const big = img.style.width === '100%'; img.style.width = big ? img.naturalWidth + 'px' : '100%'; img.style.maxWidth = big ? 'none' : ''; img.style.cursor = big ? 'zoom-out' : 'zoom-in'; };
+    img.onerror = () => { img.replaceWith(el('div', { class: 'empty' }, 'Chưa có ảnh mẫu cho báo cáo này.')); };
+    const go = el('button', { class: 'btn' }, '📄 Xem báo cáo này');
+    go.onclick = () => { closeModal(); showReport(open); };
+    openModal('👁 Mẫu: ' + title, [
+      el('div', { class: 'map-hint', style: 'margin:0 0 8px' }, `Ảnh mẫu ${H ? 'theo giờ' : 'theo ca (công)'} dựng từ dữ liệu giả (8 nhân viên, 12 ngày, chỉ chụp góc trên). File xuất thật theo dữ liệu công ty và đủ kỳ Anh/Chị chọn.`),
+      el('div', { style: 'overflow:auto;max-height:68vh;border:1px solid var(--line,#e5e7eb);border-radius:8px;background:#fff' }, img),
+    ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go]);
+    $('#modal').style.maxWidth = 'min(1240px, 96vw)';
+  };
+  const sampleBtn = (v, title, H, open) => {
+    if (!sampleSrc(v, H)) return '';
+    const b = el('button', { class: 'btn ghost sm', style: 'margin-top:8px', title: 'Xem trước file Excel của báo cáo này trông thế nào' }, '👁 Xem mẫu');
+    b.onclick = (ev) => { ev.stopPropagation(); sampleModal(v, title, H, open); };
+    return b;
   };
 
   // Màn danh sách báo cáo dạng thẻ, gom nhóm
@@ -246,7 +271,7 @@ async function pageReport() {
         const card = el('div', { class: 'panel', style: 'padding:16px;cursor:pointer;display:flex;gap:12px;align-items:flex-start;transition:box-shadow .15s,transform .15s' },
           el('div', { style: 'font-size:26px;line-height:1' }, ic),
           el('div', {}, el('div', { style: 'font-weight:700;color:var(--ink)' }, title),
-            el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, desc)));
+            el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:3px;line-height:1.5' }, desc), sampleBtn(v, title, H)));
         card.onmouseenter = () => { card.style.boxShadow = '0 6px 18px rgba(0,0,0,.09)'; card.style.transform = 'translateY(-2px)'; };
         card.onmouseleave = () => { card.style.boxShadow = ''; card.style.transform = ''; };
         card.onclick = () => showReport(v);

@@ -519,6 +519,9 @@ const REPORT_GROUPS = [
   ]],
 ];
 
+// Báo cáo có ảnh mẫu ở public/mau-bao-cao (nút "👁 Xem mẫu" trên thẻ) — khớp danh sách TYPES trong tools/anh-mau-bao-cao/xuat-excel-mau.mjs
+const REPORT_SAMPLES = ['attendance', 'firstlast', 'detail', 'detaillist', 'empsheet', 'empsheetlate', 'detailmulti', 'daytime', 'workhours', 'track6',
+  'horizontal', 'hourstat', 'symbol', 'late', 'ot', 'summary', 'absence', 'leave', 'payroll', 'manualtime'];
 // MẪU THEO GIỜ: không có công / trễ sớm / tăng ca → ẩn báo cáo chỉ toàn những thứ đó (máy chủ cũng bỏ các cột đó ở báo cáo còn lại)
 const REPORT_HOURLY_HIDE = ['late', 'ot', 'symbol', 'horizontal', 'empsheetlate', 'audit3', 'audit3day'];
 // Tên + mô tả thẻ khi xem mẫu theo giờ
