@@ -495,6 +495,74 @@ export function pickShiftSet(cands, punches, workDate) {
   return best ? best.out : [];
 }
 
+// Lịch NHIỀU ca + quy tắc BIẾT HƯỚNG lượt chấm (Theo ID máy, Chọn từ máy, Tự động - qua đêm kiểu ID máy) — Anh duyệt 13/11/2026.
+// pickShiftSet không dùng hướng: lượt RA lẻ 14:05 (quên vào) thành dòng ca C14 thay vì S6; ca đêm quên vào thành "HC 19:00→07:00
+// trễ 660". Ở đây GHÉP CẶP THEO HƯỚNG TRƯỚC — đúng cách của walkDir (VÀO → RA; vào lại khi chưa ra = quên ra; ra khi chưa vào =
+// quên vào; ngưỡng min / max của lịch trình vào ra) — rồi MỖI cặp / lượt lẻ mới tìm ca:
+//   cặp đủ → ca có |vào − đầu ca| + |ra − cuối ca| nhỏ nhất; VÀO lẻ → ca có ĐẦU ca gần nhất; RA lẻ → ca có CUỐI ca gần nhất
+// (chỉ ca có khung nhận lượt chứa lượt đó). Lượt RA không bao giờ thành giờ vào, lượt VÀO không bao giờ thành giờ ra.
+// Chọn tổ hợp ca KHÔNG chồng giờ: ưu tiên tổ hợp có ca nhận MỌI cặp / lượt; rồi như pickShiftSet: độ lệch của ca = |vào sớm nhất −
+// đầu ca| + |ra muộn nhất − cuối ca| trên các cặp nó nhận (thiếu vào / thiếu ra: phạt 240'), bằng nhau → dùng nhiều giờ vào / ra hơn,
+// rồi ít ca hơn. Cặp / lượt có giờ VÀO ở ngày hôm sau chỉ thuộc ca đêm còn đang chạy và không làm giờ vào ĐẦU TIÊN của ca (như
+// pickShiftSet); không thì là của hôm sau. Lượt RA lẻ ở ngày hôm sau chỉ thuộc ca đêm, và chỉ khi khớp CUỐI ca đêm hôm nay hơn cuối
+// các ca hôm sau (opts.nextOutClaim(iso, cuối ca đêm) = true → của hôm sau).
+// Trả [{ shift, punches }] như pickShiftSet.
+export function pickDirShiftSet(cands, punches, workDate, dir, dupOpt, opts = {}) {
+  const list = (cands || []).slice(0, 10).map((shift) => { const w = ruleWindow(workDate, shift); return { shift, ...shiftBounds(workDate, shift), ws: w.winStart.getTime(), we: w.winEnd.getTime() }; });
+  if (!list.length || !punches || !punches.length) return [];
+  const t = (p) => toMinute(p.punch_at).getTime();
+  const vnDay = (p) => new Date(new Date(p.punch_at).getTime() + 7 * HH).toISOString().slice(0, 10);
+  const dayEnd = vnInstant(workDate, '00:00').getTime() + 24 * HH;
+  const nights = list.filter((x) => x.end > dayEnd), nightEnds = nights.map((x) => x.end);
+  const inW = (p, x) => { const v = Date.parse(p.punch_at); return v >= x.ws && v <= x.we; };
+  // VÀO ở ngày hôm sau khi ca đêm hôm nay còn đang chạy (ra ngoài 23:00 rồi vào lại 01:00): thuộc ca đêm đó, nhưng không làm giờ
+  // vào ĐẦU TIÊN của ca (như pickShiftSet: giờ vào của ca phải thuộc ngày này); vào sau khi ca đêm đã hết → của hôm sau
+  const lateIn = (u, x) => x.end > dayEnd && inW(u.in, x) && t(u.in) < x.end;
+  const units = walkDir(punches, dir, dupOpt).units.filter((u) => {
+    if (u.in) return vnDay(u.in) <= workDate || nights.some((x) => lateIn(u, x));
+    if (vnDay(u.out) <= workDate) return true;
+    if (!nightEnds.length) return false;
+    const o = t(u.out), ne = nightEnds.reduce((a, e) => (Math.abs(o - e) < Math.abs(o - a) ? e : a));
+    return !(opts.nextOutClaim && opts.nextOutClaim(u.out.punch_at, ne));
+  });
+  if (!units.length) return [];
+  let best = null;
+  for (let mask = 1; mask < (1 << list.length); mask++) {
+    const set = list.filter((_, i) => mask & (1 << i)).sort((a, b) => a.start - b.start);
+    if (set.some((x, i) => i && x.start < set[i - 1].end)) continue;          // chồng giờ nhau → không cùng làm được
+    const got = set.map(() => []);
+    let miss = 0;
+    for (const u of units) {
+      const nextIn = !!u.in && vnDay(u.in) > workDate;               // VÀO hôm sau: chỉ ca đêm còn đang chạy
+      const nextDay = !u.in && vnDay(u.out) > workDate;              // RA lẻ ngày hôm sau: chỉ ca đêm
+      let bi = -1, bd = Infinity;
+      set.forEach((x, i) => {
+        if (nextDay && !(x.end > dayEnd)) return;
+        if (nextIn && !lateIn(u, x)) return;
+        if (u.in ? !inW(u.in, x) || t(u.in) < x.start - 8 * HH : !inW(u.out, x)) return;
+        const d = (u.in ? Math.abs(t(u.in) - x.start) : 0) + (u.out ? Math.abs(t(u.out) - x.end) : 0);
+        if (d < bd) { bd = d; bi = i; }
+      });
+      if (bi < 0) miss++; else got[bi].push(u);
+    }
+    if (got.some((g) => !g.length)) continue;
+    // giờ vào sớm nhất của mỗi ca (nếu có) phải thuộc ngày này
+    if (got.some((g) => { const f = g.filter((u) => u.in).sort((a, b) => t(a.in) - t(b.in))[0]; return f && vnDay(f.in) > workDate; })) continue;
+    let dev = 0, used = 0;
+    set.forEach((x, i) => {
+      const ins = got[i].filter((u) => u.in).map((u) => t(u.in)), outs = got[i].filter((u) => u.out).map((u) => t(u.out));
+      const a = ins.length ? Math.min(...ins) : null, b = outs.length ? Math.max(...outs) : null;
+      dev += (a == null ? 240 : Math.abs(a - x.start) / 60000) + (b == null ? 240 : Math.abs(b - x.end) / 60000);
+      used += (a == null ? 0 : 1) + (b == null ? 0 : 1);
+    });
+    const score = [miss, dev, -used, set.length];
+    const better = !best || score[0] < best.score[0] || (score[0] === best.score[0] && (score[1] < best.score[1] - 1e-9
+      || (Math.abs(score[1] - best.score[1]) < 1e-9 && (score[2] < best.score[2] || (score[2] === best.score[2] && score[3] < best.score[3])))));
+    if (better) best = { score, out: set.map((x, i) => ({ shift: x.shift, punches: got[i].flatMap((u) => u.ps) })) };
+  }
+  return best ? best.out : [];
+}
+
 // Quy tắc nào tính giờ công theo TỪNG CẶP vào–ra (thời gian ra ngoài giữa các cặp bị trừ):
 // "Tự động - không qua đêm" và "Tự động - qua đêm" (trừ kiểu con theo ID máy của quy tắc qua đêm).
 // Quy tắc BIẾT HƯỚNG từng lượt chấm (Theo ID máy, Tự động - qua đêm kiểu ID máy, Chọn từ máy): ngày chỉ có lượt RA
@@ -614,28 +682,29 @@ function walkPairs(isoList, opt) {
 //   - RA đóng lượt VÀO đang mở nếu không dài quá max phút; quá max → lượt VÀO cũ quên ra, lượt RA này quên vào
 //   - RA lặp (cách RA trước < min phút, chưa VÀO lại) → lấy lượt RA SAU; RA không có VÀO → QUÊN CHẤM VÀO
 // rows = mọi dòng [vào|null, ra|null] (như các dòng On39 hiện), out = các cặp ĐỦ, open = lượt VÀO cuối còn mở.
+// units = đúng các dòng đó nhưng giữ object lượt chấm: { in, out, ps } (ps = mọi lượt của dòng, kể cả lượt lặp đã bỏ) — để chia lượt cho ca.
 function walkDir(punches, dir, opt) {
   const o = opt && typeof opt === 'object' ? opt : { min: opt };
   const min = Math.max(1, Number(o.min) || PAIR_DUP_DEFAULT) * 60000;
   const maxMs = Number(o.max) > 0 ? Number(o.max) * 60000 : Infinity;
   const ps = [...(punches || [])].sort((a, b) => Date.parse(a.punch_at) - Date.parse(b.punch_at));
-  const rows = [];
-  let inT = null, lastOut = null;
+  const rows = [], units = [];
+  let inT = null, lastOut = null, cur = null;
   for (const p of ps) {
     const x = Date.parse(p.punch_at), k = dir(p);
     if (k === 1) {
-      if (inT != null && x - Date.parse(inT) < min) continue;
-      if (inT != null) rows.push([inT, null]);
-      inT = p.punch_at;
+      if (inT != null && x - Date.parse(inT) < min) { cur.ps.push(p); continue; }
+      if (inT != null) { rows.push([inT, null]); units.push(cur); }
+      inT = p.punch_at; cur = { in: p, out: null, ps: [p] };
     } else if (k === 2) {
-      if (inT != null && x - Date.parse(inT) <= maxMs) { rows.push([inT, p.punch_at]); inT = null; lastOut = x; continue; }
-      if (inT != null) { rows.push([inT, null]); inT = null; }
-      else if (lastOut != null && x - lastOut < min) { rows[rows.length - 1][1] = p.punch_at; lastOut = x; continue; }
-      rows.push([null, p.punch_at]); lastOut = x;
+      if (inT != null && x - Date.parse(inT) <= maxMs) { rows.push([inT, p.punch_at]); cur.out = p; cur.ps.push(p); units.push(cur); inT = null; cur = null; lastOut = x; continue; }
+      if (inT != null) { rows.push([inT, null]); units.push(cur); inT = null; cur = null; }
+      else if (lastOut != null && x - lastOut < min) { rows[rows.length - 1][1] = p.punch_at; const u = units[units.length - 1]; u.out = p; u.ps.push(p); lastOut = x; continue; }
+      rows.push([null, p.punch_at]); units.push({ in: null, out: p, ps: [p] }); lastOut = x;
     }
   }
-  if (inT != null) rows.push([inT, null]);
-  return { rows, out: rows.filter(([a, b]) => a && b), open: inT };
+  if (inT != null) { rows.push([inT, null]); units.push(cur); }
+  return { rows, out: rows.filter(([a, b]) => a && b), open: inT, units };
 }
 // Theo ID máy: máy số lẻ = VÀO, số chẵn = RA (máy chưa đặt số = 0 → RA, như trước)
 const idmDir = (mnum) => (p) => (mnum(p) % 2 === 1 ? 1 : 2);
