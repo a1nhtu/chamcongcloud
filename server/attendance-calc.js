@@ -455,7 +455,35 @@ function splitSeamPunches(set, got, t, dayEnd, workDate) {
   }
 }
 
-export function pickShiftSet(cands, punches, workDate) {
+// LƯỢT SÁT GIỜ VÀO CA SAU (Anh duyệt 13/11/2026, mục 3): quẹt 08:00 · 12:00 · 13:30 (quên ra chiều) trước đây gộp ngược 13:30 làm
+// giờ RA ca Sáng (08:00→13:30 tăng ca 90') và mất dòng ca Chiều. Tổ hợp ca KHÔNG hợp lệ khi lượt CUỐI (giờ ra) của ca A nằm sát
+// ĐẦU ca B hơn: B là ca ứng viên không chồng giờ A, bắt đầu từ cuối ca A trở đi; trong MỌI mốc đầu / cuối ca của các ca ứng viên,
+// mốc gần lượt đó nhất là đầu ca B (không có mốc CUỐI ca nào gần bằng) và gần hơn HẲN cuối ca A → lượt đó là giờ vào ca B.
+// Đối xứng: lượt ĐẦU (giờ vào) của ca B nằm sát CUỐI ca A trước đó hơn hẳn đầu ca B (12:00 · 13:30 · 17:30: 12:00 là của ca Sáng).
+// Giữ NGUYÊN cách cũ (mốc biên đề bài chưa nói — xem báo cáo 13/11): cách đều 2 mốc; ca chỉ có 1 lượt (lượt lẻ không rõ vào / ra);
+// 2 ca nối liền (cách nhau ≤ 30', splitSeamPunches lo); ca qua đêm (A hoặc B — lịch tự dò ngày / đêm quên chấm vào: Anh chốt giữ
+// cách chọn ca hiện tại); chỉ chọn 1 ca mà trong ngày còn lượt sớm / muộn hơn (ca đơn lấy lượt tới hết ngày — opts.oneWin(ca) trả các
+// lượt đó — giờ vào / ra thật không phải lượt này: S11 đến 05:45).
+function nearOtherShift(list, set, got, t, dayEnd, oneWin) {
+  const marks = list.flatMap((x) => [{ v: x.start, s: true }, { v: x.end, s: false }]);
+  const inDay = (x) => !(x.end > dayEnd) && !(x.shift.cross_midnight || x.shift.end_time <= x.shift.start_time);
+  // mốc gần v nhất là mốc `kind` (đầu / cuối) tại `at`, gần hơn hẳn mốc `own` của chính ca đó, và không có mốc khác loại gần bằng
+  const near = (v, at, isStart, own) => {
+    const d = Math.abs(v - at), best = Math.min(...marks.map((m) => Math.abs(v - m.v)));
+    return d === best && d < Math.abs(v - own) && !marks.some((m) => m.s !== isStart && Math.abs(v - m.v) === best);
+  };
+  for (let i = 0; i < set.length; i++) {
+    const A = set[i], g = got[i];
+    if (g.length < 2 || !inDay(A)) continue;
+    const all = set.length === 1 && oneWin ? oneWin(A.shift).map(t) : null;
+    const p = t(g[g.length - 1]), q = t(g[0]);
+    if (!(all && all.some((v) => v > p)) && list.some((B) => B !== A && inDay(B) && B.start - A.end > SEAM_GAP && near(p, B.start, true, A.end))) return true;
+    if (!(all && all.some((v) => v < q)) && list.some((P) => P !== A && inDay(P) && A.start - P.end > SEAM_GAP && near(q, P.end, false, A.start))) return true;
+  }
+  return false;
+}
+
+export function pickShiftSet(cands, punches, workDate, opts = {}) {
   const list = (cands || []).slice(0, 10).map((shift) => ({ shift, ...shiftBounds(workDate, shift) }));
   const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
   if (!list.length || !ps.length) return [];
@@ -482,6 +510,7 @@ export function pickShiftSet(cands, punches, workDate) {
     // Giờ VÀO của mỗi ca phải thuộc ngày này và không sớm hơn giờ vào ca quá 8 tiếng
     // (trước đây: làm ca sáng 05:52–11:33 thì lượt 05:55 sáng hôm sau bị lấy làm "vào Ca đêm" → 1 lượt dùng cho 2 ngày)
     if (got.some((g, i) => vnDay(g[0]) > workDate || t(g[0]) < set[i].start - 8 * HH)) continue;
+    if (nearOtherShift(list, set, got, t, dayEnd, opts.oneWin)) continue;   // giờ ra sát đầu ca sau / giờ vào sát cuối ca trước
     let dev = 0, used = 0;
     set.forEach((x, i) => {
       const g = got[i], a = t(g[0]), b = g.length > 1 ? t(g[g.length - 1]) : null;

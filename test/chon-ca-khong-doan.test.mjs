@@ -14,7 +14,7 @@ process.env.DB_PATH = join(dir, 'test.db');
 const { db, initSchema } = await import('../server/db.js');
 const { ingestAttlog } = await import('../server/device-sync.js');
 const { recomputeAttendance } = await import('../server/routes/admin/attendance.js');
-const { pickDirShiftSet, stateDir } = await import('../server/attendance-calc.js');
+const { pickDirShiftSet, pickShiftSet, stateDir } = await import('../server/attendance-calc.js');
 
 const hm = (x) => (x ? new Date(Date.parse(x) + 7 * 3600e3).toISOString().slice(11, 16) : '-');
 const vn = (dhm) => new Date(`2026-11-${dhm.replace(' ', 'T')}:00+07:00`).toISOString();
@@ -65,6 +65,7 @@ before(() => {
   const ca = (code, start, end, extra = {}) => (S[code] = ins('shifts', { ...base, name: code, code, start_time: start, end_time: end, ...(end <= start ? { cross_midnight: 1 } : {}), ...extra }));
   ca('HC', '08:00', '17:00', { break_minutes: 60 }); ca('DM', '19:00', '07:00', { break_minutes: 60 });
   ca('S6', '06:00', '14:00'); ca('C14', '14:00', '22:00'); ca('D22', '22:00', '06:00'); ca('C0', '00:00', '08:00');
+  ca('SA', '08:00', '12:00', { work_unit_value: 0.5 }); ca('CH', '13:30', '17:30', { work_unit_value: 0.5 });
   ca('SAW', '08:00', '12:00', { work_unit_value: 0.5, check_in_start: '07:00', check_in_end: '09:00', check_out_start: '11:30', check_out_end: '13:00' });
   ca('CHW', '13:30', '17:30', { work_unit_value: 0.5, check_in_start: '13:00', check_in_end: '14:30', check_out_start: '17:00', check_out_end: '20:00' });
   codeOf = Object.fromEntries(Object.entries(S).map(([k, v]) => [v, k]));
@@ -140,4 +141,37 @@ test('Việc 1 · lịch nhiều ca CÓ khung giờ + Theo ID máy: theo hướn
 test('Việc 1 · quy tắc KHÔNG biết hướng giữ cách chọn ca cũ (lịch HC / DM, quên vào đêm đầu: HC 07:00→19:00 như mốc)', () => {
   const e = nv(); ganLich(e, schedAuto(['HC', 'DM']), 'filo');
   kiem(e, ['03 07:00 r', '03 19:00 v', '04 07:00 r'], ['03[HC] 07:00→19:00 1c tc120', '04[HC] 07:00→- 0c'], 'Z4 filo');
+});
+
+// ======================= VIỆC 2: lượt sát GIỜ VÀO ca sau là giờ vào ca sau (quy tắc không biết hướng) =======================
+const ca2 = (code, start, end) => ({ id: code, code, start_time: start, end_time: end });
+const SA2 = ca2('SA', '08:00', '12:00'), CH2 = ca2('CH', '13:30', '17:30');
+const chon2 = (cands, times, opts) => pickShiftSet(cands, times.map((x) => ({ punch_at: vn('03 ' + x) })), '2026-11-03', opts)
+  .map((x) => `${x.shift.code}:${x.punches.map((q) => hm(q.punch_at)).join(',')}`);
+
+test('Việc 2 · pickShiftSet: giờ ra sát đầu ca sau / giờ vào sát cuối ca trước → thuộc ca kia', () => {
+  assert.deepEqual(chon2([SA2, CH2], ['08:00', '12:00', '13:30']), ['SA:08:00,12:00', 'CH:13:30']);         // S13 (trước: SA 08:00→13:30)
+  assert.deepEqual(chon2([SA2, CH2], ['08:00', '12:00', '13:40']), ['SA:08:00,12:00', 'CH:13:40']);         // S13b
+  assert.deepEqual(chon2([SA2, CH2], ['12:00', '13:30', '17:30']), ['SA:12:00', 'CH:13:30,17:30']);         // S14b (trước: CH 12:00→17:30)
+  // GIỮ như cũ: quẹt 2 lần 08:00 · 17:30 (17:30 sát CUỐI ca Chiều, không phải đầu ca) → 1 dòng ca Sáng
+  assert.deepEqual(chon2([SA2, CH2], ['08:00', '17:30']), ['SA:08:00,17:30']);
+  assert.deepEqual(chon2([SA2, CH2], ['08:00', '12:00', '13:30', '17:30']), ['SA:08:00,12:00', 'CH:13:30,17:30']);
+  // GIỮ như cũ: chỉ chọn 1 ca mà trong ngày còn lượt sớm hơn (S11 đến 05:45 — ca đơn lấy giờ vào 05:45, không phải 12:00)
+  const sớm = [{ punch_at: vn('03 05:45') }, ...['12:00', '13:30', '17:30'].map((x) => ({ punch_at: vn('03 ' + x) }))];
+  assert.deepEqual(chon2([SA2, CH2], ['12:00', '13:30', '17:30'], { oneWin: () => sớm }), ['CH:12:00,13:30,17:30']);
+  // GIỮ như cũ: 2 ca nối liền (hở ≤ 30') — splitSeamPunches lo; quẹt 08:00 + 16:10 vẫn là 1 ca C1 đủ vào ra
+  assert.deepEqual(chon2([ca2('C1', '08:00', '16:00'), ca2('C2', '16:15', '22:00')], ['08:00', '16:10']), ['C1:08:00,16:10']);
+  // GIỮ như cũ: cách đều 2 mốc (ca nối liền 16:00 / 16:00)
+  assert.deepEqual(chon2([ca2('C1', '08:00', '16:00'), ca2('C2', '16:00', '22:00')], ['08:00', '16:00']), ['C1:08:00,16:00']);
+});
+
+test('Việc 2 · nạp lượt máy: S13 / S14b / S4b ra đúng 2 dòng, quẹt 2 lần 08:00 · 17:30 giữ 1 dòng ca Sáng', () => {
+  const a = nv(); ganLich(a, schedWeek(['SA', 'CH']));
+  kiem(a, ['03 08:00', '03 12:00', '03 13:30'], ['03[SA] 08:00→12:00 0.5c', '03[CH] 13:30→- 0c'], 'S13');
+  const b = nv(); ganLich(b, schedWeek(['SA', 'CH']));
+  kiem(b, ['03 12:00', '03 13:30', '03 17:30'], ['03[SA] 12:00→- 0c trễ240', '03[CH] 13:30→17:30 0.5c'], 'S14b');
+  const c = nv(); ganLich(c, schedWeek(['SAW', 'CHW']));
+  kiem(c, ['03 08:00', '03 12:00', '03 13:25', '03 20:30'], ['03[SAW] 08:00→12:00 0.5c', '03[CHW] 13:25→- 0c'], 'S4b');
+  const d = nv(); ganLich(d, schedWeek(['SA', 'CH']));
+  kiem(d, ['03 08:00', '03 17:30'], ['03[SA] 08:00→17:30 0.5c tc330'], '08:00 · 17:30');
 });
