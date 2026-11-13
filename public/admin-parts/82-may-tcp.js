@@ -128,6 +128,13 @@ function rebootSchedModal(m, rows) {
 function lanScanModal() {
   const box = el('div', {}, loading());
   const again = el('button', { class: 'btn ghost' }, '🔄 Tìm lại');
+  // máy chấm công ở lớp mạng KHÁC máy tính (VD máy bắt Wi-Fi 192.168.1.x, máy tính cắm dây 10.x): gõ dải / IP để dò thêm (lưu cho lần sau)
+  const extraI = el('input', { placeholder: 'VD 192.168.1.x hoặc 192.168.1.133', style: 'font-family:monospace;flex:1;min-width:200px' });
+  extraI.addEventListener('keydown', (e) => { if (e.key === 'Enter') run(); });
+  let extraSent = false;
+  const extraRow = el('div', { style: 'margin:0 0 10px' },
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, el('span', { style: 'font-size:13px' }, 'Dò thêm dải / IP khác:'), extraI, btnSm('🔍 Dò', () => run(), 'ghost')),
+    el('div', { class: 'map-hint', style: 'margin-top:4px' }, 'Máy chấm công khác lớp mạng với máy tính (VD máy bắt Wi-Fi, máy tính cắm dây) mà ping vẫn thông: gõ dải của máy (192.168.1.x) hoặc đúng IP máy. Nhiều mục cách nhau bằng dấu phẩy.'));
   const warn = (t) => el('div', { style: 'margin:8px 0;padding:8px 12px;border-radius:8px;background:#fff7e0;color:#7a4b00;font-size:13px' }, t);
   let changed = false;
   const close = () => { closeModal(); if (changed) pageDevices(); };
@@ -167,7 +174,8 @@ function lanScanModal() {
     box.append(r.domain ? el('div', { style: 'font-size:13.5px;margin-bottom:6px' }, 'Tên miền của phần mềm này: ', el('b', { style: 'font-family:monospace;color:var(--brand-ink,#c0392b)' }, r.domain))
       : warn('Bản cài này chưa có tên miền (bản LAN) — chỉ xem được máy, chưa trỏ tự động được. Trên máy chấm công điền IP + Port theo "Cách A".'));
     if (!r.enabled) box.append(warn('Phần mềm đang TẮT dùng máy chấm công — máy trỏ về sẽ chưa hiện. Liên hệ Digiplus để bật.'));
-    if (!r.rows.length) return box.append(warn('Không thấy máy chấm công nào trong mạng. Kiểm tra máy đã bật, cắm dây mạng / Wi-Fi CÙNG mạng với máy tính này, rồi bấm Tìm lại.'));
+    if ((r.missing || []).length) box.append(warn(`Không thấy máy ở ${r.missing.join(', ')} (đã thử cổng 4370 TCP + UDP và ping). Kiểm tra lại IP trên máy chấm công (Menu → Comm → Ethernet / Wi-Fi).`));
+    if (!r.rows.length) return box.append(warn('Không thấy máy chấm công nào trong mạng. Kiểm tra máy đã bật, cắm dây mạng / Wi-Fi rồi bấm Tìm lại. Máy chấm công khác lớp mạng với máy tính (VD máy bắt Wi-Fi 192.168.1.x còn máy tính 10.x) thì gõ dải hoặc IP máy vào ô "Dò thêm" ở trên rồi bấm Dò.'));
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr><th>Máy</th><th>Đang gửi dữ liệu về</th></tr></thead>';
     const tb = el('tbody');
@@ -209,14 +217,20 @@ function lanScanModal() {
       el('div', { class: 'map-hint', style: 'margin-top:8px' }, 'Phần mềm ghi vào máy: bật Cloud Server theo tên miền (IclockSvrFun = 1, WebServerURLModel = 1, ICLOCKSVRURL = tên miền; máy có mục HTTPS thì bật IISSupportSSL = 1 + cổng 443) rồi khởi động lại máy.'));
   };
   const run = async () => {
+    if (again.disabled) return;   // đang dò dở (bấm Dò / Enter liên tiếp)
     again.disabled = true;
     box.innerHTML = ''; box.append(el('div', { class: 'map-hint' }, 'Đang dò máy chấm công trong mạng LAN… khoảng 5–30 giây.'), loading());
-    try { render(await api('/admin/devices/lan-scan', { method: 'POST' })); }
-    catch (e) { box.innerHTML = ''; box.append(warn('❌ ' + e.message)); }
+    try {
+      // lần mở đầu chưa gửi ô (máy chủ dùng dải đã lưu, trả về để điền ô); từ lần sau gửi đúng ô khách gõ (xoá trắng = bỏ dò thêm)
+      const r = await api('/admin/devices/lan-scan', { method: 'POST', body: extraSent ? { extra: extraI.value } : {} });
+      if (!extraSent) extraI.value = r.extra || '';
+      extraSent = true;
+      render(r);
+    } catch (e) { box.innerHTML = ''; box.append(warn('❌ ' + e.message)); }
     again.disabled = false;
   };
   again.onclick = run;
-  openModal('🔍 Tìm máy chấm công trong mạng LAN', [box], [el('button', { class: 'btn ghost', onclick: close }, 'Đóng'), again]);
+  openModal('🔍 Tìm máy chấm công trong mạng LAN', [extraRow, box], [el('button', { class: 'btn ghost', onclick: close }, 'Đóng'), again]);
   run();
 }
 // Thêm máy (m = null) / sửa kết nối (m = máy)

@@ -414,3 +414,27 @@ test('máy đang kết nối TCP/IP theo IP, hoặc gửi dhcp:false: KHÔNG b�
     assert.equal(out.info.dhcp_skip, 'tcp'); assert.equal(dev().dhcp, '0'); assert.equal(dev().wdhcp, '0');
   } finally { db.prepare("DELETE FROM push_devices WHERE serial='ZKTCP1'").run(); }
 });
+
+// Máy chấm công khác lớp mạng máy tính (máy tính cắm dây 10.211.55.x, máy bắt Wi-Fi 192.168.1.133 qua router; khách lolochai2 13/11/2026)
+test('ô "Dò thêm": hiểu dải 192.168.1.x / IP lẻ, chỉ nhận IP nội bộ', () => {
+  const p = ZKM.parseExtraTargets('192.168.1.x, 192.168.5.133; 10.0.0.* 172.16.3.0/24  192.168.1.50  10.1.2');
+  assert.deepEqual(p.nets, ['192.168.1', '10.0.0', '172.16.3', '10.1.2']);
+  assert.deepEqual(p.hosts, ['192.168.5.133'], 'IP lẻ nằm trong dải đã quét thì bỏ, khỏi dò 2 lần');
+  assert.deepEqual(p.bad, []);
+  assert.deepEqual(ZKM.parseExtraTargets('8.8.8.x 192.168.1.300 192.168.1.0 abc 127.0.0.1').bad, ['8.8.8.x', '192.168.1.300', '192.168.1.0', 'abc', '127.0.0.1']);
+  assert.deepEqual(ZKM.parseExtraTargets(''), { nets: [], hosts: [], bad: [] });
+});
+
+test('ô "Dò thêm": gõ sai báo lỗi, gõ đúng thì lưu lại cho lần mở sau, xoá trắng = bỏ', { skip: !WIN }, async () => {
+  withDomain('abc1'); setDev({});
+  const bad = await call('POST /devices/lan-scan', { extra: '8.8.8.8' });
+  assert.equal(bad.code, 400); assert.match(bad.out.error, /8\.8\.8\.8/);
+  const ok = await call('POST /devices/lan-scan', { extra: '192.168.1.x' });
+  assert.equal(ok.code, 200, JSON.stringify(ok.out));
+  assert.equal(ok.out.extra, '192.168.1.x');
+  assert.ok(ok.out.nets.includes('192.168.1.x'), 'dòng "Đã dò mạng" có cả dải gõ thêm');
+  const later = await call('POST /devices/lan-scan');
+  assert.equal(later.out.extra, '192.168.1.x', 'mở lại modal thì ô điền sẵn dải đã lưu');
+  const clr = await call('POST /devices/lan-scan', { extra: '' });
+  assert.equal(clr.out.extra, '');
+});

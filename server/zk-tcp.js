@@ -257,12 +257,31 @@ export async function recheckHost(x, port = 4370) {
   if (!(tcp === 'refused' || x.ports.length || await ping(x.ip))) x.offline = true;
   return x;
 }
-export async function scanLan(ips, port = 4370, ms = 800) {
+// Dải / IP khách gõ thêm để dò máy ở lớp mạng KHÁC máy tính (VD máy tính cắm dây 10.211.55.x, máy chấm công bắt Wi-Fi
+// 192.168.1.x, router nối 2 lớp — ping thông nhưng dò LAN chỉ quét lớp mạng của máy tính nên không thấy; khách lolochai2 13/11/2026).
+// Nhận "192.168.1.x" / "192.168.1.*" / "192.168.1.0/24" / "192.168.1" = cả dải; "192.168.1.133" = 1 IP. Chỉ IP nội bộ.
+// → { nets: ['192.168.1'], hosts: ['192.168.1.133'], bad: ['…'] } (tối đa 4 dải + 20 IP)
+const isPrivNet = (a, b) => a === 10 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31);
+export function parseExtraTargets(text) {
+  const nets = [], hosts = [], bad = [];
+  for (const t of String(text || '').split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean)) {
+    const m = t.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}|x|\*|0\/24))?$/i);
+    const p = m ? m.slice(1, 4).map(Number) : [];
+    if (!m || p.some((n) => n > 255) || !isPrivNet(p[0], p[1]) || (m[4] && /^\d+$/.test(m[4]) && (+m[4] < 1 || +m[4] > 254))) { bad.push(t); continue; }
+    const net = p.join('.');
+    if (m[4] && /^\d+$/.test(m[4])) { const ip = `${net}.${+m[4]}`; if (!hosts.includes(ip) && hosts.length < 20) hosts.push(ip); }
+    else if (!nets.includes(net) && nets.length < 4) nets.push(net);
+  }
+  return { nets, hosts: hosts.filter((ip) => !nets.includes(ip.split('.').slice(0, 3).join('.'))), bad };
+}
+// extra = { nets, hosts } (parseExtraTargets): quét thêm cả dải / từng IP ngoài lớp mạng của máy tính
+export async function scanLan(ips, port = 4370, ms = 800, extra = {}) {
   const test = !!process.env.ZK_SCAN_HOSTS;
-  const nets = [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.')))];
+  const nets = [...new Set([...ips.map((ip) => ip.split('.').slice(0, 3).join('.')), ...(extra.nets || [])])];
+  const one = (extra.hosts || []).filter((ip) => !nets.includes(ip.split('.').slice(0, 3).join('.')));
   const hosts = test
     ? process.env.ZK_SCAN_HOSTS.split(',').map((h) => h.trim()).filter(Boolean).map((h) => ({ ip: h.split(':')[0], port: +h.split(':')[1] || port }))
-    : nets.flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port })));
+    : [...nets.flatMap((net) => Array.from({ length: 254 }, (_, i) => ({ ip: `${net}.${i + 1}`, port }))), ...one.map((ip) => ({ ip, port }))];
   const probes = hosts.flatMap((h) => [{ ...h, sdk: true }, { ip: h.ip, port: extraPort() }]);
   const byIp = new Map();
   const hit = (ip) => byIp.get(ip) || byIp.set(ip, { ip, port: null, ports: [], mac: '' }).get(ip);
@@ -284,6 +303,12 @@ export async function scanLan(ips, port = 4370, ms = 800) {
   // Lượt dò nhanh bắn hàng trăm kết nối cùng lúc, chờ 0,8 giây → máy chậm trả lời (đang bận, mạng Wi-Fi, ARP chậm) bị lỡ.
   // Máy nào chưa thấy cổng 4370 thì hỏi lại từng máy một trước khi kết luận "đóng cổng" (máy Hikvision không cần: không dùng 4370).
   for (const x of byIp.values()) if (!x.port && !x.hik) await recheckHost(x, port);
+  // IP khách gõ riêng (khác lớp mạng → không có MAC trong ARP) mà lượt nhanh chưa thấy → hỏi lại từ từ; còn sống mới hiện
+  for (const ip of one) {
+    if (byIp.has(ip)) continue;
+    const x = await recheckHost({ ip, port: null, ports: [], mac: '' }, port);
+    if (!x.offline) byIp.set(ip, x);
+  }
   const num = (ip) => ip.split('.').reduce((n, p) => n * 256 + +p, 0);
   return [...byIp.values()].sort((a, b) => num(a.ip) - num(b.ip));
 }

@@ -6,7 +6,7 @@ import { sendCaughtError } from '../../util.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, zkDeleteUsers, queuePendingDelete, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
-  scanLan, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful, zkHello, isZkMac } from '../../zk-tcp.js';
+  scanLan, parseExtraTargets, tcpServerInfo, tcpSetServer, tcpKnock, zkCareful, zkHello, isZkMac } from '../../zk-tcp.js';
 import { buildSched, schedLabel } from '../../reboot-schedule.js';
 import { setSetting } from '../../db.js';
 import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dropConflicts, parseRange, guardOn, autoPushOn, pushEmployees } from '../../pin-guard.js';
@@ -333,7 +333,16 @@ export function registerDeviceRoutes(r, { need }) {
   r.post('/devices/lan-scan', need('devices'), winOnly, async (req, res) => {
     try {
       const domain = tunnelDomain(), ips = lanIPs(true);
-      const found = await scanLan(ips);
+      // dải / IP thêm (máy chấm công ở lớp mạng khác máy tính, VD bắt Wi-Fi): khách gõ thì lưu lại cho lần sau
+      const b = req.body || {};
+      if (typeof b.extra === 'string') {
+        const p = parseExtraTargets(b.extra);
+        if (p.bad.length) return res.status(400).json({ error: `Không hiểu: ${p.bad.join(', ')} — gõ dải như 192.168.1.x hoặc IP như 192.168.1.133 (chỉ IP nội bộ 192.168.x · 10.x · 172.16–31.x).` });
+        setSetting('lan_scan_extra', [...p.nets.map((n) => n + '.x'), ...p.hosts].join(', '));
+      }
+      const extraText = getSetting('lan_scan_extra', '');
+      const extra = parseExtraTargets(extraText);
+      const found = await scanLan(ips, 4370, 800, extra);
       const rows = [];
       // máy MAC Hikvision: hỏi cổng web ISAPI cùng lúc (HTTP, không phải SDK nên không cần tuần tự)
       const hikPort = +process.env.ZK_SCAN_HIK_PORT || 80;   // ZK_SCAN_HIK_PORT: chỉ dùng khi kiểm thử
@@ -366,7 +375,8 @@ export function registerDeviceRoutes(r, { need }) {
         }
         rows.push(row);
       }
-      res.json({ domain, nets: [...new Set(ips.map((ip) => ip.split('.').slice(0, 3).join('.') + '.x'))], enabled: getSetting('device_enabled', '0') === '1', hik_enabled: hikEnabled(), rows });
+      const missing = extra.hosts.filter((ip) => !found.some((h) => h.ip === ip));
+      res.json({ domain, nets: [...new Set([...ips.map((ip) => ip.split('.').slice(0, 3).join('.')), ...extra.nets].map((n) => n + '.x'))], extra: extraText, missing, enabled: getSetting('device_enabled', '0') === '1', hik_enabled: hikEnabled(), rows });
     } catch (e) { sendCaughtError(res, 'POST /admin/devices/lan-scan', e); }
   });
   r.post('/devices/lan-point', need('devices'), winOnly, async (req, res) => {
