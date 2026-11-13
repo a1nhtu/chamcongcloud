@@ -3,7 +3,7 @@ import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren, splitDe
 import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
-import { dayPairsFor, rebuildDays } from '../../device-sync.js';
+import { dayPairsFor, rebuildDays, rebuildDay } from '../../device-sync.js';
 import { rulePairs, ruleWindow } from '../../attendance-calc.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
@@ -300,6 +300,7 @@ export function registerAttendanceRoutes(r, { need }) {
       db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?,
         work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=?, manual_at=?, manual_by=? WHERE id=?`)
         .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý', existing.id);
+      rebuildChainAfter(eid, date);   // bù tay xong → các ngày sau tự tính lại nối tiếp
       notifyTimeEdited(eid, date, inIso, outIso);
       return res.json({ ok: true, id: existing.id, updated: true });
     }
@@ -307,6 +308,7 @@ export function registerAttendanceRoutes(r, { need }) {
       (employee_id, work_date, check_in_at, check_out_at, late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note, manual_at, manual_by)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?, 'manual', 1, ?, ?, ?)`)
       .run(eid, date, inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note || '', nowIso(), req.user.full_name || 'Quản lý');
+    rebuildChainAfter(eid, date);   // bù tay xong → các ngày sau tự tính lại nối tiếp
     notifyTimeEdited(eid, date, inIso, outIso);
     res.json({ ok: true, id: info.lastInsertRowid });
   });
@@ -326,6 +328,7 @@ export function registerAttendanceRoutes(r, { need }) {
     db.prepare(`UPDATE attendance SET check_in_at=?, check_out_at=?, late_min=?, early_min=?, ot_min=?, ot_raw_min=?,
       work_minutes=?, work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source='manual', manual=1, note=?, manual_at=?, manual_by=? WHERE id=?`)
       .run(inIso, outIso, m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, m.shiftId, b.note ?? row.note ?? '', nowIso(), req.user.full_name || 'Quản lý', row.id);
+    rebuildChainAfter(row.employee_id, row.work_date);   // sửa giờ xong → các ngày sau tự tính lại nối tiếp
     notifyTimeEdited(row.employee_id, row.work_date, inIso, outIso);
     res.json({ ok: true });
   });
@@ -378,6 +381,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const mark = db.prepare('INSERT OR IGNORE INTO att_edit_marks(employee_id, work_date) VALUES (?, ?)');
     for (const k of keys) { const [e, d] = k.split('|'); (left.get(+e, d).c ? delMan : delAll).run(+e, d); mark.run(+e, d); }   // dấu (*): ngày có lượt chấm sửa tay
     rebuildDays([...keys]);
+    rebuildChainAfterKeys(keys);   // các ngày SAU nữa (ca đêm: ngày N+1 phụ thuộc ngày N) — định nghĩa ở dưới
   };
   // Ngày NV chấm bằng ĐIỆN THOẠI (dòng công có ảnh chấm) và chưa có lượt quẹt nào từ máy: giờ chấm chỉ nằm ở bảng công,
   // không có lượt chấm gốc → dựng lại ngày từ lượt chấm thêm tay sẽ GHI ĐÈ / làm mất các lần chấm điện thoại. Chặn thêm lượt ở các ngày này.
@@ -388,6 +392,54 @@ export function registerAttendanceRoutes(r, { need }) {
   const hourlySessionDay = (eid, date) => payrollCtx(getSetting, db).isHourly(eid)
     && !db.prepare("SELECT 1 FROM device_punches WHERE employee_id = ? AND (work_date = ? OR serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA')) LIMIT 1").get(eid, date);
   const sessionDay = (eid, date) => phoneDay(eid, date) || hourlySessionDay(eid, date);
+
+  /* TÍNH LẠI NỐI TIẾP sau khi quản lý BÙ TAY một ngày.
+   * Công ngày N+1 phụ thuộc ngày N: lượt chấm sáng sớm đã là giờ RA ca đêm hôm trước thì ngày N+1 không dùng lại (consumedByPrevDay, device-sync.js).
+   * NV ca đêm quên chấm 1 đêm → các đêm sau bị dựng sai dây chuyền; quản lý bù lượt thiếu thì chỉ ngày đó + 1 ngày kế được dựng lại (rebuildDays),
+   * các ngày sau nữa vẫn sai cho tới khi có người bấm Tính lại. Hàm này dựng lại tiếp từng ngày SAU ngày bù, ĐÚNG THỨ TỰ NGÀY, cho tới khi
+   * một ngày dựng lại mà kết quả không đổi (các ngày sau nó không còn phụ thuộc điều gì mới). Không đoán giờ nào: chỉ chạy lại đúng cách dựng
+   * công như Tính lại, từ các lượt chấm + dòng công đang có.
+   *  · Gọi rebuildDay từng ngày (không phải rebuildDays): rebuildDays tự dựng thêm ngày kế → so trước / sau sẽ thấy "không đổi" và dừng sớm 1 ngày.
+   *  · Dòng sửa tay (manual=1) không bị đè (rebuildDay không đụng). Ngày chỉ chấm điện thoại (phoneDay) không dựng lại.
+   *  · NV chưa từng có lượt chấm nào (chỉ chấm điện thoại) → không làm gì.
+   *  · Dừng khi: ngày dựng lại không đổi (từ ngày thứ 2 sau ngày bù) · vượt quá ngày sau ngày có lượt chấm cuối của NV · đủ CHAIN_MAX_DAYS ngày.
+   *  · Có SAVEPOINT riêng: lỗi ở đây chỉ bỏ phần nối tiếp (ghi log), KHÔNG làm hỏng thao tác bù tay đã làm — như cũ, bấm Tính lại là xong. */
+  const CHAIN_MAX_DAYS = 62;
+  const dayShift = (d, n) => { const t = new Date(d + 'T12:00:00Z'); t.setUTCDate(t.getUTCDate() + n); return t.toISOString().slice(0, 10); };
+  // Dòng công KHÔNG sửa tay của 1 ngày: ca, giờ vào / ra, trễ, sớm, tăng ca, giờ công, số công, trạng thái (không so id — dựng lại sinh id mới)
+  const chainSnap = (eid, d) => JSON.stringify(db.prepare(`SELECT shift_id, check_in_at, check_out_at, late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type
+    FROM attendance WHERE employee_id = ? AND work_date = ? AND (manual IS NULL OR manual = 0) ORDER BY COALESCE(check_in_at, ''), COALESCE(check_out_at, ''), COALESCE(shift_id, 0)`).all(eid, d));
+  const rebuildChainAfter = (eid, date) => {
+    const last = db.prepare('SELECT MAX(work_date) d FROM device_punches WHERE employee_id = ?').get(eid)?.d;
+    if (!last) return 0;
+    // ngày sau ngày có lượt chấm cuối vẫn xét (ca bắt đầu ngay sau nửa đêm, lượt đến sớm từ tối hôm trước — prevEveningInPunches)
+    const stopAfter = dayShift(last, 1);
+    let n = 0;
+    db.exec('SAVEPOINT chain_after');
+    try {
+      for (let i = 1; i <= CHAIN_MAX_DAYS; i++) {
+        const d = dayShift(date, i);
+        if (d > stopAfter) break;
+        if (phoneDay(eid, d)) { if (i >= 2) break; continue; }   // ngày chỉ chấm điện thoại: không đụng; ngày sau nó không có gì mới để phụ thuộc
+        const before = chainSnap(eid, d);
+        rebuildDay(eid, d); n++;
+        // ngày date+1 luôn dựng (nhiều nơi đã dựng nó trước khi tới đây nên không so sánh được); từ date+2: không đổi → dừng
+        if (i >= 2 && chainSnap(eid, d) === before) break;
+      }
+      db.exec('RELEASE chain_after');
+    } catch (e) {
+      try { db.exec('ROLLBACK TO chain_after'); db.exec('RELEASE chain_after'); } catch { /* giao dịch ngoài đã đóng */ }
+      console.error('[tính lại nối tiếp] NV ' + eid + ' sau ngày ' + date + ': ' + e.message);
+      return 0;
+    }
+    return n;
+  };
+  // Cho 1 tập 'empId|date' (như redoDays): mỗi NV chỉ nối tiếp sau NGÀY CUỐI của mỗi đoạn ngày liền nhau (các ngày trong đoạn đã được rebuildDays dựng theo thứ tự ngày)
+  const rebuildChainAfterKeys = (keys) => {
+    const byEmp = new Map();
+    for (const k of keys) { const [e, d] = String(k).split('|'); if (!byEmp.has(+e)) byEmp.set(+e, new Set()); byEmp.get(+e).add(d); }
+    for (const [e, dates] of byEmp) for (const d of [...dates].sort()) if (!dates.has(dayShift(d, 1))) rebuildChainAfter(e, d);
+  };
   const dm = (d) => d.slice(8) + '/' + d.slice(5, 7);
   // Ngày chấm điện thoại: thêm giờ tay = thêm 1 PHIÊN vào–ra MỚI ở bảng công (không dựng lại từ lượt chấm, không đụng các phiên đã có).
   // Chỉ có giờ ra → điền giờ ra cho phiên đang mở (đã vào, chưa ra). Trả { error } nếu không thêm được.
@@ -478,6 +530,7 @@ export function registerAttendanceRoutes(r, { need }) {
         rebuildDays([row.employee_id + '|' + nd]);
       return true;
     });
+    rebuildChainAfter(row.employee_id, row.work_date);   // ngày sau (và các ngày kế nữa) tính lại nối tiếp — NV chỉ chấm điện thoại thì hàm tự bỏ qua
     notifyTimeEdited(row.employee_id, row.work_date, row.check_in_at, null);
     res.json({ ok: true, moved, next_date: nd });
   });
