@@ -626,14 +626,6 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
   // Phân theo giờ: VÀO = lượt đầu trong khung vào; RA = lượt CUỐI trong khung ra (sau giờ vào).
   // Lượt nằm ngoài cả 2 khung (VD ra ăn trưa 12h) bỏ qua — trước đây lấy "lượt kế tiếp" nên quẹt trưa làm mất giờ ra.
   if (rule === 'tdhc') {
-    let ci;
-    if (shift.check_in_start && shift.check_in_end) {
-      const cs = vnInstant(workDate, shift.check_in_start);
-      let ce = vnInstant(workDate, shift.check_in_end);
-      if (ce < cs) ce = new Date(ce.getTime() + 24 * HH);
-      ci = all.find((p) => at(p) >= cs && at(p) <= ce);
-    } else ci = inWin[0];
-    if (!ci) return { inIso: null, outIso: null };
     let cos, coe;
     if (shift.check_out_start && shift.check_out_end) {
       cos = vnInstant(workDate, shift.check_out_start);
@@ -642,6 +634,18 @@ export function mergeDayPunches(punches, shift, rule, machineMap = {}, workDate,
       // Ca ĐÊM (19:00 → 07:00) khai khung ra 04:00 – 11:00: khung ra là sáng HÔM SAU (trước đây lấy sáng cùng ngày → luôn thiếu giờ ra)
       if ((shift.cross_midnight || shift.end_time <= shift.start_time) && cos < start) { cos = new Date(cos.getTime() + 24 * HH); coe = new Date(coe.getTime() + 24 * HH); }
     } else { cos = new Date(end.getTime() - HH); coe = new Date(end.getTime() + 8 * HH); }
+    let ci;
+    if (shift.check_in_start && shift.check_in_end) {
+      const cs = vnInstant(workDate, shift.check_in_start);
+      let ce = vnInstant(workDate, shift.check_in_end);
+      if (ce < cs) ce = new Date(ce.getTime() + 24 * HH);
+      ci = all.find((p) => at(p) >= cs && at(p) <= ce);
+      // opts.lateIn (ca đêm 1 ca, từng ca của lịch nhiều ca): vào trễ quá "Kết thúc vào" → giờ vào là lượt ĐẦU trong cửa sổ của ca
+      // (lịch nhiều ca: trong các lượt đã chia cho ca) mà KHÔNG nằm trong khung ra — giờ chấm thật, trễ đủ phút. Lượt lẻ nằm trong
+      // khung ra (lượt sáng sớm sát giờ tan ca đêm) vẫn không thành giờ vào → không sinh dòng như cũ.
+      if (!ci && opts.lateIn) ci = inWin.find((p) => !(at(p) >= cos && at(p) <= coe));
+    } else ci = inWin[0];
+    if (!ci) return { inIso: null, outIso: null };
     const outs = all.filter((p) => at(p) - at(ci) >= dupMs && at(p) > at(ci) && at(p) >= cos && at(p) <= coe);
     return { inIso: iso(ci), outIso: outs.length ? iso(outs[outs.length - 1]) : null };
   }

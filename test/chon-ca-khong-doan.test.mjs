@@ -2,6 +2,8 @@
 // Việc 1 — quy tắc BIẾT HƯỚNG (Theo ID máy / Chọn từ máy / Tự động - qua đêm kiểu ID máy) + lịch nhiều ca: ghép cặp theo hướng TRƯỚC
 //          rồi mỗi cặp / lượt lẻ mới tìm ca (pickDirShiftSet); lượt RA lẻ sáng sớm khớp cuối ca đêm hôm trước = dòng "chỉ giờ ra" của
 //          ca đêm hôm trước (cả giữa chuỗi đêm liền của lịch 1 ca đêm — mục 8).
+// Việc 2 — quy tắc KHÔNG biết hướng + lịch nhiều ca: lượt sát GIỜ VÀO ca sau là giờ vào ca sau (pickShiftSet), không gộp ngược.
+// Việc 3 — "Phân theo giờ": vào trễ quá "Kết thúc vào" vẫn ra dòng với giờ thật (ca đêm 1 ca + từng ca của lịch nhiều ca).
 // Lượt chấm nạp qua ingestAttlog như máy đẩy lên ("v" = máy số 1 lẻ = VÀO / phím 0, "r" = máy số 2 chẵn = RA / phím 1).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -14,7 +16,7 @@ process.env.DB_PATH = join(dir, 'test.db');
 const { db, initSchema } = await import('../server/db.js');
 const { ingestAttlog } = await import('../server/device-sync.js');
 const { recomputeAttendance } = await import('../server/routes/admin/attendance.js');
-const { pickDirShiftSet, pickShiftSet, stateDir } = await import('../server/attendance-calc.js');
+const { pickDirShiftSet, pickShiftSet, stateDir, mergeDayPunches } = await import('../server/attendance-calc.js');
 
 const hm = (x) => (x ? new Date(Date.parse(x) + 7 * 3600e3).toISOString().slice(11, 16) : '-');
 const vn = (dhm) => new Date(`2026-11-${dhm.replace(' ', 'T')}:00+07:00`).toISOString();
@@ -68,6 +70,8 @@ before(() => {
   ca('SA', '08:00', '12:00', { work_unit_value: 0.5 }); ca('CH', '13:30', '17:30', { work_unit_value: 0.5 });
   ca('SAW', '08:00', '12:00', { work_unit_value: 0.5, check_in_start: '07:00', check_in_end: '09:00', check_out_start: '11:30', check_out_end: '13:00' });
   ca('CHW', '13:30', '17:30', { work_unit_value: 0.5, check_in_start: '13:00', check_in_end: '14:30', check_out_start: '17:00', check_out_end: '20:00' });
+  ca('DMW', '19:00', '07:00', { break_minutes: 60, check_in_start: '16:00', check_in_end: '22:00', check_out_start: '04:00', check_out_end: '11:00' });
+  ca('HCW', '08:00', '17:00', { break_minutes: 60, check_in_start: '06:00', check_in_end: '10:00', check_out_start: '16:00', check_out_end: '23:00' });
   codeOf = Object.fromEntries(Object.entries(S).map(([k, v]) => [v, k]));
   db.prepare("INSERT INTO push_devices(serial,name,active,machine_number) VALUES('SN1','Cổng vào',1,1),('SN2','Cổng ra',1,2)").run();
   db.prepare('UPDATE inout_schedules SET is_default=0').run();
@@ -174,4 +178,33 @@ test('Việc 2 · nạp lượt máy: S13 / S14b / S4b ra đúng 2 dòng, quẹt
   kiem(c, ['03 08:00', '03 12:00', '03 13:25', '03 20:30'], ['03[SAW] 08:00→12:00 0.5c', '03[CHW] 13:25→- 0c'], 'S4b');
   const d = nv(); ganLich(d, schedWeek(['SA', 'CH']));
   kiem(d, ['03 08:00', '03 17:30'], ['03[SA] 08:00→17:30 0.5c tc330'], '08:00 · 17:30');
+});
+
+// ======================= VIỆC 3: Phân theo giờ — vào trễ quá "Kết thúc vào" vẫn ra dòng với giờ thật =======================
+test('Việc 3 · mergeDayPunches tdhc + lateIn: giờ vào = lượt đầu trong cửa sổ không nằm trong khung ra', () => {
+  const DMW = sh('DMW'), q = (x) => ({ punch_at: vn(x), serial: 'SN1' });
+  const g = (list, o) => { const r = mergeDayPunches(list.map(q), DMW, 'tdhc', {}, '2026-11-03', o); return `${hm(r.inIso)}→${hm(r.outIso)}`; };
+  assert.equal(g(['03 22:30', '04 07:00'], {}), '-→-');                      // không bật lateIn: như cũ (ca ngày 1 ca lùi về đầu – cuối ở device-sync)
+  assert.equal(g(['03 22:30', '04 07:00'], { lateIn: true }), '22:30→07:00'); // S3
+  assert.equal(g(['04 00:30', '04 07:00'], { lateIn: true }), '00:30→07:00'); // vào sau nửa đêm, ca còn chạy
+  assert.equal(g(['04 07:00'], { lateIn: true }), '-→-');                     // lượt lẻ trong khung ra (04–11) KHÔNG thành giờ vào
+  assert.equal(g(['04 03:00'], { lateIn: true }), '03:00→-');                 // lượt lẻ ngoài khung ra → giờ vào thật, thiếu ra (không đoán)
+  assert.equal(g(['03 19:00', '03 22:30', '04 07:00'], { lateIn: true }), '19:00→07:00'); // có lượt trong khung vào → như cũ
+});
+
+test('Việc 3 · nạp lượt máy: ca đêm 1 ca (S3, Z5) và lịch nhiều ca (S4) ra dòng trễ; ca ngày 1 ca (S3b) và lượt lẻ trong khung ra giữ như cũ', () => {
+  const a = nv(); ganLich(a, schedWeek(['DMW']), 'tdhc');
+  kiem(a, ['03 22:30', '04 07:00'], ['03[DMW] 22:30→07:00 0.68c trễ210'], 'S3');
+  const b = nv(); ganLich(b, schedWeek(['HCW']), 'tdhc');
+  kiem(b, ['03 10:30', '03 17:00'], ['03[HCW] 10:30→17:00 0.68c trễ150'], 'S3b (giữ)');
+  const c = nv(); ganLich(c, schedWeek(['SAW', 'CHW']));
+  kiem(c, ['03 09:30', '03 12:00', '03 13:25', '03 17:35'], ['03[SAW] 09:30→12:00 0.31c trễ90', '03[CHW] 13:25→17:35 0.5c'], 'S4');
+  const d = nv(); ganLich(d, schedWeek(['DMW']), 'tdhc');
+  kiem(d, ['03 00:30', '03 07:00', '03 19:00', '04 07:00'], ['02[DMW] 00:30→07:00 0.5c trễ330', '03[DMW] 19:00→07:00 1c'], 'Z5 DM1 tdhc');
+  const e = nv(); ganLich(e, schedWeek(['DMW']), 'tdhc');
+  kiem(e, ['03 07:00'], [], 'Z11 (giữ: không có dòng)');
+  const f = nv(); ganLich(f, schedWeek(['DMW']), 'tdhc');
+  kiem(f, ['03 07:00', '03 19:00', '04 07:00'], ['03[DMW] 19:00→07:00 1c'], 'Z4 (giữ)');
+  const g = nv(); ganLich(g, schedWeek(['DMW']), 'tdhc');
+  kiem(g, ['02 19:00', '02 23:00', '03 19:00', '04 07:00'], ['02[DMW] 19:00→- 0c', '03[DMW] 19:00→07:00 1c'], 'Z9 (giữ: thiếu ra)');
 });

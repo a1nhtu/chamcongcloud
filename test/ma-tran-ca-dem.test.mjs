@@ -85,7 +85,7 @@ const KHOA = [
   { ca: ['Z3'], kind: ['DM1'], rule: HUONG },                                                                // quên VÀO đêm giữa: dòng chỉ-giờ-ra như Z4 (mục 8, 13/11/2026)
   { ca: ['Z3', 'Z4', 'Z11'], kind: ['XOAY', 'BA'], rule: HUONG },                                            // lịch nhiều ca biết hướng: RA lẻ sáng = chỉ-giờ-ra ca đêm hôm trước (13/11/2026)
   { ca: ['Z3', 'Z4', 'Z11'], kind: ['XOAY', 'BA', 'TUDO'], rule: KHONG_HUONG },                              // Anh chốt 13/11/2026: không biết hướng + quên vào → GIỮ cách chọn ca như cũ
-  { ca: ['Z5'], kind: ['DM1'], rule: ['filo', 'pairs', 'tdqd', 'idm', 'state'] },                            // vào trễ sau nửa đêm
+  { ca: ['Z5'], kind: ['DM1'] },                                                                             // vào trễ sau nửa đêm (tdhc có khung giờ: từ 13/11/2026 — giờ vào thật dù quá "Kết thúc vào")
   { ca: ['Z11'], kind: ['DM1'] },                                                                            // chỉ 1 lượt RA sáng
 ];
 
@@ -94,7 +94,6 @@ const CHUA_CHOT = [
   { ca: ['Z5'], kind: ['XOAY', 'TUDO'],
     note: 'vào trễ 00:30 sau nửa đêm: đêm 02 không ra dòng; filo… dựng NHẦM ca HC 00:30→19:00, sai dây chuyền sang hôm sau (04[HC] 07:00→ 0c)' },
   { ca: ['Z5'], kind: ['BA'], note: 'vào trễ 00:30 sau nửa đêm: đêm 02 không được tính; lượt RA 06:00 thành ca S6 (06:00→ / →06:00)' },
-  { ca: ['Z5'], kind: ['DM1'], rule: ['tdhc'], win: [true], note: 'tdhc bỏ mất dòng đêm 02 (00:30→07:00 trễ 330 0,5 công) mà các quy tắc khác có' },
   { ca: ['Z9'], kind: ['DM1', 'XOAY', 'BA', 'TUDO'], win: [true],
     note: 'biến thể có khung giờ: lượt RA 23:00 nằm ngoài khung ra (04:00–11:00) → XOAY mọi quy tắc và tdhc ra 02[…] 19:00→ 0c (không sớm 480); filo… của DM1 / BA / TUDO vẫn 0,36 / 0,12 công — chờ Anh quyết' },
   { ca: ['Z9'], kind: ['BA'], rule: ['tdhc'], win: [false],
@@ -157,8 +156,8 @@ const ten = (c) => `${c.ca} · ${c.kind} · ${c.rule} · ${c.win ? 'có khung gi
 // Số ô đã khoá / chưa chốt (chốt cứng để không ai âm thầm thu hẹp phạm vi khoá)
 test('phạm vi: không ô nào vừa khoá vừa chưa chốt; số ô khoá / chưa chốt đúng như đã chốt', () => {
   assert.deepEqual(DA_KHOA.filter((c) => DO_TODO.includes(c)), []);
-  assert.equal(DA_KHOA.length, 357);
-  assert.equal(DO_TODO.length, 45);
+  assert.equal(DA_KHOA.length, 358);
+  assert.equal(DO_TODO.length, 44);
   for (const c of DA_KHOA) ky_vong(c);   // ô nào đã khoá đều có kết quả mong đợi
 });
 

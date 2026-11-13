@@ -1335,7 +1335,7 @@ function rebuildDayCore(employeeId, workDate) {
       // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
       const rule = dd ? dd.ruleOf(shift) : (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || effectiveMergeRule(shift, null) || 'filo');
       const one = picked.length === 1;
-      const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn() };
+      const wopts = { toDayEnd: one && !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn(), lateIn: true };
       if (one) wopts.extendEnd = overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo);
       else if (shift === lateShift) wopts.extendEnd = late.at;   // giờ ra muộn của ca cuối không bị khung cuối ca + 4 tiếng loại
       // chỉ 1 ca → nhận lượt quẹt như ca đơn (tới hết ngày với ca ngày); nhiều ca → đúng các lượt đã chia cho ca đó
@@ -1356,7 +1356,8 @@ function rebuildDayCore(employeeId, workDate) {
   if (!shift && !hourly) { const eff = resolveEffectiveShift(employeeId, workDate, prov[0].punch_at, prov[prov.length - 1].punch_at); shift = eff.shift; mergeRule = eff.mergeRule; }
   let inIso, outIso, pairs = null;
   if (shift) {
-    const wopts = { toDayEnd: !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn() };
+    // Phân theo giờ, vào trễ quá khung vào: ca ĐÊM lấy giờ vào thật (lateIn); ca ngày giữ cách lùi về giờ đầu – giờ cuối bên dưới
+    const wopts = { toDayEnd: !isNightShift(shift), dupMin: dup, pairsFixedBreak: pairsFixedBreakOn(), lateIn: isNightShift(shift) };
     wopts.extendEnd = overnightTail(employeeId, workDate, shift, mergeRule, wopts, hourly, usedTo);
     const { winStart, winEnd, end } = ruleWindow(workDate, shift, wopts);
     let punches = punchesInWin(winStart, winEnd);
