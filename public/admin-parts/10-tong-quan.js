@@ -45,7 +45,7 @@ async function renderDashboard(showLoading) {
       ...(hourly ? [] : [mcard('warn', d.late, 'Đi muộn', () => dashListModal('Đi muộn',
         today.filter(r => r.late_min > 0).map(r => person(r, r.late_min + ' phút'))))]),
       mcard('red', d.outside, 'Chấm ngoài VP', () => dashListModal('Chấm ngoài văn phòng',
-        today.filter(r => r.check_in_outside).map(r => person(r, 'Ngoài ' + humanDistance(r.check_in_distance_m))))),
+        today.filter(r => r.check_in_outside).map(r => person(r, outsideText(r))))),
       mcard('red', d.pendingLeaves, 'Đơn chờ duyệt', () => go('leaves')),
     );
     // Có NV chấm hơn 2 lần → mỗi lần chấm 1 cột: Vào 1 · Ra 1 · Vào 2 · Ra 2 … (số cột theo người chấm nhiều nhất trong ngày)
@@ -128,7 +128,7 @@ function rowToday(r, np = 1) {
     el('td', {}, sidePhoto(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
-    el('td', {}, r.check_in_outside ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m)) : el('span', { class: 'pill ok' }, 'Trong VP')),
+    locCell(r),
     ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
     el('td', {}, (pairs[0][0] ? punchTime(pairs[0][0], pairs[0][2]) : '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
     el('td', {}, outCell(pairs[0])),
@@ -138,3 +138,23 @@ function rowToday(r, np = 1) {
   );
 }
 
+// "Ngoài 2.1 km · so với <định vị>" — định vị = định vị GẦN NHẤT mà NV được phép chấm (phần mềm so với định vị này)
+function outsideText(r) {
+  return 'Ngoài ' + humanDistance(r.check_in_distance_m) + (r.in_office ? ' · so với ' + r.in_office : '');
+}
+// Ô Vị trí ở bảng Tổng quan: Trong / Ngoài + tên định vị đã so + nút mở Google Maps đúng chỗ điện thoại chấm
+function locCell(r) {
+  const pill = r.check_in_outside
+    ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m))
+    : el('span', { class: 'pill ok' }, 'Trong VP');
+  const sub = r.in_office ? el('div', { style: 'color:#999;font-size:12px' }, (r.check_in_outside ? 'so với ' : '') + r.in_office) : null;
+  const la = Number(r.check_in_lat), ln = Number(r.check_in_lng);
+  const map = r.check_in_lat != null && r.check_in_lng != null && Number.isFinite(la) && Number.isFinite(ln)
+    ? el('a', {
+        href: 'https://www.google.com/maps/search/?api=1&query=' + la.toFixed(6) + ',' + ln.toFixed(6),
+        target: '_blank', rel: 'noopener', style: 'font-size:12px;white-space:nowrap',
+        title: 'Mở Google Maps đúng chỗ điện thoại chấm (' + la.toFixed(6) + ', ' + ln.toFixed(6) + ')',
+      }, '🗺 Xem chỗ chấm')
+    : null;
+  return el('td', {}, pill, sub, map);
+}

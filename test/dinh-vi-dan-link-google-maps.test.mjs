@@ -73,3 +73,20 @@ test('giao diện: ô địa chỉ nhận dán link / toạ độ và gọi API 
   const org = readFileSync(new URL('../server/routes/admin/org.js', import.meta.url), 'utf8');
   assert.match(org, /r\.post\('\/offices\/parse-location', need\('offices'\)/);
 });
+
+test('Tổng quan: chấm ngoài VP ghi rõ so với định vị nào + nút mở Google Maps chỗ chấm (16/11, thephongai)', () => {
+  const ui = readFileSync(new URL('../public/admin-parts/10-tong-quan.js', import.meta.url), 'utf8');
+  assert.match(ui, /function locCell\(r\)/);
+  assert.match(ui, /' · so với ' \+ r\.in_office/);
+  assert.match(ui, /google\.com\/maps\/search\/\?api=1&query=/);
+  const rep = readFileSync(new URL('../server/routes/reports.js', import.meta.url), 'utf8');
+  assert.match(rep, /SELECT a\.\*, e\.code, e\.full_name, e\.department, oi\.name AS in_office/, 'API Tổng quan phải trả toạ độ lượt chấm + tên định vị');
+});
+
+test('Lấy vị trí hiện tại: không dùng vị trí cũ, hiện sai số, sai số lớn (máy tính đoán theo mạng) thì hỏi lại', () => {
+  const ui = readFileSync(new URL('../public/admin-parts/40-chi-nhanh.js', import.meta.url), 'utf8');
+  assert.match(ui, /maximumAge: 0/);
+  assert.match(ui, /const GPS_OK_M = 100/);
+  assert.match(ui, /acc > GPS_OK_M\) \{\s*const ok = confirm\(/);
+  assert.match(ui, /if \(!ok\) \{ gpsNote\.textContent = `⚠ Chưa lấy/, 'bấm Huỷ thì KHÔNG lấy vị trí sai');
+});

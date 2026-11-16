@@ -249,9 +249,42 @@ function initOfficeMap({ o, mapDiv, latI, lngI, radiusI, addrI, gpsBtn, searchBt
   latI.addEventListener('change', syncFromInputs);
   lngI.addEventListener('change', syncFromInputs);
 
-  gpsBtn.onclick = () => navigator.geolocation.getCurrentPosition(
-    (p) => { setPos(p.coords.latitude, p.coords.longitude, true); toast('Đã lấy vị trí hiện tại', 'ok'); },
-    () => toast('Không lấy được vị trí (cần HTTPS + quyền)', 'err'), { enableHighAccuracy: true });
+  // Lấy vị trí hiện tại: KHÔNG dùng vị trí cũ trình duyệt đã nhớ, hiện sai số. Máy tính không có GPS → trình duyệt đoán theo mạng (lệch vài km)
+  // → sai số lớn thì hỏi lại, mặc định KHÔNG lấy (khách thephongai 16/11: lấy trên máy tính, NV ngồi đúng chỗ vẫn báo ngoài 2.1 km)
+  const gpsNote = el('div', { class: 'map-hint' });
+  gpsBtn.after(gpsNote);
+  const GPS_OK_M = 100;
+  gpsBtn.onclick = () => {
+    if (!navigator.geolocation) return toast('Trình duyệt không hỗ trợ lấy vị trí', 'err');
+    const label = gpsBtn.textContent;
+    gpsBtn.disabled = true; gpsBtn.textContent = '📍 Đang lấy vị trí…';
+    gpsNote.textContent = ''; gpsNote.style.color = '';
+    const done = () => { gpsBtn.disabled = false; gpsBtn.textContent = label; };
+    navigator.geolocation.getCurrentPosition((p) => {
+      done();
+      const acc = Math.round(p.coords.accuracy || 0);
+      const accTxt = acc ? humanDistance(acc) : '?';
+      if (!acc || acc > GPS_OK_M) {
+        const ok = confirm(`Vị trí vừa lấy có sai số khoảng ${accTxt} — KHÔNG đủ chính xác để chấm công.\n\n`
+          + 'Thường gặp khi bấm trên MÁY TÍNH (không có GPS, trình duyệt đoán theo mạng, lệch có khi vài km) '
+          + 'hoặc điện thoại chưa bật Vị trí chính xác.\n\n'
+          + 'Nên: bấm nút này bằng ĐIỆN THOẠI đứng tại chỗ, hoặc dán toạ độ / link Google Maps vào ô Địa chỉ.\n\n'
+          + 'Vẫn dùng vị trí không chính xác này?');
+        gpsNote.style.color = '#c0392b';
+        if (!ok) { gpsNote.textContent = `⚠ Chưa lấy: sai số ~${accTxt}. Hãy lấy bằng điện thoại tại chỗ hoặc dán toạ độ Google Maps.`; return; }
+        setPos(p.coords.latitude, p.coords.longitude, true);
+        gpsNote.textContent = `⚠ Đã lấy nhưng sai số ~${accTxt} — kiểm tra chấm đỏ có đúng toà nhà không trước khi Lưu.`;
+        return;
+      }
+      setPos(p.coords.latitude, p.coords.longitude, true);
+      gpsNote.style.color = '#1e8e3e';
+      gpsNote.textContent = `✓ Đã lấy vị trí hiện tại, sai số ~${accTxt}.`;
+      toast('Đã lấy vị trí hiện tại', 'ok');
+    }, (e) => {
+      done();
+      toast(e && e.code === 1 ? 'Chưa cho phép lấy vị trí — bấm biểu tượng ổ khoá trên thanh địa chỉ để cho phép' : 'Không lấy được vị trí (cần HTTPS + quyền + bật Vị trí)', 'err');
+    }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+  };
 
   // Dán cặp số / link Google Maps → máy chủ đọc toạ độ (link rút gọn thì máy chủ tự mở)
   let linkSeq = 0;
