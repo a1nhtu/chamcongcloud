@@ -77,3 +77,31 @@ test('dựng công thật: 4 lần → 2 dòng, về trưa muộn bị trễ bu�
   cham(b, ['07:25', '16:54']);
   assert.deepEqual(cong(b).map((x) => x.split(' ')[0]), ['HC'], 'chấm 2 lần → HC');
 });
+
+// v1.35.7 (Anh 16/11/2026): tìm ca theo khung VÀO / RA của ca như On39 — không ưu tiên tách ca nếu giờ chấm không khớp khung của ca.
+test('tìm ca theo khung vào / ra: lịch 3 ca, làm ca Chiều ra ngoài giữa ca → vẫn 1 ca Chiều; ca đêm ra ngoài → vẫn ca Đêm', () => {
+  let id = 9000; const k = (code, s, e, x = {}) => ({ id: ++id, code, start_time: s, end_time: e, break_minutes: 0, work_unit_value: 1, cross_midnight: e <= s ? 1 : 0, ...x });
+  const P = (t) => { const [d, h] = t.includes(' ') ? t.split(' ') : ['12', t]; return { punch_at: new Date(`2026-11-${d}T${h}:00+07:00`).toISOString() }; };
+  const B3 = [k('S6', '06:00', '14:00'), k('C14', '14:00', '22:00'), k('D22', '22:00', '06:00')];
+  const chon = (L, list) => pickShiftSet(L, list.map(P), '2026-11-12').map((x) => x.shift.code + x.punches.length).join('+');
+  assert.equal(chon(B3, ['13:34', '17:38', '18:10', '22:10']), 'C144', 'v1.35.6 ra S6 + D22 — sai');
+  assert.equal(chon(B3, ['14:10', '21:45', '22:36', '13 06:06']), 'C142+D222', 'làm 2 ca thật: Chiều rồi Đêm');
+  const HD = [k('HC', '08:00', '17:00'), k('DM', '20:00', '08:00')];
+  assert.equal(chon(HD, ['19:50', '23:00', '23:30', '13 07:55']), 'DM4');
+  const dir = (L, list) => pickDirShiftSet(L, list.map((s, i) => ({ ...P(s), status: i % 2 })), '2026-11-12', stateDir, { min: 30, gap: 30, max: 960 })
+    .map((x) => x.shift.code + x.punches.length).join('+');
+  assert.equal(dir(B3, ['13:34', '17:38', '18:10', '22:10']), 'C144');
+});
+
+test('tìm ca theo khung vào / ra ĐÃ KHAI (như On39): ra trong khung ra Sáng → Sáng + Chiều; ngoài khung → như cũ', () => {
+  let id = 9100; const k = (code, s, e, x = {}) => ({ id: ++id, code, start_time: s, end_time: e, break_minutes: 0, work_unit_value: 1, cross_midnight: 0, ...x });
+  const L = [k('HC', '07:30', '17:00', { check_in_start: '06:00', check_in_end: '09:00', check_out_start: '16:00', check_out_end: '19:00' }),
+    k('SA', '07:30', '11:30', { check_in_start: '06:00', check_in_end: '09:00', check_out_start: '11:00', check_out_end: '12:30' }),
+    k('CH', '13:00', '17:00', { check_in_start: '12:30', check_in_end: '14:30', check_out_start: '16:00', check_out_end: '19:00' })];
+  const P = (t) => ({ punch_at: new Date(`2026-11-12T${t}:00+07:00`).toISOString() });
+  const chon = (list) => pickShiftSet(L, list.map(P), '2026-11-12').map((x) => x.shift.code + x.punches.length).join('+');
+  assert.equal(chon(['07:25', '11:25', '13:20', '16:54']), 'SA2+CH2');
+  assert.equal(chon(['07:25', '12:20', '12:40', '18:30']), 'SA2+CH2');
+  assert.equal(chon(['07:25', '16:54']), 'HC2');
+  assert.equal(chon(['07:25', '09:40', '10:05', '16:54']), 'HC4', 'ra ngoài 09:40 (ngoài khung ra Sáng) → vẫn HC');
+});

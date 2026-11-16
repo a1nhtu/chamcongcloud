@@ -1368,7 +1368,7 @@ function rebuildDayCore(employeeId, workDate) {
     // (không biết hướng) chỉ chọn 1 ca ngày thì ca đó lấy lượt tới hết ngày → pickShiftSet cần biết các lượt đó (lượt sát giờ vào ca sau)
     const oneMemo = new Map();
     const oneWin = (s) => { if (!oneMemo.has(s.id)) { const w = ruleWindow(workDate, s, { toDayEnd: !isNightShift(s) }); oneMemo.set(s.id, punchesInWin(w.winStart, w.winEnd)); } return oneMemo.get(s.id); };
-    const pick = (ps) => (dd ? pickDirShiftSet(plan.shifts, ps, workDate, dd.dir(machineMap), dup, { nextOutClaim: outClaim }) : pickShiftSet(plan.shifts, ps, workDate, { oneWin }));
+    const pick = (ps) => (dd ? pickDirShiftSet(plan.shifts, ps, workDate, dd.dir(machineMap), dup, { nextOutClaim: outClaim }) : pickShiftSet(plan.shifts, ps, workDate, { oneWin, dup }));
     let picked = lateNight ? [{ shift: lateNight, punches: prov }] : pick([...seen.values()]);
     // Ca gãy về muộn hơn cuối ca cuối + 4 tiếng (lateSplitTail): chọn lại bộ ca có cả lượt về muộn đó. Chỉ nhận khi ra ≥ 2 ca, ca nới là
     // ca cuối (ca Chiều nhận giờ ra 22:00) và GIỮ NGUYÊN các ca đã chọn theo khung thường (chỉ thêm lại ca cuối bị mất) — không thì
