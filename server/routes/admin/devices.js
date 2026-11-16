@@ -1,9 +1,12 @@
 // Nhóm route MÁY CHẤM CÔNG (ZKTeco ADMS push) — tách khỏi admin.js.
 import { networkInterfaces } from 'node:os';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+import JSZip from 'jszip';
 import { db, getSetting } from '../../db.js';
 import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
-import { installDomain, MULTI } from '../../tenant.js';
+import { installDomain, MULTI, ROOT } from '../../tenant.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, zkDeleteUsers, queuePendingDelete, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
@@ -42,6 +45,36 @@ function lanIPs(onlyReal = false) {
 // Tên miền của bản cài (bản 1 công ty có tunnel, hoặc công ty trên máy chủ nhiều công ty) — để hướng dẫn điền vào máy
 // ở chi nhánh khác / trỏ máy về. Bản LAN (không có tunnel) trả ''.
 const tunnelDomain = installDomain;
+
+// CÔNG CỤ TRỎ MÁY BẰNG IP cho MÁY CHỦ NHIỀU CÔNG TY (Anh 16/11/2026): máy chủ ở nơi khác không kết nối thẳng tới IP LAN của khách
+// → tải 1 file .zip (script zkemkeeper + .bat điền sẵn IP / tên miền / DHCP, kèm SDK nếu máy chủ có) để chạy trên máy tính
+// CÙNG MẠNG với máy chấm công. Bản cài 1 công ty không dùng (đã có Tìm / Trỏ máy trong LAN).
+const IPV4 = /^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/;
+const sdkDir = () => [join(ROOT, '..', 'zksdk'), join(ROOT, 'tools', 'installer', 'zksdk')].find((d) => existsSync(join(d, 'zkemkeeper.dll'))) || '';
+export async function buildPointTool({ ip, domain, dhcp = true, port = 4370, key = 0 }) {
+  if (!IPV4.test(String(ip || ''))) throw Object.assign(new Error('IP máy chấm công không hợp lệ (VD 192.168.1.210)'), { status: 400 });
+  if (!/^[a-z0-9.-]+$/.test(String(domain || ''))) throw Object.assign(new Error('Công ty chưa có tên miền'), { status: 400 });
+  port = parseInt(port, 10) || 4370; key = parseInt(key, 10) || 0;
+  if (port < 1 || port > 65535 || key < 0 || key > 999999) throw Object.assign(new Error('Cổng / mật khẩu kết nối không hợp lệ'), { status: 400 });
+  const zip = new JSZip();
+  zip.file('TroMay.ps1', readFileSync(join(ROOT, 'server', 'zk', 'tro-may-ten-mien.ps1')));
+  const bat = ['@echo off',
+    `rem Tro may cham cong ${ip} ve ${domain}${dhcp ? ' + bat DHCP' : ''}. Chay tren may tinh CUNG MANG voi may cham cong.`,
+    `"%SystemRoot%\\SysWOW64\\WindowsPowerShell\\v1.0\\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0TroMay.ps1" -Ip ${ip} -Domain ${domain} -Port ${port} -Key ${key}${dhcp ? ' -Dhcp' : ''}`,
+    'pause', ''].join('\r\n');
+  zip.file('TroMay.bat', bat);
+  const sdk = sdkDir();
+  if (sdk) for (const f of readdirSync(sdk)) if (/\.dll$/i.test(f)) zip.file('zksdk/' + f, readFileSync(join(sdk, f)));
+  zip.file('HUONG-DAN.txt', ['TRO MAY CHAM CONG VE PHAN MEM DIGIPLUS', '',
+    `May cham cong: ${ip} (cong ${port})   ->   ${domain}${dhcp ? '   (bat DHCP)' : ''}`, '',
+    '1. Giai nen ca thu muc nay ra may tinh CUNG MANG voi may cham cong (VD may dang cai Wise Eye / On39).',
+    '2. Tat tam phan mem cham cong khac dang ket noi may (On39...) neu dang tai du lieu.',
+    '3. Nhay dup TroMay.bat. May tinh chua co SDK may cham cong thi Windows hoi quyen Administrator: bam Yes.',
+    '4. Thay dong XONG: may tu khoi dong lai, ~1 phut sau vao trang May cham cong > muc Cho duyet > bam Duyet.',
+    dhcp ? '5. Da bat DHCP: IP may co the doi. Phan mem khac ket noi may theo IP -> dat IP co dinh cho may tren router (theo MAC).' : '',
+    '', 'Ho tro: Digiplus 0372 669 992', ''].join('\r\n'));
+  return { buf: await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }), sdk: !!sdk };
+}
 
 // Tìm / trỏ máy trong LAN chỉ có nghĩa khi phần mềm chạy trên máy Windows CÙNG MẠNG với máy chấm công của khách.
 // Máy chủ nhiều công ty: dò ra mạng nơi đặt máy chủ (máy của nơi khác) → trỏ nhầm máy người khác về công ty này → CHẶN (Anh 16/11/2026).
@@ -336,6 +369,16 @@ export function registerDeviceRoutes(r, { need }) {
      (bắt tay ZK trước, thử lại 1 lần, báo đúng: cần / sai mật khẩu kết nối, máy bận, máy tắt cổng, máy đã tắt / đổi IP). */
   const winOnly = (req, res, next) => { const why = lanScanBlocked(); return why ? res.status(400).json({ error: why }) : next(); };
   const isLan = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip);
+  // Tải công cụ trỏ máy bằng IP — CHỈ máy chủ nhiều công ty (bản 1 công ty dùng Tìm / Trỏ máy trong LAN như cũ)
+  r.get('/devices/point-tool', need('devices'), async (req, res) => {
+    if (!MULTI) return res.status(404).json({ error: 'Chỉ có trên máy chủ nhiều công ty' });
+    try {
+      const { buf } = await buildPointTool({ ip: req.query.ip, domain: installDomain(), dhcp: req.query.dhcp !== '0', port: req.query.port, key: req.query.key });
+      res.setHeader('Content-Type', 'application/zip');
+      res.setHeader('Content-Disposition', `attachment; filename="TroMay-${String(req.query.ip).replace(/\./g, '-')}.zip"`);
+      res.end(buf);
+    } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); sendCaughtError(res, 'GET /admin/devices/point-tool', e); }
+  });
   r.post('/devices/lan-scan', need('devices'), winOnly, async (req, res) => {
     try {
       const domain = tunnelDomain(), ips = lanIPs(true);

@@ -130,6 +130,21 @@ test('máy chủ nhiều công ty: KHÔNG cho Tìm / Trỏ máy trong LAN (dò r
   assert.match(as('cta', () => lanScanBlocked()), /Máy chủ nhiều công ty/);
 });
 
+test('công cụ trỏ máy bằng IP: tải được, .bat điền đúng tên miền của công ty đang mở', async () => {
+  const M = await import('../server/routes/admin/devices.js');
+  const { default: JSZip } = await import('jszip');
+  const routes = {};
+  const reg = (m) => (path, ...h) => { routes[m + ' ' + path] = h[h.length - 1]; };
+  M.registerDeviceRoutes({ get: reg('GET'), post: reg('POST'), put: reg('PUT'), delete: reg('DELETE'), patch: reg('PATCH'), use() {} }, { need: () => (q, s, n) => n() });
+  const res = { code: 200, buf: null, headers: {}, status(c) { this.code = c; return this; }, json(x) { this.body = x; return this; }, setHeader(k, v) { this.headers[k] = v; }, end(b) { this.buf = b; } };
+  await as('cta', () => routes['GET /devices/point-tool']({ query: { ip: '192.168.1.210', dhcp: '1' } }, res));
+  assert.equal(res.code, 200);
+  assert.match(res.headers['Content-Disposition'], /TroMay-192-168-1-210\.zip/);
+  const bat = await (await JSZip.loadAsync(res.buf)).file('TroMay.bat').async('string');
+  assert.match(bat, /-Domain cta\.maychamcongcloud\.com /);
+  assert.match(bat, / -Dhcp\r\n/);
+});
+
 test('cờ "đang bận" riêng từng công ty', () => {
   const f = T.busyFlag();
   assert.equal(as('cta', () => f.take()), true);

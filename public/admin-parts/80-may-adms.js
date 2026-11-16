@@ -105,7 +105,9 @@ async function pageDevices() {
         el('div', { style: 'margin-top:6px' }, 'Tên miền: ', domVal, ' ', domCopy, ' · Port: ', el('b', {}, '443')),
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy không có mục HTTPS thì Port 80 (cổng khác như 8081 không về được) · máy cần có Internet'),
         domNote,
-        d.lan_scan && d.domain ? el('div', { style: 'margin-top:8px' }, btnSm('🔍 Khỏi gõ tay: tìm máy trong LAN & tự trỏ về', lanScanModal, 'ghost')) : ''),
+        d.lan_scan && d.domain ? el('div', { style: 'margin-top:8px' }, btnSm('🔍 Khỏi gõ tay: tìm máy trong LAN & tự trỏ về', lanScanModal, 'ghost')) : '',
+        // máy chủ nhiều công ty: không dò được LAN của khách → đã biết IP máy thì tải công cụ chạy trên máy tính cùng mạng với máy
+        d.multi && d.domain ? el('div', { style: 'margin-top:8px' }, btnSm('📥 Khỏi gõ tay: đã biết IP máy → tải công cụ trỏ về', () => pointToolModal(d.domain), 'ghost')) : ''),
       // Máy AI: giao thức WebSocket (ws://, không mã hoá) — vào CÙNG cổng web; qua tên miền thì cổng 80
       d.ai_enabled ? el('div', { class: 'dev-tg' },
         el('b', {}, 'Máy AI (khuôn mặt / vân tay)'),

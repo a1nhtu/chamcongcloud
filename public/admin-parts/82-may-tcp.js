@@ -125,6 +125,44 @@ function rebootSchedModal(m, rows) {
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
 // Tìm máy chấm công trong mạng LAN (dò cổng 4370) → xem máy đang trỏ Cloud Server về đâu → 1 bấm trỏ về tên miền phần mềm này (máy tự khởi động lại)
+// MÁY CHỦ NHIỀU CÔNG TY: máy chủ không kết nối thẳng tới IP LAN của khách → tải .zip (script + .bat điền sẵn IP / tên miền / DHCP)
+// rồi chạy trên máy tính CÙNG MẠNG với máy chấm công (VD qua UltraViewer). Bản cài 1 công ty dùng lanScanModal như cũ.
+function pointToolModal(domain) {
+  const ipI = el('input', { placeholder: 'VD 192.168.1.210', style: 'font-family:monospace;width:100%' });
+  const portI = el('input', { type: 'number', value: '4370', style: 'width:100%' });
+  const keyI = el('input', { type: 'number', value: '0', style: 'width:100%' });
+  const dhcpC = el('input', { type: 'checkbox', checked: '' });
+  const go = el('button', { class: 'btn' }, '📥 Tải công cụ');
+  go.onclick = async () => {
+    const ip = ipI.value.trim();
+    if (!/^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(ip)) { toast('IP máy chưa đúng (VD 192.168.1.210)', 'err'); return ipI.focus(); }
+    go.disabled = true;
+    try {
+      const q = new URLSearchParams({ ip, port: portI.value || '4370', key: keyI.value || '0', dhcp: dhcpC.checked ? '1' : '0' });
+      const res = await api('/admin/devices/point-tool?' + q, { raw: true });
+      if (!res.ok) { const j = await res.json().catch(() => ({})); throw new Error(j.error || 'Không tải được công cụ'); }
+      const url = URL.createObjectURL(await res.blob());
+      const a = el('a', { href: url, download: 'TroMay-' + ip.replace(/\./g, '-') + '.zip' });
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 4000);
+      toast('Đã tải công cụ — chép sang máy tính cùng mạng với máy chấm công, giải nén, chạy TroMay.bat', 'ok');
+      closeModal();
+    } catch (e) { toast(e.message, 'err'); }
+    finally { go.disabled = false; }
+  };
+  ipI.addEventListener('keydown', (e) => { if (e.key === 'Enter') go.click(); });
+  openModal('Trỏ máy chấm công về ' + domain, [
+    el('div', { style: 'font-size:13px;color:var(--muted);margin-bottom:10px' }, 'Máy chủ không kết nối thẳng được vào mạng LAN của khách. Nhập IP máy chấm công → tải công cụ → chép sang máy tính CÙNG MẠNG với máy (VD qua UltraViewer), giải nén, nhấp đúp TroMay.bat. Công cụ điền tên miền vào Cloud Server rồi khởi động lại máy.'),
+    el('label', {}, 'IP LAN của máy chấm công'), ipI,
+    el('div', { style: 'display:flex;gap:10px;margin-top:10px' },
+      el('div', { style: 'flex:1' }, el('label', {}, 'Cổng SDK'), portI),
+      el('div', { style: 'flex:1' }, el('label', {}, 'Mật khẩu kết nối (Comm Key)'), keyI)),
+    el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:12px;cursor:pointer' }, dhcpC, 'Bật DHCP (máy tự xin IP từ modem — máy đặt IP tĩnh hay không ra được Internet)'),
+    el('div', { style: 'margin-top:6px;padding:8px 12px;border-radius:8px;background:#fff7e0;color:#7a4b00;font-size:12.5px' }, '⚠️ Bật DHCP thì IP máy có thể đổi: phần mềm khác kết nối máy theo IP (Wise Eye / On39…) sẽ mất kết nối → đặt IP cố định cho máy trên router (theo địa chỉ MAC). Bỏ tích nếu khách cần giữ nguyên IP tĩnh.'),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), go]);
+  setTimeout(() => ipI.focus(), 50);
+}
+
 function lanScanModal() {
   const box = el('div', {}, loading());
   const again = el('button', { class: 'btn ghost' }, '🔄 Tìm lại');
