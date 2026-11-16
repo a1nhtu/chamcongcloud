@@ -157,9 +157,23 @@ async function geocodeAddress(q, opts = {}) {
   return arr[0];
 }
 
+// Chữ dán vào là toạ độ / link (không phải địa chỉ để tìm)
+function looksLikeCoordOrLink(q) {
+  return /^https?:\/\//i.test(q) || /^\(?\s*-?\d{1,3}\.\d+\s*°?\s*[,; ]\s*-?\d{1,3}\.\d+\s*°?\s*\)?$/.test(q);
+}
+// Địa chỉ dễ đọc từ toạ độ (Photon reverse) — lỗi / không có thì trả ''
+async function photonReverse(lat, lng) {
+  try {
+    const r = await fetch('https://photon.komoot.io/reverse?lang=default&lat=' + lat + '&lon=' + lng);
+    const j = await r.json();
+    const f = (j.features || [])[0];
+    return f ? photonLabel(f.properties || {}) : '';
+  } catch { return ''; }
+}
+
 function officeModal(o) {
   const nameI = input('o-name', { value: o?.name || '', placeholder: 'Văn phòng chính' });
-  const addrI = input('o-addr', { value: o?.address || '', placeholder: 'VD: 8 Tôn Thất Thuyết, Cầu Giấy, Hà Nội' });
+  const addrI = input('o-addr', { value: o?.address || '', placeholder: 'VD: Nguyễn Văn Cừ, Long Biên — hoặc dán link / toạ độ Google Maps' });
   const latI = input('o-lat', { type: 'number', step: 'any', value: o?.lat ?? '' });
   const lngI = input('o-lng', { type: 'number', step: 'any', value: o?.lng ?? '' });
   const radiusI = input('o-radius', { type: 'number', value: o?.radius_m ?? 200, min: 20 });
@@ -172,7 +186,8 @@ function officeModal(o) {
     field('Tên chi nhánh *', nameI),
     el('div', {},
       el('label', {}, 'Địa chỉ (gõ để hiện gợi ý, chọn 1 dòng là bản đồ nhảy tới)'),
-      el('div', { class: 'ac-wrap' }, el('div', { class: 'map-search' }, addrI, searchBtn), acList)),
+      el('div', { class: 'ac-wrap' }, el('div', { class: 'map-search' }, addrI, searchBtn), acList),
+      el('div', { class: 'map-hint' }, 'Không tìm ra số nhà? Gõ tên đường rồi kéo chấm đỏ tới đúng chỗ, hoặc DÁN link Google Maps (nút Chia sẻ) / cặp toạ độ "10.776889, 106.700806" (nhấn giữ 1 điểm trên Google Maps để chép).')),
     el('div', { class: 'two-col' }, field('Vĩ độ (lat) *', latI), field('Kinh độ (lng) *', lngI)),
     field('Bán kính cho phép chấm công (m)', radiusI),
     gpsBtn,
@@ -238,8 +253,35 @@ function initOfficeMap({ o, mapDiv, latI, lngI, radiusI, addrI, gpsBtn, searchBt
     (p) => { setPos(p.coords.latitude, p.coords.longitude, true); toast('Đã lấy vị trí hiện tại', 'ok'); },
     () => toast('Không lấy được vị trí (cần HTTPS + quyền)', 'err'), { enableHighAccuracy: true });
 
+  // Dán cặp số / link Google Maps → máy chủ đọc toạ độ (link rút gọn thì máy chủ tự mở)
+  let linkSeq = 0;
+  async function fromCoordOrLink(text, { fillAddr = true } = {}) {
+    const seq = ++linkSeq;
+    searchBtn.disabled = true; searchBtn.textContent = '…';
+    try {
+      const g = await api('/admin/offices/parse-location', { method: 'POST', body: { text } });
+      if (seq !== linkSeq) return;
+      setPos(g.lat, g.lng, true);
+      toast('Đã lấy toạ độ — kiểm tra chấm đỏ đúng chỗ rồi Lưu', 'ok');
+      if (fillAddr && addrI.value.trim() === text.trim()) {
+        addrI.value = '';
+        const label = await photonReverse(g.lat, g.lng);
+        if (seq === linkSeq && !addrI.value) addrI.value = label;
+      }
+    } catch (e) { toast(e.message, 'err'); }
+    finally { searchBtn.disabled = false; searchBtn.textContent = 'Tìm'; }
+  }
+  // Dán "10.77, 106.70" vào ô Vĩ độ / Kinh độ cũng được
+  for (const inp of [latI, lngI]) inp.addEventListener('paste', (e) => {
+    const t = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (!looksLikeCoordOrLink(t.trim()) || /^-?\d+(\.\d+)?$/.test(t.trim())) return;
+    e.preventDefault();
+    fromCoordOrLink(t.trim(), { fillAddr: false });
+  });
+
   async function doSearch() {
     const q = addrI.value.trim(); if (!q) return;
+    if (looksLikeCoordOrLink(q)) { hideAc(); return fromCoordOrLink(q); }
     searchBtn.disabled = true; searchBtn.textContent = '…';
     try { const g = await geocodeAddress(q, biasFromMap(map)); setPos(g.lat, g.lng, true); }
     catch (e) { toast(e.message, 'err'); }
@@ -254,6 +296,7 @@ function initOfficeMap({ o, mapDiv, latI, lngI, radiusI, addrI, gpsBtn, searchBt
     clearTimeout(acTimer);
     const q = addrI.value.trim();
     if (q.length < 3) { hideAc(); return; }
+    if (looksLikeCoordOrLink(q)) { hideAc(); acSeq++; acTimer = setTimeout(() => fromCoordOrLink(q), 300); return; }
     acTimer = setTimeout(async () => {
       const seq = ++acSeq;
       acList.innerHTML = '<div class="ac-loading">Đang tìm…</div>';

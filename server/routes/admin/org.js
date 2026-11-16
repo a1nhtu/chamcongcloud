@@ -2,6 +2,7 @@
 import { db, adminAttWhere, setSetting, weekendNormalDepts } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
 import { ADMIN_DEPT } from '../../seed.js';
+import { resolveMapCoords } from '../../geo-link.js';
 
 // Lưu các tùy chọn tăng ca nâng cao / bù trừ / thiếu giờ ra của ca (trường nào không gửi thì giữ giá trị cũ)
 const SHIFT_EXTRA = {
@@ -253,6 +254,11 @@ export function registerOrgRoutes(r, { need }) {
   /* ----------------------------- CHI NHÁNH / VỊ TRÍ ----------------------------- */
   r.get('/offices', (req, res) => {
     res.json({ rows: db.prepare('SELECT * FROM offices ORDER BY active DESC, name').all() });
+  });
+  // Dán cặp số toạ độ / link Google Maps (kể cả link rút gọn khi bấm Chia sẻ) → { lat, lng }
+  r.post('/offices/parse-location', need('offices'), async (req, res) => {
+    try { res.json(await resolveMapCoords(req.body?.text)); }
+    catch (e) { res.status(400).json({ error: e.message }); }
   });
   r.post('/offices', need('offices'), (req, res) => {
     const b = req.body || {};
