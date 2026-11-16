@@ -3,7 +3,7 @@ import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
 import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
-import { installDomain } from '../../tenant.js';
+import { installDomain, MULTI } from '../../tenant.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, zkDeleteUsers, queuePendingDelete, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
@@ -43,6 +43,15 @@ function lanIPs(onlyReal = false) {
 // ở chi nhánh khác / trỏ máy về. Bản LAN (không có tunnel) trả ''.
 const tunnelDomain = installDomain;
 
+// Tìm / trỏ máy trong LAN chỉ có nghĩa khi phần mềm chạy trên máy Windows CÙNG MẠNG với máy chấm công của khách.
+// Máy chủ nhiều công ty: dò ra mạng nơi đặt máy chủ (máy của nơi khác) → trỏ nhầm máy người khác về công ty này → CHẶN (Anh 16/11/2026).
+// Trả '' = được dùng, ngược lại là lý do không dùng được.
+export function lanScanBlocked() {
+  if (MULTI) return 'Máy chủ nhiều công ty không dò được mạng LAN của khách — trên máy chấm công điền tên miền của công ty vào Cloud Server (Menu → Comm → Cloud Server).';
+  if (process.platform === 'win32' || process.env.ZK_SCAN_HOSTS) return '';
+  return 'Tìm máy trong mạng LAN chỉ chạy khi phần mềm cài trên máy tính Windows cùng mạng với máy chấm công.';
+}
+
 export function registerDeviceRoutes(r, { need }) {
   // Xoá NV ở trang Nhân viên kèm xoá trên máy: người có quyền Nhân viên không cần thêm quyền Máy chấm công
   const needDevOrEmp = (req, res, next) => (hasPerm(req.user, 'employees') ? next() : need('devices')(req, res, next));
@@ -75,7 +84,7 @@ export function registerDeviceRoutes(r, { need }) {
       }
       if (d.conn_type === 'union') d.online = unionOnline(d.serial);   // máy Union: đang giữ kết nối về cổng nhận máy
     }
-    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32',
+    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', lan_scan: !lanScanBlocked(),
       ai_enabled: aiEnabled(), union_enabled: unionEnabled(), union_port: unionPort(), union_status: unionStatus(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được (kể cả máy TCP/IP, máy Union).
@@ -325,8 +334,7 @@ export function registerDeviceRoutes(r, { need }) {
      Dò thêm cổng 8818 (thử SDK qua cổng này — trỏ được nếu máy nhận) + MAC 00:17:… để thấy cả máy đóng cổng 4370.
      Không kết luận vội: máy chưa thấy 4370 thì hỏi lại từ từ (TCP lâu hơn, UDP, ping — xem scanLan); gọi SDK qua zkCareful
      (bắt tay ZK trước, thử lại 1 lần, báo đúng: cần / sai mật khẩu kết nối, máy bận, máy tắt cổng, máy đã tắt / đổi IP). */
-  const winOnly = (req, res, next) => (process.platform === 'win32' || process.env.ZK_SCAN_HOSTS ? next()
-    : res.status(400).json({ error: 'Tìm máy trong mạng LAN chỉ chạy khi phần mềm cài trên máy tính Windows cùng mạng với máy chấm công.' }));
+  const winOnly = (req, res, next) => { const why = lanScanBlocked(); return why ? res.status(400).json({ error: why }) : next(); };
   const isLan = (ip) => /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|127\.)/.test(ip);
   r.post('/devices/lan-scan', need('devices'), winOnly, async (req, res) => {
     try {

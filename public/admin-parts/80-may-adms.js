@@ -405,7 +405,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
   if (tcpBtn) tcpBtn.onclick = () => tcpAddModal(null);
   const hikBtn = d.hik_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy Hikvision') : null;
   if (hikBtn) hikBtn.onclick = () => hikAddModal(null);
-  const lanBtn = d.tcp_supported ? el('button', { class: 'btn', title: 'Dò máy chấm công trong mạng LAN và tự trỏ Cloud Server về tên miền phần mềm này' }, '🔍 Tìm máy trong LAN') : null;
+  const lanBtn = d.lan_scan ? el('button', { class: 'btn', title: 'Dò máy chấm công trong mạng LAN và tự trỏ Cloud Server về tên miền phần mềm này' }, '🔍 Tìm máy trong LAN') : null;
   if (lanBtn) lanBtn.onclick = lanScanModal;
   // Thanh TỰ ĐỘNG TẢI máy TCP/IP (kind 'tcp') / Hikvision (kind 'hik'): chọn chu kỳ (lưu ngay) + nút tải ngay tất cả
   const autoBarOf = (kind, label, minutes, choices) => {

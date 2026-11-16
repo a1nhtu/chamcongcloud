@@ -125,6 +125,11 @@ test('tên miền của công ty = <mã>.<tên miền máy chủ> (trước báo
   assert.equal(T.installDomain(), '', 'không có ngữ cảnh công ty → không đoán tên miền');
 });
 
+test('máy chủ nhiều công ty: KHÔNG cho Tìm / Trỏ máy trong LAN (dò ra mạng nơi đặt máy chủ, trỏ nhầm máy người khác)', async () => {
+  const { lanScanBlocked } = await import('../server/routes/admin/devices.js');
+  assert.match(as('cta', () => lanScanBlocked()), /Máy chủ nhiều công ty/);
+});
+
 test('cờ "đang bận" riêng từng công ty', () => {
   const f = T.busyFlag();
   assert.equal(as('cta', () => f.take()), true);

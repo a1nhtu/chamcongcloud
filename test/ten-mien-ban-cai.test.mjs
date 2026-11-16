@@ -14,3 +14,10 @@ test('bản 1 công ty: CUSTOMER + TUNNEL_TOKEN → <khách>.maychamcongcloud.co
   process.env.TUNNEL_TOKEN = 'abc='; process.env.CUSTOMER = '';
   assert.equal(installDomain(), '');
 });
+
+test('bản 1 công ty trên Windows (hoặc có ZK_SCAN_HOSTS khi thử): được Tìm máy trong LAN', async () => {
+  const { lanScanBlocked } = await import('../server/routes/admin/devices.js');
+  const old = process.env.ZK_SCAN_HOSTS;
+  process.env.ZK_SCAN_HOSTS = '127.0.0.1';
+  try { assert.equal(lanScanBlocked(), ''); } finally { if (old == null) delete process.env.ZK_SCAN_HOSTS; else process.env.ZK_SCAN_HOSTS = old; }
+});
