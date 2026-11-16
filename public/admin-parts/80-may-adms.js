@@ -435,7 +435,10 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
     const on = FEAT.filter((f) => f[1]).map((f) => f[0]);
     return on.length ? '— Bật: ' + on.join(' · ') : '— Đang tắt hết';
   }, true);
-  foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
+  // máy chủ nhiều công ty: IP:cổng là mạng nơi đặt máy chủ (không phải mạng khách) → chỉ ghi tên miền
+  foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => d.multi
+    ? '— Tên miền ' + (domain || '(chưa có)') + ' · Port 443 (máy không có HTTPS: 80)'
+    : '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
   setMain(head('Máy chấm công', lanBtn, tcpBtn, hikBtn, usbBtn, legacyBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 

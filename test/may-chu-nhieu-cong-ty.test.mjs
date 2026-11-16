@@ -143,6 +143,10 @@ test('công cụ trỏ máy bằng IP: tải được, .bat điền đúng tên 
   const bat = await (await JSZip.loadAsync(res.buf)).file('TroMay.bat').async('string');
   assert.match(bat, /-Domain cta\.maychamcongcloud\.com /);
   assert.match(bat, / -Dhcp\r\n/);
+  // IP LAN của máy chủ (VD 192.168.0.254 ở Phúc Mậu) không phải mạng của khách → không đưa ra trang
+  const r2 = { json(x) { this.body = x; } };
+  as('cta', () => routes['GET /server-ips']({ query: {} }, r2));
+  assert.deepEqual(r2.body.ips, []);
 });
 
 test('cờ "đang bận" riêng từng công ty', () => {
