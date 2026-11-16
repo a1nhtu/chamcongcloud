@@ -483,6 +483,12 @@ function nearOtherShift(list, set, got, t, dayEnd, oneWin) {
   return false;
 }
 
+// CHẤM 4 LẦN → TÁCH CA (công tắc "split_four_punches", Cài đặt › Quy tắc tính công, MẶC ĐỊNH BẬT — Anh 16/11/2026).
+// Lịch có cả ca Hành chính lẫn Sáng + Chiều: tính theo độ lệch thì HC luôn thắng (chỉ lệch 2 đầu ngày, Sáng + Chiều lệch thêm 2 lượt
+// trưa) → chấm 4 lần vẫn 1 dòng HC, về trưa muộn không bị trễ. Bật: tổ hợp ≥ 2 ca mà ca nào cũng ĐỦ vào–ra (lượt đầu – cuối của ca
+// cách nhau ≥ 30', 2 lượt quẹt trùng không tính là đủ) được ưu tiên trước; còn lại chọn như cũ (quên chấm trưa → vẫn HC đủ công).
+// opts.preferSplit do device-sync truyền vào; tắt / không truyền = như cũ.
+const SPLIT_MIN_SPAN = 30 * 60000;
 export function pickShiftSet(cands, punches, workDate, opts = {}) {
   const list = (cands || []).slice(0, 10).map((shift) => ({ shift, ...shiftBounds(workDate, shift) }));
   const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
@@ -511,15 +517,17 @@ export function pickShiftSet(cands, punches, workDate, opts = {}) {
     // (trước đây: làm ca sáng 05:52–11:33 thì lượt 05:55 sáng hôm sau bị lấy làm "vào Ca đêm" → 1 lượt dùng cho 2 ngày)
     if (got.some((g, i) => vnDay(g[0]) > workDate || t(g[0]) < set[i].start - 8 * HH)) continue;
     if (nearOtherShift(list, set, got, t, dayEnd, opts.oneWin)) continue;   // giờ ra sát đầu ca sau / giờ vào sát cuối ca trước
-    let dev = 0, used = 0;
+    let dev = 0, used = 0, full = 0;
     set.forEach((x, i) => {
       const g = got[i], a = t(g[0]), b = g.length > 1 ? t(g[g.length - 1]) : null;
       dev += Math.abs(a - x.start) / 60000 + (b == null ? 240 : Math.abs(b - x.end) / 60000);
       used += b == null ? 1 : 2;
+      if (b != null && b - a >= SPLIT_MIN_SPAN) full++;
     });
+    const split = opts.preferSplit && set.length >= 2 && full === set.length ? set.length : 0;   // xem preferSplitOn
     const score = [dev, -used, set.length];
-    if (!best || score[0] < best.score[0] - 1e-9 || (Math.abs(score[0] - best.score[0]) < 1e-9 && (score[1] < best.score[1] || (score[1] === best.score[1] && score[2] < best.score[2]))))
-      best = { score, out: set.map((x, i) => ({ shift: x.shift, punches: got[i] })) };
+    const better = !best || split > best.split || (split === best.split && (score[0] < best.score[0] - 1e-9 || (Math.abs(score[0] - best.score[0]) < 1e-9 && (score[1] < best.score[1] || (score[1] === best.score[1] && score[2] < best.score[2])))));
+    if (better) best = { score, split, out: set.map((x, i) => ({ shift: x.shift, punches: got[i] })) };
   }
   return best ? best.out : [];
 }
@@ -577,17 +585,20 @@ export function pickDirShiftSet(cands, punches, workDate, dir, dupOpt, opts = {}
     if (got.some((g) => !g.length)) continue;
     // giờ vào sớm nhất của mỗi ca (nếu có) phải thuộc ngày này
     if (got.some((g) => { const f = g.filter((u) => u.in).sort((a, b) => t(a.in) - t(b.in))[0]; return f && vnDay(f.in) > workDate; })) continue;
-    let dev = 0, used = 0;
+    let dev = 0, used = 0, full = 0;
     set.forEach((x, i) => {
       const ins = got[i].filter((u) => u.in).map((u) => t(u.in)), outs = got[i].filter((u) => u.out).map((u) => t(u.out));
       const a = ins.length ? Math.min(...ins) : null, b = outs.length ? Math.max(...outs) : null;
       dev += (a == null ? 240 : Math.abs(a - x.start) / 60000) + (b == null ? 240 : Math.abs(b - x.end) / 60000);
       used += (a == null ? 0 : 1) + (b == null ? 0 : 1);
+      if (a != null && b != null && b - a >= SPLIT_MIN_SPAN) full++;
     });
+    // chấm 4 lần → tách ca (như pickShiftSet): chỉ so khi cùng nhận mọi cặp / lượt (miss bằng nhau)
+    const split = opts.preferSplit && set.length >= 2 && full === set.length ? set.length : 0;
     const score = [miss, dev, -used, set.length];
-    const better = !best || score[0] < best.score[0] || (score[0] === best.score[0] && (score[1] < best.score[1] - 1e-9
-      || (Math.abs(score[1] - best.score[1]) < 1e-9 && (score[2] < best.score[2] || (score[2] === best.score[2] && score[3] < best.score[3])))));
-    if (better) best = { score, out: set.map((x, i) => ({ shift: x.shift, punches: got[i].flatMap((u) => u.ps) })) };
+    const better = !best || score[0] < best.score[0] || (score[0] === best.score[0] && (split > best.split || (split === best.split && (score[1] < best.score[1] - 1e-9
+      || (Math.abs(score[1] - best.score[1]) < 1e-9 && (score[2] < best.score[2] || (score[2] === best.score[2] && score[3] < best.score[3])))))));
+    if (better) best = { score, split, out: set.map((x, i) => ({ shift: x.shift, punches: got[i].flatMap((u) => u.ps) })) };
   }
   return best ? best.out : [];
 }

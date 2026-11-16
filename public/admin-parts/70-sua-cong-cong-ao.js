@@ -151,7 +151,8 @@ async function pageEditAtt() {
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
-      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll' }, tbl), pager));
+      // bảng dài: cuộn trong khung, dòng tiêu đề đứng yên (Anh 16/11/2026: kéo xuống bị mất tiêu đề) — dùng chung kiểu .rep-scroll của Báo cáo
+      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll rep-scroll' }, tbl), pager));
   };
   // Giữ trang đang xem khi tải lại sau khi sửa giờ; đổi phạm vi (ngày / phòng ban / NV / tab) thì về trang 1
   const pageSt = { detail: { page: 1 }, summary: { page: 1 } };
@@ -188,7 +189,7 @@ async function pageEditAtt() {
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên. Chọn phòng ban / nhân viên (nút 🏢 / 👥) rồi bấm "↻ Tính lại" để tính lại đúng phạm vi. Bấm "Chi tiết" để xem/sửa 1 người.`),
-      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll' }, tbl), pager));
+      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll rep-scroll' }, tbl), pager));
   };
 
   // Đổi Từ / Đến ngày KHÔNG tự tải → bấm "✓ Áp dụng" hoặc Enter
