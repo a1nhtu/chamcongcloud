@@ -37,3 +37,29 @@ test('máy hỏi lệnh kèm INFO → lưu IP LAN; lần sau không kèm INFO th
   H.handleCData({ method: 'POST', query: { SN: 'SN_IP', table: 'OPTIONS', Stamp: '0' }, body: 'IPAddress=192.168.1.50,MAC=00:17:61:00:00:01', headers: {}, socket: {} }, resObj());
   assert.equal(lanOf('SN_IP'), '192.168.1.50');
 });
+
+test('máy không tự khai IP → phần mềm hỏi lệnh INFO (1 lần / ngày), máy trả IPAddress= thì lưu', () => {
+  db.prepare("INSERT INTO push_devices(serial,name,active,last_seen) VALUES('SN_HOI','',1,?)").run(new Date().toISOString());
+  const q = () => db.prepare("SELECT id FROM push_device_commands WHERE serial='SN_HOI' AND content='INFO'").all();
+  const out = resObj(); H.handleGetRequest({ query: { SN: 'SN_HOI' }, headers: {}, socket: {} }, out);
+  assert.match(out.out, /^C:\d+:INFO$/);
+  assert.equal(q().length, 1);
+  H.handleGetRequest({ query: { SN: 'SN_HOI' }, headers: {}, socket: {} }, resObj());
+  assert.equal(q().length, 1, 'không hỏi lặp trong ngày');
+  const id = q()[0].id;
+  H.handleDeviceCmd({ body: `ID=${id}&Return=0&CMD=INFO
+~DeviceName=ZLM60_TFT
+MAC=00:17:61:12:14:C7
+GATEIPAddress=192.168.1.1
+IPAddress=192.168.1.37
+`, query: { SN: 'SN_HOI' } }, resObj());
+  assert.equal(lanOf('SN_HOI'), '192.168.1.37');
+  H.handleGetRequest({ query: { SN: 'SN_HOI' }, headers: {}, socket: {} }, resObj());
+  assert.equal(q().length, 1, 'đã biết IP thì không hỏi nữa');
+});
+
+test('máy chưa duyệt → không gửi lệnh INFO', () => {
+  db.prepare("INSERT INTO push_devices(serial,name,active,last_seen) VALUES('SN_CHO2','',0,?)").run(new Date().toISOString());
+  H.handleGetRequest({ query: { SN: 'SN_CHO2' }, headers: {}, socket: {} }, resObj());
+  assert.equal(db.prepare("SELECT COUNT(*) c FROM push_device_commands WHERE serial='SN_CHO2'").get().c, 0);
+});

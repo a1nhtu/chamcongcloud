@@ -17,7 +17,7 @@ const post = (sn, table, body) => H.handleCData({ method: 'POST', query: { SN: s
 const queryData = (sn, tablename, body) => H.handleQueryData({ query: { SN: sn, type: 'tabledata', tablename, cmdid: '1' }, body, headers: {}, socket: {} }, resObj());
 const pending = (sn) => db.prepare('SELECT content FROM push_device_commands WHERE serial=? AND trans_time IS NULL ORDER BY id').all(sn).map((r) => r.content);
 const sendAll = (sn) => db.prepare("UPDATE push_device_commands SET trans_time=datetime('now'), response_at=datetime('now'), return_value='0' WHERE serial=?").run(sn);
-const addDev = (sn) => db.prepare("INSERT INTO push_devices(serial,name,active,sync_group,last_seen) VALUES(?,?,1,'1',?)").run(sn, sn, new Date().toISOString());
+const addDev = (sn) => db.prepare("INSERT INTO push_devices(serial,name,active,sync_group,last_seen,lan_ip) VALUES(?,?,1,'1',?,'192.168.1.9')").run(sn, sn, new Date().toISOString());
 const face = (pin, tmp) => `BIODATA Pin=${pin}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=5\tMinorVer=8\tFormat=0\tTmp=${tmp}`;
 const qdFace = (pin, tmp) => `biodata pin=${pin}\tno=0\tindex=0\tvalid=1\tduress=0\ttype=9\tmajorver=5\tminorver=8\tformat=0\ttmp=${tmp}`;
 

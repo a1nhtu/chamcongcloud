@@ -16,7 +16,7 @@ const getreq = (sn) => { const r = resObj(); H.handleGetRequest({ query: { SN: s
 const post = (sn, table, body) => H.handleCData({ method: 'POST', query: { SN: sn, table, Stamp: '9999' }, body, headers: {}, socket: {} }, resObj());
 const attQueries = (sn) => db.prepare("SELECT content FROM push_device_commands WHERE serial=? AND content LIKE 'DATA QUERY ATTLOG%'").all(sn).map((r) => r.content);
 const ago = (min) => new Date(Date.now() - min * 60000).toISOString();
-const addDev = (sn, active, lastSeen) => db.prepare("INSERT INTO push_devices(serial,name,active,att_stamp,oper_stamp,last_seen) VALUES(?,?,?,'9999','9999',?)").run(sn, sn, active, lastSeen);
+const addDev = (sn, active, lastSeen) => db.prepare("INSERT INTO push_devices(serial,name,active,att_stamp,oper_stamp,last_seen,lan_ip) VALUES(?,?,?,'9999','9999',?,'192.168.1.9')").run(sn, sn, active, lastSeen);
 
 before(async () => {
   const D = await import('../server/db.js');

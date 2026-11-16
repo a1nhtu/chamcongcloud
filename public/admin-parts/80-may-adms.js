@@ -101,7 +101,7 @@ async function pageDevices() {
         el('div', { style: 'margin-top:6px' }, 'IP: ', ipVal, ' · Port: ', portVal),
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'HTTP · không bật tên miền')),
       el('div', { class: 'dev-tg' },
-        el('b', {}, 'Cách B · Qua Internet / chi nhánh khác'),
+        el('b', {}, d.multi ? 'Kết nối qua tên miền' : 'Cách B · Qua Internet / chi nhánh khác'),   // máy chủ nhiều công ty: chỉ có 1 cách
         el('div', { style: 'margin-top:6px' }, 'Tên miền: ', domVal, ' ', domCopy, ' · Port: ', el('b', {}, '443')),
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy không có mục HTTPS thì Port 80 (cổng khác như 8081 không về được) · máy cần có Internet'),
         domNote,
@@ -109,7 +109,7 @@ async function pageDevices() {
       // Máy AI: giao thức WebSocket (ws://, không mã hoá) — vào CÙNG cổng web; qua tên miền thì cổng 80
       d.ai_enabled ? el('div', { class: 'dev-tg' },
         el('b', {}, 'Máy AI (khuôn mặt / vân tay)'),
-        el('div', { style: 'margin-top:6px' }, 'Server: ', el('b', { style: 'font-family:monospace' }, d.server_ips[0] || '(IP máy chủ)'), ' · Port: ', el('b', {}, String(d.port))),
+        d.multi ? '' : el('div', { style: 'margin-top:6px' }, 'Server: ', el('b', { style: 'font-family:monospace' }, d.server_ips[0] || '(IP máy chủ)'), ' · Port: ', el('b', {}, String(d.port))),
         domain ? el('div', { style: 'margin-top:4px' }, 'Qua Internet: ', el('b', { style: 'font-family:monospace' }, domain), ' · Port: ', el('b', {}, '80')) : '',
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Trên máy: Menu → Network / Cloud Server, điền như trên. Máy tự kết nối về rồi hiện ở danh sách (Chờ duyệt).')) : '',
       // Máy Union / Virdi: máy tự kết nối về cổng riêng (SDK UCS) — chỉ trong mạng LAN

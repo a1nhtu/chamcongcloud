@@ -4,7 +4,7 @@
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
 import { guardIncoming } from '../pin-guard.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd } from '../device-sync.js';
 import { vnDateStr } from '../util.js';
 
 const r = Router();
@@ -79,6 +79,14 @@ export function lanIpOf(text, fromInfo = false) {
   return /^\d{1,3}(\.\d{1,3}){3}$/.test(v) && v !== '0.0.0.0' && v.split('.').every((x) => +x <= 255) ? v : '';
 }
 const saveLanIp = (sn, ip) => { if (sn && ip) db.prepare('UPDATE push_devices SET lan_ip=? WHERE serial=?').run(ip, sn); };
+// Máy không tự khai IP (không kèm INFO khi hỏi lệnh — VD ZLM60_TFT Ver 6.60 của tungphong) → hỏi bằng lệnh INFO, máy trả
+// "~DeviceName=… / IPAddress=…" (mỗi mục 1 dòng) qua /devicecmd. Chỉ hỏi khi chưa biết IP, tối đa 1 lần / ngày (máy không hỗ trợ thì thôi).
+function askLanIp(sn) {
+  const d = db.prepare('SELECT lan_ip FROM push_devices WHERE serial=?').get(sn);
+  if (!d || d.lan_ip) return;
+  const recent = db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND mkind='info' AND (trans_time IS NULL OR trans_time > datetime('now','-1 day'))").get(sn);
+  if (!recent) queueCmd(sn, 'INFO', { mkind: 'info' });
+}
 
 // Tham số máy gửi, không phân biệt hoa thường (pushver / PushVersion..., INFO / info)
 const queryParam = (req, ...names) => {
@@ -218,7 +226,12 @@ function handleGetRequest(req, res) {
   if (info) saveLanIp(sn, lanIpOf(info, true));
   if (enabled() && isActive(sn)) {
     try { resendLostAttlogQueries(sn); } catch (e) { console.error('[device] gửi lại lệnh tải log lỗi:', e.message); }
-    try { const cmd = nextCommand(sn); if (cmd) return res.type('text/plain').send(cmd); }
+    try {
+      let cmd = nextCommand(sn);
+      // Hết việc mới hỏi IP LAN (không chen trước lệnh đồng bộ / tải log)
+      if (!cmd) { askLanIp(sn); cmd = nextCommand(sn); }
+      if (cmd) return res.type('text/plain').send(cmd);
+    }
     catch (e) { console.error('[device] getrequest lỗi:', e.message); }
   }
   res.type('text/plain').send('OK');
@@ -234,6 +247,15 @@ function handleDeviceCmd(req, res) {
     for (const pair of line.split('&')) { const i = pair.indexOf('='); if (i > 0) p[pair.slice(0, i).trim()] = pair.slice(i + 1).trim(); }
     const id = parseInt(p.ID || (lines.length > 1 ? '0' : req.query.ID) || '0', 10);
     if (id) { try { ackCommand(id, p.Return ?? '?'); storeClockResult(id, line); } catch (e) { console.error('[device] ack lỗi:', e.message); } }
+  }
+  // Trả lời lệnh INFO (askLanIp) có dòng IPAddress=… → lưu IP LAN của máy
+  const ip = lanIpOf(body);
+  if (ip) {
+    try {
+      const id = parseInt((/(?:^|&)ID=(\d+)/.exec(body) || [])[1] || req.query.ID || '0', 10);
+      const sn = req.query.SN || req.query.sn || (id ? db.prepare('SELECT serial FROM push_device_commands WHERE id=?').get(id)?.serial : '');
+      saveLanIp(sn, ip);
+    } catch (e) { console.error('[device] lưu IP LAN lỗi:', e.message); }
   }
   res.type('text/plain').send('OK');
 }
