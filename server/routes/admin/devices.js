@@ -3,6 +3,7 @@ import { networkInterfaces } from 'node:os';
 import { db, getSetting } from '../../db.js';
 import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
+import { installDomain } from '../../tenant.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, zkDeleteUsers, queuePendingDelete, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
@@ -38,12 +39,9 @@ function lanIPs(onlyReal = false) {
   return onlyReal ? real : [...real, ...virt];
 }
 
-// Tên miền của bản cài có tunnel (config.txt: CUSTOMER + TUNNEL_TOKEN) — để hướng dẫn điền vào máy ở chi nhánh khác.
-// Bản LAN (không có tunnel) trả ''.
-function tunnelDomain() {
-  const c = (process.env.CUSTOMER || '').trim().toLowerCase();
-  return c && process.env.TUNNEL_TOKEN ? c + '.maychamcongcloud.com' : '';
-}
+// Tên miền của bản cài (bản 1 công ty có tunnel, hoặc công ty trên máy chủ nhiều công ty) — để hướng dẫn điền vào máy
+// ở chi nhánh khác / trỏ máy về. Bản LAN (không có tunnel) trả ''.
+const tunnelDomain = installDomain;
 
 export function registerDeviceRoutes(r, { need }) {
   // Xoá NV ở trang Nhân viên kèm xoá trên máy: người có quyền Nhân viên không cần thêm quyền Máy chấm công

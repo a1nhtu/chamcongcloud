@@ -33,6 +33,18 @@ export const dataDir = () => join(appRoot(), 'data');
 // Cấu hình bản cài (config.txt): bản 1 công ty đọc biến môi trường; máy chủ nhiều công ty đọc cấu hình riêng của công ty
 export const cfg = (name) => (MULTI ? (needTenant().env || {})[name] : process.env[name]);
 
+// Tên miền của bản cài / công ty đang phục vụ ('' = bản LAN, không có tên miền). Dùng để hướng dẫn / trỏ máy chấm công.
+//  - bản 1 công ty: config.txt có CUSTOMER + TUNNEL_TOKEN → <CUSTOMER>.maychamcongcloud.com
+//  - máy chủ nhiều công ty: tên miền chung của máy chủ, mỗi công ty <mã>.<HOST_DOMAIN> (config công ty không có CUSTOMER / TUNNEL_TOKEN)
+export function installDomain() {
+  if (MULTI) {
+    const t = currentTenant();
+    return t && t.slug ? t.slug + '.' + String(process.env.HOST_DOMAIN || 'maychamcongcloud.com').toLowerCase() : '';
+  }
+  const c = String(process.env.CUSTOMER || '').trim().toLowerCase();
+  return c && process.env.TUNNEL_TOKEN ? c + '.maychamcongcloud.com' : '';
+}
+
 // Khoá phân biệt công ty cho bộ nhớ tạm dùng chung (bản 1 công ty = '')
 export const tenantKey = () => (MULTI ? needTenant().slug : '');
 

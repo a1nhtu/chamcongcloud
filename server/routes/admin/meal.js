@@ -2,6 +2,7 @@
 // Tắt công tắc → mealGate trả 403 cho mọi đường dẫn /meal/*. Module chỉ ĐỌC chấm công + đăng ký làm thêm (xem server/meal.js).
 import { db, getSetting, setSetting } from '../../db.js';
 import { sendCaughtError } from '../../util.js';
+import { installDomain } from '../../tenant.js';
 import {
   mealGate, mealManagerOnly, listShifts, needShift, needDate, loadBoard, saveRegistrations, closeMeal, reopenMeal,
   getMenu, saveMenu, copyMenu, orderSummary, kitchenKey, headDepartments, mealReport, mealOptions, mealSignupSerials, setMealAdjust, hrSetOrder, mealEmpSearch,
@@ -17,8 +18,7 @@ const who = (req) => req.user.full_name || req.user.username || '';
 const wrap = (name, fn) => (req, res) => { try { fn(req, res); } catch (e) { sendCaughtError(res, name, e); } };
 // Tên miền đã lưu cho liên kết bếp + tên miền tunnel của bản cài (nếu có) để gợi ý khi HR mở bằng localhost/IP
 const kitchenBase = () => {
-  const c = (process.env.CUSTOMER || '').trim().toLowerCase();
-  return { base: getSetting('meal_kitchen_base', ''), domain: c && process.env.TUNNEL_TOKEN ? c + '.maychamcongcloud.com' : '' };
+  return { base: getSetting('meal_kitchen_base', ''), domain: installDomain() };
 };
 
 export function registerMealRoutes(r) {

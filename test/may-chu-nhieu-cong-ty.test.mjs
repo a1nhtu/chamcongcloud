@@ -119,6 +119,12 @@ test('hẹn giờ chạy lần lượt từng công ty, bỏ qua công ty đang 
   H.setTenantDisabled('ctb', false);
 });
 
+test('tên miền của công ty = <mã>.<tên miền máy chủ> (trước báo "bản LAN" ở Tìm máy trong LAN — khách tungphong 16/11/2026)', () => {
+  assert.equal(as('cta', () => T.installDomain()), 'cta.maychamcongcloud.com');
+  assert.equal(as('ctb', () => T.installDomain()), 'ctb.maychamcongcloud.com');
+  assert.equal(T.installDomain(), '', 'không có ngữ cảnh công ty → không đoán tên miền');
+});
+
 test('cờ "đang bận" riêng từng công ty', () => {
   const f = T.busyFlag();
   assert.equal(as('cta', () => f.take()), true);
