@@ -20,38 +20,44 @@ export function scheduleShifts(scheduleId) {
     WHERE wss.work_schedule_id = ? AND s.active = 1 ORDER BY wss.sort_order`).all(scheduleId);
 }
 
-// Cửa sổ nhận RA của 1 ca: dùng cửa sổ khai báo; nếu chưa khai → suy từ Giờ ra (end-1h .. end+8h).
-// (giống phần mềm mẫu). Trả [startMin, endMin]; inWindow tự xử lý ca đêm (wrap qua nửa đêm).
+// Khung VÀO / RA của 1 ca (phút trong ngày; inWindow tự xử lý ca đêm qua nửa đêm): dùng khung đã khai; chưa khai → khung mặc định
+// GIỐNG chọn ca nhiều ca (fitWindows, attendance-calc): vào [đầu ca − 2h, đầu ca + min(1h, ¼ ca)], ra [cuối ca − min(1h, ¼ ca), cuối ca + 2h].
+const shiftLen = (s) => { const a = hhmm2min(s.start_time); let b = hhmm2min(s.end_time); if (b <= a) b += 1440; return b - a; };
+const wrap = (m) => ((m % 1440) + 1440) % 1440;
+function inWin(s) {
+  if (s.check_in_start && s.check_in_end) return [hhmm2min(s.check_in_start), hhmm2min(s.check_in_end)];
+  const a = hhmm2min(s.start_time), h = Math.min(60, shiftLen(s) / 4);
+  return [wrap(a - 120), wrap(a + h)];
+}
 function outWin(s) {
   if (s.check_out_start && s.check_out_end) return [hhmm2min(s.check_out_start), hhmm2min(s.check_out_end)];
-  const e = hhmm2min(s.end_time);
-  return [((e - 60) % 1440 + 1440) % 1440, (e + 480) % 1440];
+  const e = hhmm2min(s.end_time), h = Math.min(60, shiftLen(s) / 4);
+  return [wrap(e - h), wrap(e + 120)];
 }
-// Tự động tìm ca theo GIỜ VÀO (+ GIỜ RA nếu biết, để phân biệt các ca cùng giờ vào — VD Sáng vs Hành chính).
-// candidates = danh sách ca ứng viên (VD của 1 lịch trình); bỏ trống = mọi ca active có cửa sổ.
+// TỰ TÌM 1 CA theo khung vào / ra của ca như Wise Eye On39 (Anh chốt 16/11/2026, v1.35.10):
+//   (1) giờ vào trong khung vào VÀ giờ ra trong khung ra  (2) giờ vào trong khung vào  (3) giờ vào ngoài khung vào của MỌI ca (vào trễ
+//   quá khung / ca chưa khai khung) → cách đo cũ (nearestShift: ra trong khung ra, cuối ca gần giờ ra, đầu ca gần giờ vào — vòng 24 giờ)
+// Nhiều ca cùng khớp một bước → ca đứng trước trong danh sách (thứ tự ca của lịch trình). candidates = các ca của lịch trình (theo thứ tự);
+// bỏ trống = mọi ca đang dùng ĐÃ KHAI khung vào (NV chưa gán ca / lịch) — không khớp khung vào ca nào thì không gán ca (null).
 export function autoDetectShift(checkInIso, candidates, checkOutIso) {
   if (!checkInIso) return null;
   const inMin = checkinMinVN(checkInIso);
   const outMin = checkOutIso ? checkinMinVN(checkOutIso) : null;
-  const all = candidates || q("SELECT * FROM shifts WHERE active = 1 AND check_in_start IS NOT NULL AND check_in_start != ''").all();
+  const all = candidates || q("SELECT * FROM shifts WHERE active = 1 AND check_in_start IS NOT NULL AND check_in_start != '' ORDER BY id").all();
   if (!all.length) return null;
-  const withWin = all.filter((s) => s.check_in_start && s.check_in_end);
-  // Khớp cửa sổ VÀO
-  const ciMatch = withWin.filter((s) => inWindow(inMin, hhmm2min(s.check_in_start), hhmm2min(s.check_in_end)));
-  const pool = ciMatch.length ? ciMatch : (candidates ? all : []);
-  if (!pool.length) return null;
-  const nearIn = (list) => [...list].sort((a, b) => minDist(hhmm2min(a.start_time), inMin) - minDist(hhmm2min(b.start_time), inMin))[0];
-  // Chưa biết giờ RA (lúc chấm VÀO) hoặc chỉ 1 ứng viên → chọn theo giờ vào gần nhất
-  if (outMin == null || pool.length === 1) return nearIn(pool);
-  // Có giờ RA + nhiều ca cùng khớp giờ vào → chấm điểm bằng cửa sổ RA (ưu tiên cửa sổ khai báo)
-  const scored = pool.map((s) => {
-    const explicit = !!(s.check_out_start && s.check_out_end);
-    const [coS, coE] = outWin(s);
-    const outOk = inWindow(outMin, coS, coE);
-    return { s, score: outOk ? (explicit ? 3 : 2) : 0, outDist: minDist(hhmm2min(s.end_time), outMin), inDist: minDist(hhmm2min(s.start_time), inMin) };
-  });
-  scored.sort((a, b) => b.score - a.score || a.outDist - b.outDist || a.inDist - b.inDist);
-  return scored[0].s;
+  const okIn = (s) => inWindow(inMin, ...inWin(s)), okOut = (s) => outMin != null && inWindow(outMin, ...outWin(s));
+  return all.find((s) => okIn(s) && okOut(s)) || all.find(okIn) || (candidates ? nearestShift(all, inMin, outMin) : null);
+}
+// Bước 3 khi giờ vào không trong khung vào của ca nào (vào trễ quá khung mặc định / ca chưa khai khung): cách đo cũ (v1.33.10) —
+// ra trong khung ra (khai báo trước), rồi cuối ca gần giờ ra nhất, rồi đầu ca gần giờ vào nhất (đo vòng 24 giờ).
+function nearestShift(all, inMin, outMin) {
+  const oldOut = (s) => (s.check_out_start && s.check_out_end ? [hhmm2min(s.check_out_start), hhmm2min(s.check_out_end)]
+    : [wrap(hhmm2min(s.end_time) - 60), wrap(hhmm2min(s.end_time) + 480)]);
+  const nearIn = [...all].sort((a, b) => minDist(hhmm2min(a.start_time), inMin) - minDist(hhmm2min(b.start_time), inMin))[0];
+  if (outMin == null || all.length === 1) return nearIn;
+  return all.map((s) => ({ s, sc: inWindow(outMin, ...oldOut(s)) ? (s.check_out_start && s.check_out_end ? 3 : 2) : 0,
+    od: minDist(hhmm2min(s.end_time), outMin), id: minDist(hhmm2min(s.start_time), inMin) }))
+    .sort((a, b) => b.sc - a.sc || a.od - b.od || a.id - b.id)[0].s;
 }
 
 // Không gán ca, dòng công của NGÀY D mà giờ vào nằm ở RẠNG SÁNG HÔM SAU (ca đêm vào trễ sau nửa đêm — device-sync lateNightInPunches

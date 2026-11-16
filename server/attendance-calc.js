@@ -487,7 +487,8 @@ function nearOtherShift(list, set, got, t, dayEnd, oneWin) {
 // On39 (RollCall): ghép cặp rồi mỗi cặp tìm ca theo thứ tự — (1) giờ vào trong khung "Bắt đầu vào – Kết thúc vào" VÀ giờ ra trong
 // khung "Bắt đầu ra – Kết thúc ra"; (2) chỉ giờ vào khớp khung vào; (3) ca đầu. Ở đây: tổ hợp ca có NHIỀU ca khớp ĐỦ khung vào + khung
 // ra (MỌI ca của tổ hợp đều khớp: lượt đầu của ca trong khung vào, lượt cuối trong khung ra, cách nhau từ min tới max của Lịch trình vào ra — tối thiểu
-// 30') được chọn trước, nhiều ca khớp hơn trước; còn lại → như cũ (độ lệch, số lượt dùng, ít ca; quên chấm giữa ca vẫn 1 ca). VD lịch HC 07:30–17:00 + Sáng 07:30–11:30 + Chiều 13:00–17:00:
+// 30') được chọn trước, nhiều ca khớp hơn trước; còn lại → theo mức khớp khung (matchLevel / betterSc bên dưới, v1.35.10 — không còn so
+// "giờ gần nhất"; quên chấm giữa ca vẫn 1 ca). VD lịch HC 07:30–17:00 + Sáng 07:30–11:30 + Chiều 13:00–17:00:
 // chấm 07:25 · 11:25 · 13:20 · 16:54 → Sáng (11:25 trong khung ra Sáng, không trong khung ra HC) + Chiều trễ 20'; chấm 2 lần → HC.
 // Lịch 3 ca làm Chiều 14h ra ngoài 17:38 · 18:10: không ca Sáng / Đêm nào khớp khung → vẫn 1 dòng ca Chiều (v1.35.6 tách sai).
 // Khung chưa khai: vào [đầu ca − 2h, đầu ca + min(1h, ¼ ca)], ra [cuối ca − min(1h, ¼ ca), cuối ca + 2h] (hẹp → ngoài khung thì như cũ).
@@ -541,8 +542,34 @@ function fitPartition(set, ps, t, dup) {
   if (!best) return null;
   return best.cuts.map((to, i) => ps.slice(i ? best.cuts[i - 1] : 0, to));
 }
+// ---- 3 BƯỚC TÌM CA CỦA ON39 (Anh chốt 16/11/2026, v1.35.10): mọi lượt chọn ca theo thông số của ca, KHÔNG theo "giờ gần nhất" ----
+// Mức khớp của 1 cặp (a = vào, b = ra) / 1 lượt lẻ với ca x (khung vào ci, khung ra co — fitWindows):
+//   3 = vào trong khung vào VÀ ra trong khung ra, ra − vào trong [min, max] của Lịch trình vào ra (bước 1 của On39)
+//   2 = vào trong khung vào (bước 2) · lượt lẻ: nằm trong khung vào của ca
+//   1 = ra trong khung ra · lượt lẻ: nằm trong khung ra của ca
+//   0 = không khớp khung nào → bước 3: ca ĐẦU trong lịch trình (thứ tự ca của lịch)
+const inR = (v, r) => v >= r[0] && v <= r[1];
+function matchLevel(w, a, b, dup) {
+  if (a != null && b != null) return fitsWindows(w, a, b, dup) ? 3 : inR(a, w.ci) ? 2 : inR(b, w.co) ? 1 : 0;
+  if (a != null) return inR(a, w.ci) ? 2 : inR(a, w.co) ? 1 : 0;      // lượt lẻ chưa biết hướng / VÀO lẻ
+  return b != null ? (inR(b, w.co) ? 2 : inR(b, w.ci) ? 1 : 0) : 0;   // RA lẻ (quy tắc biết hướng)
+}
+// So 2 tổ hợp ca theo 3 bước On39 — KHÔNG so "giờ gần nhất": (1) mọi ca khớp đủ khung vào + ra, nhiều ca khớp hơn; (2) mức khớp
+// THẤP NHẤT trong các ca của tổ hợp cao hơn (3 đủ khung · 2 vào trong khung vào · 1 ra trong khung ra · 0 không khớp); nhiều ca khớp
+// đủ khung hơn (lượt lẻ 22:31 cuối ca Chiều không thành thêm dòng ca Đêm); dùng nhiều lượt vào / ra hơn; ít ca hơn; (3) ca đứng TRƯỚC
+// trong lịch trình (thứ tự ca của lịch — "ca đầu" của On39).
+function betterSc(sc, best) {
+  if (!best) return true;
+  if (sc.split !== best.split) return sc.split > best.split;
+  if (sc.minLv !== best.minLv) return sc.minLv > best.minLv;
+  if ((sc.full || 0) !== (best.full || 0)) return (sc.full || 0) > (best.full || 0);
+  if (sc.used !== best.used) return sc.used > best.used;
+  if (sc.idx.length !== best.idx.length) return sc.idx.length < best.idx.length;
+  for (let i = 0; i < sc.idx.length; i++) if (sc.idx[i] !== best.idx[i]) return sc.idx[i] < best.idx[i];
+  return false;
+}
 export function pickShiftSet(cands, punches, workDate, opts = {}) {
-  const list = (cands || []).slice(0, 10).map((shift) => ({ shift, ...shiftBounds(workDate, shift), w: fitWindows(workDate, shift) }));
+  const list = (cands || []).slice(0, 10).map((shift, idx) => ({ shift, idx, ...shiftBounds(workDate, shift), w: fitWindows(workDate, shift) }));
   const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
   if (!list.length || !ps.length) return [];
   const t = (p) => toMinute(p.punch_at).getTime();
@@ -575,17 +602,17 @@ export function pickShiftSet(cands, punches, workDate, opts = {}) {
     // (trước đây: làm ca sáng 05:52–11:33 thì lượt 05:55 sáng hôm sau bị lấy làm "vào Ca đêm" → 1 lượt dùng cho 2 ngày)
     if (got.some((g, i) => vnDay(g[0]) > workDate || t(g[0]) < set[i].start - 8 * HH)) continue;
     if (!byWin && nearOtherShift(list, set, got, t, dayEnd, opts.oneWin)) continue;   // giờ ra sát đầu ca sau / giờ vào sát cuối ca trước
-    let dev = 0, used = 0, full = 0;
+    let used = 0, full = 0, minLv = 3;
     set.forEach((x, i) => {
       const g = got[i], a = t(g[0]), b = g.length > 1 ? t(g[g.length - 1]) : null;
-      dev += Math.abs(a - x.start) / 60000 + (b == null ? 240 : Math.abs(b - x.end) / 60000);
       used += b == null ? 1 : 2;
-      if (b != null && fitsWindows(x.w, a, b, opts.dup)) full++;   // khớp đủ khung vào + khung ra của ca
+      const lv = matchLevel(x.w, a, b, opts.dup);
+      if (lv === 3) full++;                                    // khớp đủ khung vào + khung ra của ca
+      if (lv < minLv) minLv = lv;
     });
-    const split = full === set.length ? full : 0;   // MỌI ca của tổ hợp khớp đủ khung vào + ra (xem trên) — ưu tiên trước độ lệch
-    const score = [dev, -used, set.length];
-    const better = !best || split > best.split || (split === best.split && (score[0] < best.score[0] - 1e-9 || (Math.abs(score[0] - best.score[0]) < 1e-9 && (score[1] < best.score[1] || (score[1] === best.score[1] && score[2] < best.score[2])))));
-    if (better) best = { score, split, out: set.map((x, i) => ({ shift: x.shift, punches: got[i] })) };
+    const split = full === set.length ? full : 0;   // MỌI ca của tổ hợp khớp đủ khung vào + ra — nhiều ca khớp hơn trước
+    const sc = { split, minLv, full, used, idx: set.map((x) => x.idx).sort((a, b) => a - b) };
+    if (betterSc(sc, best)) best = { ...sc, out: set.map((x, i) => ({ shift: x.shift, punches: got[i] })) };
   }
   return best ? best.out : [];
 }
@@ -603,7 +630,7 @@ export function pickShiftSet(cands, punches, workDate, opts = {}) {
 // các ca hôm sau (opts.nextOutClaim(iso, cuối ca đêm) = true → của hôm sau).
 // Trả [{ shift, punches }] như pickShiftSet.
 export function pickDirShiftSet(cands, punches, workDate, dir, dupOpt, opts = {}) {
-  const list = (cands || []).slice(0, 10).map((shift) => { const w = ruleWindow(workDate, shift); return { shift, ...shiftBounds(workDate, shift), ws: w.winStart.getTime(), we: w.winEnd.getTime(), w: fitWindows(workDate, shift) }; });
+  const list = (cands || []).slice(0, 10).map((shift, idx) => { const w = ruleWindow(workDate, shift); return { shift, idx, ...shiftBounds(workDate, shift), ws: w.winStart.getTime(), we: w.winEnd.getTime(), w: fitWindows(workDate, shift) }; });
   if (!list.length || !punches || !punches.length) return [];
   const t = (p) => toMinute(p.punch_at).getTime();
   const vnDay = (p) => new Date(new Date(p.punch_at).getTime() + 7 * HH).toISOString().slice(0, 10);
@@ -635,28 +662,27 @@ export function pickDirShiftSet(cands, punches, workDate, dir, dupOpt, opts = {}
         if (nextDay && !(x.end > dayEnd)) return;
         if (nextIn && !lateIn(u, x)) return;
         if (u.in ? !inW(u.in, x) || t(u.in) < x.start - 8 * HH : !inW(u.out, x)) return;
-        const d = (u.in ? Math.abs(t(u.in) - x.start) : 0) + (u.out ? Math.abs(t(u.out) - x.end) : 0);
-        if (d < bd) { bd = d; bi = i; }
+        // 3 bước On39: cặp / lượt khớp khung của ca nào nhiều nhất (matchLevel); bằng nhau → ca đứng trước trong lịch trình
+        const l = matchLevel(x.w, u.in ? t(u.in) : null, u.out ? t(u.out) : null, dupOpt);
+        if (bi < 0 || l > bd || (l === bd && x.idx < set[bi].idx)) { bd = l; bi = i; }
       });
       if (bi < 0) miss++; else got[bi].push(u);
     }
     if (got.some((g) => !g.length)) continue;
     // giờ vào sớm nhất của mỗi ca (nếu có) phải thuộc ngày này
     if (got.some((g) => { const f = g.filter((u) => u.in).sort((a, b) => t(a.in) - t(b.in))[0]; return f && vnDay(f.in) > workDate; })) continue;
-    let dev = 0, used = 0, full = 0;
+    let used = 0, full = 0, minLv = 3;
     set.forEach((x, i) => {
       const ins = got[i].filter((u) => u.in).map((u) => t(u.in)), outs = got[i].filter((u) => u.out).map((u) => t(u.out));
       const a = ins.length ? Math.min(...ins) : null, b = outs.length ? Math.max(...outs) : null;
-      dev += (a == null ? 240 : Math.abs(a - x.start) / 60000) + (b == null ? 240 : Math.abs(b - x.end) / 60000);
       used += (a == null ? 0 : 1) + (b == null ? 0 : 1);
-      if (a != null && b != null && fitsWindows(x.w, a, b, dupOpt)) full++;   // khớp đủ khung vào + khung ra của ca
+      const lv = matchLevel(x.w, a, b, dupOpt);
+      if (lv === 3) full++;                                    // khớp đủ khung vào + khung ra của ca
+      if (lv < minLv) minLv = lv;
     });
-    // tìm ca theo khung vào / ra (như pickShiftSet): chỉ so khi cùng nhận mọi cặp / lượt (miss bằng nhau)
-    const split = full === set.length ? full : 0;
-    const score = [miss, dev, -used, set.length];
-    const better = !best || score[0] < best.score[0] || (score[0] === best.score[0] && (split > best.split || (split === best.split && (score[1] < best.score[1] - 1e-9
-      || (Math.abs(score[1] - best.score[1]) < 1e-9 && (score[2] < best.score[2] || (score[2] === best.score[2] && score[3] < best.score[3])))))));
-    if (better) best = { score, split, out: set.map((x, i) => ({ shift: x.shift, punches: got[i].flatMap((u) => u.ps) })) };
+    // như pickShiftSet (3 bước On39, không so giờ gần nhất) — chỉ so khi cùng nhận mọi cặp / lượt (miss bằng nhau)
+    const sc = { split: full === set.length ? full : 0, minLv, full, used, idx: set.map((x) => x.idx).sort((a, b) => a - b) };
+    if (!best || miss < best.miss || (miss === best.miss && betterSc(sc, best))) best = { ...sc, miss, out: set.map((x, i) => ({ shift: x.shift, punches: got[i].flatMap((u) => u.ps) })) };
   }
   return best ? best.out : [];
 }

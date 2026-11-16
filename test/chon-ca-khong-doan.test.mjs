@@ -225,8 +225,10 @@ test('Việc 4 · autoDetectShift so giờ theo vòng 24 giờ (S5)', () => {
   assert.equal(dò(BA4, '13:50', '00:10'), 'C14');
 });
 
-test('Việc 4 · autoDetectShift: mọi giờ cách các ca dưới 12 tiếng ra y như cách đo cũ', () => {
-  // cách đo cũ (không vòng) — chép lại phần chọn theo giờ vào / giờ ra của bản 1.33.10 cho ca không khai khung giờ
+// v1.35.10 (Anh 16/11/2026 "Đổi theo On39"): tìm 1 ca theo khung vào / ra của ca trước (On39), giờ gần nhất chỉ còn là bước cuối khi
+// giờ vào không trong khung vào của ca nào. Trước đây test đòi "y như cách đo cũ" — nay đòi: ngày làm thật (vào lệch −60…+90', ra lệch
+// −60…+120' hoặc chưa ra) bản mới ra ĐÚNG ca đã làm ít nhất bằng cách đo cũ ở mọi trường hợp, và đúng hơn ở lịch HC + Sáng + Chiều.
+test('Việc 4 · autoDetectShift theo khung vào / ra (On39): ngày làm thật không trường hợp nào kém cách đo cũ', () => {
   const m = (s) => { const [h, mi] = s.split(':').map(Number); return h * 60 + mi; };
   const cu = (cands, vao, ra) => {
     if (ra == null || cands.length === 1) return [...cands].sort((a, b) => Math.abs(m(a.start_time) - m(vao)) - Math.abs(m(b.start_time) - m(vao)))[0].code;
@@ -235,16 +237,24 @@ test('Việc 4 · autoDetectShift: mọi giờ cách các ca dưới 12 tiếng 
     return cands.map((s) => ({ s, sc: inW(m(ra), ...ow(s)) ? 2 : 0, od: Math.abs(m(s.end_time) - m(ra)), id: Math.abs(m(s.start_time) - m(vao)) }))
       .sort((a, b) => b.sc - a.sc || a.od - b.od || a.id - b.id)[0].s.code;
   };
-  const hh = (x) => `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`;
+  const hh = (x) => { x = ((x % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
   const sets = [BA4, [ca4('HC', '08:00', '17:00'), ca4('SA', '08:00', '12:00'), ca4('CH', '13:30', '17:30')], [ca4('HC', '08:00', '17:00'), ca4('DM', '19:00', '07:00')]];
-  let n = 0;
-  for (const cands of sets) for (let v = 0; v < 1440; v += 10) for (const r of [null, ...Array.from({ length: 24 }, (_, i) => i * 60 + 5)]) {
-    const far = cands.some((s) => Math.abs(m(s.start_time) - v) > 720 || (r != null && Math.abs(m(s.end_time) - r) > 720));
-    if (far) continue;
-    n++;
-    assert.equal(dò(cands, hh(v), r == null ? null : hh(r)), cu(cands, hh(v), r == null ? null : hh(r)), `${cands.map((s) => s.code)} vào ${hh(v)} ra ${r == null ? '-' : hh(r)}`);
-  }
-  assert.ok(n > 1000, 'đủ nhiều trường hợp trong ngày');
+  const kq = sets.map((cands) => {
+    let cuOk = 0, moiOk = 0;
+    for (const X of cands) {
+      const a = m(X.start_time); let b = m(X.end_time); if (b <= a) b += 1440;
+      for (let dv = -60; dv <= 90; dv += 10) for (const dr of [null, -60, -30, 0, 30, 60, 120]) {
+        const vao = hh(a + dv), ra = dr == null ? null : hh(b + dr);
+        const c = cu(cands, vao, ra), w = dò(cands, vao, ra);
+        if (c === X.code) cuOk++;
+        if (w === X.code) moiOk++;
+        assert.ok(w === X.code || c !== X.code, `${cands.map((s) => s.code)} làm ${X.code} vào ${vao} ra ${ra || '-'}: cũ đúng ${c}, mới ${w}`);
+      }
+    }
+    return [cuOk, moiOk];
+  });
+  assert.ok(kq[1][1] > kq[1][0], 'lịch HC + Sáng + Chiều: đúng hơn cách đo cũ');
+  assert.equal(dò(sets[1], '07:00', '17:30'), 'HC', 'trước: CH (cuối CH 17:30 gần giờ ra hơn)');
 });
 
 test('Việc 4 · nạp lượt máy: lịch nhiều ca có ca đêm (HC / DM, 3 ca) — ca đêm vào trễ 00:30 thuộc đêm hôm trước, trễ đủ phút', () => {
