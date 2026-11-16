@@ -483,11 +483,10 @@ function nearOtherShift(list, set, got, t, dayEnd, oneWin) {
   return false;
 }
 
-// CHẤM 4 LẦN → TÁCH CA (công tắc "split_four_punches", Cài đặt › Quy tắc tính công, MẶC ĐỊNH BẬT — Anh 16/11/2026).
+// CHẤM 4 LẦN → TÁCH CA như Wise Eye On39 (Anh 16/11/2026 — v1.35.4 có công tắc, v1.35.6 Anh chốt bỏ hẳn: luôn như vậy).
 // Lịch có cả ca Hành chính lẫn Sáng + Chiều: tính theo độ lệch thì HC luôn thắng (chỉ lệch 2 đầu ngày, Sáng + Chiều lệch thêm 2 lượt
 // trưa) → chấm 4 lần vẫn 1 dòng HC, về trưa muộn không bị trễ. Bật: tổ hợp ≥ 2 ca mà ca nào cũng ĐỦ vào–ra (lượt đầu – cuối của ca
 // cách nhau ≥ 30', 2 lượt quẹt trùng không tính là đủ) được ưu tiên trước; còn lại chọn như cũ (quên chấm trưa → vẫn HC đủ công).
-// opts.preferSplit do device-sync truyền vào; tắt / không truyền = như cũ.
 const SPLIT_MIN_SPAN = 30 * 60000;
 export function pickShiftSet(cands, punches, workDate, opts = {}) {
   const list = (cands || []).slice(0, 10).map((shift) => ({ shift, ...shiftBounds(workDate, shift) }));
@@ -524,7 +523,7 @@ export function pickShiftSet(cands, punches, workDate, opts = {}) {
       used += b == null ? 1 : 2;
       if (b != null && b - a >= SPLIT_MIN_SPAN) full++;
     });
-    const split = opts.preferSplit && set.length >= 2 && full === set.length ? set.length : 0;   // xem preferSplitOn
+    const split = set.length >= 2 && full === set.length ? set.length : 0;   // chấm đủ vào–ra mọi ca → tách ca (xem trên)
     const score = [dev, -used, set.length];
     const better = !best || split > best.split || (split === best.split && (score[0] < best.score[0] - 1e-9 || (Math.abs(score[0] - best.score[0]) < 1e-9 && (score[1] < best.score[1] || (score[1] === best.score[1] && score[2] < best.score[2])))));
     if (better) best = { score, split, out: set.map((x, i) => ({ shift: x.shift, punches: got[i] })) };
@@ -594,7 +593,7 @@ export function pickDirShiftSet(cands, punches, workDate, dir, dupOpt, opts = {}
       if (a != null && b != null && b - a >= SPLIT_MIN_SPAN) full++;
     });
     // chấm 4 lần → tách ca (như pickShiftSet): chỉ so khi cùng nhận mọi cặp / lượt (miss bằng nhau)
-    const split = opts.preferSplit && set.length >= 2 && full === set.length ? set.length : 0;
+    const split = set.length >= 2 && full === set.length ? set.length : 0;
     const score = [miss, dev, -used, set.length];
     const better = !best || score[0] < best.score[0] || (score[0] === best.score[0] && (split > best.split || (split === best.split && (score[1] < best.score[1] - 1e-9
       || (Math.abs(score[1] - best.score[1]) < 1e-9 && (score[2] < best.score[2] || (score[2] === best.score[2] && score[3] < best.score[3])))))));

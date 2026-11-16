@@ -941,8 +941,6 @@ function metrics(employeeId, workDate, inIso, outIso, presetShift, pairs = null)
 // quản trị đặt 0 (lưu đủ mọi lượt quẹt) thì lúc ghép cặp vẫn lọc lượt lặp dưới 5 phút để không lệch cặp.
 // Kiểu HR-ERP 4 lần quẹt: ca nghỉ trưa cố định + quy tắc nhiều lần vào/ra → mỗi cặp trừ giờ nghỉ, số lần quẹt lẻ lấy đầu → cuối (mặc định TẮT)
 export const pairsFixedBreakOn = () => getSetting('pairs_fixed_break', '0') === '1';
-// Chấm 4 lần → tách ca Sáng + Chiều thay vì 1 ca Hành chính (lịch có cả 3 ca) — MẶC ĐỊNH BẬT (Anh 16/11/2026), xem pickShiftSet
-export const preferSplitOn = () => getSetting('split_four_punches', '1') === '1';
 export const pairDup = () => parseInt(getSetting('punch_dedup_min', '15'), 10) || 5;
 // Ca NGÀY chạy 1 ca/ngày: nhận lượt quẹt tới hết ngày (về rất muộn vẫn có giờ ra)
 const isNightShift = (s) => !!(s.cross_midnight || s.end_time <= s.start_time);
@@ -1024,7 +1022,7 @@ function nightOutOnlyPunches(employeeId, workDate, usedTo = null) {
     const seen = new Map();
     for (const s of plan.shifts) for (const p of inWin(ruleWindow(workDate, s))) seen.set(p.punch_at, p);
     const picked = pickDirShiftSet(plan.shifts, [...seen.values()], workDate, dd.dir(machineMap), ioParamsFor(employeeId, workDate) || pairDup(),
-      { nextOutClaim: nextDayOutClaim(employeeId, workDate), preferSplit: preferSplitOn() });
+      { nextOutClaim: nextDayOutClaim(employeeId, workDate) });
     return picked.flatMap((x) => x.punches).sort((a, b) => (a.punch_at < b.punch_at ? -1 : 1));
   }
   const { winStart, winEnd, end } = ruleWindow(workDate, shift);
@@ -1368,10 +1366,9 @@ function rebuildDayCore(employeeId, workDate) {
     const dd = dayDirOf(plan);
     const outClaim = dd ? nextDayOutClaim(employeeId, workDate) : null;
     // (không biết hướng) chỉ chọn 1 ca ngày thì ca đó lấy lượt tới hết ngày → pickShiftSet cần biết các lượt đó (lượt sát giờ vào ca sau)
-    const split4 = preferSplitOn();
     const oneMemo = new Map();
     const oneWin = (s) => { if (!oneMemo.has(s.id)) { const w = ruleWindow(workDate, s, { toDayEnd: !isNightShift(s) }); oneMemo.set(s.id, punchesInWin(w.winStart, w.winEnd)); } return oneMemo.get(s.id); };
-    const pick = (ps) => (dd ? pickDirShiftSet(plan.shifts, ps, workDate, dd.dir(machineMap), dup, { nextOutClaim: outClaim, preferSplit: split4 }) : pickShiftSet(plan.shifts, ps, workDate, { oneWin, preferSplit: split4 }));
+    const pick = (ps) => (dd ? pickDirShiftSet(plan.shifts, ps, workDate, dd.dir(machineMap), dup, { nextOutClaim: outClaim }) : pickShiftSet(plan.shifts, ps, workDate, { oneWin }));
     let picked = lateNight ? [{ shift: lateNight, punches: prov }] : pick([...seen.values()]);
     // Ca gãy về muộn hơn cuối ca cuối + 4 tiếng (lateSplitTail): chọn lại bộ ca có cả lượt về muộn đó. Chỉ nhận khi ra ≥ 2 ca, ca nới là
     // ca cuối (ca Chiều nhận giờ ra 22:00) và GIỮ NGUYÊN các ca đã chọn theo khung thường (chỉ thêm lại ca cuối bị mất) — không thì

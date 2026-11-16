@@ -12,7 +12,7 @@ import { join } from 'node:path';
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-rs1211-'));
 process.env.DB_PATH = join(dir, 'test.db');
-const { db, initSchema, setSetting } = await import('../server/db.js');
+const { db, initSchema } = await import('../server/db.js');
 const { ingestAttlog } = await import('../server/device-sync.js');
 const { recomputeAttendance } = await import('../server/routes/admin/attendance.js');
 
@@ -153,12 +153,8 @@ test('lỗi 2 — giữ nguyên: đủ 4 lượt, chỉ làm 1 ca, quên chấm 
   assert.deepEqual(ca(W.SACH, ['03 08:00 v', '03 12:00 r', '03 22:00 r']), ['03[SA] 08:00→22:00 0.5c tc600']);
   // ca Chiều đã khai "Kết thúc ra" 20:00 → theo đúng khung đã khai
   assert.deepEqual(ca(W.SACHE, ['03 08:00 v', '03 12:00 r', '03 13:30 v', '03 22:00 r']), ['03[SA] 08:00→22:00 0.5c tc600']);
-  // lịch Sáng / Chiều / HC: chấm đủ trưa (08 · 12 · 13:30 · 16:30) → công tắc "chấm 4 lần tách ca" (mặc định BẬT, Anh 16/11/2026)
-  // ra Sáng + Chiều; tắt công tắc thì như cũ: đã chọn HC theo khung thường thì không đổi sang Sáng + Chiều
+  // lịch Sáng / Chiều / HC: chấm đủ trưa (08 · 12 · 13:30 · 16:30) → Sáng + Chiều như On39 (Anh 16/11/2026, trước: HC 1c tc300)
   assert.deepEqual(ca(W.SACHHC, ['03 08:00 v', '03 12:00 r', '03 13:30 v', '03 16:30 r', '03 22:00 r']), ['03[SA] 08:00→12:00 0.5c', '03[CH] 13:30→22:00 0.5c tc270']);
-  setSetting('split_four_punches', '0');
-  try { assert.deepEqual(ca(W.SACHHC, ['03 08:00 v', '03 12:00 r', '03 13:30 v', '03 16:30 r', '03 22:00 r']), ['03[HC] 08:00→22:00 1c tc300']); }
-  finally { setSetting('split_four_punches', '1'); }
 });
 
 test('lỗi 2 — giữ nguyên: lượt 23:50 là giờ vào ca 00:00 hôm sau, không thành giờ ra ca Chiều', () => {

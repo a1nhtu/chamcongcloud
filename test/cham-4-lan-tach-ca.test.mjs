@@ -1,4 +1,4 @@
-// CHẤM 4 LẦN → TÁCH CA (Anh 16/11/2026, công tắc "split_four_punches" MẶC ĐỊNH BẬT).
+// CHẤM 4 LẦN → TÁCH CA như Wise Eye On39 (Anh 16/11/2026; v1.35.4 có công tắc, v1.35.6 bỏ hẳn — luôn như vậy).
 // Lịch trình có cả ca Hành chính lẫn ca Sáng + Chiều: trước đây chọn theo độ lệch nên HC luôn thắng → chấm 4 lần vẫn 1 dòng HC,
 // về trưa muộn không bị trễ. Nay: chấm đủ 4 lần (mỗi buổi đủ vào–ra) → 2 dòng Sáng + Chiều; chấm 2 lần / quẹt trùng / lẻ lượt → như cũ.
 import { test, before, after } from 'node:test';
@@ -9,8 +9,8 @@ import { join } from 'node:path';
 
 const dir = mkdtempSync(join(tmpdir(), 'dgp-4lan-'));
 process.env.DB_PATH = join(dir, 'test.db');
-const { db, initSchema, setSetting } = await import('../server/db.js');
-const { ingestAttlog, preferSplitOn } = await import('../server/device-sync.js');
+const { db, initSchema } = await import('../server/db.js');
+const { ingestAttlog } = await import('../server/device-sync.js');
 const { recomputeAttendance } = await import('../server/routes/admin/attendance.js');
 const { pickShiftSet, pickDirShiftSet, stateDir } = await import('../server/attendance-calc.js');
 
@@ -45,33 +45,29 @@ const cong = (e) => db.prepare('SELECT * FROM attendance WHERE employee_id=? ORD
   .map((r) => `${codeOf[r.shift_id] || '-'} ${hm(r.check_in_at)}→${hm(r.check_out_at)} ${r.work_unit}c${r.late_min ? ' trễ' + r.late_min : ''}${r.early_min ? ' sớm' + r.early_min : ''}`);
 const tinhLai = (e) => recomputeAttendance({ from: '2026-11-12', to: '2026-11-12', ids: [e.id] });
 
-test('công tắc mặc định BẬT', () => { assert.equal(preferSplitOn(), true); });
-
 test('chọn ca (không biết hướng): 4 lần → Sáng + Chiều; 2 lần / quẹt trùng / lẻ lượt → như cũ', () => {
   const sh = (c) => db.prepare('SELECT * FROM shifts WHERE id=?').get(S[c]);
   const P = (t) => ({ punch_at: new Date(`2026-11-12T${t}:00+07:00`).toISOString() });
-  const chon = (list, on) => pickShiftSet(['HC', 'SA', 'CH'].map(sh), list.map(P), '2026-11-12', { preferSplit: on }).map((x) => codeOf[x.shift.id] + x.punches.length).join('+');
-  assert.equal(chon(['07:25', '11:25', '13:01', '16:54'], true), 'SA2+CH2');
-  assert.equal(chon(['07:25', '11:25', '13:01', '16:54'], false), 'HC4', 'tắt: như cũ');
-  assert.equal(chon(['07:25', '11:35', '13:20', '16:54'], true), 'SA2+CH2');
-  assert.equal(chon(['07:25', '16:54'], true), 'HC2', 'quên chấm trưa → vẫn HC');
-  assert.equal(chon(['07:25', '07:26', '16:54', '16:55'], true), 'HC4', 'quẹt trùng không tính là đủ vào–ra');
-  assert.equal(chon(['07:25', '11:25', '16:54'], true), 'HC3', 'lẻ lượt → như cũ');
-  assert.equal(chon(['07:25', '11:30'], true), 'SA2');
-  assert.equal(chon(['13:00', '17:00'], true), 'CH2');
+  const chon = (list) => pickShiftSet(['HC', 'SA', 'CH'].map(sh), list.map(P), '2026-11-12').map((x) => codeOf[x.shift.id] + x.punches.length).join('+');
+  assert.equal(chon(['07:25', '11:25', '13:01', '16:54']), 'SA2+CH2');
+  assert.equal(chon(['07:25', '11:35', '13:20', '16:54']), 'SA2+CH2');
+  assert.equal(chon(['07:25', '16:54']), 'HC2', 'quên chấm trưa → vẫn HC');
+  assert.equal(chon(['07:25', '07:26', '16:54', '16:55']), 'HC4', 'quẹt trùng không tính là đủ vào–ra');
+  assert.equal(chon(['07:25', '11:25', '16:54']), 'HC3', 'lẻ lượt → như cũ');
+  assert.equal(chon(['07:25', '11:30']), 'SA2');
+  assert.equal(chon(['13:00', '17:00']), 'CH2');
 });
 
 test('chọn ca (quy tắc biết hướng — máy / phím vào ra): 4 lần → Sáng + Chiều', () => {
   const sh = (c) => db.prepare('SELECT * FROM shifts WHERE id=?').get(S[c]);
   const P = (s) => { const [t, k] = s.split(' '); return { punch_at: new Date(`2026-11-12T${t}:00+07:00`).toISOString(), status: k === 'r' ? 1 : 0 }; };
-  const chon = (list, on) => pickDirShiftSet(['HC', 'SA', 'CH'].map(sh), list.map(P), '2026-11-12', stateDir, { min: 30, gap: 30, max: 960 }, { preferSplit: on })
+  const chon = (list) => pickDirShiftSet(['HC', 'SA', 'CH'].map(sh), list.map(P), '2026-11-12', stateDir, { min: 30, gap: 30, max: 960 })
     .map((x) => codeOf[x.shift.id] + x.punches.length).join('+');
-  assert.equal(chon(['07:25 v', '11:25 r', '13:01 v', '16:54 r'], true), 'SA2+CH2');
-  assert.equal(chon(['07:25 v', '11:25 r', '13:01 v', '16:54 r'], false), 'HC4');
-  assert.equal(chon(['07:25 v', '16:54 r'], true), 'HC2');
+  assert.equal(chon(['07:25 v', '11:25 r', '13:01 v', '16:54 r']), 'SA2+CH2');
+  assert.equal(chon(['07:25 v', '16:54 r']), 'HC2');
 });
 
-test('dựng công thật: 4 lần → 2 dòng, về trưa muộn bị trễ buổi chiều; tắt công tắc + Tính lại → 1 dòng HC', () => {
+test('dựng công thật: 4 lần → 2 dòng, về trưa muộn bị trễ buổi chiều; chấm 2 lần → HC', () => {
   const a = nv();
   cham(a, ['07:25', '11:25', '13:20', '16:54']);
   assert.deepEqual(cong(a), ['SA 07:25→11:25 0.48c sớm5', 'CH 13:20→16:54 0.44c trễ20 sớm6']);
@@ -80,9 +76,4 @@ test('dựng công thật: 4 lần → 2 dòng, về trưa muộn bị trễ bu�
   const b = nv();
   cham(b, ['07:25', '16:54']);
   assert.deepEqual(cong(b).map((x) => x.split(' ')[0]), ['HC'], 'chấm 2 lần → HC');
-  setSetting('split_four_punches', '0');
-  try {
-    tinhLai(a);
-    assert.deepEqual(cong(a).map((x) => x.split(' ').slice(0, 2).join(' ')), ['HC 07:25→16:54'], 'tắt: như cũ');
-  } finally { setSetting('split_four_punches', '1'); }
 });

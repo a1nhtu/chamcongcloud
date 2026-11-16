@@ -497,7 +497,6 @@ async function pageSettings() {
   const wkNeedChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.weekend_need_pairs ?? '0') === '1' ? { checked: '' } : {}) });
   const pfbChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.pairs_fixed_break ?? '0') === '1' ? { checked: '' } : {}) });
   const msaChk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.multi_shift_assist ?? '0') === '1' ? { checked: '' } : {}) });
-  const sp4Chk = el('input', { type: 'checkbox', style: 'width:auto', ...(String(s.split_four_punches ?? '1') === '1' ? { checked: '' } : {}) });   // mặc định BẬT
   // Phòng ban đi làm cuối tuần vẫn tính như NGÀY THƯỜNG (VD bảo vệ trực CN) — ngoại lệ của quy tắc trên
   const wkNormal = new Set((s.weekend_normal_depts || []).map(String));
   const wkNormBox = el('div', { style: 'display:flex;gap:6px 14px;flex-wrap:wrap;max-height:140px;overflow:auto' }, el('span', { class: 'map-hint' }, 'Đang tải phòng ban…'));
@@ -534,7 +533,7 @@ async function pageSettings() {
   const saveCalc = el('button', { class: 'btn' }, 'Lưu quy tắc');
   saveCalc.onclick = async () => {
     const weekend_days = [...document.querySelectorAll('.wk-day:checked')].map(x => x.value).join(',');
-    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, split_four_punches: sp4Chk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value, pay_hours_per_day: hpdI.value, night_pay: nightChk.checked, night_pct: nightPctI.value, night_ot_pct: nightOtPctI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
+    try { await api('/admin/settings', { method: 'PUT', body: { weekend_days, weekend_work_as_ot: wkOtChk.checked, weekend_ot_before: wkBeforeChk.checked, weekend_work_exact: wkExactChk.checked, weekend_need_pairs: wkNeedChk.checked, pairs_fixed_break: pfbChk.checked, multi_shift_assist: msaChk.checked, workunit_rounding: roundI.value, workunit_rounding_mode: roundM.value, ot_rounding: otRoundI.value, ot_rounding_mode: otRoundM.value, ot_rounding_type: otTypeSel.value, ot_rounding_block: otBlockI.value, late_round_block: lateBlockI.value, weekend_normal_depts: [...document.querySelectorAll('.wk-norm:checked')].map((x) => x.value), pay_period_start_day: payStartI.value, ot_rate_weekday: otWdI.value, ot_rate_weekend: otWkI.value, ot_rate_holiday: otHoI.value, pay_hours_per_day: hpdI.value, night_pay: nightChk.checked, night_pct: nightPctI.value, night_ot_pct: nightOtPctI.value } }); toast('Đã lưu quy tắc. Bấm "↻ Tính lại công tất cả" để áp cho dữ liệu cũ', 'ok'); }
     catch (e) { toast(e.message, 'err'); }
   };
   const recalcBtn = el('button', { class: 'btn ghost' }, '↻ Tính lại công tất cả');
@@ -561,9 +560,6 @@ async function pageSettings() {
           el('label', { style: 'display:flex;gap:8px;align-items:flex-start;cursor:pointer;font-weight:600;color:var(--ink)' }, msaChk,
             el('div', {}, 'Bảng phân ca: đánh dấu ca đủ / thiếu / chồng giờ + Ctrl + bấm mã ca để cộng thêm ca',
               el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Ô gán từ 2 ca có dấu ✓ (đủ ca), ✗ (ngày đã chấm mà thiếu công của ca đó), ⚠ (ca chồng giờ). Rê chuột vào ô xem chi tiết. Nhập Excel báo thêm ca chồng giờ.')))),
-        el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:12px;cursor:pointer;font-weight:600;color:var(--ink)' }, sp4Chk,
-          el('div', {}, 'Lịch trình có cả ca Hành chính và ca Sáng + Chiều: chấm đủ 4 lần thì tách thành 2 ca',
-            el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Chấm 4 lần → 2 dòng Sáng + Chiều, tính trễ / sớm / tăng ca từng buổi (về trưa muộn bị tính trễ). Chấm 2 lần (quên chấm trưa) → vẫn ca Hành chính. Tắt: luôn chọn ca lệch giờ ít nhất (chấm 4 lần thường vẫn ra Hành chính).'))),
         el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin-top:10px;cursor:pointer;font-weight:600;color:var(--ink)' }, wkOtChk,
           el('div', {}, 'Đi làm vào ngày cuối tuần tính là TĂNG CA',
             el('div', { style: 'font-size:12.5px;color:var(--muted);font-weight:400' }, 'Cả thời gian làm ngày đã tích ở trên thành tăng ca cuối tuần (không tính công thường). Báo cáo quy đổi 8 giờ = 1 công ở cột "Công TC cuối tuần". VD tích T7 → đi làm thứ 7 là tăng ca.'))),
