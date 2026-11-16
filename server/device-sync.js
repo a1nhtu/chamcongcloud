@@ -2,7 +2,7 @@
 // Parse dòng ATTLOG → lưu punch → dựng lại bản ghi chấm công (vào sớm nhất / ra muộn nhất).
 import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
-import { db, getSetting, setSetting, empHourly, hourlyNoOvernight, USER_TZ } from './db.js';
+import { db, getSetting, setSetting, empHourly, hourlyNoOvernight, USER_TZ, nearestAllowedOffice } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, pickDirShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn, fitWindows } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
@@ -1295,24 +1295,37 @@ export function rebuildDays(keys) {
 // quẹt máy theo đúng quy tắc của ca. Chỉ chép dòng chấm điện thoại CHƯA gộp (dòng đã dựng từ lượt chấm có shift_source='device').
 const VIRT_SERIALS = "('TAY_VAO','TAY_RA','DT_VAO','DT_RA')";
 const PHONE_ROW = "(COALESCE(check_in_photo,'')<>'' OR COALESCE(check_out_photo,'')<>'')";
-// Ghi 1 lượt chấm điện thoại thành lượt của máy ảo DT_VAO / DT_RA, KÈM ẢNH CHẤM (gộp ngày rồi vẫn còn ảnh của từng lượt)
-function insPhonePunch(pin, employeeId, kind, iso, photo) {
+// Ghi 1 lượt chấm điện thoại thành lượt của máy ảo DT_VAO / DT_RA, KÈM ẢNH CHẤM + VỊ TRÍ (gộp ngày rồi vẫn còn ảnh, trong / ngoài
+// định vị của từng lượt). geo = { lat, lng, office_id, distance_m, outside } — thiếu office / outside (dòng công bản cũ) thì tính lại.
+function insPhonePunch(pin, employeeId, kind, iso, photo, geo) {
   const serial = kind === 'out' ? 'DT_RA' : 'DT_VAO';
   const wd = new Date(Date.parse(iso) + 7 * 3600000).toISOString().slice(0, 10);
-  db.prepare('INSERT OR IGNORE INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id, photo) VALUES (?,?,?,?,?,0,?,?)')
-    .run(serial, pin, iso, wd, kind === 'out' ? 1 : 0, employeeId, photo || null);
+  let g = geo && geo.lat != null && geo.lng != null ? { ...geo } : null;
+  if (g && g.outside == null) {
+    const n = nearestAllowedOffice(employeeId, g.lat, g.lng);
+    g = { ...g, office_id: n.office?.id ?? null, distance_m: g.distance_m ?? n.distance, outside: n.outside };
+  }
+  db.prepare('INSERT OR IGNORE INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id, photo, lat, lng, office_id, distance_m, outside) VALUES (?,?,?,?,?,0,?,?,?,?,?,?,?)')
+    .run(serial, pin, iso, wd, kind === 'out' ? 1 : 0, employeeId, photo || null, g?.lat ?? null, g?.lng ?? null, g?.office_id ?? null, g?.distance_m ?? null, g ? (g.outside ? 1 : 0) : null);
   if (photo) db.prepare("UPDATE device_punches SET photo=? WHERE serial=? AND pin=? AND punch_at=? AND COALESCE(photo,'')=''").run(photo, serial, pin, iso);   // lượt đã chép từ bản cũ (chưa có ảnh)
+  if (g) db.prepare('UPDATE device_punches SET lat=?, lng=?, office_id=?, distance_m=?, outside=? WHERE serial=? AND pin=? AND punch_at=? AND lat IS NULL')
+    .run(g.lat, g.lng, g.office_id ?? null, g.distance_m ?? null, g.outside ? 1 : 0, serial, pin, iso);   // lượt đã có từ bản cũ (chưa có vị trí)
 }
+// Vị trí giờ VÀO / RA của 1 dòng công chấm điện thoại → geo cho insPhonePunch
+const inGeo = (a) => ({ lat: a.check_in_lat, lng: a.check_in_lng, office_id: a.check_in_office_id, distance_m: a.check_in_distance_m, outside: a.check_in_office_id == null ? null : a.check_in_outside });
+const outGeo = (a) => ({ lat: a.check_out_lat, lng: a.check_out_lng, office_id: a.check_out_office_id, distance_m: a.check_out_distance_m, outside: a.check_out_outside });
 const punchPin = (employeeId) => { const e = db.prepare('SELECT code, device_pin FROM employees WHERE id=?').get(employeeId); return e ? String(e.device_pin || e.code) : null; };
 // Chấm RA bằng điện thoại vào DÒNG CÔNG DỰNG TỪ MÁY (vào bằng máy, ra bằng điện thoại): giờ ra điện thoại chỉ nằm ở dòng công —
 // lần dựng lại sau (máy đẩy lượt mới, Tính lại) sẽ đè mất. Ghi ngay thành lượt DT_RA để giờ ra + ảnh còn nguyên khi ghép cặp.
-export function recordPhonePunch(employeeId, kind, iso, photo) {
+export function recordPhonePunch(employeeId, kind, iso, photo, geo) {
   const pin = punchPin(employeeId);
-  if (pin && iso) insPhonePunch(pin, employeeId, kind, iso, photo);
+  if (pin && iso) insPhonePunch(pin, employeeId, kind, iso, photo, geo);
 }
 function seedPhonePunches(employeeId, workDate) {
   if (!db.prepare(`SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ${VIRT_SERIALS} LIMIT 1`).get(employeeId, workDate)) return;
-  const rows = db.prepare(`SELECT check_in_at, check_out_at, check_in_photo, check_out_photo, shift_source FROM attendance
+  const rows = db.prepare(`SELECT check_in_at, check_out_at, check_in_photo, check_out_photo, shift_source,
+    check_in_lat, check_in_lng, check_in_office_id, check_in_distance_m, check_in_outside,
+    check_out_lat, check_out_lng, check_out_office_id, check_out_distance_m, check_out_outside FROM attendance
     WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND ${PHONE_ROW}`).all(employeeId, workDate);
   if (!rows.length) return;
   const pin = punchPin(employeeId); if (!pin) return;
@@ -1320,11 +1333,11 @@ function seedPhonePunches(employeeId, workDate) {
   for (const a of rows) {
     if (a.shift_source === 'device') {
       // dòng dựng từ máy mà giờ RA là của điện thoại (bản cũ chưa ghi lượt DT_RA lúc chấm) và chưa bị đè → cứu lại giờ ra đó
-      if (a.check_out_at && a.check_out_photo && !have.has(a.check_out_at)) insPhonePunch(pin, employeeId, 'out', a.check_out_at, a.check_out_photo);
+      if (a.check_out_at && a.check_out_photo && !have.has(a.check_out_at)) insPhonePunch(pin, employeeId, 'out', a.check_out_at, a.check_out_photo, outGeo(a));
       continue;
     }
-    if (a.check_in_at && a.check_in_photo) insPhonePunch(pin, employeeId, 'in', a.check_in_at, a.check_in_photo);
-    if (a.check_out_at && a.check_out_photo) insPhonePunch(pin, employeeId, 'out', a.check_out_at, a.check_out_photo);
+    if (a.check_in_at && a.check_in_photo) insPhonePunch(pin, employeeId, 'in', a.check_in_at, a.check_in_photo, inGeo(a));
+    if (a.check_out_at && a.check_out_photo) insPhonePunch(pin, employeeId, 'out', a.check_out_at, a.check_out_photo, outGeo(a));
   }
 }
 
@@ -1466,9 +1479,10 @@ function rebuildDayCore(employeeId, workDate) {
   upsertRow(employeeId, workDate, shift?.id ?? null, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs), existing?.id);
   if (mixed && existing) {
     // các phiên chấm điện thoại khác trong ngày đã gộp vào dòng này → bỏ (không thì tính trùng công); giữ lại ảnh / vị trí chấm RA sau cùng
-    const last = db.prepare(`SELECT check_out_photo, check_out_lat, check_out_lng, check_out_distance_m FROM attendance
+    const last = db.prepare(`SELECT check_out_photo, check_out_lat, check_out_lng, check_out_distance_m, check_out_office_id, check_out_outside FROM attendance
       WHERE employee_id=? AND work_date=? AND id<>? AND (manual IS NULL OR manual=0) AND COALESCE(check_out_photo,'')<>'' ORDER BY check_out_at DESC LIMIT 1`).get(employeeId, workDate, existing.id);
-    if (last) db.prepare('UPDATE attendance SET check_out_photo=?, check_out_lat=?, check_out_lng=?, check_out_distance_m=? WHERE id=?').run(last.check_out_photo, last.check_out_lat, last.check_out_lng, last.check_out_distance_m, existing.id);
+    if (last) db.prepare('UPDATE attendance SET check_out_photo=?, check_out_lat=?, check_out_lng=?, check_out_distance_m=?, check_out_office_id=?, check_out_outside=? WHERE id=?')
+      .run(last.check_out_photo, last.check_out_lat, last.check_out_lng, last.check_out_distance_m, last.check_out_office_id, last.check_out_outside, existing.id);
     db.prepare('DELETE FROM attendance WHERE employee_id=? AND work_date=? AND id<>? AND (manual IS NULL OR manual=0)').run(employeeId, workDate, existing.id);
   }
   // 1 ca/ngày chỉ có 1 dòng dựng từ máy. Đổi từ lịch NHIỀU ca/ngày (Sáng + Chiều) sang 1 ca / bỏ gán (tự dò) rồi "Tính lại": trước đây

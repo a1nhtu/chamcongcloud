@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isMainThread } from 'node:worker_threads';
 import { HR_FIELD_KEYS } from './hr-rules.js';
+import { distanceMeters } from './util.js';
 import { MULTI, ROOT, dataDir as tenantDataDir, needTenant, cfg } from './tenant.js';
 
 const ROOT_DATA = join(ROOT, 'data');
@@ -544,6 +545,16 @@ function migrateColumns() {
   add('employees', 'att_mode', "TEXT NOT NULL DEFAULT ''");
   // Ảnh chấm của lượt chấm ĐIỆN THOẠI đã gộp vào ngày có quẹt máy (máy ảo DT_VAO / DT_RA) → Tổng quan hiện ảnh cạnh từng giờ
   add('device_punches', 'photo', 'TEXT');
+  // Vị trí lượt chấm ĐIỆN THOẠI (DT_VAO / DT_RA) đã gộp với quẹt máy → Tổng quan hiện trong / ngoài định vị cạnh từng giờ
+  add('device_punches', 'lat', 'REAL');
+  add('device_punches', 'lng', 'REAL');
+  add('device_punches', 'office_id', 'INTEGER');
+  add('device_punches', 'distance_m', 'INTEGER');
+  add('device_punches', 'outside', 'INTEGER');
+  // Giờ RA chấm điện thoại: định vị đã so + trong / ngoài (giờ VÀO có sẵn check_in_office_id / check_in_outside).
+  // NULL = lượt ra cũ chưa lưu → fillCheckoutGeo() tính bù lúc xem Tổng quan.
+  add('attendance', 'check_out_office_id', 'INTEGER');
+  add('attendance', 'check_out_outside', 'INTEGER');
   // Lương theo giờ (dùng cho chế độ chấm công 'hourly')
   add('salary_configs', 'hourly_rate', 'REAL NOT NULL DEFAULT 0');
   // Đánh dấu bản ghi chấm công do admin thêm/sửa tay + ghi chú lý do
@@ -1412,4 +1423,31 @@ export function allowedOffices(employeeId) {
     WHERE eo.employee_id = ? AND o.active = 1 ORDER BY o.name`).all(employeeId);
   if (rows.length) return rows;
   return db.prepare('SELECT * FROM offices WHERE active = 1 ORDER BY name').all();
+}
+
+// Định vị GẦN NHẤT trong danh sách NV được phép chấm (chưa cấu hình → tất cả định vị).
+// Trả { office, distance, outside } — outside=1 nếu xa hơn bán kính của định vị gần nhất.
+export function nearestAllowedOffice(employeeId, lat, lng) {
+  const offices = allowedOffices(employeeId);
+  if (!offices.length) return { office: null, distance: null, outside: 0 };
+  let best = null;
+  for (const o of offices) {
+    const d = distanceMeters(lat, lng, o.lat, o.lng);
+    if (!best || d < best.distance) best = { office: o, distance: d };
+  }
+  return { office: best.office, distance: best.distance, outside: best.distance > best.office.radius_m ? 1 : 0 };
+}
+
+// Lượt chấm RA điện thoại của bản cũ (chỉ lưu toạ độ + khoảng cách) → tính bù định vị đã so + trong / ngoài rồi lưu luôn.
+// Chỉ chạm các dòng trong khoảng ngày đang xem (Tổng quan) nên nhanh; lần sau không phải tính lại.
+export function fillCheckoutGeo(fromDate, toDate = fromDate) {
+  const rows = db.prepare(`SELECT id, employee_id, check_out_lat, check_out_lng FROM attendance
+    WHERE work_date BETWEEN ? AND ? AND check_out_lat IS NOT NULL AND check_out_lng IS NOT NULL AND check_out_outside IS NULL`).all(fromDate, toDate);
+  if (!rows.length) return 0;
+  const upd = db.prepare('UPDATE attendance SET check_out_office_id=?, check_out_outside=? WHERE id=?');
+  for (const a of rows) {
+    const g = nearestAllowedOffice(a.employee_id, a.check_out_lat, a.check_out_lng);
+    upd.run(g.office?.id ?? null, g.outside, a.id);
+  }
+  return rows.length;
 }

@@ -75,9 +75,10 @@ test('giao diện: ô địa chỉ nhận dán link / toạ độ và gọi API 
 });
 
 test('Tổng quan: chấm ngoài VP ghi rõ so với định vị nào + nút mở Google Maps chỗ chấm (16/11, thephongai)', () => {
+  // 16/11 (sau): vị trí hiện dưới TỪNG giờ chấm (geoBlock) thay cho 1 cột "Vị trí" chỉ của giờ vào — test vi-tri-tung-gio-cham.test.mjs
   const ui = readFileSync(new URL('../public/admin-parts/10-tong-quan.js', import.meta.url), 'utf8');
-  assert.match(ui, /function locCell\(r\)/);
-  assert.match(ui, /' · so với ' \+ r\.in_office/);
+  assert.match(ui, /function geoBlock\(g, t\)/);
+  assert.match(ui, /\(g\.out \? 'so với ' : ''\) \+ g\.office/);
   assert.match(ui, /google\.com\/maps\/search\/\?api=1&query=/);
   const rep = readFileSync(new URL('../server/routes/reports.js', import.meta.url), 'utf8');
   assert.match(rep, /SELECT a\.\*, e\.code, e\.full_name, e\.department, oi\.name AS in_office/, 'API Tổng quan phải trả toạ độ lượt chấm + tên định vị');

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
-import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren, splitDeptList } from '../db.js';
+import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren, splitDeptList, fillCheckoutGeo } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
 import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs, idmRows, stateRows } from '../attendance-calc.js';
@@ -1736,7 +1736,9 @@ r.get('/dashboard', (req, res) => {
     " WHERE a.work_date = ? AND (a.check_in_at IS NOT NULL OR a.check_out_at IS NOT NULL) AND e.active = 1" + adminAttWhere('e.role')
   ).get(today).c;
   const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0').get(today).c;
-  const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND check_in_outside = 1').get(today).c;
+  // Chấm ngoài VP: giờ VÀO hoặc giờ RA nằm ngoài định vị (lượt ra bản cũ chưa có cờ → tính bù trước khi đếm)
+  fillCheckoutGeo(today);
+  const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND (check_in_outside = 1 OR check_out_outside = 1)').get(today).c;
   const pendingLeaves = db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'").get().c;
   // includeAdmin: popup "Chưa chấm" phải dùng CÙNG bộ lọc vai trò với totalEmp (bật "Tính công cho cả Admin" thì kể cả admin)
   res.json({ today, totalEmp, checkedIn, notYet: Math.max(0, totalEmp - checkedIn), late, outside, pendingLeaves, includeAdmin: getSetting('payroll_include_admin', '0') === '1' });
@@ -1755,6 +1757,7 @@ r.get('/attendance', (req, res) => {
   const args = [day || month + '%'];
   if (dept) { sql += ' AND e.department = ?'; args.push(dept); }
   sql += ' ORDER BY a.work_date DESC, e.full_name';
+  fillCheckoutGeo(day || month + '-01', day || month + '-31');   // giờ RA bản cũ: tính bù trong / ngoài định vị
   const marks = new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE work_date ${day ? '=' : 'LIKE'} ?`).all(day || month + '%').map((m) => m.employee_id + '|' + m.work_date));
   let raw = db.prepare(sql).all(...args);
   if (req.forceVirt) {   // tài khoản kiểm tra: danh sách Tổng quan cũng là công ảo, không dấu sửa tay
@@ -1772,7 +1775,7 @@ r.get('/attendance', (req, res) => {
   };
   // Ngày VỪA chấm điện thoại VỪA quẹt máy (gộp 1 dòng): ảnh chấm của TỪNG lượt điện thoại (máy ảo DT_VAO / DT_RA) → hiện cạnh giờ đó.
   // Lượt gộp từ bản cũ (chưa lưu ảnh theo lượt): lượt VÀO trùng giờ vào dòng công lấy ảnh vào, lượt RA điện thoại cuối lấy ảnh ra.
-  const dtOf = timesOf ? new Map(db.prepare("SELECT employee_id, punch_at, serial, photo FROM device_punches WHERE work_date = ? AND serial IN ('DT_VAO','DT_RA')").all(day)
+  const dtOf = day ? new Map(db.prepare("SELECT employee_id, punch_at, serial, photo, lat, lng, office_id, distance_m, outside FROM device_punches WHERE work_date = ? AND serial IN ('DT_VAO','DT_RA')").all(day)
     .map((p) => [p.employee_id + '|' + p.punch_at, p])) : null;
   const punchPhotos = (a, ts) => {
     if (!ts || !dtOf) return undefined;
@@ -1787,10 +1790,28 @@ r.get('/attendance', (req, res) => {
     });
     return ph.some(Boolean) ? ph : undefined;
   };
+  // VỊ TRÍ TỪNG GIỜ CHẤM (Tổng quan hiện trong / ngoài định vị + nút bản đồ dưới mỗi giờ): { lat, lng, dist, out, office } | null
+  const offName = new Map(db.prepare('SELECT id, name FROM offices').all().map((o) => [o.id, o.name]));
+  const mkGeo = (lat, lng, officeId, dist, out) => (lat == null || lng == null ? null
+    : { lat, lng, dist: dist ?? null, out: out ? 1 : 0, office: (officeId != null && offName.get(officeId)) || '' });
+  const inG = (a) => mkGeo(a.check_in_lat, a.check_in_lng, a.check_in_office_id, a.check_in_distance_m, a.check_in_outside);
+  const outG = (a) => mkGeo(a.check_out_lat, a.check_out_lng, a.check_out_office_id, a.check_out_distance_m, a.check_out_outside);
+  // Giờ t của dòng công a: lượt điện thoại (DT_VAO / DT_RA) có vị trí riêng → lấy của lượt; dòng chấm điện thoại thì giờ vào / ra
+  // lấy vị trí của dòng. Dòng dựng từ máy: chỉ giờ là lượt điện thoại mới có vị trí (lượt quẹt máy không có GPS).
+  const geoAt = (a, t) => {
+    if (!t) return null;
+    const dt = dtOf ? dtOf.get(a.employee_id + '|' + t) : null;
+    if (dt && dt.lat != null) return mkGeo(dt.lat, dt.lng, dt.office_id, dt.distance_m, dt.outside);
+    const phone = a.shift_source !== 'device';
+    if (t === a.check_in_at && (phone || (dt && dt.serial === 'DT_VAO'))) return inG(a);
+    if (t === a.check_out_at && (phone || (dt && dt.serial === 'DT_RA'))) return outG(a);
+    return null;
+  };
   const rows = raw.map((a) => {
     const ts = dayTs(a);
     return { ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
-      check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: ts ? ts.map(isoToVnHM) : undefined, punch_photos: punchPhotos(a, ts) };
+      check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: ts ? ts.map(isoToVnHM) : undefined, punch_photos: punchPhotos(a, ts),
+      in_geo: geoAt(a, a.check_in_at), out_geo: geoAt(a, a.check_out_at), punch_geos: ts ? ts.map((t) => geoAt(a, t)) : undefined };
   });
   res.json({ month, rows });
 });

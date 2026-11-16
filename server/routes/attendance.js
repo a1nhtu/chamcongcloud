@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { db, getSetting, allowedOffices, empAttMode, empHourly, isWeekendNormalEmp, hourlyOvernight, hourlyNoOvernight } from '../db.js';
+import { db, getSetting, nearestAllowedOffice, empAttMode, empHourly, isWeekendNormalEmp, hourlyOvernight, hourlyNoOvernight } from '../db.js';
 import { resolveEffectiveShift, resolveDayShifts, getShift } from '../shift-resolver.js';
 import { authRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { savePhoto } from '../storage.js';
-import { vnDateStr, nowIso, distanceMeters } from '../util.js';
+import { vnDateStr, nowIso } from '../util.js';
 import { computeLate, computeCheckout, ruleWindow, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom, payrollCtx, computeDayMetrics, standardMinutesFrom } from '../day-metrics.js';
@@ -45,19 +45,6 @@ function dayFlags(date, empId = null) {
 function otTypeOf(date, empId = null) {
   const f = dayFlags(date, empId);
   return f.isHoliday ? 'le' : f.isWeekend ? 'cuoi_tuan' : 'thuong';
-}
-
-// Định vị GẦN NHẤT trong danh sách NV được phép chấm (chưa cấu hình → tất cả định vị).
-// Trả { office, distance, outside } — outside=1 nếu xa hơn bán kính của định vị gần nhất.
-function nearestAllowedOffice(employeeId, lat, lng) {
-  const offices = allowedOffices(employeeId);
-  if (!offices.length) return { office: null, distance: null, outside: 0 };
-  let best = null;
-  for (const o of offices) {
-    const d = distanceMeters(lat, lng, o.lat, o.lng);
-    if (!best || d < best.distance) best = { office: o, distance: d };
-  }
-  return { office: best.office, distance: best.distance, outside: best.distance > best.office.radius_m ? 1 : 0 };
 }
 
 // ---- Khoá thiết bị (chống chấm hộ) ----
@@ -336,8 +323,8 @@ r.post('/check-out', (req, res) => {
   const shift = rs.shift;
 
   // Định vị GẦN NHẤT trong các định vị NV được phép chấm
-  const { office, distance } = nearestAllowedOffice(req.user.id, lat, lng);
-  if (office && distance > office.radius_m && getSetting('geofence_enforce', '0') === '1') {
+  const { office, distance, outside } = nearestAllowedOffice(req.user.id, lat, lng);
+  if (office && outside && getSetting('geofence_enforce', '0') === '1') {
     return res.status(400).json({ error: `Bạn đang cách "${office.name}" khoảng ${distance}m, ngoài phạm vi cho phép (${office.radius_m}m). Vui lòng tới gần một định vị được phép để chấm ra ca.` });
   }
 
@@ -375,12 +362,12 @@ r.post('/check-out', (req, res) => {
   const finalLate = shift && singlePunchFull(shift) ? 0 : shift ? (() => { const f = dayFlags(wdate, req.user.id); return computeLate(shift, row.check_in_at, wdate, f.lateBlock, halfLeavePriv(shift, wdate, f.half, f.priv)); })() : row.late_min;
 
   db.prepare(`UPDATE attendance SET check_out_at=?, check_out_lat=?, check_out_lng=?,
-    check_out_photo=?, check_out_distance_m=?, work_minutes=?, early_min=?, ot_min=?, ot_raw_min=?,
+    check_out_photo=?, check_out_distance_m=?, check_out_office_id=?, check_out_outside=?, work_minutes=?, early_min=?, ot_min=?, ot_raw_min=?,
     work_unit=?, day_status=?, ot_type=?, shift_id=?, shift_source=?, late_min=? WHERE id=?`)
-    .run(at, lat, lng, photoPath, distance, calc.work_minutes, calc.early_min, calc.ot_min, otRaw,
+    .run(at, lat, lng, photoPath, distance, office?.id ?? null, outside, calc.work_minutes, calc.early_min, calc.ot_min, otRaw,
          calc.work_unit, calc.day_status, calc.ot_type, finalShiftId, finalSource, finalLate, row.id);
-  // vào bằng MÁY, ra bằng ĐIỆN THOẠI: ghi giờ ra (+ ảnh) thành lượt chấm DT_RA — lần dựng lại công từ lượt quẹt sau không đè mất
-  if (row.shift_source === 'device') recordPhonePunch(req.user.id, 'out', at, photoPath);
+  // vào bằng MÁY, ra bằng ĐIỆN THOẠI: ghi giờ ra (+ ảnh, vị trí) thành lượt chấm DT_RA — lần dựng lại công từ lượt quẹt sau không đè mất
+  if (row.shift_source === 'device') recordPhonePunch(req.user.id, 'out', at, photoPath, { lat, lng, office_id: office?.id ?? null, distance_m: distance, outside });
 
   const updated = db.prepare('SELECT * FROM attendance WHERE id = ?').get(row.id);
   res.json({ ok: true, attendance: updated, meta: calc });

@@ -30,6 +30,8 @@ async function renderDashboard(showLoading) {
     const person = (r, info) => ({ name: r.full_name, code: r.code, dept: r.department, info });
     // 1 NV chấm nhiều phiên/ngày chỉ hiện 1 dòng (giữ lần chấm vào ĐẦU) để khớp số trên thẻ
     const uniqByCode = (rows) => { const s = new Set(); return rows.filter(r => (s.has(r.code) ? false : s.add(r.code))); };
+    // Chấm ngoài VP: dòng có BẤT KỲ giờ chấm nào (vào / ra / vào 2 …) nằm ngoài định vị — popup ghi rõ giờ nào ngoài, cách bao xa
+    const outRows = today.filter(r => rowPunches(r).some(p => p.geo && p.geo.out));
     const cards = el('div', { class: 'cards' },
       mcard('brand', d.totalEmp, 'Nhân viên', () => go('employees')),
       mcard('green', d.checkedIn, 'Đã chấm vào', () => dashListModal('Đã chấm vào',
@@ -44,8 +46,8 @@ async function renderDashboard(showLoading) {
       }),
       ...(hourly ? [] : [mcard('warn', d.late, 'Đi muộn', () => dashListModal('Đi muộn',
         today.filter(r => r.late_min > 0).map(r => person(r, r.late_min + ' phút'))))]),
-      mcard('red', d.outside, 'Chấm ngoài VP', () => dashListModal('Chấm ngoài văn phòng',
-        today.filter(r => r.check_in_outside).map(r => person(r, outsideText(r))))),
+      mcard('red', outRows.length, 'Chấm ngoài VP', () => dashListModal('Chấm ngoài văn phòng',
+        outRows.map(r => person(r, outsideText(r))))),
       mcard('red', d.pendingLeaves, 'Đơn chờ duyệt', () => go('leaves')),
     );
     // Có NV chấm hơn 2 lần → mỗi lần chấm 1 cột: Vào 1 · Ra 1 · Vào 2 · Ra 2 … (số cột theo người chấm nhiều nhất trong ngày)
@@ -54,8 +56,8 @@ async function renderDashboard(showLoading) {
     let extraTh = '';
     for (let i = 2; i <= np; i++) extraTh += `<th>Vào ${i}</th><th>Ra ${i}</th>`;
     const tbl = el('table', { class: 'data' });
-    // Vị trí + Muộn đứng trước để các lần chấm (Vào / Ra) nằm liền nhau
-    tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th><th>Vị trí</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vào${n1}</th><th>Ra${n1}</th>${extraTh}<th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
+    // Muộn đứng trước để các lần chấm (Vào / Ra) nằm liền nhau; vị trí (trong / ngoài định vị) hiện ngay dưới TỪNG giờ chấm
+    tbl.innerHTML = `<thead><tr><th>Ảnh vào</th><th>Nhân viên</th><th>Bộ phận</th>${hourly ? '' : '<th>Muộn</th>'}<th>Vào${n1}</th><th>Ra${n1}</th>${extraTh}<th>Ảnh ra</th><th>Giờ</th></tr></thead>`;
     const tb = el('tbody');
     tbl.append(tb);
     // Phân trang: chọn số dòng/trang, giữ nguyên trang đang xem khi tự cập nhật mỗi 20 giây
@@ -68,7 +70,7 @@ async function renderDashboard(showLoading) {
       dashPage = Math.min(Math.max(1, dashPage), pages);
       const from = (dashPage - 1) * size, part = today.slice(from, from + size);
       tb.innerHTML = '';
-      if (!today.length) tb.append(el('tr', {}, el('td', { colspan: (hourly ? 8 : 9) + 2 * (np - 1) }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
+      if (!today.length) tb.append(el('tr', {}, el('td', { colspan: (hourly ? 6 : 7) + 2 * (np - 1) }, el('div', { class: 'empty' }, 'Không có ai chấm công ngày này.'))));
       for (const r of part) tb.append(rowToday(r, np));
       const prev = el('button', { class: 'btn ghost sm', ...(dashPage <= 1 ? { disabled: '' } : {}), onclick: () => { dashPage--; renderPage(); } }, '‹ Trước');
       const next = el('button', { class: 'btn ghost sm', ...(dashPage >= pages ? { disabled: '' } : {}), onclick: () => { dashPage++; renderPage(); } }, 'Sau ›');
@@ -101,10 +103,23 @@ function dashListModal(title, people) {
     const list = el('div', {});
     for (const p of people) list.append(el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 2px;border-bottom:1px solid #f1efec' },
       el('div', {}, el('b', {}, p.name || p.code || ''), el('div', { style: 'color:#999;font-size:12px' }, (p.code || '') + (p.dept ? ' · ' + p.dept : ''))),
-      el('div', { style: 'font-weight:600;color:var(--ink);white-space:nowrap' }, p.info || '')));
+      el('div', { style: 'font-weight:600;color:var(--ink);white-space:pre-line;text-align:right' }, p.info || '')));
     body.append(list);
   }
   openModal(`${title} (${people.length})`, [body], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+}
+// Các lần chấm của 1 dòng công theo thứ tự: { label, t, photo, geo } — geo = vị trí lượt đó (null: quẹt máy / không có GPS)
+// NV chấm hơn 2 lần trong ngày (ngày vừa chấm điện thoại vừa quẹt máy) → Vào 1 · Ra 1 · Vào 2 …, ảnh + vị trí theo từng lượt
+function rowPunches(r) {
+  const ps = r.punches_hm || [];
+  if (ps.length > 2) {
+    const pp = r.punch_photos || [], pg = r.punch_geos || [];
+    return ps.map((t, i) => ({ label: (i % 2 ? 'Ra ' : 'Vào ') + (Math.floor(i / 2) + 1), t, photo: pp[i] || null, geo: pg[i] || null }));
+  }
+  const out = [];
+  if (r.check_in_hm) out.push({ label: 'Vào', t: r.check_in_hm, photo: null, geo: r.in_geo || null });
+  if (r.check_out_hm) out.push({ label: 'Ra', t: r.check_out_hm, photo: null, geo: r.out_geo || null });
+  return out;
 }
 // np: số cặp vào/ra đang hiện trên bảng (NV chấm hơn 2 lần trong ngày → thêm cột Vào 2 · Ra 2 …)
 // Ngày vừa chấm điện thoại vừa quẹt máy (1 dòng Vào 1 · Ra 1 · Vào 2 …): lượt chấm điện thoại có ảnh nhỏ ngay cạnh giờ, bấm xem to
@@ -114,47 +129,52 @@ function punchTime(t, photo) {
   img.addEventListener('click', () => showPhoto(photo));
   return el('span', { style: 'white-space:nowrap' }, t, img);
 }
+// Vị trí của 1 giờ chấm (ngay dưới giờ): Trong VP / Ngoài 2.1 km + định vị đã so + nút mở Google Maps đúng chỗ điện thoại chấm.
+// Định vị đã so = định vị GẦN NHẤT mà NV được phép chấm. Lượt quẹt máy (không có GPS) → không hiện gì.
+function geoBlock(g, t) {
+  if (!g || g.lat == null || g.lng == null) return null;
+  const la = Number(g.lat), ln = Number(g.lng);
+  if (!Number.isFinite(la) || !Number.isFinite(ln)) return null;
+  const ll = la.toFixed(6) + ',' + ln.toFixed(6);
+  return el('div', { style: 'margin-top:5px;line-height:1.4' },
+    g.out ? el('span', { class: 'pill bad', style: 'white-space:nowrap' }, 'Ngoài ' + humanDistance(g.dist))
+          : el('span', { class: 'pill ok', style: 'white-space:nowrap' }, 'Trong VP'),
+    g.office ? el('div', { style: 'color:#999;font-size:12px;white-space:nowrap' }, (g.out ? 'so với ' : '') + g.office) : null,
+    el('div', {}, el('a', {
+      href: 'https://www.google.com/maps/search/?api=1&query=' + ll, target: '_blank', rel: 'noopener', style: 'font-size:12px;white-space:nowrap',
+      title: 'Mở Google Maps đúng chỗ điện thoại chấm' + (t ? ' lúc ' + t : '') + ' (' + la.toFixed(6) + ', ' + ln.toFixed(6) + ')',
+    }, '🗺 Xem chỗ chấm')));
+}
 function rowToday(r, np = 1) {
-  const ps = r.punches_hm || [];
-  const pp = ps.length > 2 ? (r.punch_photos || []) : [];
-  const pairs = ps.length > 2 ? Array.from({ length: Math.ceil(ps.length / 2) }, (_, i) => [ps[2 * i], ps[2 * i + 1], pp[2 * i], pp[2 * i + 1]]) : [[r.check_in_hm, r.check_out_hm]];
-  const outCell = (p) => (p[1] ? punchTime(p[1], p[3]) : el('span', { class: 'pill muted' }, 'chưa ra'));
+  const list = rowPunches(r);
+  const multi = (r.punches_hm || []).length > 2;
+  // cặp i = [lượt vào, lượt ra]; dòng 1–2 lần chấm: Vào = giờ vào, Ra = giờ ra (quên chấm vào thì chỉ có giờ ra)
+  const pairs = multi ? Array.from({ length: Math.ceil(list.length / 2) }, (_, i) => [list[2 * i], list[2 * i + 1]])
+    : [[list.find(p => p.label === 'Vào'), list.find(p => p.label === 'Ra')]];
+  const cell = (p, star) => el('td', {}, el('div', { style: 'white-space:nowrap' }, punchTime(p.t, p.photo), star || ''), geoBlock(p.geo, p.t));
+  const inCell = (p, star) => (p ? cell(p, star) : el('td', {}, '—'));
+  const outCell = (p) => (p ? cell(p) : el('td', {}, el('span', { class: 'pill muted' }, 'chưa ra')));
   // ảnh đã hiện cạnh giờ thì cột Ảnh vào / Ảnh ra không hiện lặp lại
-  const inline = new Set(pp.filter(Boolean));
+  const inline = new Set(list.map(p => p.photo).filter(Boolean));
   const sidePhoto = (src) => photoCell(src && !inline.has(src) ? src : null);
   const extra = [];
-  for (let i = 1; i < np; i++) { const p = pairs[i]; extra.push(el('td', {}, p ? punchTime(p[0], p[2]) : ''), el('td', {}, p ? outCell(p) : '')); }
+  for (let i = 1; i < np; i++) { const p = pairs[i]; extra.push(p ? inCell(p[0]) : el('td', {}, ''), p ? outCell(p[1]) : el('td', {}, '')); }
+  const star = r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : null;
   return el('tr', {},
     el('td', {}, sidePhoto(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
-    locCell(r),
     ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
-    el('td', {}, (pairs[0][0] ? punchTime(pairs[0][0], pairs[0][2]) : '—'), (r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : '')),
-    el('td', {}, outCell(pairs[0])),
+    inCell(pairs[0][0], star),
+    outCell(pairs[0][1]),
     ...extra,
     el('td', {}, sidePhoto(r.check_out_photo)),
     el('td', {}, humanMinutes(r.work_minutes)),
   );
 }
 
-// "Ngoài 2.1 km · so với <định vị>" — định vị = định vị GẦN NHẤT mà NV được phép chấm (phần mềm so với định vị này)
+// Popup "Chấm ngoài VP": mỗi giờ ngoài định vị 1 dòng — "Vào 09:47 · ngoài 2.1 km (so với VP Chính)"
 function outsideText(r) {
-  return 'Ngoài ' + humanDistance(r.check_in_distance_m) + (r.in_office ? ' · so với ' + r.in_office : '');
-}
-// Ô Vị trí ở bảng Tổng quan: Trong / Ngoài + tên định vị đã so + nút mở Google Maps đúng chỗ điện thoại chấm
-function locCell(r) {
-  const pill = r.check_in_outside
-    ? el('span', { class: 'pill bad' }, 'Ngoài ' + humanDistance(r.check_in_distance_m))
-    : el('span', { class: 'pill ok' }, 'Trong VP');
-  const sub = r.in_office ? el('div', { style: 'color:#999;font-size:12px' }, (r.check_in_outside ? 'so với ' : '') + r.in_office) : null;
-  const la = Number(r.check_in_lat), ln = Number(r.check_in_lng);
-  const map = r.check_in_lat != null && r.check_in_lng != null && Number.isFinite(la) && Number.isFinite(ln)
-    ? el('a', {
-        href: 'https://www.google.com/maps/search/?api=1&query=' + la.toFixed(6) + ',' + ln.toFixed(6),
-        target: '_blank', rel: 'noopener', style: 'font-size:12px;white-space:nowrap',
-        title: 'Mở Google Maps đúng chỗ điện thoại chấm (' + la.toFixed(6) + ', ' + ln.toFixed(6) + ')',
-      }, '🗺 Xem chỗ chấm')
-    : null;
-  return el('td', {}, pill, sub, map);
+  return rowPunches(r).filter(p => p.geo && p.geo.out)
+    .map(p => `${p.label} ${p.t} · ngoài ${humanDistance(p.geo.dist)}` + (p.geo.office ? ` (so với ${p.geo.office})` : '')).join('\n');
 }

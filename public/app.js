@@ -253,6 +253,7 @@ async function renderCham() {
     else if (a.check_in_distance_m != null) bits.push(`Trong văn phòng (cách ${a.check_in_distance_m} m)`);
     if (a.late_min > 0) bits.push(`⏰ Muộn ${a.late_min} phút`);
     if (hasOut) bits.push(`Đã ra ca lúc <b>${isoToHM(a.check_out_at)}</b> · Tổng ${humanMinutes(a.work_minutes)}`);
+    if (hasOut && a.check_out_outside) bits.push(`Ra ca ngoài văn phòng (cách ~${humanDistance(a.check_out_distance_m)})`);
     c.append(el('div', { class: 'status-banner' + (hasOut ? ' done' : ''), html: bits.join(' · ') }));
   }
 

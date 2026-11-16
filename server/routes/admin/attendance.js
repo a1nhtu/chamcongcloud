@@ -537,6 +537,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const moved = tx(() => {
       const m = computeManual(row.employee_id, row.work_date, row.check_in_at, null);
       db.prepare(`UPDATE attendance SET check_out_at=NULL, check_out_lat=NULL, check_out_lng=NULL, check_out_photo=NULL, check_out_distance_m=NULL,
+        check_out_office_id=NULL, check_out_outside=NULL,
         late_min=?, early_min=?, ot_min=?, ot_raw_min=?, work_minutes=?, work_unit=?, day_status=?, ot_type=?, manual=1, manual_at=?, manual_by=? WHERE id=?`)
         .run(m.late, m.early_min, m.ot_min, m.ot_raw, m.work_minutes, m.work_unit, m.day_status, m.ot_type, nowIso(), by, row.id);
       // ngày sau đã có phiên VÀO sát giờ này (trong ngưỡng chống bấm nhầm — thường NV bấm RA nhầm rồi bấm VÀO ngay cùng phút)
@@ -547,9 +548,11 @@ export function registerAttendanceRoutes(r, { need }) {
         .get(row.employee_id, nd, lo, hi, outIso, outIso)) return false;
       const m2 = computeManual(row.employee_id, nd, outIso, null);
       db.prepare(`INSERT INTO attendance (employee_id, work_date, check_in_at, check_in_lat, check_in_lng, check_in_photo, check_in_distance_m,
+        check_in_office_id, check_in_outside,
         late_min, early_min, ot_min, ot_raw_min, work_minutes, work_unit, day_status, ot_type, shift_id, shift_source, manual, note)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'')`)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'')`)
         .run(row.employee_id, nd, outIso, row.check_out_lat, row.check_out_lng, row.check_out_photo, row.check_out_distance_m,
+          row.check_out_office_id ?? null, row.check_out_outside ? 1 : 0,
           m2.late, m2.early_min, m2.ot_min, m2.ot_raw, m2.work_minutes, m2.work_unit, m2.day_status, m2.ot_type, m2.shiftId ?? null, row.shift_source || 'hourly');
       // ngày sau có quẹt máy → dựng lại ngày đó (gộp lượt điện thoại với lượt máy)
       if (db.prepare("SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA') LIMIT 1").get(row.employee_id, nd))
