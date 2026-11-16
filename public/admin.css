@@ -48,6 +48,9 @@ table.data td { padding: 11px 14px; border-bottom: 1px solid #f1efec; vertical-a
 table.data tr:last-child td { border-bottom: none; }
 table.data tr:hover td { background: #fcfbfa; }
 .tbl-scroll { overflow-x: auto; }
+/* bản sao dòng tiêu đề bám mép trên khi cuộn trang (floatHeadPanel — Tính công) */
+.float-head { display: none; position: fixed; top: 0; z-index: 40; overflow: hidden; background: #faf7f5; box-shadow: 0 2px 6px rgba(0,0,0,.10); }
+.float-head table.data { table-layout: fixed; }
 
 .avatar { width: 40px; height: 40px; border-radius: 8px; object-fit: cover; border: 1px solid var(--line); cursor: pointer; background: #eee; }
 

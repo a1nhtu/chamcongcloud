@@ -127,3 +127,19 @@ test('ngày chấm điện thoại còn sót lượt thêm tay: dựng lại (T�
   rebuildDay(phoneEmp, D);
   assert.deepEqual(dayRows(phoneEmp), [['08:00', '12:33'], ['14:31', '19:32']]);
 });
+
+// GIỜ NGUỒN (tab "🕘 Giờ nguồn" của Tính công, Anh 16/11/2026): mỗi NV mỗi ngày 1 dòng, mọi lượt quẹt theo thứ tự + nguồn từng lượt
+test('Giờ nguồn: mọi lượt quẹt máy / thêm tay theo thứ tự; ngày chỉ chấm điện thoại lấy giờ vào · ra của phiên', async () => {
+  const D2 = '2026-10-20';
+  const pi = db.prepare('INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES (?,?,?,?,0,1,?)');
+  for (const [sr, t] of [['MAY1', '13:01'], ['MAY1', '07:25'], ['TAY_VAO', '11:25'], ['MAY1', '16:54']]) pi.run(sr, 'DV1', iso(t, D2), D2, devEmp);
+  db.prepare("INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, check_in_photo, work_minutes, work_unit, day_status, shift_source) VALUES (?,?,?,?,'/uploads/c.jpg',60,0.1,'lam_viec','hourly')")
+    .run(phoneEmp, D2, iso('09:00', D2), iso('10:00', D2));
+  const g = await call('GET', `/attendance/grid?mode=raw&from=${D2}&to=${D2}&ids=${devEmp},${phoneEmp}`);
+  assert.equal(g.status, 200);
+  const by = Object.fromEntries(g.body.rows.map((r) => [r.employee_id, r]));
+  assert.deepEqual(by[devEmp].times, ['07:25', '11:25✎', '13:01', '16:54']);
+  assert.deepEqual(by[devEmp].srcs, ['MAY1', 'Thêm tay', 'MAY1', 'MAY1']);
+  assert.deepEqual(by[phoneEmp].times, ['09:00📱', '10:00📱']);
+  assert.equal(g.body.rows.length, 2);
+});

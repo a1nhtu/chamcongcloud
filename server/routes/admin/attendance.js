@@ -169,7 +169,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const dept = (req.query.dept || '').trim();
     const deptList = deptWithChildren(splitDeptList(req.query.depts || dept));   // gồm cả bộ phận con
     const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
-    const mode = req.query.mode === 'summary' ? 'summary' : 'detail';
+    const mode = req.query.mode === 'summary' ? 'summary' : req.query.mode === 'raw' ? 'raw' : 'detail';
 
     let esql = `SELECT id, code, full_name, department FROM employees WHERE ${EMP_IN_PERIOD}` + adminAttWhere();
     const eargs = [from];
@@ -199,6 +199,30 @@ export function registerAttendanceRoutes(r, { need }) {
     const lv = virtLevel(req.query, req), virt = lv > 0;   // 1|2|3 = công ảo mức đó; tài khoản kiểm tra: luôn công ảo
     if (virt && !req.forceVirt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
     const vmap = virt ? virtualOt(empIds, from, to, !!req.forceVirt, lv) : null;
+
+    // GIỜ NGUỒN (như On39 "Giờ nguồn", Anh 16/11/2026): mỗi NV mỗi ngày 1 dòng, MỌI lượt quẹt theo thứ tự (không theo ca / quy tắc
+    // ghép) — thay cột "Các lần chấm" của tab Chi tiết (ngày tách Sáng + Chiều thì 2 dòng cùng lặp đủ lượt của ngày).
+    // Ngày chỉ chấm điện thoại (không có lượt máy) lấy giờ vào / ra của phiên chấm; công ảo: giờ vào / ra ảo, không lộ lượt thật.
+    if (mode === 'raw') {
+      const groups = new Map();
+      const put = (eid, d, t, src) => { const k = eid + '|' + d; if (!groups.has(k)) groups.set(k, { eid, date: d, times: [], srcs: [] }); const g = groups.get(k); g.times.push(t); g.srcs.push(src); };
+      const attQ = `SELECT employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY check_in_at`;
+      if (vmap) {
+        for (const a of applyVirtual(db.prepare(attQ).all(...empIds, from, to), vmap)) for (const x of [a.check_in_at, a.check_out_at]) if (x) put(a.employee_id, a.work_date, vnHM(x), '');
+      } else {
+        const dn = new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
+        const srcOf = (sr) => { sr = String(sr || ''); if (sr.startsWith('TAY_')) return 'Thêm tay'; if (sr.startsWith('DT_')) return 'Điện thoại'; const d = dn.get(sr); return d ? (d.name || sr) + (d.machine_number ? ` (máy ${d.machine_number})` : '') : sr; };
+        for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to))
+          put(p.employee_id, p.work_date, vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : String(p.serial).startsWith('DT_') ? '📱' : ''), srcOf(p.serial));
+        const has = new Set(groups.keys());
+        for (const a of db.prepare(attQ).all(...empIds, from, to)) {
+          if (has.has(a.employee_id + '|' + a.work_date) || !(a.check_in_photo || a.check_out_photo)) continue;
+          for (const x of [a.check_in_at, a.check_out_at]) if (x) put(a.employee_id, a.work_date, vnHM(x) + '📱', 'Điện thoại');
+        }
+      }
+      const rows = [...groups.values()].map((g) => { const e = empById.get(g.eid); return e && { date: g.date, wd: WDVN[vnWd(g.date)], employee_id: g.eid, code: e.code, name: e.full_name, dept: e.department || '', times: g.times, srcs: g.srcs }; }).filter(Boolean);
+      return res.json({ mode, rows, ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
+    }
 
     if (mode === 'summary') {
       let att = db.prepare(`SELECT id, employee_id, work_date, check_in_at, work_unit, work_minutes, ot_min, late_min, early_min FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to);

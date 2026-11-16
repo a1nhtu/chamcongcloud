@@ -28,7 +28,8 @@ async function pageEditAtt() {
   const viewBar = el('div', { style: 'display:inline-flex;gap:6px' });
   const renderViewBar = () => viewBar.replaceChildren(
     (() => { const b = el('button', { class: 'btn sm' + (view === 'detail' ? '' : ' ghost') }, '📋 Chi tiết'); b.onclick = () => { view = 'detail'; renderViewBar(); load(); }; return b; })(),
-    (() => { const b = el('button', { class: 'btn sm' + (view === 'summary' ? '' : ' ghost') }, 'Σ Tổng hợp'); b.onclick = () => { view = 'summary'; renderViewBar(); load(); }; return b; })());
+    (() => { const b = el('button', { class: 'btn sm' + (view === 'summary' ? '' : ' ghost') }, 'Σ Tổng hợp'); b.onclick = () => { view = 'summary'; renderViewBar(); load(); }; return b; })(),
+    (() => { const b = el('button', { class: 'btn sm' + (view === 'raw' ? '' : ' ghost'), title: 'Mọi lượt quẹt trong ngày theo thứ tự, như "Giờ nguồn" của Wise Eye On39 — bấm vào dòng để xem / thêm / sửa / xoá từng lượt' }, '🕘 Giờ nguồn'); b.onclick = () => { view = 'raw'; renderViewBar(); load(); }; return b; })());
   renderViewBar();
 
   const recalcBtn = el('button', { class: 'btn ghost sm' }, '↻ Tính lại');
@@ -109,7 +110,8 @@ async function pageEditAtt() {
     const hrly = hourlyMode();
     // Chế độ tính theo GIỜ: bỏ Trễ/Sớm/OT/Công, hiện Tổng giờ + Tổng phút
     const metricHeads = hrly ? ['Tổng giờ', 'Tổng phút'] : ['Trễ(p)', 'Sớm(p)', 'OT(p)', 'Công'];
-    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', 'Các lần chấm', ...metricHeads, 'Nghỉ', 'Trạng thái', ''];
+    // cột "Các lần chấm" chuyển sang tab "🕘 Giờ nguồn" (Anh 16/11/2026: ngày chấm 4 lần đã ra 2 dòng Sáng + Chiều)
+    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', ...metricHeads, 'Nghỉ', 'Trạng thái', ''];
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tb = el('tbody');
@@ -121,11 +123,6 @@ async function pageEditAtt() {
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
         inlineCell(r, 'in', [r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : '']),
         inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')]),
-        (() => {
-          const td = el('td', {}, (r.punches && r.punches.length) ? el('span', { style: 'font-size:12px;color:var(--muted)' }, r.punches.join(' · ')) : el('span', { class: 'muted' }, canEdit ? '+ lượt chấm' : '—'));
-          if (canEdit && !_virt) { td.className = 'att-inl'; td.title = 'Bấm để xem / thêm / sửa / xoá từng lượt chấm'; td.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
-          return td;
-        })(),
         ...(hrly ? [
           el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
           el('td', { style: 'text-align:center' }, r.mins ? (r.mins + ' phút') : '—'),
@@ -150,14 +147,13 @@ async function pageEditAtt() {
     wrap.innerHTML = '';
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Bấm ô "Các lần chấm" để xem / sửa từng lượt. Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác. "Các lần chấm" liệt kê mọi lượt quẹt trong ngày.'),
-      // bảng dài: cuộn trong khung, dòng tiêu đề đứng yên (Anh 16/11/2026: kéo xuống bị mất tiêu đề) — dùng chung kiểu .rep-scroll của Báo cáo
-      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll rep-scroll' }, tbl), pager));
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Xem / sửa từng lượt quẹt: tab "🕘 Giờ nguồn". Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác.'),
+      floatHeadPanel(tbl, pager));
   };
   // Giữ trang đang xem khi tải lại sau khi sửa giờ; đổi phạm vi (ngày / phòng ban / NV / tab) thì về trang 1
-  const pageSt = { detail: { page: 1 }, summary: { page: 1 } };
+  const pageSt = { detail: { page: 1 }, summary: { page: 1 }, raw: { page: 1 } };
   let lastScope = '';
-  const keepPage = () => { const s = view + '|' + scope() + '|' + markChkInput.checked + '|' + sortBy; if (s !== lastScope) { pageSt.detail.page = 1; pageSt.summary.page = 1; lastScope = s; } };
+  const keepPage = () => { const s = view + '|' + scope() + '|' + markChkInput.checked + '|' + sortBy; if (s !== lastScope) { pageSt.detail.page = 1; pageSt.summary.page = 1; pageSt.raw.page = 1; lastScope = s; } };
 
   // Lưới TỔNG HỢP: mỗi NV 1 dòng + tick chọn để tính lại vài người
   const loadSummary = async () => {
@@ -189,7 +185,42 @@ async function pageEditAtt() {
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Đang xem ${rows.length} nhân viên. Chọn phòng ban / nhân viên (nút 🏢 / 👥) rồi bấm "↻ Tính lại" để tính lại đúng phạm vi. Bấm "Chi tiết" để xem/sửa 1 người.`),
-      el('div', { class: 'panel' }, el('div', { class: 'tbl-scroll rep-scroll' }, tbl), pager));
+      floatHeadPanel(tbl, pager));
+  };
+
+  // GIỜ NGUỒN: mỗi NV mỗi ngày 1 dòng, Lần 1 · Lần 2 … = mọi lượt quẹt theo thứ tự (✎ thêm tay · 📱 điện thoại; rê chuột xem máy)
+  const loadRaw = async () => {
+    wrap.innerHTML = ''; wrap.append(loading());
+    let d;
+    try { d = await api(`/admin/attendance/grid?mode=raw&${scope().replace('&all=1', '')}`); }
+    catch (e) { wrap.innerHTML = ''; wrap.append(el('div', { class: 'empty' }, e.message)); return; }
+    const rows = d.rows || [];
+    const showNV = empPick.size !== 1;
+    sortDetailRows(rows, sortBy);
+    const n = Math.max(2, ...rows.map((r) => r.times.length));
+    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), ...Array.from({ length: n }, (_, i) => 'Lần ' + (i + 1)), 'Số lần'];
+    const tbl = el('table', { class: 'data' });
+    tbl.innerHTML = '<thead><tr>' + heads.map((h) => `<th>${h}</th>`).join('') + '</tr></thead>';
+    const tb = el('tbody');
+    const edit = canEdit && !_virt;
+    const mkRow = (r) => {
+      const tr = el('tr', r._first && showNV ? { class: 'emp-first' } : {},
+        el('td', {}, r.date.slice(8) + '/' + r.date.slice(5, 7)),
+        el('td', {}, r.wd),
+        ...(showNV ? [el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || '—')] : []),
+        ...Array.from({ length: n }, (_, i) => el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums', ...(r.srcs[i] ? { title: r.srcs[i] } : {}) }, r.times[i] || '')),
+        el('td', { style: 'text-align:center;font-weight:600' + (r.times.length % 2 ? ';color:#c0392b' : ''), title: r.times.length % 2 ? 'Số lần lẻ — có thể quên chấm 1 lượt' : '' }, String(r.times.length)));
+      if (edit) { tr.className += ' att-inl'; tr.style.cursor = 'pointer'; tr.title = 'Bấm để xem / thêm / sửa / xoá từng lượt chấm ngày này'; tr.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
+      return tr;
+    };
+    keepPage();
+    const pager = pagedRows(tb, rows, mkRow, heads.length, pageSt.raw, 'editatt_page_size');
+    tbl.append(tb);
+    wrap.innerHTML = '';
+    wrap.append(
+      ...[lockNote(d.locks)].filter(Boolean),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Mọi lượt quẹt trong ngày theo thứ tự (chưa chia ca). ✎ = thêm tay · 📱 = chấm điện thoại · rê chuột vào giờ xem chấm ở máy nào · Số lần đỏ = số lẻ (có thể quên chấm 1 lượt).' + (edit ? ' Bấm vào dòng để xem / thêm / sửa / xoá từng lượt — công ngày đó tự tính lại.' : '')),
+      floatHeadPanel(tbl, pager));
   };
 
   // Đổi Từ / Đến ngày KHÔNG tự tải → bấm "✓ Áp dụng" hoặc Enter
@@ -197,8 +228,8 @@ async function pageEditAtt() {
   const applyB = dApply.btn;
   const load = () => {
     dApply.synced();
-    sortSel.style.display = view === 'detail' ? '' : 'none';   // ô Sắp xếp chỉ dùng cho tab Chi tiết
-    view === 'summary' ? loadSummary() : loadDetail();
+    sortSel.style.display = view === 'summary' ? 'none' : '';   // ô Sắp xếp: tab Chi tiết + Giờ nguồn
+    view === 'summary' ? loadSummary() : view === 'raw' ? loadRaw() : loadDetail();
   };
   recalcBtn.onclick = async () => {
     let scopeTxt;
@@ -220,6 +251,40 @@ async function pageEditAtt() {
   bar.insertBefore(sortSel, allChk);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();
+}
+
+// DÒNG TIÊU ĐỀ BÁM MÉP TRÊN khi cuộn cả trang (Anh 16/11/2026): trang cuộn bình thường (hàng chữ giải thích trôi đi, bảng dùng hết
+// chiều cao màn hình); dòng tiêu đề của bảng trôi khỏi mép trên thì hiện bản sao cố định ở mép trên, đúng độ rộng từng cột và theo
+// thanh cuộn ngang. Không dùng CSS sticky: .main (overflow-x: hidden) và .tbl-scroll (cuộn ngang) chặn sticky theo trang.
+// Bản sao nằm trong panel → bảng bị thay (tải lại / sang trang khác) thì bản sao đi theo; sự kiện tự gỡ khi bảng không còn.
+function floatHeadPanel(tbl, ...after) {
+  const box = el('div', { class: 'tbl-scroll' }, tbl);
+  const fl = el('div', { class: 'float-head' });
+  const ft = el('table', { class: tbl.className });
+  fl.append(ft);
+  let w = -1;
+  const build = () => {
+    const th = tbl.tHead; if (!th) return false;
+    ft.replaceChildren(th.cloneNode(true));
+    const src = th.rows[0] ? [...th.rows[0].cells] : [], dst = ft.tHead.rows[0] ? [...ft.tHead.rows[0].cells] : [];
+    src.forEach((c, i) => { const px = c.getBoundingClientRect().width + 'px'; if (dst[i]) Object.assign(dst[i].style, { width: px, minWidth: px, maxWidth: px, boxSizing: 'border-box' }); });
+    ft.style.width = tbl.offsetWidth + 'px';
+    w = tbl.offsetWidth;
+    return true;
+  };
+  const sync = () => {
+    if (!tbl.isConnected) { window.removeEventListener('scroll', sync, true); window.removeEventListener('resize', sync); return; }
+    const th = tbl.tHead;
+    const r = tbl.getBoundingClientRect(), hh = th ? th.offsetHeight : 0;
+    if (!th || !(r.top < 0 && r.bottom > hh * 2)) { fl.style.display = 'none'; return; }
+    if (fl.style.display !== 'block' || w !== tbl.offsetWidth) build();
+    const b = box.getBoundingClientRect();
+    Object.assign(fl.style, { display: 'block', left: b.left + 'px', width: box.clientWidth + 'px' });
+    ft.style.transform = `translateX(${-box.scrollLeft}px)`;
+  };
+  window.addEventListener('scroll', sync, true);   // true: bắt cả cuộn của khung khác (cuộn ngang bảng)
+  window.addEventListener('resize', sync);
+  return el('div', { class: 'panel' }, fl, box, ...after);
 }
 
 async function attEditModal(row, employeeId, reload, opts = {}) {
