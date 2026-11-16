@@ -92,18 +92,18 @@ async function pageDevices() {
   const domNote = domain ? '' : el('div', { style: 'font-size:12px;color:var(--muted);margin-top:4px' }, 'Bản LAN chưa có tên miền — liên hệ Digiplus nếu cần dùng qua Internet.');
   const guide = el('div', { class: 'panel', style: 'padding:14px 18px;margin-bottom:14px;max-width:1100px' },
     el('div', { style: 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin:8px 0 10px' },
-      el('div', { style: 'font-size:13.5px;color:var(--muted)', html: 'Trên máy: <b style="color:var(--ink)">Menu → Comm → Cloud Server (ADMS)</b>, điền theo 1 trong 2 cách:' }), refreshNet),
+      el('div', { style: 'font-size:13.5px;color:var(--muted)', html: 'Trên máy: <b style="color:var(--ink)">Menu → Comm → Cloud Server (ADMS)</b>, ' + (d.multi ? 'điền tên miền như dưới:' : 'điền theo 1 trong 2 cách:') }), d.multi ? '' : refreshNet),
     el('div', { class: 'dev-tg-grid' },
-      el('div', { class: 'dev-tg' },
+      d.multi ? '' : el('div', { class: 'dev-tg' },   // máy chủ nhiều công ty: IP này là mạng nơi đặt máy chủ, không phải mạng của khách
         el('b', {}, 'Cách A · Cùng mạng LAN'),
         el('div', { style: 'margin-top:6px' }, 'IP: ', ipVal, ' · Port: ', portVal),
         el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'HTTP · không bật tên miền')),
       el('div', { class: 'dev-tg' },
         el('b', {}, 'Cách B · Qua Internet / chi nhánh khác'),
         el('div', { style: 'margin-top:6px' }, 'Tên miền: ', domVal, ' ', domCopy, ' · Port: ', el('b', {}, '443')),
-        el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy cần có Internet'),
+        el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:4px' }, 'Bật Domain + HTTPS · máy không có mục HTTPS thì Port 80 (cổng khác như 8081 không về được) · máy cần có Internet'),
         domNote,
-        d.tcp_supported && d.domain ? el('div', { style: 'margin-top:8px' }, btnSm('🔍 Khỏi gõ tay: tìm máy trong LAN & tự trỏ về', lanScanModal, 'ghost')) : ''),
+        d.lan_scan && d.domain ? el('div', { style: 'margin-top:8px' }, btnSm('🔍 Khỏi gõ tay: tìm máy trong LAN & tự trỏ về', lanScanModal, 'ghost')) : ''),
       // Máy AI: giao thức WebSocket (ws://, không mã hoá) — vào CÙNG cổng web; qua tên miền thì cổng 80
       d.ai_enabled ? el('div', { class: 'dev-tg' },
         el('b', {}, 'Máy AI (khuôn mặt / vân tay)'),
@@ -119,7 +119,7 @@ async function pageDevices() {
           ? el('div', { class: 'dv-warn', style: 'margin-top:6px' }, '⚠️ Chưa mở được cổng nhận máy' + (d.union_status.error ? ': ' + d.union_status.error : ' — đang khởi động, bấm Làm mới sau ít giây.'))
           : el('div', { style: 'font-size:12.5px;color:#15803d;margin-top:6px' }, `✓ Đang chờ máy kết nối ở cổng ${d.union_status ? d.union_status.port : d.union_port}. Máy không vào được: mở cổng này trên tường lửa Windows.`)) : ''),
     el('div', { style: 'font-size:13.5px;margin-top:10px', html: 'Lưu, khởi động lại máy → máy hiện ở danh sách bên dưới (<b>Chờ duyệt</b>) → bấm <b>Duyệt</b>.' }),
-    ipsHint);
+    d.multi ? '' : ipsHint);   // máy chủ nhiều công ty: IP mạng nơi đặt máy chủ, khách không dùng
 
   // Bảng danh sách máy
   const tbl = el('table', { class: 'data dev-tbl' });

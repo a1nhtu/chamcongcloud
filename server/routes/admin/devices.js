@@ -84,7 +84,7 @@ export function registerDeviceRoutes(r, { need }) {
       }
       if (d.conn_type === 'union') d.online = unionOnline(d.serial);   // máy Union: đang giữ kết nối về cổng nhận máy
     }
-    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', lan_scan: !lanScanBlocked(),
+    res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', lan_scan: !lanScanBlocked(), multi: MULTI,
       ai_enabled: aiEnabled(), union_enabled: unionEnabled(), union_port: unionPort(), union_status: unionStatus(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được (kể cả máy TCP/IP, máy Union).
