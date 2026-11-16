@@ -1,4 +1,5 @@
 // Nhóm route PHÂN CA — theo ngày (lịch tuần), theo khoảng ngày (shift_assignments) và phân ca bằng Excel.
+import { rebuildChainAfterKeys } from './attendance.js';
 import ExcelJS from 'exceljs';
 import { db, adminAttWhere, getSetting } from '../../db.js';
 import { overrideAssignRanges, overrideAllDepts, ALL_DEPTS } from '../../assign-normalize.js';
@@ -17,8 +18,9 @@ function recalcDays(keys) {
     return has.get(+e, d, nx.toISOString().slice(0, 10));
   });
   if (!list.length) return 0;
+  // + rebuildChainAfterKeys: các ngày sau nữa (phân ca Đêm ngày đầu quên chấm vào → cả chuỗi đêm sau tự tính lại)
   db.exec('BEGIN');
-  try { rebuildDays(list); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); console.error('[phân ca] tính lại công lỗi:', e.message); return 0; }
+  try { rebuildDays(list); rebuildChainAfterKeys(list); db.exec('COMMIT'); } catch (e) { db.exec('ROLLBACK'); console.error('[phân ca] tính lại công lỗi:', e.message); return 0; }
   return list.length;
 }
 
