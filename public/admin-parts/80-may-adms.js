@@ -1,4 +1,6 @@
 /* ---------- MÁY CHẤM CÔNG (ZKTeco ADMS push) ---------- */
+// Máy tự đẩy: IP LAN máy tự khai (lan_ip) + IP Internet phần mềm thấy (last_ip — qua tên miền là IP modem nhà khách)
+const pushIpText = (m) => (m.lan_ip ? 'LAN ' + m.lan_ip + (m.last_ip && m.last_ip !== m.lan_ip ? ' · qua ' + m.last_ip : '') : (m.last_ip || '—'));
 async function pageDevices() {
   setMain(head('Máy chấm công'), loading());
   let d;
@@ -326,7 +328,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       m.reboot_sched ? el('span', { class: 'chip', title: 'Tự khởi động lại theo giờ hẹn' + (m.reboot_note ? ' — lần gần nhất: ' + m.reboot_note : '') }, '⏰ ' + rebootSchedLabel(m.reboot_sched)) : '',
     ].filter(Boolean);
     const seenEl = el('div', { class: 'dv-sub' }, seenText(m.last_seen));
-    const ipEl = el('div', { class: 'dv-ip' }, direct ? `${m.tcp_ip}:${m.tcp_port}` : (m.last_ip || '—'));
+    const ipEl = el('div', { class: 'dv-ip', style: direct ? '' : 'white-space:pre-line' }, direct ? `${m.tcp_ip}:${m.tcp_port}` : pushIpText(m));
     const stEl = el('span', { class: 'st ' + (online ? 'on' : 'offl'), title: onlineTitle(online) }, el('i', {}), online ? 'Online' : 'Offline');
     const tr = el('tr', { class: online || direct ? '' : 'off' },
       el('td', {},
@@ -366,7 +368,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
           const on = !!m.online;
           sc.st.className = 'st ' + (on ? 'on' : 'offl'); sc.st.title = onlineTitle(on); sc.st.lastChild.textContent = on ? 'Online' : 'Offline';
           sc.tr.classList.toggle('off', !on);
-          sc.ip.textContent = m.last_ip || '—'; sc.seen.textContent = seenText(m.last_seen);
+          sc.ip.textContent = pushIpText(m); sc.seen.textContent = seenText(m.last_seen);
         }
         const cc = countCells[m.serial]; if (!cc) continue;
         for (const [cell, v] of [[cc.cNV, m.emp_count], [cc.cFP, m.fp_count], [cc.cFace, m.face_count], [cc.cCard, m.card_count]]) {

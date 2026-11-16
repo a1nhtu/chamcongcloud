@@ -780,6 +780,7 @@ function migrateColumns() {
   // '-' = đã bắt tay mà KHÔNG khai (đời cũ); '' = chưa bắt tay lại từ khi có cột này. firmware = 'Ver ...' máy gửi kèm INFO.
   add('push_devices', 'push_ver', "TEXT DEFAULT ''");
   add('push_devices', 'firmware', "TEXT DEFAULT ''");
+  add('push_devices', 'lan_ip', "TEXT DEFAULT ''");   // IP mạng LAN máy tự khai (INFO khi hỏi lệnh / bảng OPTIONS) — khác last_ip (IP Internet phần mềm thấy)
   // Máy kết nối TRỰC TIẾP TCP/IP (SDK zkemkeeper, cổng 4370): conn_type 'push' (máy tự đẩy, mặc định) | 'tcp' (phần mềm chủ động kết nối)
   add('push_devices', 'conn_type',   "TEXT NOT NULL DEFAULT 'push'");
   add('push_devices', 'tcp_ip',      "TEXT DEFAULT ''");

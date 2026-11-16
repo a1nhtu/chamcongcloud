@@ -71,6 +71,15 @@ function pendingInfo(serial) {
     `PushProtVer=2.4.1\n` +
     `ServerName=Digiplus Server\n`;
 }
+// IP mạng LAN máy chấm công tự khai: INFO=Ver …,số NV,số vân tay,số lượt,<IP>,… (mục thứ 5) hoặc dòng IPAddress=… trong bảng OPTIONS.
+// Máy đẩy qua tên miền thì phần mềm chỉ thấy IP Internet của nhà khách → cần IP này để biết máy đang ở IP nào trong LAN (khách tungphong 16/11/2026).
+export function lanIpOf(text, fromInfo = false) {
+  const s = String(text || '');
+  const v = fromInfo ? (s.split(',')[4] || '').trim() : ((/(?:^|[\s,~&])IPAddress=([\d.]+)/i.exec(s) || [])[1] || '');
+  return /^\d{1,3}(\.\d{1,3}){3}$/.test(v) && v !== '0.0.0.0' && v.split('.').every((x) => +x <= 255) ? v : '';
+}
+const saveLanIp = (sn, ip) => { if (sn && ip) db.prepare('UPDATE push_devices SET lan_ip=? WHERE serial=?').run(ip, sn); };
+
 // Tham số máy gửi, không phân biệt hoa thường (pushver / PushVersion..., INFO / info)
 const queryParam = (req, ...names) => {
   for (const [k, v] of Object.entries(req.query || {})) if (names.includes(k.toLowerCase())) return String(v || '').trim();
@@ -115,6 +124,7 @@ function handleCData(req, res) {
     ingestUserTables(sn, table, body, stamp);
     return res.type('text/plain').send(`OK: ${lineCount}\n`);
   }
+  if (table === 'OPTIONS') saveLanIp(sn, lanIpOf(body));
   // Các bảng khác (OPTIONS, ...) — nhận cho máy khỏi báo lỗi
   return res.type('text/plain').send(`OK: ${lineCount}\n`);
 }
@@ -205,6 +215,7 @@ function handleGetRequest(req, res) {
   // Máy gửi kèm INFO=Ver 6.60 Apr 28 2016,số NV,số vân tay,số lượt,... → giữ phiên bản firmware để xem đời máy
   const info = queryParam(req, 'info');
   if (sn && info) db.prepare('UPDATE push_devices SET firmware=? WHERE serial=?').run(info.split(',')[0].trim().slice(0, 60), sn);
+  if (info) saveLanIp(sn, lanIpOf(info, true));
   if (enabled() && isActive(sn)) {
     try { resendLostAttlogQueries(sn); } catch (e) { console.error('[device] gửi lại lệnh tải log lỗi:', e.message); }
     try { const cmd = nextCommand(sn); if (cmd) return res.type('text/plain').send(cmd); }
