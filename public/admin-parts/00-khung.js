@@ -7,6 +7,13 @@ import {
 import * as COMMON from '/common.js';
 const rememberLogin = () => (COMMON.rememberLogin ? COMMON.rememberLogin() : true);
 const tokenFromOtherTab = () => (COMMON.tokenFromOtherTab ? COMMON.tokenFromOtherTab() : Promise.resolve());
+// Lưu file xuất (Excel…): máy tính tải về như cũ; điện thoại hiện thêm nút "Gửi qua Zalo, Mail…" (saveFile — common.js).
+// opt.share = false: chỉ tải về (file mẫu, sao lưu…)
+function saveFile(blob, name, opt) {
+  if (COMMON.saveFile) return COMMON.saveFile(blob, name, opt);
+  const url = URL.createObjectURL(blob); const a = el('a', { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
 
 let ME = null;
 let SETTINGS = {};        // cache cấu hình (attendance_mode, geofence…)
@@ -238,6 +245,7 @@ async function afterLogin() {
     nav.append(b);
   });
   navFoldSync();
+  buildMobileNav(visible);   // điện thoại: thanh dưới + bảng Menu (máy tính không thấy)
   // Lần đầu khởi tạo: Admin chọn kiểu chấm công + phạm vi
   if (isAdmin() && SETTINGS.setup_done !== '1' && !attOff()) { setupWizard(); return; }
   // /admin#hrcontract (bấm vào thông báo nhắc hợp đồng) → mở thẳng trang đó nếu có quyền; đọc xong thì xoá #
@@ -334,10 +342,120 @@ function go(key) {
   document.querySelectorAll('#nav button').forEach(b => b.classList.toggle('active', b.dataset.k === key));
   // nhóm chứa trang đang mở: tự xổ ra (không ghi nhớ) + tô nhẹ tiêu đề nhóm
   for (const g of _navGrp.values()) { const mine = g.has(key); g.head.classList.toggle('cur', mine); if (mine) g.open(true, false); }
+  mobileNavSync(key);
   ({ dashboard: pageDashboard, employees: pageEmployees, org: () => pageOrg('dept'), positions: () => pageOrg('pos'), shifts: pageShifts, assignments: pageAssignments, shiftreq: pageShiftReq, devreq: pageDevReq, editatt: pageEditAtt, fixtime: pageFixTime, otreg: pageOtReg, swap: pageSwap, abnormal: pageAbnormal, devices: pageDevices, offices: pageOffices, leaves: pageLeaves, salary: pageSalary, report: pageReport, audit: pageAudit, auditlimits: pageAuditLimits, logs: pageLogs, settings: pageSettings,
     hrprofile: () => hrPage('pageHrProfiles'), hrcontract: () => hrPage('pageHrContracts'), hrdecision: () => hrPage('pageHrDecisions'), hrtemplates: () => hrPage('pageHrTemplates'),
     meal: () => mealPage('pageMealBoard'), mealreg: () => mealPage('pageMealReg'), mealrpt: () => mealPage('pageMealRpt'), mealrep: () => mealPage('pageMealReport'), mealmenu: () => mealPage('pageMealMenu'), mealinv: () => mealPage('pageMealInv'), mealcfg: () => mealPage('pageMealCfg'), mealme: () => mealPage('pageMealMe') }[key])();
 }
+/* ---------- MENU ĐIỆN THOẠI (Anh 16/11/2026: hàng menu kéo ngang trên điện thoại khó tìm chức năng) ----------
+ * Màn hẹp (≤ 780px, xem admin.css): ẩn menu trái; thay bằng THANH DƯỚI (4 mục hay dùng + nút "Menu") và BẢNG MENU dạng ô biểu tượng
+ * theo đúng các nhóm của menu trái, có ô tìm chức năng (gõ không dấu cũng được). Máy tính giữ nguyên menu trái.
+ * Bảng Menu mở ra thì nút Back của điện thoại đóng bảng (không thoát khỏi trang quản lý). */
+const M_TAB_PRI = ['dashboard', 'editatt', 'report', 'employees', 'leaves', 'salary', 'assignments', 'mealme', 'meal', 'mealreg', 'mealrpt', 'devices', 'settings'];
+const M_SHORT = { dashboard: 'Tổng quan', editatt: 'Tính công', report: 'Báo cáo', employees: 'Nhân viên', leaves: 'Đơn từ', salary: 'Lương', assignments: 'Phân ca',
+  mealme: 'Suất ăn', meal: 'Suất ăn', mealreg: 'Đăng ký ăn', mealrpt: 'BC suất ăn', devices: 'Máy CC', settings: 'Cài đặt' };
+let _mTabs = [];            // các mục đang nằm trên thanh dưới
+let _mSheetOpen = false;
+const vnFold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[đĐ]/g, 'd').toLowerCase();
+const isPhoneNav = () => { try { return matchMedia('(max-width: 780px)').matches; } catch { return false; } };
+function buildMobileNav(visible) {
+  document.getElementById('m-tabs')?.remove(); document.getElementById('m-sheet')?.remove();
+  _mSheetOpen = false; document.body.classList.remove('ms-lock');
+  if (!visible.length) return;
+  const item = (k) => visible.find((v) => v[0] === k);
+  _mTabs = M_TAB_PRI.filter((k) => item(k)).slice(0, 4);
+  // THANH DƯỚI
+  const bar = el('nav', { id: 'm-tabs', 'aria-label': 'Menu nhanh' });
+  for (const k of _mTabs) {
+    const [, ic, label] = item(k);
+    const b = el('button', { type: 'button', 'data-k': k }, el('span', { class: 'ic' }, ic), el('span', { class: 'lb' }, M_SHORT[k] || label));
+    b.onclick = () => go(k);
+    bar.append(b);
+  }
+  const more = el('button', { type: 'button', id: 'm-more' }, el('span', { class: 'ic ic-menu' }, '☰'), el('span', { class: 'lb' }, 'Menu'));
+  more.onclick = () => mSheet(true);
+  bar.append(more);
+  // BẢNG MENU: ô biểu tượng theo nhóm (mục không thuộc nhóm nào — Tổng quan — đứng đầu, không tiêu đề)
+  const body = el('div', { class: 'ms-body' });
+  const none = el('div', { class: 'ms-none hidden' }, 'Không có chức năng nào khớp');
+  const secs = [];
+  const grouped = new Set(NAV_GROUPS.flatMap((g) => g[2]));
+  const addSec = (title, keys) => {
+    const items = keys.map(item).filter(Boolean);
+    if (!items.length) return;
+    const grid = el('div', { class: 'ms-grid' });
+    for (const [k, ic, label] of items) {
+      const t = el('button', { type: 'button', class: 'ms-tile', 'data-k': k, 'data-q': vnFold(label + ' ' + title) }, el('span', { class: 'ic' }, ic), el('span', { class: 'lb' }, label));
+      t.onclick = () => { mSheet(false); go(k); };
+      grid.append(t);
+    }
+    const sec = el('section', { class: 'ms-sec' }, title ? el('h4', {}, title) : null, grid);
+    secs.push(sec); body.append(sec);
+  };
+  addSec('', visible.map((v) => v[0]).filter((k) => !grouped.has(k)));
+  for (const [, title, keys] of NAV_GROUPS) addSec(title, keys);
+  body.append(none);
+  const search = el('input', { type: 'search', placeholder: '🔍 Tìm chức năng… (VD: tinh cong, luong)', autocomplete: 'off', enterkeyhint: 'search', 'aria-label': 'Tìm chức năng' });
+  search.addEventListener('input', () => {
+    const q = vnFold(search.value.trim());
+    let any = false;
+    for (const sec of secs) {
+      let n = 0;
+      sec.querySelectorAll('.ms-tile').forEach((t) => { const ok = !q || t.dataset.q.includes(q); t.classList.toggle('hidden', !ok); if (ok) n++; });
+      sec.classList.toggle('hidden', !n); if (n) any = true;
+    }
+    none.classList.toggle('hidden', any);
+  });
+  // Enter trong ô tìm: chỉ còn 1 chức năng khớp → mở luôn
+  search.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    const left = [...body.querySelectorAll('.ms-tile:not(.hidden)')];
+    if (left.length === 1) { e.preventDefault(); left[0].click(); }
+  });
+  const x = el('button', { type: 'button', class: 'ms-x', 'aria-label': 'Đóng menu' }, '×');
+  x.onclick = () => mSheet(false);
+  const out = el('button', { type: 'button', class: 'btn ghost sm ms-out' }, 'Đăng xuất');
+  out.onclick = () => { clearToken(); location.reload(); };
+  const company = ($('#side-brand')?.firstChild?.textContent || '').trim() || 'Digiplus';
+  const role = isMaster() ? 'Tài khoản tổng' : ME.role === 'admin' ? 'Quản trị viên' : 'Quản lý';
+  const head = el('div', { class: 'ms-head' },
+    el('div', { class: 'ms-top' }, el('div', { class: 'ms-who' }, el('b', {}, company), el('small', {}, `${ME.full_name || ME.username || ''} · ${role}`)), out, x),
+    search);
+  const panel = el('div', { class: 'ms-panel', role: 'dialog', 'aria-label': 'Menu chức năng' }, el('div', { class: 'ms-grip' }), head, body);
+  const sheet = el('div', { id: 'm-sheet' }, panel);
+  sheet.addEventListener('click', (e) => { if (e.target === sheet) mSheet(false); });
+  document.body.append(bar, sheet);
+  if (!window._mNavEv) {
+    window._mNavEv = true;
+    window.addEventListener('popstate', () => { if (_mSheetOpen) mSheet(false, true); });
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && _mSheetOpen) mSheet(false); });
+  }
+}
+function mSheet(open, fromBack) {
+  const s = document.getElementById('m-sheet');
+  if (!s || open === _mSheetOpen) return;
+  _mSheetOpen = open;
+  s.classList.toggle('show', open);
+  document.body.classList.toggle('ms-lock', open);
+  if (open) {
+    try { history.pushState({ mSheet: 1 }, ''); } catch {}
+    const inp = s.querySelector('.ms-head input');
+    if (inp && inp.value) { inp.value = ''; inp.dispatchEvent(new Event('input')); }
+    const cur = s.querySelector('.ms-tile.on');
+    const p = s.querySelector('.ms-panel');
+    if (p) p.scrollTop = 0;
+    if (cur && p && cur.offsetTop > p.clientHeight - 120) p.scrollTop = cur.offsetTop - p.clientHeight / 2;
+  } else if (!fromBack && history.state && history.state.mSheet) { try { history.back(); } catch {} }
+}
+function mobileNavSync(key) {
+  const bar = document.getElementById('m-tabs');
+  if (!bar) return;
+  bar.querySelectorAll('button[data-k]').forEach((b) => b.classList.toggle('active', b.dataset.k === key));
+  const more = document.getElementById('m-more'); if (more) more.classList.toggle('active', !_mTabs.includes(key));
+  document.querySelectorAll('#m-sheet .ms-tile').forEach((t) => t.classList.toggle('on', t.dataset.k === key));
+  if (isPhoneNav()) window.scrollTo(0, 0);   // điện thoại: sang trang khác thì về đầu trang
+}
+
 // PHÂN HỆ QUẢN LÝ SUẤT ĂN (public/suatan/admin.js) — chỉ nạp khi mở menu Suất ăn (và chỉ có menu khi tài khoản tổng đã bật)
 async function mealPage(fn) {
   setMain(loading());

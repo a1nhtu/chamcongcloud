@@ -1,7 +1,14 @@
 // TIỀN LƯƠNG NÂNG CAO (giao diện) — kiểu AMIS Tiền lương: Bảng lương (chốt / duyệt / khoá / phiếu / chuyển khoản) · Hồ sơ lương
 // · Thành phần lương (công thức) · Dữ liệu theo kỳ · Tạm ứng · Mẫu bảng lương · Báo cáo · Phản hồi · Thông số.
 // Nạp khi mở menu "Lương" và tài khoản tổng đã bật Tiền lương nâng cao (admin.js gọi import('/payroll.js')).
+import * as COMMON from '/common.js';
 import { api, toast, el, todayMonth } from '/common.js';
+// Lưu file xuất: máy tính tải về như cũ; điện thoại có thêm nút "Gửi qua Zalo, Mail…" (saveFile — common.js)
+function saveFile(blob, name, opt) {
+  if (COMMON.saveFile) return COMMON.saveFile(blob, name, opt);
+  const url = URL.createObjectURL(blob); const a = el('a', { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
 
 let C = null;        // { head, setMain, openModal, closeModal, loading, hasPerm, go }
 let META = null;     // /admin/pay/meta
@@ -46,9 +53,7 @@ async function download(path, name) {
     const cd = res.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename\*=UTF-8''([^;]+)/);
     if (m) { try { name = decodeURIComponent(m[1]); } catch {} }
-    const url = URL.createObjectURL(await res.blob());
-    const a = el('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    saveFile(await res.blob(), name, { share: !/template|\/file(\?|$)/.test(path) });   // file mẫu: chỉ tải về
   } catch (e) { toast(e.message, 'err'); }
 }
 function pickFile(onB64, accept = '.xlsx') {

@@ -221,9 +221,7 @@ async function pageOtReg() {
     try {
       const res = await api('/admin/ot-reg/export.xlsx', { method: 'POST', raw: true, body: { from: _or.from, to: _or.to, ids: vis.length === emps.length ? [] : vis.map((e) => e.id) } });
       if (!res.ok) { let m = 'Máy chủ trả lỗi ' + res.status; try { m = (await res.json()).error || m; } catch {} toast(m, 'err'); return; }
-      const url = URL.createObjectURL(await res.blob());
-      const a = el('a', { href: url, download: `dang_ky_lam_them_${_or.from}_${_or.to}.xlsx` });
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      saveFile(await res.blob(), `dang_ky_lam_them_${_or.from}_${_or.to}.xlsx`);
       toast(`Đã xuất mẫu ${vis.length.toLocaleString('vi')} nhân viên × ${days.length} ngày`, 'ok');
     } catch (e) { toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
     finally { xlOut.disabled = false; }
@@ -382,9 +380,7 @@ async function pageAbnormal() {
       const qs = `from=${_ab.from}&to=${_ab.to}&kinds=${[..._ab.kinds].join(',')}&min_late=${_ab.minLate}&min_early=${_ab.minEarly}&min_ot=${_ab.minOt}` + (_ab.depts.size ? '&depts=' + encodeURIComponent([..._ab.depts].join(',')) : '');
       const res = await api('/admin/abnormal.xlsx?' + qs, { raw: true });
       if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
-      const url = URL.createObjectURL(await res.blob());
-      const a = el('a', { href: url, download: `cham_cong_bat_thuong_${_ab.from}_${_ab.to}.xlsx` });
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+      saveFile(await res.blob(), `cham_cong_bat_thuong_${_ab.from}_${_ab.to}.xlsx`);
       toast('Đã xuất Excel', 'ok');
     } catch (e) { toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
     finally { xls.disabled = false; }

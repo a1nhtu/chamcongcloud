@@ -70,6 +70,106 @@ export function toast(msg, type = '') {
   toastEl._t = setTimeout(() => (toastEl.className = type), 2600);
 }
 
+/* ---------- LƯU FILE XUẤT (Excel…) + GỬI QUA ZALO / MAIL (Anh 16/11/2026) ----------
+ * Máy tính (chuột): tải file về như cũ. Điện thoại / máy tính bảng (màn cảm ứng, trang mở bằng https): hiện bảng nhỏ dưới đáy
+ *   [📤 Gửi qua Zalo, Mail…]  [⬇ Lưu về máy]
+ * - iPhone / iPad (Safari) cho chia sẻ thẳng FILE → gửi file Excel thật.
+ * - Chrome Android KHÔNG cho trang web chia sẻ file .xlsx / .docx (chỉ ảnh, PDF, CSV, TXT) → gửi LINK tải file: máy chủ giữ file
+ *   3 ngày dưới link mã ngẫu nhiên (server/share-file.js), người nhận bấm link là tải được.
+ * Hộp chia sẻ của điện thoại chỉ mở được ngay sau một cú bấm, mà xuất file mất vài giây → phải bấm nút "Gửi" (không tự mở được).
+ * share: false = chỉ tải về (file mẫu để nhập, sao lưu…). Trang mở bằng http (mạng LAN) điện thoại không có hộp chia sẻ → tải về như cũ. */
+const SF_MIME = {
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', doc: 'application/msword',
+  pdf: 'application/pdf', csv: 'text/csv',
+};
+const sfTouch = () => { try { return matchMedia('(hover: none) and (pointer: coarse)').matches; } catch { return false; } };
+export function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = name; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+const sfSize = (n) => (n >= 1048576 ? (n / 1048576).toFixed(1).replace('.', ',') + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB');
+export function saveFile(blob, name, { share = true } = {}) {
+  name = String(name || 'file.xlsx');
+  if (!share || !sfTouch() || !window.isSecureContext || typeof navigator.share !== 'function') { downloadBlob(blob, name); return; }
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  let file = null, fileOk = false;
+  try {
+    file = new File([blob], name, { type: SF_MIME[ext] || blob.type || 'application/octet-stream' });
+    fileOk = !!(navigator.canShare && navigator.canShare({ files: [file] }));
+  } catch { fileOk = false; }
+  sfSheet(blob, name, ext, file, fileOk);
+}
+async function sfMakeLink(blob, name) {
+  const headers = { 'Content-Type': 'application/octet-stream', 'X-Device-Id': deviceId() };
+  const t = getToken(); if (t) headers.Authorization = 'Bearer ' + t;
+  const res = await fetch('/api/admin/share-file?name=' + encodeURIComponent(name), { method: 'POST', headers, body: blob });
+  const d = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(d.error || 'Không tạo được link (lỗi ' + res.status + ')');
+  return new URL(d.url, location.origin).href;
+}
+async function sfCopy(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch {}
+  try {
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;left:-9999px;top:0';
+    document.body.appendChild(ta); ta.select(); const ok = document.execCommand('copy'); ta.remove(); return ok;
+  } catch { return false; }
+}
+function sfSheet(blob, name, ext, file, fileOk) {
+  document.getElementById('sf-sheet')?.remove();
+  const bg = el('div', { id: 'sf-sheet', class: 'sf-bg' });
+  // đang mở bảng: thông báo nổi ("Đã xuất Excel"…) chuyển lên đầu màn hình, không đè lên nút
+  const close = () => { bg.classList.remove('show'); document.body.classList.remove('sf-open'); setTimeout(() => bg.remove(), 220); };
+  document.body.classList.add('sf-open');
+  bg.addEventListener('click', (e) => { if (e.target === bg) close(); });
+  const IC = { xlsx: ['📊', 'xl'], xls: ['📊', 'xl'], csv: ['📊', 'xl'], docx: ['📄', 'wd'], doc: ['📄', 'wd'], pdf: ['📕', 'pd'] }[ext] || ['📁', ''];
+  const x = el('button', { type: 'button', class: 'sf-x', 'aria-label': 'Đóng' }, '×'); x.onclick = close;
+  const SEND = '📤 Gửi qua Zalo, Mail…';
+  const send = el('button', { type: 'button', class: 'btn block sf-send' }, SEND);
+  const save = el('button', { type: 'button', class: 'btn ghost block' }, '⬇ Lưu về điện thoại');
+  save.onclick = () => { downloadBlob(blob, name); close(); };
+  const note = el('div', { class: 'sf-note' }, fileOk
+    ? 'Bấm Gửi rồi chọn Zalo, Gmail, Messenger… trong danh sách điện thoại hiện ra.'
+    : 'Gửi dạng LINK TẢI FILE (trình duyệt Chrome không cho gửi thẳng file Excel / Word). Link dùng được 3 ngày, ai có link đều tải được — chỉ gửi cho người cần nhận.');
+  const linkBox = el('div', { class: 'sf-link hidden' });
+  let link = '';
+  const showLink = () => {
+    const inp = el('input', { value: link, readonly: '' });
+    const cp = el('button', { type: 'button', class: 'btn ghost sm' }, 'Sao chép');
+    cp.onclick = async () => { toast((await sfCopy(link)) ? 'Đã sao chép link — dán vào Zalo / Mail để gửi' : 'Không sao chép được, hãy giữ ngón tay vào ô link để chép', 'ok'); };
+    linkBox.replaceChildren(inp, cp); linkBox.classList.remove('hidden');
+  };
+  send.onclick = async () => {
+    if (fileOk) {
+      try { await navigator.share({ files: [file], title: name }); close(); }
+      catch (e) { if (e && e.name !== 'AbortError') toast('Không mở được hộp chia sẻ: ' + (e.message || e), 'err'); }
+      return;
+    }
+    if (!link) {
+      send.disabled = true; send.textContent = 'Đang tạo link tải file…';
+      try { link = await sfMakeLink(blob, name); }
+      catch (e) { toast(e.message || 'Không tạo được link', 'err'); send.disabled = false; send.textContent = SEND; return; }
+      send.disabled = false; send.textContent = '📤 Gửi link qua Zalo, Mail…';
+      showLink();
+    }
+    try { await navigator.share({ title: name, text: `${IC[0]} ${name}\nLink tải file (dùng được 3 ngày):`, url: link }); close(); }
+    catch (e) {
+      if (e && e.name === 'AbortError') return;
+      // tạo link lâu quá → trình duyệt không cho mở hộp chia sẻ nữa: bấm lại lần nữa (link đã có sẵn, mở ngay)
+      send.textContent = '📤 Bấm lần nữa để gửi link';
+    }
+  };
+  bg.append(el('div', { class: 'sf-card', role: 'dialog', 'aria-label': 'Gửi file' },
+    el('div', { class: 'sf-grip' }),
+    el('div', { class: 'sf-file' }, el('div', { class: 'sf-ic ' + IC[1] }, IC[0]),
+      el('div', { style: 'min-width:0' }, el('div', { class: 'sf-nm' }, name), el('div', { class: 'sf-sz' }, 'Đã xuất xong · ' + sfSize(blob.size || 0))), x),
+    send, save, linkBox, note));
+  document.body.appendChild(bg);
+  requestAnimationFrame(() => bg.classList.add('show'));
+}
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 

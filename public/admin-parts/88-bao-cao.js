@@ -448,11 +448,8 @@ async function downloadExcel(type, from, to, extraQS) {
     const res = await api(`/reports/export.xlsx?type=${type}&from=${from}&to=${to}${extraQS || ''}&pt=${xp.pt}`, { raw: true });
     if (!res.ok) { xp.done(false); toast('Máy chủ trả lỗi ' + res.status + ' khi xuất', 'err'); return; }
     const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = el('a', { href: url, download: `baocao_${type}_${from}_${to}.xlsx` });
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
     xp.done(true);
+    saveFile(blob, `baocao_${type}_${from}_${to}.xlsx`);
     toast('Đã xuất Excel', 'ok');
   } catch (e) { xp.done(false); toast('Không xuất được file (mất kết nối máy chủ, thử lại)', 'err'); }
   finally { _xlBusy = false; }

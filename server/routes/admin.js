@@ -23,6 +23,7 @@ import { registerMealRoutes } from './admin/meal.js';
 import { registerPayProRoutes } from './admin/payroll-pro.js';
 import { registerLegacyImportRoutes } from './admin/legacy-import.js';
 import { registerCustomReportRoutes } from './admin/custom-reports.js';
+import { registerShareRoutes } from './admin/share.js';
 
 const r = Router();
 r.use(authRequired, roleRequired('admin', 'manager'));
@@ -55,5 +56,6 @@ registerHrImportRoutes(r, { need });     // nhân sự: nhập hồ sơ / hợp 
 registerPayProRoutes(r, { need });       // tiền lương nâng cao (BH, thuế, thành phần, bảng lương chốt/khoá) — sau công tắc pay_pro
 registerCustomReportRoutes(r);           // mẫu báo cáo riêng của công ty — chỉ tài khoản tổng sửa
 registerMealRoutes(r);                   // quản lý suất ăn (HR): đối chiếu 3 ca, chốt số, thực đơn — sau công tắc meal_enabled
+registerShareRoutes(r);                  // link tải file (Excel…) để gửi qua Zalo / Mail từ điện thoại
 
 export default r;

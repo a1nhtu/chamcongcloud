@@ -1,7 +1,14 @@
 // QUẢN LÝ SUẤT ĂN (giao diện HR trong /admin) — Đối chiếu & chốt · Tổng hợp & điều chỉnh theo món · Thực đơn · Cấu hình · Suất ăn của tôi.
 // Chỉ nạp khi mở menu "Suất ăn" (admin.js gọi import('/suatan/admin.js')), và chỉ khi tài khoản tổng đã bật phân hệ.
+import * as COMMON from '/common.js';
 import { api, toast, el } from '/common.js';
 import { renderMealTab } from '/suatan/emp.js';
+// Lưu file xuất: máy tính tải về như cũ; điện thoại có thêm nút "Gửi qua Zalo, Mail…" (saveFile — common.js)
+function saveFile(blob, name, opt) {
+  if (COMMON.saveFile) return COMMON.saveFile(blob, name, opt);
+  const url = URL.createObjectURL(blob); const a = el('a', { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
 
 let C = null;   // { head, setMain, openModal, closeModal, loading, hasPerm, go }
 let _mealShowOff = false;   // trang cấu hình: có hiện cả các bữa đang tắt (bỏ tích "Bật bữa này") không — mặc định ẩn
@@ -975,9 +982,7 @@ async function downloadRpt(type, query) {
     const res = await api(`/admin/meal/rpt.xlsx?type=${type}&${query}`, { raw: true });
     if (!res.ok) { let m = 'Không xuất được báo cáo'; try { m = (await res.json()).error || m; } catch {} return toast(m, 'err'); }
     const name = (/filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '') || [])[1] || `bao_cao_suat_an_${type}.xlsx`;
-    const url = URL.createObjectURL(await res.blob());
-    const a = el('a', { href: url, download: name });
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    saveFile(await res.blob(), name);
     toast('Đã xuất Excel', 'ok');
   } catch { toast('Không xuất được báo cáo', 'err'); }
 }
@@ -1425,10 +1430,7 @@ export async function pageMealReport(ctx) {
       try {
         const res = await api(`/admin/meal/report.xlsx?from=${f.value}&to=${t.value}`, { raw: true });
         if (!res.ok) { let m = 'Không xuất được báo cáo'; try { m = (await res.json()).error || m; } catch {} return toast(m, 'err'); }
-        const url = URL.createObjectURL(await res.blob());
-        const a = el('a', { href: url, download: `bao_cao_suat_an_${f.value}_${t.value}.xlsx` });
-        document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
-        C.closeModal(); toast('Đã xuất báo cáo', 'ok');
+        C.closeModal(); saveFile(await res.blob(), `bao_cao_suat_an_${f.value}_${t.value}.xlsx`); toast('Đã xuất báo cáo', 'ok');
       } catch { toast('Không xuất được báo cáo', 'err'); }
     };
     C.openModal('⬇ Xuất báo cáo suất ăn ra Excel', [el('div', { class: 'sa' },

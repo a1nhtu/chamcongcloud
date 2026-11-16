@@ -260,10 +260,7 @@ async function downloadEmpExport() {
     const res = await api('/admin/employees/export.xlsx' + (dept ? '?dept=' + encodeURIComponent(dept) : ''), { raw: true });
     if (!res.ok) { toast('Không xuất được danh sách', 'err'); return; }
     const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'danh_sach_nhan_vien.xlsx';
-    const url = URL.createObjectURL(await res.blob());
-    const a = el('a', { href: url, download: name });
-    document.body.appendChild(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    saveFile(await res.blob(), name);
     toast('Đã xuất danh sách nhân viên ' + (dept === '__none__' ? '· Chưa có bộ phận' : dept ? '· ' + dept : 'cả công ty'), 'ok');
   } catch { toast('Không xuất được danh sách', 'err'); }
 }

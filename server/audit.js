@@ -70,6 +70,7 @@ const LABELS = {
   'POST /attendance/punches/bulk': 'Thêm giờ hàng loạt',
   'POST /attendance/clear': 'Xóa dữ liệu chấm công (theo NV)',
   'PUT /backup/config': 'Đổi cấu hình sao lưu',
+  'POST /share-file': 'Tạo link gửi file (Zalo / Mail)',
   'POST /backup/now': 'Tạo bản sao lưu',
   'DELETE /backup': 'Xóa bản sao lưu',
   'POST /backup/restore': 'Phục hồi dữ liệu',

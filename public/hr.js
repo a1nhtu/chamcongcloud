@@ -1,6 +1,13 @@
 // PHÂN HỆ NHÂN SỰ (giao diện) — Hồ sơ nhân sự · Hợp đồng lao động · Thuyên chuyển & nghỉ việc.
 // Nạp khi mở menu "Nhân sự" (admin.js gọi import('/hr.js')). Dùng chung khung trang / hộp thoại của admin.js qua ctx.
+import * as COMMON from '/common.js';
 import { api, toast, el } from '/common.js';
+// Lưu file xuất: máy tính tải về như cũ; điện thoại có thêm nút "Gửi qua Zalo, Mail…" (saveFile — common.js)
+function saveFile(blob, name, opt) {
+  if (COMMON.saveFile) return COMMON.saveFile(blob, name, opt);
+  const url = URL.createObjectURL(blob); const a = el('a', { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
 
 let C = null;        // { head, setMain, openModal, closeModal, loading, hasPerm, go }
 let META = null;     // danh mục từ /admin/hr/meta
@@ -51,9 +58,7 @@ async function download(path, name) {
     const cd = res.headers.get('Content-Disposition') || '';
     const m = cd.match(/filename\*=UTF-8''([^;]+)/);
     if (m) { try { name = decodeURIComponent(m[1]); } catch {} }
-    const url = URL.createObjectURL(await res.blob());
-    const a = el('a', { href: url, download: name }); document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    saveFile(await res.blob(), name, { share: !/template|\/file(\?|$)/.test(path) });   // file mẫu: chỉ tải về
     return res;
   } catch (e) { toast(e.message, 'err'); return null; }
 }

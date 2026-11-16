@@ -75,9 +75,7 @@ async function pageLogs() {
     try {
       const url = `/admin/logs/${tab}/export.xlsx?` + qs().toString();
       const res = await api(url, { raw: true });
-      const blob = await res.blob(); const u = URL.createObjectURL(blob);
-      const a = el('a', { href: u, download: `nhatky_${tab === 'admin' ? 'quantri' : 'maychamcong'}.xlsx` });
-      document.body.append(a); a.click(); a.remove(); URL.revokeObjectURL(u);
+      saveFile(await res.blob(), `nhatky_${tab === 'admin' ? 'quantri' : 'maychamcong'}.xlsx`);
     } catch (e) { toast(e.message || 'Lỗi xuất Excel', 'err'); }
     exportBtn.disabled = false;
   }

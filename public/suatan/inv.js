@@ -1,7 +1,14 @@
 // ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (menu Suất ăn › Nguyên liệu & kho) — 5 tab:
 //   Nhu cầu nấu · Định lượng món · Nguyên liệu & tồn kho · Phiếu kho · Báo cáo
 // Chỉ có menu khi tài khoản tổng bật công tắc "Định lượng nguyên liệu" (Cài đặt › Cấu hình hiển thị). API: /admin/meal/inv/*
+import * as COMMON from '/common.js';
 import { api, toast, el } from '/common.js';
+// Lưu file xuất: máy tính tải về như cũ; điện thoại có thêm nút "Gửi qua Zalo, Mail…" (saveFile — common.js)
+function saveFile(blob, name, opt) {
+  if (COMMON.saveFile) return COMMON.saveFile(blob, name, opt);
+  const url = URL.createObjectURL(blob); const a = el('a', { href: url, download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+}
 
 let C = null;
 const vnToday = () => new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
@@ -48,8 +55,7 @@ async function download(path, fallback) {
     const res = await api(path, { raw: true });
     if (!res.ok) { let m = 'Không xuất được báo cáo'; try { m = (await res.json()).error || m; } catch {} return toast(m, 'err'); }
     const name = (/filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '') || [])[1] || fallback;
-    const url = URL.createObjectURL(await res.blob());
-    const a = el('a', { href: url, download: name }); document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    saveFile(await res.blob(), name);
     toast('Đã xuất Excel', 'ok');
   } catch { toast('Không xuất được báo cáo', 'err'); }
 }

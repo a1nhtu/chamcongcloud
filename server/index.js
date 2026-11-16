@@ -39,6 +39,7 @@ import { startHrRemindScheduler } from './hr-remind.js';
 import { startRebootScheduler } from './reboot-schedule.js';
 import { moveGuard, moveDownload } from './chuyen-may.js';
 import { adminBundle } from './admin-bundle.js';
+import { shareDownload, cleanupShares } from './share-file.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -63,6 +64,8 @@ startRebootScheduler();   // máy chấm công: tự khởi động lại theo g
 const backupTick = () => eachTenant(maybeAutoBackup);
 backupTick();
 setInterval(backupTick, 5 * 60 * 1000);
+// Link tải file gửi qua Zalo / Mail (server/share-file.js): xoá file đã hết hạn mỗi giờ
+setInterval(() => eachTenant(() => { cleanupShares(); }), 60 * 60 * 1000);
 
 const app = express();
 // Máy chủ nhiều công ty: API điều khiển (tạo công ty — cần HOST_TOKEN) + mọi yêu cầu khác chạy theo công ty của TÊN MIỀN
@@ -99,6 +102,9 @@ app.use('/api', (req, res, next) => {
   if (isActivated()) return next();
   res.status(403).json({ error: 'Phần mềm chưa được kích hoạt bản quyền', needLicense: true });
 });
+
+// Link tải file đã gửi qua Zalo / Mail — công khai (người nhận không có tài khoản), mã ngẫu nhiên, hết hạn sau 3 ngày
+app.get('/api/f/:tok/:name', shareDownload);
 
 // API
 app.use('/api/auth', authRoutes);

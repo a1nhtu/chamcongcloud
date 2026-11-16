@@ -654,10 +654,7 @@ async function pageAssignments() {
       try {
         const res = await api(`/admin/assignments/export.xlsx?from=${days[0]}&to=${days[days.length - 1]}&dept=${encodeURIComponent(deptQS)}`, { raw: true });
         if (!res.ok) { toast('Máy chủ trả lỗi ' + res.status, 'err'); return; }
-        const blob = await res.blob(); const url = URL.createObjectURL(blob);
-        const a = el('a', { href: url, download: `phanca_${days[0]}_${days[days.length - 1]}.xlsx` });
-        document.body.appendChild(a); a.click(); a.remove();
-        setTimeout(() => URL.revokeObjectURL(url), 4000);
+        saveFile(await res.blob(), `phanca_${days[0]}_${days[days.length - 1]}.xlsx`);
         if (_asDirty.size) toast('Lưu ý: file xuất chưa gồm các ô đang sửa chưa lưu', 'err');
       } catch (e) { toast('Không xuất được (mất kết nối, thử lại)', 'err'); }
     }, 'ghost');
