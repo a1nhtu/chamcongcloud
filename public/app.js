@@ -439,11 +439,57 @@ async function loadMyShiftReq() {
 }
 
 /* ---------------- Tab BÁO CÁO ---------------- */
+// Chọn kỳ xem (Anh 17/11/2026): Tháng này · Tháng trước · Chọn tháng · Từ ngày → đến ngày. Nhớ lựa chọn khi chuyển tab.
+let _bcKind = 'cur', _bcMonth = '', _bcFrom = '', _bcTo = '';
+const shiftMonth = (ym, n) => { const [y, m] = ym.split('-').map(Number); const d = new Date(Date.UTC(y, m - 1 + n, 1)); return d.toISOString().slice(0, 7); };
+const dmY = (d) => d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
+
 async function renderBaocao() {
   const c = $('#content'); c.innerHTML = '';
+  const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const curM = today.slice(0, 7);
+  if (!_bcMonth) _bcMonth = curM;
+  if (!_bcFrom) { _bcFrom = curM + '-01'; _bcTo = today; }
+
+  // Thanh chọn kỳ
+  const seg = el('div', { class: 'bc-seg' });
+  const extra = el('div', { class: 'bc-extra' });
+  const KINDS = [['cur', 'Tháng này'], ['prev', 'Tháng trước'], ['month', 'Chọn tháng'], ['range', 'Từ ngày…']];
+  for (const [k, label] of KINDS) {
+    const b = el('button', { type: 'button', class: k === _bcKind ? 'on' : '' }, label);
+    b.onclick = () => { _bcKind = k; renderBaocao(); };
+    seg.append(b);
+  }
+  if (_bcKind === 'month') {
+    const mI = el('input', { type: 'month', value: _bcMonth, max: curM });
+    mI.onchange = () => { if (mI.value) { _bcMonth = mI.value; renderBaocao(); } };
+    extra.append(el('button', { type: 'button', class: 'btn ghost sm', onclick: () => { _bcMonth = shiftMonth(_bcMonth, -1); renderBaocao(); } }, '‹'),
+      mI, el('button', { type: 'button', class: 'btn ghost sm', onclick: () => { if (_bcMonth < curM) { _bcMonth = shiftMonth(_bcMonth, 1); renderBaocao(); } } }, '›'));
+  } else if (_bcKind === 'range') {
+    const fI = el('input', { type: 'date', value: _bcFrom, max: today }), tI = el('input', { type: 'date', value: _bcTo, max: today });
+    const go = () => {
+      if (!fI.value || !tI.value) return;
+      if (tI.value < fI.value) return toast('"Đến ngày" phải sau "Từ ngày"', 'err');
+      _bcFrom = fI.value; _bcTo = tI.value; renderBaocao();
+    };
+    fI.onchange = go; tI.onchange = go;
+    extra.append(el('div', { class: 'bc-dates' }, el('label', {}, 'Từ ngày', fI), el('label', {}, 'Đến ngày', tI)));
+  }
+  c.append(el('div', { class: 'card bc-bar' }, seg, extra.childNodes.length ? extra : ''));
+
+  let qs, title;
+  if (_bcKind === 'range') { qs = `from=${_bcFrom}&to=${_bcTo}`; title = `Công từ ${dmY(_bcFrom)} đến ${dmY(_bcTo)}`; }
+  else {
+    const m = _bcKind === 'prev' ? shiftMonth(curM, -1) : _bcKind === 'month' ? _bcMonth : curM;
+    qs = 'month=' + m; title = m === curM ? 'Công tháng này' : `Công tháng ${m.slice(5)}/${m.slice(0, 4)}`;
+  }
+  const body = el('div', {}, el('div', { class: 'empty' }, 'Đang tải…'));
+  c.append(body);
   let sum, mine;
-  try { [sum, mine] = await Promise.all([api('/attendance/summary'), api('/attendance/mine')]); }
-  catch (e) { showErr(c, e); return; }
+  try { [sum, mine] = await Promise.all([api('/attendance/summary?' + qs), api('/attendance/mine?' + qs)]); }
+  catch (e) { showErr(body, e); return; }
+  if (!document.body.contains(body)) return;   // đã chuyển tab / đổi kỳ trong lúc tải
+  body.remove();
 
   if (MODE === 'hourly') {
     c.append(el('div', { class: 'stat-row' },
@@ -463,7 +509,7 @@ async function renderBaocao() {
         stat(sum.days, 'NGÀY CHẤM'),
       ));
   }
-  c.append(el('div', { class: 'sec-title' }, 'Công tháng này'));
+  c.append(el('div', { class: 'sec-title' }, title));
   c.append(monthTable(mine.rows));
 }
 function stat(n, l) { return el('div', { class: 'stat' }, el('div', { class: 'n' }, String(n)), el('div', { class: 'l' }, l)); }

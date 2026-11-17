@@ -378,13 +378,29 @@ r.post('/check-out', (req, res) => {
   }, req.user.id).catch(() => {});
 });
 
-// Bảng công của tôi theo tháng (?month=YYYY-MM)
+// Khoảng ngày xem công của tôi (Anh 17/11/2026: nhân viên xem được tháng trước / tháng bất kỳ / từ ngày đến ngày):
+// ?from=YYYY-MM-DD&to=YYYY-MM-DD (tối đa 366 ngày) hoặc ?month=YYYY-MM; bỏ trống = tháng hiện tại như cũ.
+const YMD = /^\d{4}-\d{2}-\d{2}$/, YM = /^\d{4}-\d{2}$/;
+export function myRange(q = {}) {
+  const f = String(q.from || '').slice(0, 10), t = String(q.to || '').slice(0, 10);
+  if (YMD.test(f) && YMD.test(t)) {
+    let [from, to] = f <= t ? [f, t] : [t, f];
+    const max = new Date(Date.parse(from + 'T12:00:00Z') + 365 * 86400000).toISOString().slice(0, 10);
+    if (to > max) to = max;
+    return { from, to, month: from.slice(0, 7) === to.slice(0, 7) ? from.slice(0, 7) : null };
+  }
+  const m = String(q.month || '').slice(0, 7);
+  const month = YM.test(m) ? m : vnDateStr().slice(0, 7);
+  return { from: month + '-01', to: month + '-31', month };
+}
+
+// Bảng công của tôi (?month=YYYY-MM hoặc ?from&to)
 r.get('/mine', (req, res) => {
-  const month = (req.query.month || vnDateStr().slice(0, 7)).slice(0, 7);
+  const { from, to, month } = myRange(req.query);
   const rows = db.prepare(
-    `SELECT * FROM attendance WHERE employee_id = ? AND work_date LIKE ? ORDER BY work_date DESC`
-  ).all(req.user.id, month + '%');
-  res.json({ month, rows });
+    `SELECT * FROM attendance WHERE employee_id = ? AND work_date BETWEEN ? AND ? ORDER BY work_date DESC`
+  ).all(req.user.id, from, to);
+  res.json({ month, from, to, rows });
 });
 
 // Lịch chấm công cá nhân đủ tháng (đánh dấu từng ngày)
@@ -438,20 +454,20 @@ r.get('/calendar', (req, res) => {
   res.json({ month, days: out });
 });
 
-// Tổng hợp tháng
+// Tổng hợp tháng (hoặc khoảng ngày ?from&to)
 r.get('/summary', (req, res) => {
-  const month = (req.query.month || vnDateStr().slice(0, 7)).slice(0, 7);
+  const { from, to, month } = myRange(req.query);
   const rows = db.prepare(
-    `SELECT * FROM attendance WHERE employee_id = ? AND work_date LIKE ?`
-  ).all(req.user.id, month + '%');
-  const days = rows.filter((x) => x.check_in_at).length;
+    `SELECT * FROM attendance WHERE employee_id = ? AND work_date BETWEEN ? AND ?`
+  ).all(req.user.id, from, to);
+  const days = new Set(rows.filter((x) => x.check_in_at).map((x) => x.work_date)).size;   // ngày làm 2 ca (2 dòng) vẫn tính 1 ngày chấm
   const totalMin = rows.reduce((s, x) => s + (x.work_minutes || 0), 0);
   const totalUnit = rows.reduce((s, x) => s + (x.work_unit || 0), 0);
   const otMin = rows.reduce((s, x) => s + (x.ot_min || 0), 0);
   const lateCount = rows.filter((x) => (x.late_min || 0) > 0).length;
   const earlyCount = rows.filter((x) => (x.early_min || 0) > 0).length;
   res.json({
-    month, days,
+    month, from, to, days,
     totalMinutes: totalMin,
     totalWorkUnit: Math.round(totalUnit * 100) / 100,
     otMinutes: otMin,
