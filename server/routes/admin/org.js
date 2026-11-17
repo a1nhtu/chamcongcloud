@@ -39,6 +39,10 @@ function schedPattern(b) {
   }
   return { unit, cycle, cells, shiftIds: [...new Set(cells.map((c) => c[1]))] };
 }
+// Chỉ MỘT lịch trình ca được làm mặc định (áp cho NV chưa được gán ca / lịch trình nào)
+function setDefaultSchedule(wsId) {
+  db.prepare('UPDATE work_schedules SET is_default = CASE WHEN id = ? THEN 1 ELSE 0 END').run(wsId);
+}
 function saveSchedDays(wsId, pat) {
   db.prepare('DELETE FROM work_schedule_days WHERE work_schedule_id = ?').run(wsId);
   const ins = db.prepare('INSERT OR IGNORE INTO work_schedule_days(work_schedule_id, idx, shift_id) VALUES (?,?,?)');
@@ -48,7 +52,7 @@ function saveSchedDays(wsId, pat) {
 export function registerOrgRoutes(r, { need }) {
   /* ----------------------------- LỊCH TRÌNH CA ----------------------------- */
   r.get('/schedules', (req, res) => {
-    const rows = db.prepare('SELECT * FROM work_schedules WHERE active = 1 ORDER BY name').all();
+    const rows = db.prepare('SELECT * FROM work_schedules WHERE active = 1 ORDER BY is_default DESC, name').all();
     const links = db.prepare(`SELECT wss.work_schedule_id, wss.shift_id, wss.sort_order, s.name, s.code, s.start_time, s.end_time
       FROM work_schedule_shifts wss JOIN shifts s ON s.id = wss.shift_id WHERE s.active = 1 ORDER BY wss.sort_order`).all();
     const days = db.prepare('SELECT work_schedule_id, idx, shift_id FROM work_schedule_days').all();
@@ -65,6 +69,7 @@ export function registerOrgRoutes(r, { need }) {
     try {
       const info = db.prepare('INSERT INTO work_schedules(code, name, description, unit, cycle) VALUES (?,?,?,?,?)').run(b.code || '', b.name.trim(), b.description || '', pat.unit, pat.cycle);
       const wsId = info.lastInsertRowid;
+      if (b.is_default) setDefaultSchedule(wsId);
       const ins = db.prepare('INSERT OR IGNORE INTO work_schedule_shifts(work_schedule_id, shift_id, sort_order) VALUES (?,?,?)');
       ids.forEach((sid, i) => ins.run(wsId, sid, i));
       saveSchedDays(wsId, pat);
@@ -85,6 +90,7 @@ export function registerOrgRoutes(r, { need }) {
         b.code ?? ws.code, b.name ?? ws.name, b.description ?? ws.description,
         b.active != null ? (b.active ? 1 : 0) : ws.active, ws.id);
       if (pat) { db.prepare('UPDATE work_schedules SET unit=?, cycle=? WHERE id=?').run(pat.unit, pat.cycle, ws.id); saveSchedDays(ws.id, pat); }
+      if (b.is_default != null) { if (b.is_default) setDefaultSchedule(ws.id); else db.prepare('UPDATE work_schedules SET is_default = 0 WHERE id = ?').run(ws.id); }
       if (ids) {
         db.prepare('DELETE FROM work_schedule_shifts WHERE work_schedule_id = ?').run(ws.id);
         const ins = db.prepare('INSERT OR IGNORE INTO work_schedule_shifts(work_schedule_id, shift_id, sort_order) VALUES (?,?,?)');
@@ -100,7 +106,7 @@ export function registerOrgRoutes(r, { need }) {
     const used2 = db.prepare('SELECT COUNT(*) c FROM shift_assignments WHERE work_schedule_id = ? AND active = 1').get(req.params.id).c
       + db.prepare('SELECT COUNT(*) c FROM dept_shift_assignments WHERE work_schedule_id = ? AND active = 1').get(req.params.id).c;
     if (used2 > 0) return res.status(400).json({ error: `Lịch trình này đang được gán ở ${used2} dòng Lịch trình nhân viên / phòng ban. Xoá các dòng đó trước.` });
-    db.prepare('UPDATE work_schedules SET active = 0 WHERE id = ?').run(req.params.id);
+    db.prepare('UPDATE work_schedules SET active = 0, is_default = 0 WHERE id = ?').run(req.params.id);
     res.json({ ok: true });
   });
 

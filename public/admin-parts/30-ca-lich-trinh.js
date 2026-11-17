@@ -140,13 +140,13 @@ async function pageSchedules() {
     if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 5 }, el('div', { class: 'empty' }, '📭 Chưa có lịch trình nào. Bấm "+ Thêm lịch trình".'))));
     for (const w of rows) {
       const unit = w.unit || 'auto';
-      tb.append(el('tr', {}, el('td', {}, el('b', {}, w.name)), el('td', {}, SCH_UNIT[unit] || unit), el('td', {}, unit === 'auto' ? '—' : String(w.cycle || 1)),
+      tb.append(el('tr', {}, el('td', {}, el('b', {}, w.name), w.is_default ? el('span', { class: 'pill ok', style: 'margin-left:6px', title: 'Áp cho nhân viên chưa được gán ca / lịch trình nào' }, 'Mặc định') : ''), el('td', {}, SCH_UNIT[unit] || unit), el('td', {}, unit === 'auto' ? '—' : String(w.cycle || 1)),
         el('td', { style: 'color:var(--muted)' }, (w.shifts || []).map((x) => x.name).join(', ') || '—'),
         el('td', {}, canEdit ? el('div', { style: 'display:flex;gap:6px' }, btnSm('Chỉnh sửa', () => { _schEdit = w; pageSchedules(); }),
           btnSm('Xoá', async () => { if (!confirm(`Xoá lịch trình "${w.name}"?`)) return; try { await api('/admin/schedules/' + w.id, { method: 'DELETE' }); toast('Đã xoá', 'ok'); pageSchedules(); } catch (e) { toast(e.message, 'err'); } }, 'ghost')) : '')));
     }
     setMain(head('Lịch trình ca làm việc', addBtn),
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Lịch trình làm việc = thứ nào làm ca nào, lặp theo chu kỳ (VD Thứ Hai → Thứ Sáu ca Hành chính, Thứ Bảy ca Sáng, Chủ Nhật nghỉ). Tạo ở đây rồi gán cho nhân viên / phòng ban ở mục Phân ca.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, 'Lịch trình làm việc = thứ nào làm ca nào, lặp theo chu kỳ (VD Thứ Hai → Thứ Sáu ca Hành chính, Thứ Bảy ca Sáng, Chủ Nhật nghỉ). Tạo ở đây rồi gán cho nhân viên / phòng ban ở mục Phân ca. Nhân viên chưa được gán ca / lịch trình nào thì dùng dòng có nhãn "Mặc định".'),
       el('div', { class: 'panel tbl-scroll' }, tbl));
     return;
   }
@@ -160,7 +160,8 @@ async function pageSchedules() {
   const nameI = el('input', { value: w.name || '', placeholder: 'VD: Hành chính T2–T7', style: 'width:220px' });
   const unitSel = el('select', { style: 'width:auto' }, ...['week', 'day', 'month', 'auto'].map((u) => el('option', { value: u, ...((w.unit || 'week') === u ? { selected: '' } : {}) }, SCH_UNIT[u])));
   const cycI = el('input', { type: 'number', min: '1', max: '62', value: w.cycle || 1, style: 'width:80px' });
-  if (w.id && (w.unit || 'auto') === 'auto') for (const x of (w.shifts || [])) ticked.add(x.shift_id);
+  const defC = el('input', { type: 'checkbox', style: 'width:auto', ...(w.is_default ? { checked: '' } : {}) });
+  if (w.id &&(w.unit || 'auto') === 'auto') for (const x of (w.shifts || [])) ticked.add(x.shift_id);
 
   // Trái: danh sách ca để tick
   const shSearch = el('input', { placeholder: 'Tên ca', style: 'margin-bottom:8px' });
@@ -230,14 +231,15 @@ async function pageSchedules() {
     el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-bottom:12px' },
       el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Tên'), nameI),
       el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Đơn vị'), unitSel),
-      el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Chu kỳ'), cycI)),
+      el('div', {}, el('label', {}, el('span', { style: 'color:#dc2626' }, '* '), 'Chu kỳ'), cycI),
+      el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink);margin:0 0 8px' }, defC, 'Dùng làm MẶC ĐỊNH cho nhân viên chưa được gán ca / lịch trình')),
     gridBox);
 
   const saveBtn = el('button', { class: 'btn green' }, 'Lưu');
   saveBtn.onclick = async () => {
     if (!nameI.value.trim()) return toast('Nhập tên lịch trình', 'err');
     const unit = unitSel.value;
-    const body = { name: nameI.value.trim(), code: w.code || '', unit, cycle: parseInt(cycI.value, 10) || 1 };
+    const body = { name: nameI.value.trim(), code: w.code || '', unit, cycle: parseInt(cycI.value, 10) || 1, is_default: defC.checked };
     if (unit === 'auto') { if (!ticked.size) return toast('Tick ít nhất 1 ca', 'err'); body.shift_ids = [...ticked]; }
     else { body.days = [...cells].filter(([, set]) => set.size).map(([idx, set]) => ({ idx, shift_ids: [...set] })); if (!body.days.length) return toast('Chưa gán ca vào ô ngày nào', 'err'); }
     saveBtn.disabled = true;

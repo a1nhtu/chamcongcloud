@@ -725,13 +725,13 @@ begin
   ChkPhone.Top := ChkDevice.Top + ScaleY(24);
   ChkPhone.Width := DomainPage.SurfaceWidth; ChkPhone.Height := ScaleY(20);
   ChkPhone.Caption := 'Khách chấm công bằng điện thoại (chụp ảnh + định vị)';
-  ChkPhone.Checked := True;
+  ChkPhone.Checked := False;   { mặc định chỉ máy chấm công (Anh 17/11/2026) — khách chấm điện thoại thì tích thêm }
   ChkVps := TNewCheckBox.Create(DomainPage);
   ChkVps.Parent := DomainPage.Surface;
   ChkVps.Top := ChkPhone.Top + ScaleY(34);
   ChkVps.Width := DomainPage.SurfaceWidth; ChkVps.Height := ScaleY(20);
   ChkVps.Caption := 'Đang cài trên VPS nhiều khách của Digiplus (cài ở máy khách thì BỎ tích)';
-  ChkVps.Checked := OtherInstCount > 0;   { máy đã có bản Digiplus khác → nhiều khả năng là VPS }
+  ChkVps.Checked := True;   { mặc định cài trên VPS của Digiplus (Anh 17/11/2026) — cài ở máy khách thì bỏ tích }
 
   { tạo SAU trang tên miền, cùng gắn sau trang Kiểu cài → thứ tự: Kiểu → File chuyển máy → Tên miền → Cổng }
   MovePage := CreateInputFilePage(ModePage.ID, 'Chuyển từ máy cũ', 'Chọn file chuyển máy lấy từ máy tính cũ',

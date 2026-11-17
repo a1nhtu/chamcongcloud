@@ -586,6 +586,8 @@ function migrateColumns() {
   //   unit: 'auto' = nhóm ca, tự dò theo giờ chấm (kiểu cũ) | 'week' | 'day' | 'month'; cycle = số tuần/ngày/tháng lặp lại
   add('work_schedules', 'unit',  "TEXT NOT NULL DEFAULT 'auto'");
   add('work_schedules', 'cycle', 'INTEGER NOT NULL DEFAULT 1');
+  // 1 = lịch trình MẶC ĐỊNH cho NV chưa được gán ca / lịch trình nào (giống lịch trình vào ra mặc định). Khách cũ không có dòng nào = tính như cũ.
+  add('work_schedules', 'is_default', 'INTEGER NOT NULL DEFAULT 0');
   db.exec(`CREATE TABLE IF NOT EXISTS work_schedule_days (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     work_schedule_id INTEGER NOT NULL REFERENCES work_schedules(id),
@@ -1271,6 +1273,12 @@ function migrateColumns() {
   if (getSetting('device_enabled') == null) setSetting('device_enabled', '0');
   // Chấm công điện thoại (selfie + định vị GPS): '1' = dùng (mặc định), '0' = tắt (chỉ dùng máy chấm công)
   if (getSetting('phone_enabled') == null) setSetting('phone_enabled', '1');
+  // Tên tài khoản quản trị: bản cũ tạo sẵn "Quản trị Digiplus" → đổi MỘT LẦN thành "Quản trị" (Anh 17/11/2026).
+  // Chỉ đổi khi vẫn đúng tên cũ — khách đã tự đặt tên khác thì giữ nguyên.
+  if (getSetting('admin_name_quan_tri') == null) {
+    db.prepare("UPDATE employees SET full_name = 'Quản trị' WHERE username = 'admin' AND full_name = 'Quản trị Digiplus'").run();
+    setSetting('admin_name_quan_tri', '1');
+  }
   // Tính công cho cả tài khoản Admin: '0' = KHÔNG (mặc định, admin là chủ/quản trị), '1' = tính công cả admin
   if (getSetting('payroll_include_admin') == null) setSetting('payroll_include_admin', '0');
   // Tự tạo NV khi máy đăng ký vân tay: '1' = tự tạo NV nháp (mặc định), '0' = chỉ ghi nhận chờ gán tay

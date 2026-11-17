@@ -1,5 +1,6 @@
 // Tạo dữ liệu khởi tạo lần đầu (chỉ chạy 1 lần khi MỚI CÀI, đánh dấu bằng setting 'seeded'):
-// cài đặt, chi nhánh mẫu, 4 bộ phận, 4 ca, 2 lịch trình vào ra, 2 lịch trình ca, tài khoản admin (bộ phận Quản trị).
+// cài đặt, chi nhánh mẫu, 4 bộ phận, 4 ca, 2 lịch trình vào ra, 2 lịch trình ca theo tuần ("Hành chính" là mặc định),
+// tài khoản admin tên "Quản trị" (bộ phận Quản trị).
 // KHÔNG tạo nhân viên mẫu — khách tự thêm / tải từ máy chấm công.
 import { db, getSetting, setSetting } from './db.js';
 import { hashPassword } from './auth.js';
@@ -39,16 +40,21 @@ function seedShiftsAndSchedules() {
     io.run('TDQD', 'Tự động - Qua đêm', 'tdqd', 30, 960, 30, 0);
   }
 
-  // Lịch trình ca làm việc (nhóm ca, tự dò ca theo giờ chấm)
+  // Lịch trình ca làm việc theo CHU KỲ TUẦN (Anh 17/11/2026): đủ 7 ngày, mỗi ngày nhiều ca → hệ thống tự chọn ca khớp giờ chấm
+  // (nửa buổi ra Ca sáng / Ca chiều). Chủ Nhật KHÔNG để trống: ngày nghỉ cuối tuần đã do cài đặt "Ngày cuối tuần" quyết định
+  // (đi làm CN = tăng ca theo ca, trừ giờ nghỉ trưa) — để trống thì CN thành "ngày nghỉ theo lịch" không có ca, tăng ca tính cả giờ nghỉ.
+  // "Hành chính" là lịch trình MẶC ĐỊNH cho nhân viên chưa được gán ca / lịch trình nào.
   if (!db.prepare('SELECT 1 FROM work_schedules LIMIT 1').get()) {
-    const ws = db.prepare("INSERT INTO work_schedules(code, name, description, unit, cycle) VALUES (?,?,?,'auto',1)");
+    const ws = db.prepare("INSERT INTO work_schedules(code, name, description, unit, cycle, is_default) VALUES (?,?,?,'week',1,?)");
     const link = db.prepare('INSERT INTO work_schedule_shifts(work_schedule_id, shift_id, sort_order) VALUES (?,?,?)');
-    const add = (code, name, desc, codes) => {
-      const wsId = ws.run(code, name, desc).lastInsertRowid;
+    const day = db.prepare('INSERT OR IGNORE INTO work_schedule_days(work_schedule_id, idx, shift_id) VALUES (?,?,?)');
+    const add = (code, name, desc, codes, isDefault) => {
+      const wsId = ws.run(code, name, desc, isDefault ? 1 : 0).lastInsertRowid;
       codes.forEach((c, i) => link.run(wsId, id[c], i));
+      for (let wd = 0; wd < 7; wd++) for (const c of codes) day.run(wsId, wd, id[c]);   // idx 0 = Thứ Hai … 6 = Chủ Nhật
     };
-    add('HC', 'Hành chính', 'Ca hành chính - Ca sáng - Ca chiều', ['HC', 'S', 'C']);
-    add('THEOCA', 'Theo ca', 'Ca hành chính - Ca đêm', ['HC', 'DEM']);
+    add('HC', 'Hành chính', 'Ca hành chính - Ca sáng - Ca chiều', ['HC', 'S', 'C'], true);
+    add('THEOCA', 'Theo ca', 'Ca hành chính - Ca đêm', ['HC', 'DEM'], false);
   }
   return id.HC;
 }
@@ -78,7 +84,7 @@ export function ensureSeed() {
     db.prepare(`INSERT INTO employees
       (code, full_name, department, position, role, username, password_hash, office_id, shift_id)
       VALUES (?,?,?,?,?,?,?,?,?)`).run(
-      'AD001', 'Quản trị Digiplus', ADMIN_DEPT, 'Admin', 'admin',
+      'AD001', 'Quản trị', ADMIN_DEPT, 'Admin', 'admin',
       'admin', hashPassword('admin123'), officeId, shiftId);
   }
 
