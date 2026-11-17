@@ -51,6 +51,26 @@ test('mới cài: 2 lịch trình ca theo CHU KỲ TUẦN, đủ 7 ngày, "Hành
   assert.deepEqual(cells('Theo ca'), [0, 1, 2, 3, 4, 5, 6].map((i) => [i, 'DEM-HC']));
 });
 
+test('mới cài: ca tạo sẵn cho phép muộn / sớm = 0; tính tăng ca sau giờ ở mọi ca TRỪ Ca sáng', () => {
+  const rows = db.prepare('SELECT code, late_grace_min l, early_grace_min e, allow_ot ot FROM shifts ORDER BY id').all().map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { code: 'HC', l: 0, e: 0, ot: 1 },
+    { code: 'S', l: 0, e: 0, ot: 0 },
+    { code: 'C', l: 0, e: 0, ot: 1 },
+    { code: 'DEM', l: 0, e: 0, ot: 1 },
+  ]);
+});
+
+test('mới cài: ca HC về 18:30 → tăng ca 90 phút; vào 08:03 → muộn 3 phút', () => {
+  const id = mkEmp({ shift_id: shiftId('HC') });
+  const pin = db.prepare('SELECT device_pin p FROM employees WHERE id = ?').get(id).p;
+  ingestAttlog('SN1', `${pin}\t2026-11-03 08:03:00\t0\t1`, { ask: () => {} });
+  ingestAttlog('SN1', `${pin}\t2026-11-03 18:30:00\t1\t1`, { ask: () => {} });
+  rebuildDay(id, '2026-11-03');
+  const a = db.prepare("SELECT late_min, early_min, ot_min FROM attendance WHERE employee_id = ? AND work_date = '2026-11-03'").get(id);
+  assert.deepEqual({ ...a }, { late_min: 3, early_min: 0, ot_min: 90 });
+});
+
 test('mới cài: tài khoản quản trị tên "Quản trị"', () => {
   assert.equal(db.prepare("SELECT full_name FROM employees WHERE username = 'admin'").get().full_name, 'Quản trị');
 });

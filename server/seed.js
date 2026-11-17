@@ -9,15 +9,16 @@ import { hashPassword } from './auth.js';
 export const ADMIN_DEPT = 'Quản trị';
 const DEFAULT_DEPTS = ['Hành chính', 'Văn phòng', 'Kế toán', ADMIN_DEPT];
 
-// Ca mặc định — có cửa sổ nhận VÀO/RA để lịch trình tự dò đúng ca theo giờ chấm (HC và Sáng cùng giờ vào, phân biệt bằng giờ ra)
+// Ca mặc định — có cửa sổ nhận VÀO/RA để lịch trình tự dò đúng ca theo giờ chấm (HC và Sáng cùng giờ vào, phân biệt bằng giờ ra).
+// Anh 17/11/2026: cho phép đi muộn / về sớm = 0 phút ở mọi ca; tích "Cho phép tính tăng ca" (sau giờ ra) ở mọi ca TRỪ Ca sáng (ot: 0).
 const DEFAULT_SHIFTS = [
-  { code: 'HC', name: 'Ca hành chính', start: '08:00', end: '17:00', brk: 60, brkStart: '12:00', unit: 1.0, cross: 0,
+  { code: 'HC', name: 'Ca hành chính', start: '08:00', end: '17:00', brk: 60, brkStart: '12:00', unit: 1.0, cross: 0, ot: 1,
     ci: ['06:00', '10:00'], co: ['15:00', '20:00'] },
-  { code: 'S', name: 'Ca sáng', start: '08:00', end: '12:00', brk: 0, brkStart: '', unit: 0.5, cross: 0,
+  { code: 'S', name: 'Ca sáng', start: '08:00', end: '12:00', brk: 0, brkStart: '', unit: 0.5, cross: 0, ot: 0,
     ci: ['06:00', '10:00'], co: ['10:30', '14:00'] },
-  { code: 'C', name: 'Ca chiều', start: '13:00', end: '17:00', brk: 0, brkStart: '', unit: 0.5, cross: 0,
+  { code: 'C', name: 'Ca chiều', start: '13:00', end: '17:00', brk: 0, brkStart: '', unit: 0.5, cross: 0, ot: 1,
     ci: ['11:30', '14:30'], co: ['15:00', '20:00'] },
-  { code: 'DEM', name: 'Ca đêm', start: '22:00', end: '06:00', brk: 0, brkStart: '', unit: 1.0, cross: 1,
+  { code: 'DEM', name: 'Ca đêm', start: '22:00', end: '06:00', brk: 0, brkStart: '', unit: 1.0, cross: 1, ot: 1,
     ci: ['20:00', '23:59'], co: ['04:00', '09:00'] },
 ];
 
@@ -25,12 +26,12 @@ function seedShiftsAndSchedules() {
   if (db.prepare('SELECT 1 FROM shifts LIMIT 1').get()) return;   // đã có ca (DB cũ) → không đụng
   const ins = db.prepare(`INSERT INTO shifts
     (code, name, start_time, end_time, late_grace_min, early_grace_min, work_days, break_minutes, break_start,
-     work_unit_value, cross_midnight, check_in_start, check_in_end, check_out_start, check_out_end)
-    VALUES (?,?,?,?,5,15,'1,2,3,4,5,6',?,?,?,?,?,?,?,?)`);
+     work_unit_value, cross_midnight, check_in_start, check_in_end, check_out_start, check_out_end, allow_ot)
+    VALUES (?,?,?,?,0,0,'1,2,3,4,5,6',?,?,?,?,?,?,?,?,?)`);
   const id = {};
   for (const s of DEFAULT_SHIFTS) {
     id[s.code] = ins.run(s.code, s.name, s.start, s.end, s.brk, s.brkStart, s.unit, s.cross,
-      s.ci[0], s.ci[1], s.co[0], s.co[1]).lastInsertRowid;
+      s.ci[0], s.ci[1], s.co[0], s.co[1], s.ot).lastInsertRowid;
   }
 
   // Lịch trình vào ra: "Giờ đầu - Giờ cuối" (mặc định) + "Tự động - Qua đêm"
