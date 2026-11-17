@@ -5,7 +5,7 @@
 #   OK <ghi chú>            xong                     ERR <mã> <lỗi>          thất bại
 param(
   [string]$Ip, [int]$Port = 4370, [int]$Key = 0, [string]$Action = 'info',
-  [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = '', [string]$Opt = ''
+  [string]$From = '', [string]$To = '', [int]$Machine = 1, [string]$Proto = '', [string]$Opt = '', [string]$Sig = ''
 )
 $ErrorActionPreference = 'Stop'
 try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false) } catch {}
@@ -211,6 +211,49 @@ try {
         }
       }
       [void]$z.RefreshData($m); Done "set-users`t$fp"
+    }
+    'enroll' {          # ĐĂNG KÝ VÂN TAY TỪ XA: $From = Số ID, $To = ngón (0–9), $Opt = tên (máy chưa có NV thì tạo).
+                        # Máy hiện màn hình đăng ký, NV đặt ngón; phần mềm hỏi lại máy ~3 giây/lần tới khi có mẫu MỚI ở ngón đó
+                        # (khác mẫu cũ nếu đã có) → in 'F <pin> <ngón> <cờ> <9|10> <mẫu>'. Chờ tối đa 90 giây rồi huỷ.
+      $pin = $From; $fid = [int]$To
+      $v = ''; [void]$z.GetSysOption($m, '~ZKFPVersion', [ref]$v); $fp = $(if ((Clean $v) -eq '10') { 10 } else { 9 })
+      $n0 = ''; $pw0 = ''; $pri0 = 0; $en0 = $true
+      if (-not $z.SSR_GetUserInfo($m, $pin, [ref]$n0, [ref]$pw0, [ref]$pri0, [ref]$en0)) {
+        $ok = $false; try { [void]$z.SetStrCardNumber('0'); $ok = [bool]$z.SSR_SetUserInfo($m, $pin, $(if ($Opt) { $Opt } else { $pin }), '', 0, $true) } catch {}
+        if (-not $ok) { $z.Disconnect(); Fail 'NOUSER' "Không ghi được nhân viên Số ID $pin xuống máy." }
+        [void]$z.RefreshData($m)
+      }
+      function ReadTmp {
+        $t = ''; $len = 0; $flag = 1; $ok = $false
+        try { $ok = $(if ($fp -eq 10) { [bool]$z.GetUserTmpExStr($m, $pin, $fid, [ref]$flag, [ref]$t, [ref]$len) } else { [bool]$z.SSR_GetUserTmpStr($m, $pin, $fid, [ref]$t, [ref]$len) }) } catch {}
+        if ($ok -and $t) { return @($t, $flag) }; return $null
+      }
+      $old = ReadTmp; $oldTmp = $(if ($old) { $old[0] } else { '' })
+      try { [void]$z.CancelOperation() } catch {}
+      $ok = $false; try { $ok = [bool]$z.StartEnrollEx($pin, $fid, 1) } catch {}
+      if (-not $ok -and $oldTmp) {   # đã có mẫu ở ngón này → máy không cho đăng ký đè: xoá mẫu cũ rồi thử lại
+        try { [void]$z.SSR_DelUserTmpExt($m, $pin, $fid) } catch {}; $oldTmp = ''
+        try { $ok = [bool]$z.StartEnrollEx($pin, $fid, 1) } catch {}
+      }
+      if (-not $ok -and $pin -match '^\d{1,9}$') { try { $ok = [bool]$z.StartEnroll([int]$pin, $fid) } catch {} }
+      if (-not $ok) { $e = 0; $z.GetLastError([ref]$e); try { [void]$z.StartIdentify() } catch {}; $z.Disconnect(); Fail "ENROLL$e" "Máy không nhận lệnh đăng ký vân tay từ xa (mã lỗi $e) — đời máy này có thể chưa hỗ trợ, đăng ký trực tiếp trên máy." }
+      Out "W`tstarted"
+      # TRONG LÚC MÁY ĐANG ĐĂNG KÝ KHÔNG ĐƯỢC GỬI LỆNH NÀO: máy thật ZLM60_TFT FW 6.60 (17/11/2026) cứ nhận lệnh đọc mẫu là thoát
+      # màn hình đăng ký → NV không kịp thấy gì. Sự kiện SDK (OnEnrollFingerEx) PowerShell không nghe được (COM gọi muộn không lộ sự kiện)
+      # → ngồi chờ yên tới khi người quản lý bấm "Nhân viên đã đặt xong" (phần mềm tạo file $Sig) hoặc hết giờ, rồi mới đọc mẫu 1 lần.
+      $wait = 75; if ($env:ZK_ENROLL_WAIT) { $wait = [int]$env:ZK_ENROLL_WAIT }
+      $end = (Get-Date).AddSeconds($wait)
+      while ((Get-Date) -lt $end) {
+        if ($Sig -and (Test-Path -LiteralPath $Sig)) { Start-Sleep -Milliseconds 1500; break }   # chờ thêm chút cho máy lưu xong mẫu
+        Start-Sleep -Milliseconds 300
+      }
+      $t = ReadTmp
+      try { [void]$z.StartIdentify() } catch {}
+      if ($t -and $t[0] -ne $oldTmp) {
+        Out ("F`t" + (Clean $pin) + "`t$fid`t$($t[1])`t$fp`t" + (Clean $t[0]))
+        Done 'enroll'
+      }
+      $z.Disconnect(); Fail 'TIMEOUT' "Hết $wait giây chưa thấy vân tay mới trên máy — nhân viên chưa đặt ngón kịp hoặc đăng ký chưa đạt. Bấm đăng ký lại."
     }
     'set-time' {        # đặt giờ máy = giờ máy tính đang chạy phần mềm
       [void]$z.SetDeviceTime($m); [void]$z.RefreshData($m); Done ((Get-Date).ToString('yyyy-MM-dd HH:mm:ss'))

@@ -7,6 +7,7 @@ import { guardRoleAndPermissions, resolveImportRole, guardUpdateTarget, filterEm
 import { sendCaughtError } from '../../util.js';
 import { relinkPunchesForPin, deviceRolesForPin, setDeviceAdmin, saveUploadedFace } from '../../device-sync.js';
 import { onEmployeesSaved } from '../../pin-guard.js';
+import { enrollDevices, startRemoteEnroll, finishEnroll, FINGERS } from '../../remote-enroll.js';
 import { doBackup } from '../../backup.js';
 import { ADMIN_DEPT } from '../../seed.js';
 
@@ -541,6 +542,32 @@ export function registerEmployeeRoutes(r, { need }) {
         (SELECT COUNT(DISTINCT b.idx) FROM device_bio_templates b WHERE b.serial=s.serial AND b.pin=s.pin AND b.bio_type IN (2,9)) AS face
       FROM device_users_serial s LEFT JOIN push_devices d ON d.serial=s.serial WHERE s.pin=?`).all(pin);
     res.json({ pin, fp, face, card, password, photo, photoData, byDevice });
+  });
+  // ĐĂNG KÝ VÂN TAY / KHUÔN MẶT TỪ XA (tab Sinh trắc): máy dùng được + bắt đầu (chạy nền, hỏi tiến độ ở /admin/devices/tcp-jobs/:job)
+  r.get('/employees/:id/enroll-devices', need('devices'), (req, res) => {
+    const emp = db.prepare('SELECT device_pin FROM employees WHERE id=?').get(req.params.id);
+    if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    const pin = String(emp.device_pin || '').trim();
+    res.json({ pin, fingers: FINGERS, devices: getSetting('device_enabled', '0') === '1' ? enrollDevices(pin) : [] });
+  });
+  r.post('/employees/:id/remote-enroll', need('devices'), (req, res) => {
+    const emp = db.prepare('SELECT device_pin, active FROM employees WHERE id=?').get(req.params.id);
+    if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    const pin = String(emp.device_pin || '').trim();
+    if (!pin) return res.status(400).json({ error: 'Nhân viên chưa có Số ID máy chấm công — điền Số ID ở tab Thông tin rồi Lưu trước.' });
+    if (!emp.active) return res.status(400).json({ error: 'Nhân viên đã nghỉ / đang khoá — không đăng ký xuống máy.' });
+    const b = req.body || {};
+    const kind = b.kind === 'face' ? 'face' : 'fp';
+    const fid = Number.isInteger(+b.fid) && +b.fid >= 0 && +b.fid <= 9 ? +b.fid : 6;
+    const dev = db.prepare('SELECT * FROM push_devices WHERE serial=? AND active=1').get(String(b.serial || ''));
+    if (!dev) return res.status(404).json({ error: 'Không tìm thấy máy (hoặc máy chưa duyệt).' });
+    if (dev.conn_type !== 'hik' && pin.length > 20) return res.status(400).json({ error: 'Số ID dài hơn 20 ký tự chỉ dùng được với máy Hikvision.' });
+    try { const j = startRemoteEnroll(dev, pin, kind, fid); res.json({ ok: true, job: j.id }); }
+    catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); sendCaughtError(res, 'POST /admin/employees/:id/remote-enroll', e, { status: 400 }); }
+  });
+  // Máy TCP/IP: người quản lý bấm "Nhân viên đã đặt xong" → phần mềm đọc mẫu ngay, khỏi chờ hết giờ
+  r.post('/employees/remote-enroll/:job/done', need('devices'), (req, res) => {
+    res.json({ ok: finishEnroll(req.params.job) });
   });
   // Quyền của NV trên TỪNG máy chấm công (nhân viên / quản trị máy — vào được menu máy)
   r.get('/employees/:id/device-roles', need('employees'), (req, res) => {

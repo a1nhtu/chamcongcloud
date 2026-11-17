@@ -160,6 +160,7 @@ export function zkRun(dev, action, args = {}, onLine = null) {
     if (args.from) a.push('-From', args.from);
     if (args.to) a.push('-To', args.to);
     if (args.opt) a.push('-Opt', args.opt);
+    if (args.sig) a.push('-Sig', args.sig);   // file báo hiệu (đăng ký từ xa: người quản lý bấm "đã đặt xong")
     const p = spawn(exe, a, { windowsHide: true });
     let buf = '', errTxt = '', done = null, fail = null;
     const timer = setTimeout(() => { fail = { code: 'TIMEOUT', msg: 'Máy không phản hồi (quá thời gian chờ).' }; p.kill(); }, args.timeoutMs || 15 * 60000);

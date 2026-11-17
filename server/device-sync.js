@@ -805,6 +805,8 @@ export function cmdLabel(c) {
     : /^DATA UPDATE (USERPIC|BIOPHOTO)/.test(c) ? 'Đẩy ảnh'
     : /^DATA DELETE USERINFO/.test(c) ? 'Xoá NV'
     : /^DATA DELETE (FINGERTMP|BIODATA)/.test(c) ? 'Xoá mẫu cũ'
+    : /^ENROLL_FP /.test(c) || /^ENROLL_BIO TYPE=1\t/.test(c) ? 'Đăng ký vân tay từ xa'
+    : /^ENROLL_BIO /.test(c) ? 'Đăng ký khuôn mặt từ xa'
     : ({ CHECK: 'Kiểm tra dữ liệu (CHECK)', REBOOT: 'Khởi động lại máy', 'CLEAR LOG': 'Xoá log chấm công', 'CLEAR DATA': 'Xoá toàn bộ dữ liệu', AC_UNLOCK: 'Mở cửa' })[c] || c.slice(0, 40);
   return { what, pin };
 }

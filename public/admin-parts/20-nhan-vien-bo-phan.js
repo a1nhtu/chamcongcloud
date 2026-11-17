@@ -661,8 +661,67 @@ async function loadEmpBio(e, box) {
   } else {
     box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Chưa thấy đăng ký trên máy nào (Số ID máy: ' + d.pin + ').'));
   }
-  box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Dữ liệu lấy từ máy chấm công đã đồng bộ về. Đăng ký thêm vân tay/khuôn mặt trực tiếp trên máy.'));
+  box.append(el('div', { class: 'map-hint', style: 'margin-top:12px' }, 'Dữ liệu lấy từ máy chấm công đã đồng bộ về. Đăng ký thêm vân tay/khuôn mặt trực tiếp trên máy, hoặc bấm "Đăng ký từ xa" bên dưới.'));
+  if (hasPerm('devices')) box.append(await empRemoteEnroll(e, box));
   box.append(await empDeviceRoles(e));
+}
+// ĐĂNG KÝ TỪ XA: người quản lý bấm ở đây → máy chấm công ở xa hiện màn hình đăng ký, NV đứng tại máy đặt ngón / nhìn vào máy
+async function empRemoteEnroll(e, bioBox) {
+  const wrap = el('div', { style: 'margin-top:18px;border-top:1px solid var(--line);padding-top:14px' },
+    el('div', { style: 'font-weight:700' }, '📲 Đăng ký từ xa'),
+    el('div', { style: 'font-size:12.5px;color:var(--muted);margin:2px 0 8px' }, 'Hẹn nhân viên đứng sẵn ở máy (gọi điện / Zalo). Bấm Bắt đầu → máy hiện màn hình đăng ký → nhân viên đặt ngón tay hoặc nhìn vào máy. Máy chưa có nhân viên này thì phần mềm tự ghi xuống trước.'));
+  let d; try { d = await api('/admin/employees/' + e.id + '/enroll-devices'); } catch (err) { wrap.append(el('div', { class: 'map-hint' }, err.message)); return wrap; }
+  if (!d.devices.length) { wrap.append(el('div', { class: 'map-hint' }, 'Chưa có máy chấm công nào đăng ký từ xa được (máy ZKTeco đẩy về / kết nối TCP/IP, máy Hikvision).')); return wrap; }
+  const TYPE = { push: 'ZKTeco', tcp: 'ZKTeco TCP/IP', hik: 'Hikvision' };
+  const devSel = el('select', { style: 'width:auto;max-width:100%;padding:5px 8px' });
+  for (const dv of d.devices) devSel.append(el('option', { value: dv.serial },
+    `${dv.name} · ${TYPE[dv.conn_type] || dv.conn_type}${dv.online === true ? ' · 🟢 online' : dv.online === false ? ' · ⚪ offline' : ''}${dv.onDevice ? '' : ' · chưa có NV trên máy'}`));
+  const kindSel = el('select', { style: 'width:auto;padding:5px 8px' }, el('option', { value: 'fp' }, '👉 Vân tay'), el('option', { value: 'face' }, '😊 Khuôn mặt'));
+  const fSel = el('select', { style: 'width:auto;padding:5px 8px' });
+  d.fingers.forEach((n, i) => fSel.append(el('option', { value: String(i), ...(i === 6 ? { selected: '' } : {}) }, n)));
+  const st = el('div', { style: 'margin-top:10px;font-size:14px;white-space:pre-line' });
+  const go = el('button', { class: 'btn sm', type: 'button' }, '▶ Bắt đầu đăng ký');
+  // máy TCP/IP: phần mềm không được hỏi máy lúc đang đăng ký → người quản lý bấm khi máy báo xong để đọc mẫu ngay
+  const doneB = el('button', { class: 'btn sm', type: 'button', hidden: true, style: 'margin-top:8px' }, '✋ Nhân viên đã đặt xong — đọc vân tay về');
+  const cur = () => d.devices.find((x) => x.serial === devSel.value) || {};
+  const refresh = () => {
+    const dv = cur(), face = kindSel.value === 'face';
+    fSel.hidden = face;
+    const ok = face ? dv.face : dv.fp;
+    go.disabled = !ok;
+    st.style.color = ''; st.textContent = ok ? '' : (face ? 'Máy này chưa đăng ký khuôn mặt từ xa được — dùng "Tải ảnh khuôn mặt lên" ở trên rồi đẩy xuống máy.' : 'Máy này chưa đăng ký vân tay từ xa được.');
+    if (ok && dv.online === false) st.textContent = '⚠️ Máy đang offline — máy phải kết nối về phần mềm mới nhận được lệnh.';
+  };
+  devSel.onchange = refresh; kindSel.onchange = refresh;
+  go.onclick = async () => {
+    go.disabled = true; devSel.disabled = kindSel.disabled = fSel.disabled = true;
+    st.style.color = ''; st.textContent = '⏳ Đang gửi lệnh…';
+    const end = (txt, color) => { st.textContent = txt; st.style.color = color || ''; devSel.disabled = kindSel.disabled = fSel.disabled = false; go.disabled = false; refresh(); st.textContent = txt; st.style.color = color || ''; };
+    let r; try { r = await api('/admin/employees/' + e.id + '/remote-enroll', { method: 'POST', body: { serial: devSel.value, kind: kindSel.value, fid: +fSel.value } }); }
+    catch (err) { return end('❌ ' + err.message, 'var(--danger,#c0392b)'); }
+    doneB.onclick = async () => { doneB.disabled = true; try { await api('/admin/employees/remote-enroll/' + r.job + '/done', { method: 'POST', body: {} }); st.textContent = '⏳ Đang đọc vân tay vừa đăng ký từ máy…'; } catch (err) { toast(err.message, 'err'); doneB.disabled = false; } };
+    for (;;) {
+      await new Promise((ok) => setTimeout(ok, 1500));
+      if (!wrap.isConnected) return;   // đóng hộp NV giữa chừng: việc vẫn chạy trên máy chủ
+      let j; try { j = await api('/admin/devices/tcp-jobs/' + r.job); } catch (err) { return end('❌ ' + err.message, 'var(--danger,#c0392b)'); }
+      if (j.state === 'run') {
+        if (!doneB.disabled) st.textContent = '⏳ ' + j.msg;
+        doneB.hidden = !(j.canFinish && /màn hình đăng ký/.test(j.msg));
+        continue;
+      }
+      doneB.hidden = true; doneB.disabled = false;
+      if (j.state === 'err') return end('❌ ' + j.msg, 'var(--danger,#c0392b)');
+      const x = j.result || {};
+      end(`✅ Đã đăng ký ${x.what || ''} trên máy ${x.device || ''}${x.quality ? ` (chất lượng ${x.quality})` : ''}.
+${x.note || ''}`, 'var(--ok,#1e8e3e)');
+      toast('Đăng ký từ xa xong', 'ok');
+      setTimeout(() => { if (bioBox.isConnected) loadEmpBio(e, bioBox); }, 2500);   // cập nhật số vân tay / khuôn mặt
+      return;
+    }
+  };
+  refresh();
+  wrap.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;align-items:center' }, devSel, kindSel, fSel, go), st, doneB);
+  return wrap;
 }
 // Quyền trên TỪNG máy chấm công: Nhân viên / Quản trị máy (vào được menu máy). Đổi → phần mềm gửi lệnh xuống máy.
 async function empDeviceRoles(e) {
