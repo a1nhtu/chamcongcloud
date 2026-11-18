@@ -687,6 +687,91 @@ export function pickDirShiftSet(cands, punches, workDate, dir, dupOpt, opts = {}
   return best ? best.out : [];
 }
 
+// ---- LỊCH NHIỀU CA + "TỰ ĐỘNG - QUA ĐÊM": GHÉP CẶP THEO THỨ TỰ GIỜ RỒI MỖI CẶP MỚI TÌM CA — như Wise Eye On39 (Anh duyệt 18/11/2026) ----
+// Đối chiếu On39 (file Data_on39_CaDem, 18/11/2026): trước đây lịch nhiều ca có khai khung giờ bị ép "Phân theo giờ" → lượt ra quá
+// "Kết thúc ra" (12 tiếng ra 20:15, ca đêm ra 08:25) bị bỏ / thành giờ vào ca khác rồi đảo cả chuỗi ngày sau; quẹt lặp 2 giây sau giờ ra
+// thành thêm 1 ca. Cách của On39 (ArrInOut, chế độ Tự động): lượt đầu là VÀO; lượt kế tiếp
+//   - cách VÀO từ "Thời gian nhỏ nhất" tới "Thời gian lớn nhất" → RA · dưới nhỏ nhất → quẹt lặp, bỏ · quá lớn nhất → VÀO mới (VÀO cũ quên ra)
+//   - sau RA: cách RA dưới "Khoảng cách giữa 2 cặp" → quẹt lặp, lượt SAU làm giờ ra · từ mức đó trở lên → VÀO mới
+//   - quá "Mốc kết thúc ra hôm sau" (giờ đó của ngày hôm sau ngày VÀO; bỏ trống = không chặn) → VÀO mới
+// dayPunches = lượt của ngày (đã bỏ lượt thuộc ngày hôm trước); nextPunches = lượt ngày hôm sau, chỉ dùng để đóng lượt VÀO / quẹt lặp
+// cuối ngày (gặp lượt thành VÀO mới thì dừng — lượt đó là của hôm sau). Trả [{ in, out, ps }] (ps = mọi lượt đã dùng, kể cả lượt lặp bỏ).
+const minOf = (p) => Math.floor(Date.parse(p.punch_at) / 60000);   // so theo PHÚT như DateDiff(Minute) của On39
+export function seqPairUnits(dayPunches, nextPunches = [], opt = PAIR_DUP_DEFAULT) {
+  const o = opt && typeof opt === 'object' ? opt : { min: opt, gap: opt };
+  const minM = Math.max(1, Number(o.min) || PAIR_DUP_DEFAULT);
+  const gapM = Math.max(1, Number(o.gap ?? o.min) || PAIR_DUP_DEFAULT);
+  const maxM = Number(o.max) > 0 ? Number(o.max) : 960;
+  const endHm = /^\d{1,2}:\d{2}$/.test(String(o.nextEnd || '').trim()) ? String(o.nextEnd).trim().padStart(5, '0') : null;
+  const byT = (a, b) => Date.parse(a.punch_at) - Date.parse(b.punch_at);
+  const seq = [...(dayPunches || [])].sort(byT).map((p) => [p, false]).concat([...(nextPunches || [])].sort(byT).map((p) => [p, true]));
+  const units = [];
+  let cur = null, isIn = false, lastM = 0, limM = Infinity;
+  const open = (p) => {
+    cur = { in: p, out: null, ps: [p] }; units.push(cur); isIn = true; lastM = minOf(p);
+    const d = new Date(Date.parse(p.punch_at) + 7 * HH).toISOString().slice(0, 10);
+    limM = endHm ? Math.floor(vnInstant(d, endHm, 1).getTime() / 60000) : Infinity;
+  };
+  for (const [p, next] of seq) {
+    const x = minOf(p);
+    if (!cur || x > limM) { if (next) break; open(p); continue; }
+    if (isIn) {
+      const d = x - lastM;
+      if (d >= minM && d <= maxM) { cur.out = p; cur.ps.push(p); isIn = false; lastM = x; }
+      else if (d > maxM) { if (next) break; open(p); }
+      else cur.ps.push(p);                                   // quẹt lặp ngay sau VÀO → bỏ
+      continue;
+    }
+    if (x - lastM >= gapM) { if (next) break; open(p); continue; }
+    cur.out = p; cur.ps.push(p); lastM = x;                 // quẹt lặp ngay sau RA → lượt sau làm giờ ra
+  }
+  return units;
+}
+// Mỗi cặp / lượt VÀO lẻ tự tìm ca theo 3 bước On39 (matchLevel: đủ khung vào + ra → vào trong khung vào → ra trong khung ra);
+// nhiều ca cùng mức → ca đứng trước trong lịch trình. Không khớp khung nào → ca có đầu ca gần giờ vào + cuối ca gần giờ ra nhất
+// (giờ chấm thật giữ nguyên, trễ / sớm tính theo giờ thật). Cặp cùng ca gộp 1 dòng.
+// Trả [{ shift, units }] theo thứ tự giờ vào của cặp đầu tiên.
+export function pickSeqShifts(cands, units, workDate, dupOpt) {
+  const list = (cands || []).map((shift, idx) => ({ shift, idx, ...shiftBounds(workDate, shift), w: fitWindows(workDate, shift) }));
+  if (!list.length) return [];
+  const t = (p) => toMinute(p.punch_at).getTime();
+  const out = [];
+  for (const u of units || []) {
+    const a = t(u.in), b = u.out ? t(u.out) : null;
+    let best = null;
+    for (const x of list) { const lv = matchLevel(x.w, a, b, dupOpt); if (!best || lv > best.lv) best = { x, lv }; }
+    if (best.lv === 0) {
+      const dev = (x) => Math.abs(a - x.start) + (b == null ? 0 : Math.abs(b - x.end));
+      best = { x: list.reduce((m, x) => (dev(x) < dev(m) ? x : m)), lv: 0 };
+    }
+    let g = out.find((y) => y.shift === best.x.shift);
+    if (!g) { g = { shift: best.x.shift, units: [] }; out.push(g); }
+    g.units.push(u);
+  }
+  return out;
+}
+// CA ĐÊM RA NGOÀI QUA NỬA ĐÊM (vào 19:00 · ra 23:00 · vào lại 01:00 · ra 07:00): On39 cắt lượt vào lại 01:00 sang ngày hôm sau (thành
+// dòng "không ca" 0 công). Ở đây: cặp cuối của ngày thuộc ca ĐÊM `night` → các cặp tiếp theo ở sáng hôm sau mà VÀO trước giờ kết thúc
+// ca đêm đó và RA không muộn hơn khung ra của ca đêm (đủ cặp) vẫn là của ca đêm này (giờ ra ngoài bị trừ) — như "VÀO hôm sau khi ca
+// đêm còn đang chạy" của pickDirShiftSet. Trả các cặp nhận thêm (thêm vào cuối `units`); lượt VÀO lẻ / cặp quá khung → dừng.
+export function seqNightTail(units, nextPunches, night, workDate, opt) {
+  const used = new Set((units || []).flatMap((u) => u.ps.map((p) => p.punch_at)));
+  const last = Math.max(...(units || []).flatMap((u) => u.ps.map((p) => Date.parse(p.punch_at))));
+  const { end } = shiftBounds(workDate, night), coEnd = fitWindows(workDate, night).co[1];
+  let rest = [...(nextPunches || [])].filter((p) => !used.has(p.punch_at) && Date.parse(p.punch_at) > last).sort((a, b) => Date.parse(a.punch_at) - Date.parse(b.punch_at));
+  const got = [];
+  while (rest.length) {
+    const [u] = seqPairUnits([rest[0]], rest.slice(1), opt);
+    if (!u || !u.out || toMinute(u.in.punch_at) >= end || toMinute(u.out.punch_at).getTime() > coEnd) break;
+    got.push(u);
+    const ps = new Set(u.ps.map((p) => p.punch_at));
+    rest = rest.filter((p) => !ps.has(p.punch_at));
+  }
+  return got;
+}
+// Lịch nhiều ca dùng cách ghép tuần tự này: MỌI ca của ngày theo "Tự động - qua đêm" kiểu ghép cặp (không phải kiểu ID máy)
+export const seqDayRule = (rules, shifts) => rules.length > 1 && rules.every((r, i) => r === 'tdqd' && rulePairs(r, shifts[i]));
+
 // Quy tắc nào tính giờ công theo TỪNG CẶP vào–ra (thời gian ra ngoài giữa các cặp bị trừ):
 // "Tự động - không qua đêm" và "Tự động - qua đêm" (trừ kiểu con theo ID máy của quy tắc qua đêm).
 // Quy tắc BIẾT HƯỚNG từng lượt chấm (Theo ID máy, Tự động - qua đêm kiểu ID máy, Chọn từ máy): ngày chỉ có lượt RA

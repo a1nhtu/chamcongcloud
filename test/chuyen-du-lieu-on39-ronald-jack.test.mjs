@@ -144,3 +144,9 @@ test('Ronald Jack: lọc theo khoảng ngày; NV nghỉ việc tạm thời tạ
 test('File không phải On39 / Ronald Jack → báo lỗi dễ hiểu', () => {
   assert.throws(() => L.readLegacy(Buffer.alloc(8192)), /Không đọc được file Access/);
 });
+
+test('On39: phím vào / ra (OriginType) → mã phím ZKTeco: I 0 · O 1 · OTI 4 · OTO 5 (trước đây OTO thành VÀO)', () => {
+  const rows = ['I', 'O', 'OTI', 'OTO'].map((k, i) => ({ UserEnrollNumber: 142, TimeStr: T(`2024-07-23T${String(7 + i).padStart(2, "0")}:00:00`), OriginType: k, MachineNo: 1 }));
+  const d = L.normalizeOn39(fake({ ...ON39, CheckInOut: rows }));
+  assert.deepEqual(d.punches.map((p) => p.status), [0, 1, 4, 5]);
+});

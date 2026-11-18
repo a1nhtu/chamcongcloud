@@ -31,6 +31,7 @@ const okDate = (d) => d instanceof Date && !isNaN(d) && d.getUTCFullYear() > 190
 const ymd = (d) => (okDate(d) ? d.toISOString().slice(0, 10) : '');
 const stamp = (d) => (okDate(d) ? d.toISOString().slice(0, 19).replace('T', ' ') : '');
 const str = (v) => (v == null ? '' : String(v).trim());
+const ON39_STATUS = { I: 0, O: 1, OTI: 4, OTO: 5 };   // OriginType của On39 → mã phím ZKTeco (0,3,4 vào · 1,2,5 ra)
 const hasLetter = (s) => /\p{L}/u.test(s);
 const card = (v) => { const s = str(v); return /^0*$/.test(s) ? '' : s; };   // '0000000000' = chưa có thẻ
 // Ngày sinh: bỏ giá trị mặc định (trùng ngày vào làm, hoặc chưa đủ 14 tuổi) — phần mềm cũ hay để sẵn ngày hôm nay
@@ -94,10 +95,12 @@ export function normalizeOn39(table) {
   const mach = table('Machines', ['MachineID', 'MachineName', 'SerialNumber']);
   const serialOf = new Map(mach.map((m) => [m.MachineID, str(m.SerialNumber) || 'ON39_MAY' + m.MachineID]));
   const punches = [];
+  // Phím vào / ra của On39 (OriginType) → mã phím ZKTeco mà "Chọn từ máy" hiểu: I vào 0 · O ra 1 · OTI vào tăng ca 4 · OTO ra tăng ca 5
+  // (trước đây chỉ 'O' là ra → 'OTO' thành VÀO; file Data_on39_CaDem có 10.055 lượt OTO)
   for (const c of table('CheckInOut', ['UserEnrollNumber', 'TimeStr', 'OriginType', 'MachineNo'])) {
     const time = stamp(c.TimeStr);
     if (!time || !(c.UserEnrollNumber > 0)) continue;
-    punches.push({ pin: String(c.UserEnrollNumber), time, status: str(c.OriginType).toUpperCase() === 'O' ? 1 : 0,
+    punches.push({ pin: String(c.UserEnrollNumber), time, status: ON39_STATUS[str(c.OriginType).toUpperCase()] ?? 0,
       serial: serialOf.get(c.MachineNo) || 'ON39_MAY' + (c.MachineNo || 0) });
   }
   return { kind: 'on39', company, depts, emps, punches,

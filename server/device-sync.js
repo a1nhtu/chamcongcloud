@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
 import { db, getSetting, setSetting, empHourly, hourlyNoOvernight, USER_TZ, nearestAllowedOffice } from './db.js';
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
-import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, pickDirShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn, fitWindows } from './attendance-calc.js';
+import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, pickDirShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn, fitWindows, seqPairUnits, pickSeqShifts, seqNightTail, seqDayRule } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
@@ -1217,7 +1217,12 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
   const d = wopts.dupMin && typeof wopts.dupMin === 'object' ? wopts.dupMin : { min: wopts.dupMin };
   const minMs = Math.max(1, Number(d.min) || 5) * 60000;
   const maxMs = (Number(d.max) > 0 ? Number(d.max) : 960) * 60000;
-  const limit = new Date(Date.parse(open) + maxMs);
+  let limit = new Date(Date.parse(open) + maxMs);
+  // "Mốc kết thúc ra hôm sau" của lịch trình vào ra (như EndTime của On39): lượt RA phải trước giờ đó của ngày hôm sau ngày VÀO
+  if (/^\d{2}:\d{2}$/.test(String(d.nextEnd || ''))) {
+    const cap = new Date(`${vnDayOf(Date.parse(open))}T${d.nextEnd}:00+07:00`); cap.setUTCDate(cap.getUTCDate() + 1);
+    if (cap < limit) limit = cap;
+  }
   if (limit <= w.winEnd) return null;
   const claim = nextDayClaim(employeeId, workDate, limit, hourly);
   const next = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
@@ -1266,6 +1271,31 @@ function lateSplitTail(employeeId, workDate, shifts, seen, punchesInWin) {
     for (const p of punchesInWin(w.winEnd, at)) if (!seen.has(p.punch_at) && !(claim && claim(p.punch_at, w.end))) extra.set(p.punch_at, p);
   });
   return extra.size ? { shifts: ext, at, punches: [...extra.values()] } : null;
+}
+
+// Lịch NHIỀU ca + "Tự động - qua đêm": ghép các lượt của ngày theo thứ tự giờ (seqPairUnits — lượt VÀO / quẹt lặp cuối ngày đóng bằng
+// lượt sáng hôm sau), mỗi cặp tìm ca (pickSeqShifts), cặp cùng ca gộp 1 dòng: giờ vào = VÀO đầu, giờ ra = RA của cặp đủ cuối, giờ công
+// theo từng cặp. Ngày hôm sau tự bỏ các lượt đã dùng ở đây (consumedByPrevDay: tới giờ ra muộn nhất của ngày này).
+function rebuildSeqDay(employeeId, workDate, prov, shifts, dup) {
+  const nx = new Date(workDate + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
+  const next = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, nx.toISOString().slice(0, 10));
+  const opt = dup && typeof dup === 'object' ? dup : { min: dup, gap: dup };
+  const fixedBreak = pairsFixedBreakOn();
+  const all = seqPairUnits(prov, next, opt);
+  const groups = pickSeqShifts(shifts, all, workDate, opt);
+  // cặp cuối ngày thuộc ca đêm → ra ngoài rồi vào lại sau nửa đêm (ca còn đang chạy) vẫn là của ca đêm này (seqNightTail)
+  const lg = all.length ? groups.find((g) => g.units.includes(all[all.length - 1])) : null;
+  if (lg && isNightShift(lg.shift)) lg.units.push(...seqNightTail(all, next, lg.shift, workDate, opt));
+  for (const { shift, units } of groups) {
+    if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
+    const full = units.filter((u) => u.out);
+    const inIso = units[0].in.punch_at, outIso = full.length ? full[full.length - 1].out.punch_at : null;
+    let pairs = full.length ? full.map((u) => [u.in.punch_at, u.out.punch_at]) : null;
+    // (cài đặt pairs_fixed_break) ca nghỉ trưa cố định + số lượt quẹt lẻ: lấy đầu → cuối trừ giờ nghỉ (như mergeDayPunches)
+    const kept = units.reduce((s, u) => s + (u.out ? 2 : 1), 0);
+    if (fixedBreak && shift.break_start && kept >= 3 && kept % 2 === 1) pairs = null;
+    upsertRow(employeeId, workDate, shift.id, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs));
+  }
 }
 
 // Dựng lại nhiều ngày theo đúng THỨ TỰ (từng NV, ngày tăng dần) — ngày hôm trước phải xong trước để biết
@@ -1392,6 +1422,12 @@ function rebuildDayCore(employeeId, workDate) {
   // Lịch trình NHIỀU ca/ngày: chọn bộ ca thực làm theo giờ chấm (1 ca trong nhóm Sáng/Chiều/HC, hoặc 2 ca gãy) → mỗi ca 1 dòng
   if (plan.isSchedule && plan.shifts.length > 1) {
     db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0)").run(employeeId, workDate);
+    // MỌI ca theo "Tự động - qua đêm" (ghép cặp): ghép theo thứ tự giờ rồi mỗi cặp mới tìm ca, như On39 (Anh duyệt 18/11/2026) —
+    // không ép "Phân theo giờ" nữa; lượt ngoài khung vẫn giữ giờ thật. Ca đêm vào trễ sau nửa đêm (lateNight) vẫn theo cách cũ.
+    if (!lateNight && seqDayRule(plan.shifts.map((s) => plan.mergeRule || effectiveMergeRule(s, null) || 'filo'), plan.shifts)) {
+      rebuildSeqDay(employeeId, workDate, prov, plan.shifts, dup);
+      return;
+    }
     const seen = new Map();
     for (const shift of plan.shifts) { const { winStart, winEnd } = ruleWindow(workDate, shift); for (const p of punchesInWin(winStart, winEnd)) seen.set(p.punch_at, p); }
     // Quy tắc BIẾT HƯỚNG (mọi ca của ngày): ghép cặp theo hướng trước rồi mỗi cặp / lượt lẻ mới tìm ca (pickDirShiftSet) — lượt RA lẻ

@@ -612,6 +612,8 @@ function migrateColumns() {
   )`);
   add('shift_assignments', 'inout_schedule_id', 'INTEGER');        // lịch trình vào ra gán kèm cho NV
   add('dept_shift_assignments', 'inout_schedule_id', 'INTEGER');   // … cho phòng ban
+  // "Tự động - qua đêm": lượt RA của lượt VÀO phải trước giờ này của NGÀY HÔM SAU (như EndTime của Wise Eye On39, VD 09:00); '' = không chặn
+  add('inout_schedules', 'next_out_end', "TEXT NOT NULL DEFAULT ''");
   // Nguồn của dòng phân ca theo NGÀY: 'sheet' = nhập ở bảng Xem lịch trình (kiểu Excel) / Nhập Excel — ƯU TIÊN CAO NHẤT;
   // 'temp' = Lịch trình tạm thời. Dòng cũ coi như 'sheet'.
   add('daily_shift_assignments', 'source', "TEXT NOT NULL DEFAULT 'sheet'");

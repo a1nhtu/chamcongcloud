@@ -131,7 +131,7 @@ export function ioScheduleFor(employeeId, workDate) {
 // Ngưỡng ghép cặp của lịch trình vào ra đó → { min, gap, max } (phút); null = chưa khai lịch trình vào ra nào
 export function ioParamsFor(employeeId, workDate) {
   const io = ioScheduleFor(employeeId, workDate);
-  return io ? { min: io.min_minutes, gap: io.gap_minutes, max: io.max_minutes } : null;
+  return io ? { min: io.min_minutes, gap: io.gap_minutes, max: io.max_minutes, nextEnd: io.next_out_end || '' } : null;
 }
 
 // Cách ghép giờ thực tế, theo thứ tự: lịch trình vào ra của dòng gán → quy tắc RIÊNG còn lưu ở ca (kiểu cũ, khác FILO)

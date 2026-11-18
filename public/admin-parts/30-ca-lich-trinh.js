@@ -45,7 +45,7 @@ async function pageShifts() {
 const IO_RULES = [
   ['filo', 'Giờ đầu là vào, giờ cuối là ra', 'Lần chấm công đầu tiên được xem là giờ VÀO, lần chấm công cuối cùng được xem là giờ RA, bỏ qua tất cả các giờ chấm ở giữa. Tính trong khung giờ của ca: ca ngày lấy trong ngày; ca qua đêm lấy lượt VÀO buổi tối và lượt RA sáng hôm sau.'],
   ['pairs', 'Tự động - không qua đêm (không qua 12h)', 'Lần chấm đầu là VÀO, lần chấm kế tiếp là RA, rồi lại VÀO… Giờ làm = tổng các cặp vào–ra (thời gian ra ngoài giữa chừng bị trừ). Việc chọn lượt phụ thuộc ba thông số bên dưới. Cặp chỉ ghép trong khung giờ của ca: ca ngày trong ngày, ca đêm (giờ ra nhỏ hơn giờ vào) thì sang sáng hôm sau. Lượt VÀO lẻ cuối ngày là thiếu giờ ra.'],
-  ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động - không qua đêm" (tính theo từng cặp, trừ thời gian ra ngoài), thêm: lượt VÀO lẻ cuối ngày được ghép với lượt chấm đầu tiên sáng hôm sau làm giờ RA, nếu cách nhau không quá "Thời gian lớn nhất" và lượt đó không phải giờ vào ca hôm sau. Dùng khi ca ngày hay tăng ca quá nửa đêm. Ca đêm 19h–7h không cần trừ giờ ra ngoài thì dùng "Giờ đầu là vào, giờ cuối là ra" là đủ.'],
+  ['tdqd', 'Tự động - qua đêm (qua 12h)', 'Như "Tự động - không qua đêm" (tính theo từng cặp, trừ thời gian ra ngoài), thêm: lượt VÀO lẻ cuối ngày được ghép với lượt chấm đầu tiên sáng hôm sau làm giờ RA, nếu cách nhau không quá "Thời gian lớn nhất" và lượt đó không phải giờ vào ca hôm sau. Dùng khi ca ngày hay tăng ca quá nửa đêm. Ca đêm 19h–7h không cần trừ giờ ra ngoài thì dùng "Giờ đầu là vào, giờ cuối là ra" là đủ. Lịch trình ca nhiều ca tự dò (VD Ngày / Đêm xoay ca): ghép cặp theo thứ tự giờ như Wise Eye On39 (VÀO → lượt kế tiếp trong khoảng nhỏ nhất – lớn nhất là RA) rồi mỗi cặp tự tìm ca theo khung vào / ra của ca; lượt ra quá "Kết thúc ra" vẫn giữ giờ thật.'],
   ['idm', 'Theo ID máy', 'Khi chấm công ở máy có số máy lẻ (1, 3, 5, 7, 9) sẽ là VÀO. Khi chấm ở máy có số máy chẵn (2, 4, 6, 8, 10) sẽ là RA. Ra/vào nhiều lần qua 2 cửa thì cộng từng cặp VÀO → RA (trừ thời gian ra ngoài, như Wise Eye On39); vào lại khi chưa ra = lượt vào trước quên chấm ra, ra mà chưa vào = quên chấm vào (dòng chỉ có giờ RA). Máy vào là giờ vào, máy ra là giờ ra BẤT KỂ NGÀY ĐÊM: vào tối, ra sáng hôm sau (cách không quá "Thời gian lớn nhất") vẫn ghép thành 1 cặp, không cần chọn qua đêm; ca đêm quên chấm vào thì giờ RA sáng hôm sau gắn về đêm hôm trước. Đặt "ID máy" cho từng máy ở cột ID máy của mục Máy chấm công.'],
   ['state', 'Chọn từ máy', 'Giờ VÀO hay giờ RA nhận từ máy chấm công: bấm phím Check In trước khi chấm là VÀO, bấm Check Out trước khi chấm là RA. Ghép cặp như "Theo ID máy": cộng từng cặp VÀO → RA, qua nửa đêm vẫn ghép (không quá "Thời gian lớn nhất"), không cần chọn qua đêm.'],
   ['tdhc', 'Phân theo giờ', 'Giờ chấm nằm trong khung "Bắt đầu vào – Kết thúc vào" của ca là VÀO; nằm trong khung "Bắt đầu ra – Kết thúc ra" là RA (khai ở Ca làm việc).'],
@@ -65,7 +65,7 @@ async function pageInOut() {
   if (!rows.length) tb.append(el('tr', {}, el('td', { colspan: 8 }, el('div', { class: 'empty' }, '📭 Chưa có lịch trình vào ra nào. Khi chưa khai, hệ thống dùng "Giờ đầu là vào, giờ cuối là ra". Bấm "+ Thêm mới".'))));
   for (const r of rows) {
     tb.append(el('tr', {}, el('td', {}, r.code || '—'), el('td', {}, el('b', {}, r.name)), el('td', {}, IO_RULE_NAME[r.rule] || r.rule),
-      el('td', {}, r.min_minutes + ' phút'), el('td', {}, r.max_minutes + ' phút'), el('td', {}, r.gap_minutes + ' phút'),
+      el('td', {}, r.min_minutes + ' phút'), el('td', {}, r.max_minutes + ' phút' + (r.rule === 'tdqd' && r.next_out_end ? ` · ra trước ${r.next_out_end} hôm sau` : '')), el('td', {}, r.gap_minutes + ' phút'),
       el('td', {}, r.is_default ? el('span', { class: 'pill ok' }, 'Mặc định') : ''),
       el('td', {}, canEdit ? el('div', { style: 'display:flex;gap:6px' }, btnSm('Sửa', () => inOutModal(r)),
         btnSm('Xoá', async () => { if (!confirm(`Xoá lịch trình vào ra "${r.name}"?`)) return; try { await api('/admin/inout-schedules/' + r.id, { method: 'DELETE' }); toast('Đã xoá', 'ok'); pageInOut(); } catch (e) { toast(e.message, 'err'); } }, 'ghost')) : '')));
@@ -81,7 +81,7 @@ function inOutModal(r) {
   let rule = r?.rule || 'filo';
   const descT = el('b', {}), descB = el('div', { style: 'font-size:13.5px;color:var(--ink);line-height:1.55;margin-top:4px' });
   const radios = el('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:8px 16px' });
-  const sync = () => { const it = IO_RULES.find(([k]) => k === rule); descT.textContent = it[1]; descB.textContent = it[2]; };
+  const sync = () => { const it = IO_RULES.find(([k]) => k === rule); descT.textContent = it[1]; descB.textContent = it[2]; if (endRow) endRow.style.display = rule === 'tdqd' ? 'flex' : 'none'; };
   for (const [k, t] of IO_RULES) {
     const rd = el('input', { type: 'radio', name: 'io-rule', style: 'width:auto', ...(rule === k ? { checked: '' } : {}) });
     rd.onchange = () => { rule = k; sync(); };
@@ -90,12 +90,15 @@ function inOutModal(r) {
   const minI = el('input', { type: 'number', min: '0', value: r?.min_minutes ?? 30, style: 'width:90px' });
   const maxI = el('input', { type: 'number', min: '0', value: r?.max_minutes ?? 960, style: 'width:90px' });
   const gapI = el('input', { type: 'number', min: '0', value: r?.gap_minutes ?? 30, style: 'width:90px' });
+  const endI = time24('io-next-end', r?.next_out_end || ''); endI.style.width = '90px';
+  const endRow = el('div', { style: 'display:flex;align-items:center;gap:10px' }, el('span', { style: 'width:210px;font-weight:600' }, 'Mốc kết thúc ra hôm sau'), endI,
+    el('span', { style: 'color:var(--muted);font-size:12.5px' }, 'lượt sau giờ này của ngày hôm sau không còn là giờ RA (VD 09:00, như On39); bỏ trống = chỉ theo thời gian lớn nhất'));
   const defC = el('input', { type: 'checkbox', style: 'width:auto', ...(r?.is_default ? { checked: '' } : {}) });
   const row = (label, inp, hint) => el('div', { style: 'display:flex;align-items:center;gap:10px' }, el('span', { style: 'width:210px;font-weight:600' }, label), inp, el('span', {}, 'phút'), el('span', { style: 'color:var(--muted);font-size:12.5px' }, hint));
   const save = el('button', { class: 'btn' }, 'Lưu');
   save.onclick = async () => {
     if (!nameI.value.trim()) return toast('Nhập tên lịch trình', 'err');
-    const body = { code: codeI.value.trim(), name: nameI.value.trim(), rule, min_minutes: minI.value, max_minutes: maxI.value, gap_minutes: gapI.value, is_default: defC.checked };
+    const body = { code: codeI.value.trim(), name: nameI.value.trim(), rule, min_minutes: minI.value, max_minutes: maxI.value, gap_minutes: gapI.value, next_out_end: endI.value.trim(), is_default: defC.checked };
     try { if (r) await api('/admin/inout-schedules/' + r.id, { method: 'PUT', body }); else await api('/admin/inout-schedules', { method: 'POST', body }); toast('Đã lưu', 'ok'); closeModal(); pageInOut(); }
     catch (e) { toast(e.message, 'err'); }
   };
@@ -106,6 +109,7 @@ function inOutModal(r) {
     row('Thời gian nhỏ nhất', minI, 'RA cách VÀO dưới mức này = quẹt lặp, bỏ'),
     row('Thời gian lớn nhất', maxI, 'cặp vào–ra dài hơn mức này = quên quẹt ra'),
     row('Khoảng cách giữa 2 cặp vào ra', gapI, 'VÀO mới cách RA trước dưới mức này = quẹt lặp'),
+    endRow,
     el('div', { style: 'border:1px solid var(--line);border-radius:10px;padding:12px;background:#faf7f5' }, descT, descB),
     el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:600;color:var(--ink)' }, defC, 'Dùng làm MẶC ĐỊNH cho nhân viên chưa được gán lịch trình vào ra'),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);

@@ -118,6 +118,8 @@ export function registerOrgRoutes(r, { need }) {
     min: Math.max(0, parseInt(b.min_minutes ?? old.min_minutes ?? 30, 10) || 0),
     max: Math.max(0, parseInt(b.max_minutes ?? old.max_minutes ?? 960, 10) || 0),
     gap: Math.max(0, parseInt(b.gap_minutes ?? old.gap_minutes ?? 30, 10) || 0),
+    // Mốc kết thúc ra hôm sau ("Tự động - qua đêm", như EndTime của On39): 'HH:MM' hoặc '' = không chặn
+    nextEnd: ((x) => (/^([01]?\d|2[0-3]):[0-5]\d$/.test(x) ? x.padStart(5, '0') : ''))(String(b.next_out_end ?? old.next_out_end ?? '').trim()),
     def: (b.is_default != null ? b.is_default : old.is_default) ? 1 : 0,
   });
   r.get('/inout-schedules', (req, res) => {
@@ -128,8 +130,8 @@ export function registerOrgRoutes(r, { need }) {
     if (!v.name) return res.status(400).json({ error: 'Nhập tên lịch trình vào ra' });
     if (v.def) db.prepare('UPDATE inout_schedules SET is_default = 0').run();
     const first = !db.prepare('SELECT 1 FROM inout_schedules WHERE active = 1').get();   // lịch trình đầu tiên tự là mặc định
-    const info = db.prepare('INSERT INTO inout_schedules(code, name, rule, min_minutes, max_minutes, gap_minutes, is_default) VALUES (?,?,?,?,?,?,?)')
-      .run(v.code, v.name, v.rule, v.min, v.max, v.gap, v.def || first ? 1 : 0);
+    const info = db.prepare('INSERT INTO inout_schedules(code, name, rule, min_minutes, max_minutes, gap_minutes, next_out_end, is_default) VALUES (?,?,?,?,?,?,?,?)')
+      .run(v.code, v.name, v.rule, v.min, v.max, v.gap, v.nextEnd, v.def || first ? 1 : 0);
     res.json({ ok: true, id: info.lastInsertRowid });
   });
   r.put('/inout-schedules/:id', need('shifts'), (req, res) => {
@@ -138,8 +140,8 @@ export function registerOrgRoutes(r, { need }) {
     const v = ioBody(req.body || {}, old);
     if (!v.name) return res.status(400).json({ error: 'Nhập tên lịch trình vào ra' });
     if (v.def) db.prepare('UPDATE inout_schedules SET is_default = 0 WHERE id <> ?').run(old.id);
-    db.prepare('UPDATE inout_schedules SET code=?, name=?, rule=?, min_minutes=?, max_minutes=?, gap_minutes=?, is_default=? WHERE id=?')
-      .run(v.code, v.name, v.rule, v.min, v.max, v.gap, v.def, old.id);
+    db.prepare('UPDATE inout_schedules SET code=?, name=?, rule=?, min_minutes=?, max_minutes=?, gap_minutes=?, next_out_end=?, is_default=? WHERE id=?')
+      .run(v.code, v.name, v.rule, v.min, v.max, v.gap, v.nextEnd, v.def, old.id);
     res.json({ ok: true });
   });
   r.delete('/inout-schedules/:id', need('shifts'), (req, res) => {

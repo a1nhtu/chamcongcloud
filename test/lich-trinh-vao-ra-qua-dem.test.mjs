@@ -152,11 +152,11 @@ test('tdqd: máy đẩy lượt sáng hôm sau MUỘN (tải bù) → ngày hôm
   assert.equal(db.prepare("SELECT COUNT(*) c FROM attendance WHERE employee_id=? AND work_date='2026-11-03'").get(e).c, 0);
 });
 
-test('tdqd + lịch Tự do (HC / Đêm): ngày tăng ca quá nửa đêm vẫn nhận đúng ca HC, ra 01:30', () => {
+// Ghép cặp theo thứ tự như On39 (18/11/2026): 08:00 → 17:00 là 1 cặp; vào lại 18:00 (cách RA ≥ "giữa 2 cặp") là cặp mới — giờ vào 18:00
+// nằm trong khung vào của ca Đêm (17:00–20:00) nên cặp 18:00 → 01:30 thuộc ca Đêm (On39 ra y như vậy: "Ngày:Đêm").
+test('tdqd + lịch Tự do (HC / Đêm): 08:00 · 17:00 · vào lại 18:00 · ra 01:30 → HC 08:00→17:00 + Đêm 18:00→01:30 (như On39)', () => {
   const r = chay(W.AUTO, IO.tdqd, ['02 08:00', '02 17:00', '02 18:00', '03 01:30']);
-  assert.equal(r.rows.length, 1);
-  assert.equal(r.rows[0].shift_id, S.HC);
-  assert.equal(hm(r.rows[0].check_out_at), '03 01:30');
+  assert.deepEqual(r.rows.map((x) => [x.shift_id, hm(x.check_in_at), hm(x.check_out_at)]), [[S.HC, '02 08:00', '02 17:00'], [S.DM, '02 18:00', '03 01:30']]);
 });
 
 test('Lịch trình vào ra MẶC ĐỊNH = Tự động, ô gán để Mặc định → áp dụng (trước đây thành FILO)', () => {
