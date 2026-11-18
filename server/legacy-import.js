@@ -1,5 +1,6 @@
 // CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CHẤM CÔNG CŨ sang Digiplus: Wise Eye On39 / V5.1 / Ronald Jack Pro (file Access .mdb).
-// Lấy 3 thứ: BỘ PHẬN (cây cha – con) · NHÂN VIÊN (mã, tên, Số ID máy, bộ phận, chức danh, SĐT, ngày vào làm, thẻ…) · LƯỢT CHẤM.
+// Lấy: BỘ PHẬN (cây cha – con) · NHÂN VIÊN (mã, tên, Số ID máy, bộ phận, chức danh, SĐT, ngày vào làm, thẻ…) · LƯỢT CHẤM
+// · với Wise Eye: thêm CA + LỊCH TRÌNH VÀO RA + LỊCH TRÌNH CA + gán lịch trình cho NV (normalizeOn39Shifts / applyShifts).
 //  - Đọc file bằng mdb-reader (JS thuần, server/vendor) → chạy được cả Windows lẫn VPS Linux, không cần cài Access/ODBC.
 //    Mật khẩu Access (On39 mặc định 12112009) chỉ là lớp khoá ngoài, dữ liệu không mã hoá nên đọc được cả khi không nhập.
 //  - normalizeOn39 / normalizeRj: hàm thuần, đổi bảng của từng phần mềm về 1 dạng chung → test không cần DB.
@@ -10,7 +11,7 @@ import { gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import MDBReader from './vendor/mdb-reader.mjs';
 import { db } from './db.js';
-import { ingestAttlog } from './device-sync.js';
+import { ingestAttlog, rebuildDay } from './device-sync.js';
 import { defaultPasswordHash } from './auth.js';
 import { cleanName, isJunkName } from './ten-nv.js';
 
@@ -104,7 +105,87 @@ export function normalizeOn39(table) {
       serial: serialOf.get(c.MachineNo) || 'ON39_MAY' + (c.MachineNo || 0) });
   }
   return { kind: 'on39', company, depts, emps, punches,
-    machines: mach.map((m) => ({ serial: serialOf.get(m.MachineID), name: str(m.MachineName) })) };
+    machines: mach.map((m) => ({ serial: serialOf.get(m.MachineID), name: str(m.MachineName) })), ...normalizeOn39Shifts(table) };
+}
+
+// Giờ 'HH:MM' từ chữ ('7:30', '07:30:00') hoặc kiểu giờ của Access (Date ngày 30/12/1899 mang đúng giờ ghi trong file)
+const hmOf = (v) => {
+  if (v instanceof Date) return isNaN(v) ? '' : v.toISOString().slice(11, 16);
+  const m = /^(\d{1,2}):(\d{2})/.exec(str(v));
+  return m && +m[1] < 24 && +m[2] < 60 ? m[1].padStart(2, '0') + ':' + m[2] : '';
+};
+const minOf = (hm) => +hm.slice(0, 2) * 60 + +hm.slice(3, 5);
+const hmFrom = (m) => { m = ((m % 1440) + 1440) % 1440; return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); };
+const nn = (v) => Math.max(0, Math.round(Number(v) || 0));
+const IO_RULE = { 1: 'tdhc', 2: 'idm', 3: 'filo', 4: 'state' };   // InOutMode On39 → quy tắc Digiplus; 0 = Tự động (tdqd nếu qua đêm, không thì pairs)
+
+// CA + LỊCH TRÌNH của Wise Eye On39 / V5.1 → dạng chung (Anh duyệt 18/11/2026, mục L6 báo cáo đối chiếu On39):
+//  - Ca (Shifts): khung nhận VÀO = Giờ vào − OnTimeIn … Giờ vào + CutIn; khung nhận RA = Giờ ra − OnTimeOut … Giờ ra + CutOut
+//    (cách chép này đã đối chiếu bảng công On39 trên file Data_on39_CaDem: lịch 1 ca HC-CN khớp 100%).
+//  - Lịch trình vào ra (InOutArr): InOutMode 0 Tự động (DayCount > 0 = qua đêm; EndTime = "Mốc kết thúc ra hôm sau") · 1 theo khoảng giờ
+//    · 2 theo số máy · 3 giờ đầu – giờ cuối · 4 theo phím vào / ra.
+//  - Lịch trình ca (Schedule): chu kỳ tuần = WSchedules (DayID 1 = CN, 2 = T2 … 7 = T7; 8 = ngày lễ → bỏ) · tháng = MSchedules
+//    (DayID = ngày 1..31; 32 = lễ → bỏ) · năm = YSchedules → Digiplus không có chu kỳ năm nên chép thành "tự dò" trong các ca của lịch.
+//    Một ngày có nhiều ca = Digiplus tự dò ca theo giờ chấm, như On39 thử lần lượt từng ca của ngày.
+//  - Gán NV: UserInfo.SchID = lịch trình chính · UserTempSch = lịch trình tạm theo khoảng ngày.
+export function normalizeOn39Shifts(table) {
+  const shifts = [];
+  for (const s of table('Shifts', ['ShiftID', 'ShiftCode', 'Onduty', 'Offduty', 'DayCount', 'OnTimeIn', 'OnTimeOut', 'CutIn', 'CutOut', 'OnLunch', 'OffLunch',
+    'Workingday', 'LateGrace', 'EarlyGrace', 'IsAfterOT', 'MinAfterOT', 'IsBeforeOT', 'MinBeforeOT'])) {
+    const code = str(s.ShiftCode), on = hmOf(s.Onduty), off = hmOf(s.Offduty);
+    if (!code || !on || !off) continue;
+    const st = minOf(on), en = minOf(off), l1 = hmOf(s.OnLunch), l2 = hmOf(s.OffLunch);
+    const brk = l1 && l2 && l1 !== l2 ? (minOf(l2) - minOf(l1) + 1440) % 1440 : 0;
+    shifts.push({ key: 'S' + s.ShiftID, code, start_time: on, end_time: off, cross_midnight: nn(s.DayCount) > 0 || en <= st ? 1 : 0,
+      break_minutes: brk, break_start: brk ? l1 : '',
+      check_in_start: hmFrom(st - nn(s.OnTimeIn)), check_in_end: hmFrom(st + nn(s.CutIn)),
+      check_out_start: hmFrom(en - nn(s.OnTimeOut)), check_out_end: hmFrom(en + nn(s.CutOut)),
+      late_grace_min: nn(s.LateGrace), early_grace_min: nn(s.EarlyGrace), work_unit_value: Number(s.Workingday) > 0 ? Number(s.Workingday) : 1,
+      allow_ot: s.IsAfterOT ? 1 : 0, ot_start_after_min: nn(s.MinAfterOT), ot_before: s.IsBeforeOT ? 1 : 0, ot_before_min: nn(s.MinBeforeOT) });
+  }
+  const shiftKeys = new Set(shifts.map((s) => s.key));
+  const inouts = table('InOutArr', ['InOutID', 'InOutCode', 'InOutName', 'AutoMax', 'AutoMin', 'AutoInterval', 'InOutMode', 'DayCount', 'EndTime'])
+    .filter((a) => str(a.InOutCode) || str(a.InOutName))
+    .map((a) => {
+      const rule = IO_RULE[Number(a.InOutMode)] || (nn(a.DayCount) > 0 ? 'tdqd' : 'pairs');
+      const end = hmOf(a.EndTime);
+      return { key: 'IO' + a.InOutID, code: str(a.InOutCode) || str(a.InOutName), name: str(a.InOutName) || str(a.InOutCode), rule,
+        min_minutes: nn(a.AutoMin) || 30, max_minutes: nn(a.AutoMax) || 960, gap_minutes: nn(a.AutoInterval) || 30,
+        next_out_end: rule === 'tdqd' && end && end !== '23:59' && end !== '00:00' ? end : '' };
+    });
+  const ioKeys = new Set(inouts.map((a) => a.key));
+  const rows = (name) => table(name, ['ID', 'SchID', 'DayID', 'ShiftID', 'MonthID']).filter((r) => shiftKeys.has('S' + r.ShiftID))
+    .sort((a, b) => (a.ID || 0) - (b.ID || 0));
+  const W = rows('WSchedules'), M = rows('MSchedules'), Y = rows('YSchedules');
+  const schedules = [];
+  for (const sc of table('Schedule', ['SchID', 'SchName', 'InOutID', 'CycleMode'])) {
+    const name = str(sc.SchName);
+    if (!name) continue;
+    const w = W.filter((r) => r.SchID === sc.SchID && r.DayID >= 1 && r.DayID <= 7);
+    const m = M.filter((r) => r.SchID === sc.SchID && r.DayID >= 1 && r.DayID <= 31);
+    const y = Y.filter((r) => r.SchID === sc.SchID);
+    // CycleMode 0 tuần · 1 tháng · 2 năm; chu kỳ đang chọn không có ca (dữ liệu sót) → lấy chu kỳ nào có ca
+    const cyc = Number(sc.CycleMode) || 0;
+    const unit = cyc === 1 && m.length ? 'month' : cyc === 2 && y.length ? 'auto' : w.length ? 'week' : m.length ? 'month' : 'auto';
+    const src = unit === 'week' ? w : unit === 'month' ? m : y;
+    const used = [...new Set(src.map((r) => 'S' + r.ShiftID))];
+    if (!used.length) continue;
+    // Digiplus: ô tuần 0 = Thứ Hai … 6 = Chủ Nhật · ô tháng = ngày − 1
+    const cells = unit === 'week' ? w.map((r) => [r.DayID === 1 ? 6 : r.DayID - 2, 'S' + r.ShiftID])
+      : unit === 'month' ? m.map((r) => [r.DayID - 1, 'S' + r.ShiftID]) : [];
+    schedules.push({ key: 'W' + sc.SchID, name, unit, cells, shifts: used, io: ioKeys.has('IO' + sc.InOutID) ? 'IO' + sc.InOutID : null });
+  }
+  const schKeys = new Set(schedules.map((s) => s.key));
+  const assign = table('UserInfo', ['UserEnrollNumber', 'SchID'])
+    .filter((u) => u.UserEnrollNumber > 0 && schKeys.has('W' + u.SchID)).map((u) => ({ pin: String(u.UserEnrollNumber), sch: 'W' + u.SchID }));
+  const temp_sch = [];
+  for (const t of table('UserTempSch', ['UserEnrollNumber', 'StartDate', 'EndDate', 'SchID'])) {
+    const from = ymd(t.StartDate), to = ymd(t.EndDate) || null;
+    if (!(t.UserEnrollNumber > 0) || !schKeys.has('W' + t.SchID) || !from || (to && to < from)) continue;
+    temp_sch.push({ pin: String(t.UserEnrollNumber), sch: 'W' + t.SchID, from, to });
+  }
+  temp_sch.sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+  return { shifts, inouts, schedules, assign, temp_sch };
 }
 
 export function normalizeRj(table) {
@@ -186,6 +267,11 @@ export function summarize(data) {
     emps_no_dept: data.emps.filter((e) => !e.dept).length,
     punches: data.punches.length, first_date: first.slice(0, 10), last_date: last.slice(0, 10),
     machines: data.machines,
+    // Ca + lịch trình (chỉ Wise Eye): số lượng + tên để hiện ở bước xem trước
+    shifts: (data.shifts || []).length, shift_names: (data.shifts || []).map((s) => `${s.code} ${s.start_time}–${s.end_time}`),
+    inouts: (data.inouts || []).length, schedules: (data.schedules || []).length,
+    schedule_names: (data.schedules || []).map((s) => s.name),
+    sch_emps: (data.assign || []).length, temp_sch: (data.temp_sch || []).length,
   };
 }
 
@@ -209,16 +295,96 @@ export function filterLegacy(data, skipDepts = [], skipNoDept = false) {
   if (!skip.size && !skipNoDept) return data;
   const emps = data.emps.filter((e) => (e.dept ? !skip.has(e.dept) : !skipNoDept));
   const pins = new Set(emps.map((e) => e.pin));
-  return { ...data, depts: data.depts.filter((d) => !skip.has(d.key)), emps, punches: data.punches.filter((p) => pins.has(p.pin)) };
+  const own = (list) => (list ? list.filter((x) => pins.has(x.pin)) : list);
+  return { ...data, depts: data.depts.filter((d) => !skip.has(d.key)), emps, punches: data.punches.filter((p) => pins.has(p.pin)),
+    assign: own(data.assign), temp_sch: own(data.temp_sch) };
 }
 
-// opts: { depts, emps, punches (true/false), overwrite (ghi đè thông tin NV đã có), from, to ('YYYY-MM-DD', rỗng = tất cả),
+// CA + LỊCH TRÌNH (Wise Eye) → Digiplus. Không đụng ca / lịch trình đang có của khách:
+//  - ca trùng MÃ + giờ vào + giờ ra → dùng lại ca đó; trùng mã mà khác giờ → tạo ca mới tên "<mã> (On39)"
+//  - lịch trình vào ra trùng mã + cùng thông số → dùng lại; lịch trình ca đã chép lần trước (cùng tên, mô tả "Chép từ …") → dùng lại
+//  - gán NV: lịch trình chính từ ngày đầu tiên có lượt chấm, không ngày kết thúc; lịch trình tạm có từ ngày – đến ngày, ghi SAU
+//    (dòng gán mới nhất thắng → trong khoảng ngày tạm theo lịch tạm, ngoài khoảng theo lịch chính). NV đã có dòng gán tự khai
+//    ở Digiplus thì giữ nguyên, trừ khi chọn "Ghi đè".
+// Trả danh sách id NV vừa được gán (để tính lại công nếu lượt chấm của họ đã có từ trước).
+function applyShifts(data, o, out) {
+  const tag = data.kind === 'we51' ? 'V5.1' : 'On39';
+  const mark = `Chép từ ${LEGACY_LABEL[data.kind] || 'phần mềm cũ'}`;
+  // Tên / mã chưa dùng: "X" → "X (On39)" → "X (On39 2)" …
+  const freeName = (base, taken) => { if (!taken(base)) return base; for (let i = 1; ; i++) { const v = `${base} (${tag}${i > 1 ? ' ' + i : ''})`; if (!taken(v)) return v; } };
+  const shiftId = {}, ioId = {}, wsId = {};
+  for (const s of data.shifts) {
+    const same = db.prepare('SELECT id FROM shifts WHERE active=1 AND lower(code)=lower(?) AND start_time=? AND end_time=?').get(s.code, s.start_time, s.end_time);
+    if (same) { shiftId[s.key] = same.id; continue; }
+    const code = freeName(s.code, (v) => db.prepare('SELECT 1 FROM shifts WHERE active=1 AND (lower(code)=lower(?) OR lower(name)=lower(?))').get(v, v));
+    const row = { ...s, code, name: code, work_days: '1,2,3,4,5,6,7', active: 1 };
+    delete row.key;
+    const k = Object.keys(row);
+    shiftId[s.key] = Number(db.prepare(`INSERT INTO shifts(${k.join(',')}) VALUES (${k.map(() => '?').join(',')})`).run(...k.map((x) => row[x])).lastInsertRowid);
+    out.shifts_created++;
+  }
+  for (const a of data.inouts) {
+    const same = db.prepare(`SELECT id FROM inout_schedules WHERE active=1 AND lower(code)=lower(?) AND rule=? AND min_minutes=? AND max_minutes=?
+      AND gap_minutes=? AND COALESCE(next_out_end,'')=?`).get(a.code, a.rule, a.min_minutes, a.max_minutes, a.gap_minutes, a.next_out_end);
+    if (same) { ioId[a.key] = same.id; continue; }
+    const code = freeName(a.code, (v) => db.prepare('SELECT 1 FROM inout_schedules WHERE active=1 AND lower(code)=lower(?)').get(v));
+    ioId[a.key] = Number(db.prepare('INSERT INTO inout_schedules(code, name, rule, min_minutes, max_minutes, gap_minutes, next_out_end, is_default) VALUES (?,?,?,?,?,?,?,0)')
+      .run(code, a.name, a.rule, a.min_minutes, a.max_minutes, a.gap_minutes, a.next_out_end).lastInsertRowid);
+    out.inouts_created++;
+  }
+  for (const w of data.schedules) {
+    const same = db.prepare('SELECT id FROM work_schedules WHERE active=1 AND lower(name)=lower(?) AND description=?').get(w.name, mark);
+    if (same) { wsId[w.key] = same.id; continue; }
+    const name = freeName(w.name, (v) => db.prepare('SELECT 1 FROM work_schedules WHERE active=1 AND lower(name)=lower(?)').get(v));
+    const id = Number(db.prepare('INSERT INTO work_schedules(code, name, description, unit, cycle, is_default) VALUES (?,?,?,?,1,0)')
+      .run(name, name, mark, w.unit).lastInsertRowid);
+    w.shifts.forEach((k, i) => db.prepare('INSERT OR IGNORE INTO work_schedule_shifts(work_schedule_id, shift_id, sort_order) VALUES (?,?,?)').run(id, shiftId[k], i));
+    for (const [idx, k] of w.cells) db.prepare('INSERT OR IGNORE INTO work_schedule_days(work_schedule_id, idx, shift_id) VALUES (?,?,?)').run(id, idx, shiftId[k]);
+    wsId[w.key] = id;
+    out.schedules_created++;
+  }
+
+  const ioOf = new Map(data.schedules.map((w) => [w.key, w.io ? ioId[w.io] || null : null]));
+  let base = '';
+  for (const p of data.punches) if (!base || p.time < base) base = p.time;
+  base = base.slice(0, 10) || new Date().toISOString().slice(0, 10);
+  const empOf = (pin) => db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>''").get(pin)?.id;
+  const ownRows = db.prepare('SELECT * FROM shift_assignments WHERE employee_id=? AND active=1');
+  const insA = db.prepare(`INSERT INTO shift_assignments(employee_id, mode, work_schedule_id, from_date, to_date, shift_type, merge_rule, inout_schedule_id, note, active)
+    VALUES (?, 'schedule', ?, ?, ?, 'fixed', 'default', ?, ?, 1)`);
+  const touched = new Set(), skipped = new Set();
+  // NV có dòng gán tự khai ở Digiplus (không phải dòng chép) → không đụng, trừ khi chọn ghi đè
+  const keepOwn = (eid) => !o.overwrite && ownRows.all(eid).some((r) => r.note !== mark);
+  for (const a of data.assign) {
+    const eid = empOf(a.pin), ws = wsId[a.sch];
+    if (!eid || !ws) continue;
+    if (keepOwn(eid)) { skipped.add(eid); continue; }
+    if (ownRows.all(eid).some((r) => r.note === mark && r.work_schedule_id === ws && !r.to_date)) continue;   // đã chép lần trước
+    insA.run(eid, ws, base, null, ioOf.get(a.sch), mark);
+    touched.add(eid); out.assign_created++;
+  }
+  // Lịch tạm: xoá dòng tạm đã chép giống hệt rồi ghi lại → luôn nằm trên dòng lịch chính (dòng mới nhất thắng)
+  const delSame = db.prepare("DELETE FROM shift_assignments WHERE employee_id=? AND work_schedule_id=? AND from_date=? AND COALESCE(to_date,'')=? AND note=?");
+  for (const t of data.temp_sch) {
+    const eid = empOf(t.pin), ws = wsId[t.sch];
+    if (!eid || !ws) continue;
+    if (keepOwn(eid)) { skipped.add(eid); continue; }
+    const had = delSame.run(eid, ws, t.from, t.to || '', mark).changes;
+    insA.run(eid, ws, t.from, t.to, ioOf.get(t.sch), mark);
+    if (!had) { touched.add(eid); out.temp_created++; }
+  }
+  out.assign_skipped = skipped.size;
+  return [...touched];
+}
+
+// opts: { depts, emps, punches, shifts (true/false), overwrite (ghi đè thông tin NV / dòng gán ca đã có), from, to ('YYYY-MM-DD', rỗng = tất cả),
 //         skip_depts (key bộ phận không lấy), skip_no_dept (bỏ NV chưa có bộ phận) }
 // prog(%, chữ). Trả số liệu đã làm.
 export async function applyLegacy(data, opts = {}, prog = () => {}) {
-  const o = { depts: true, emps: true, punches: true, overwrite: false, from: '', to: '', ...opts };
+  const o = { depts: true, emps: true, punches: true, shifts: true, overwrite: false, from: '', to: '', ...opts };
   data = filterLegacy(data, o.skip_depts || [], !!o.skip_no_dept);
-  const out = { depts_created: 0, emps_created: 0, emps_updated: 0, emps_linked: 0, punches_read: 0, punches_new: 0 };
+  const out = { depts_created: 0, emps_created: 0, emps_updated: 0, emps_linked: 0, punches_read: 0, punches_new: 0,
+    shifts_created: 0, inouts_created: 0, schedules_created: 0, assign_created: 0, temp_created: 0, assign_skipped: 0, recomputed_emps: 0 };
 
   // 1) BỘ PHẬN — cha trước con; trùng tên (không phân biệt hoa thường) thì dùng bộ phận có sẵn, không đổi chỗ trong cây
   prog(2, 'Đang tạo bộ phận…');
@@ -305,6 +471,17 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
     }
   }
 
+  // 2b) CA + LỊCH TRÌNH (Wise Eye) — làm TRƯỚC lượt chấm để công tính ngay theo đúng ca. NV được gán mà lượt chấm đã có sẵn
+  //     (chuyển lần trước, máy đã gửi) thì lượt trùng không dựng lại ngày → tính lại riêng ở cuối.
+  let regEmps = [];
+  if (o.shifts && data.shifts?.length) {
+    prog(20, 'Đang chép ca + lịch trình…');
+    const touched = tx(() => applyShifts(data, o, out));
+    const has = db.prepare('SELECT 1 FROM device_punches WHERE employee_id=? LIMIT 1');
+    regEmps = touched.filter((id) => has.get(id));
+    await tick();
+  }
+
   // 3) LƯỢT CHẤM — theo từng máy, xếp theo Số ID + giờ; mỗi đợt 1 giao dịch rồi nhả luồng
   if (o.punches && data.punches.length) {
     const from = o.from || '0000', to = o.to ? o.to + ' 99' : '9999';
@@ -327,6 +504,23 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
       }
     }
     out.punches_new = db.prepare('SELECT COUNT(*) c FROM device_punches').get().c - before;
+    // NV chấm ở NHIỀU máy: lượt nạp theo từng máy → lúc dựng ngày còn thiếu lượt của máy nạp sau; lịch ghép cặp theo thứ tự giờ
+    // (L1) dây chuyền lệch sang các ngày sau (file On39 Data_on39_CaDem: 236 NV chấm 2 máy, có NV lệch pha cả tháng) → dựng lại ở bước 4
+    const serials = new Map();
+    for (const p of list) { if (!serials.has(p.pin)) serials.set(p.pin, new Set()); serials.get(p.pin).add(p.serial); }
+    const idOf = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>''");
+    const multi = [...serials].filter(([, s]) => s.size > 1).map(([pin]) => idOf.get(pin)?.id).filter(Boolean);
+    regEmps = [...new Set([...regEmps, ...multi])];
+  }
+  // 4) TÍNH LẠI theo thứ tự ngày (ca đêm lấy đúng giờ ra sáng hôm sau): NV vừa được gán ca mà lượt chấm có từ trước + NV chấm nhiều máy
+  if (regEmps.length) {
+    const dates = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE employee_id=? ORDER BY work_date');
+    for (let i = 0; i < regEmps.length; i++) {
+      const id = regEmps[i];
+      tx(() => { for (const { work_date } of dates.all(id)) rebuildDay(id, work_date); });
+      out.recomputed_emps++;
+      if (i % 10 === 9 || i === regEmps.length - 1) { prog(99, `Dựng lại công theo thứ tự ngày: ${i + 1} / ${regEmps.length} NV`); await tick(); }
+    }
   }
   if (lockLater.length) tx(() => { for (const id of lockLater) db.prepare('UPDATE employees SET active=0 WHERE id=?').run(id); });
   prog(100, 'Xong');

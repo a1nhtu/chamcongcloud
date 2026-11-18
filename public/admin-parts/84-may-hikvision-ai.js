@@ -183,7 +183,7 @@ function usbImportModal() {
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
 
-// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / V5.1 / Ronald Jack Pro, file .mdb): bộ phận + nhân viên + lượt chấm.
+// CHUYỂN DỮ LIỆU TỪ PHẦN MỀM CŨ (Wise Eye On39 / V5.1 / Ronald Jack Pro, file .mdb): bộ phận + nhân viên + lượt chấm (+ ca, lịch trình với Wise Eye).
 // Bước 1 chọn phần mềm cũ (On39 / V5.1 có mật khẩu file, Ronald Jack không) + chọn file .mdb → bước 2 xem trước + chọn phần cần chuyển → bước 3 chạy nền, hiện tiến độ.
 function legacyImportModal() {
   const SOFT = {
@@ -258,7 +258,7 @@ function legacyImportModal() {
     cards[k].onclick = () => choose(k);
   }
   const step1 = [
-    el('div', { class: 'map-hint' }, 'Lấy BỘ PHẬN + NHÂN VIÊN + DỮ LIỆU CHẤM CÔNG từ phần mềm cũ sang Digiplus. Phần mềm cũ không bị thay đổi gì. Nhập lại nhiều lần cũng không bị trùng.'),
+    el('div', { class: 'map-hint' }, 'Lấy BỘ PHẬN + NHÂN VIÊN + DỮ LIỆU CHẤM CÔNG (Wise Eye: cả CA + LỊCH TRÌNH) từ phần mềm cũ sang Digiplus. Phần mềm cũ không bị thay đổi gì. Nhập lại nhiều lần cũng không bị trùng.'),
     el('div', { style: 'margin:14px 0 0;font-weight:700' }, '1) Chọn phần mềm đang dùng'),
     el('div', { style: 'display:flex;gap:10px;margin-top:8px;flex-wrap:wrap' }, cards.on39, cards.we51, cards.rj),
     fileSec,
@@ -291,18 +291,23 @@ function legacyImportModal() {
     const dmy = (d) => d.split('-').reverse().join('/');
     const [cP, lP] = chk(s.punches > 0, `Dữ liệu chấm công: ${s.punches.toLocaleString('vi')} lượt` + (s.first_date ? ` (từ ${dmy(s.first_date)} đến ${dmy(s.last_date)})` : ''),
       'Lượt trùng tự bỏ qua; công các ngày được tính lại theo ca đang cài ở Digiplus.');
-    const [cO, lO] = chk(false, 'Ghi đè thông tin NV đã có', 'Lấy tên, bộ phận, chức danh, SĐT, ngày vào làm theo phần mềm cũ (mặc định chỉ điền ô trống).');
+    // Ca + lịch trình (chỉ Wise Eye On39 / V5.1): chép ca, lịch trình vào ra, lịch trình ca rồi gán NV theo lịch trình ở phần mềm cũ
+    const [cS, lS] = s.shifts > 0 ? chk(true, `Ca làm việc + lịch trình: ${s.shifts} ca · ${s.inouts} lịch trình vào ra · ${s.schedules} lịch trình ca`,
+      `${s.shift_names.join(' · ')}. Gán lịch trình cho ${s.sch_emps} NV như ${s.label}` + (s.temp_sch ? ` (+ ${s.temp_sch} lịch trình tạm theo khoảng ngày)` : '')
+      + '. Ca trùng mã + giờ đã có thì dùng lại; NV đã tự gán ca ở Digiplus thì giữ nguyên (trừ khi chọn Ghi đè).') : [null, ''];
+    const [cO, lO] = chk(false, 'Ghi đè thông tin NV đã có', 'Lấy tên, bộ phận, chức danh, SĐT, ngày vào làm theo phần mềm cũ (mặc định chỉ điền ô trống)'
+      + (s.shifts > 0 ? '; gán lịch trình như phần mềm cũ cả với NV đã tự gán ca ở Digiplus.' : '.'));
     const fromI = el('input', { type: 'date', value: s.first_date, style: 'margin:0;width:auto' }), toI = el('input', { type: 'date', value: s.last_date, style: 'margin:0;width:auto' });
     const range = el('div', { style: 'display:flex;gap:8px;align-items:center;margin:0 0 6px 24px;flex-wrap:wrap;font-size:13px' }, el('span', {}, 'Chỉ lấy từ ngày'), fromI, el('span', {}, 'đến'), toI);
     cP.onchange = () => { range.style.display = cP.checked ? 'flex' : 'none'; };
     cP.onchange();
     const go = el('button', { class: 'btn' }, '⇄ Chuyển dữ liệu');
     go.onclick = async () => {
-      if (!cD.checked && !cE.checked && !cP.checked) return toast('Chưa chọn phần nào để chuyển', 'err');
+      if (!cD.checked && !cE.checked && !cP.checked && !cS?.checked) return toast('Chưa chọn phần nào để chuyển', 'err');
       if (cP.checked && fromI.value && toI.value && toI.value < fromI.value) return toast('Khoảng ngày không hợp lệ', 'err');
       go.disabled = true;
       try {
-        const r = await api('/admin/legacy/apply', { method: 'POST', body: { token, depts: cD.checked, emps: cE.checked, punches: cP.checked, overwrite: cO.checked, from: fromI.value, to: toI.value,
+        const r = await api('/admin/legacy/apply', { method: 'POST', body: { token, depts: cD.checked, emps: cE.checked, punches: cP.checked, shifts: !!cS?.checked, overwrite: cO.checked, from: fromI.value, to: toI.value,
           skip_depts: deptPicks.filter((x) => !x[1].checked).map((x) => x[0]), skip_no_dept: !cNo.checked } });
         run(r.job);
       } catch (e) { go.disabled = false; toast(e.message, 'err'); }
@@ -313,7 +318,7 @@ function legacyImportModal() {
       el('div', { class: 'panel', style: 'padding:10px 14px;margin:0 0 10px;background:#f8fafc' },
         el('div', {}, el('b', {}, s.label), s.company ? ' · ' + s.company : ''),
         s.machines.length ? el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Máy chấm công: ' + s.machines.map((m) => `${m.name || 'Máy'} (${m.serial})`).join(' · ')) : ''),
-      lD, lE, pickBox, lP, range, lO, back);
+      lD, lE, pickBox, lS, lP, range, lO, back);
     $('#modal .m-foot').replaceChildren(el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'), go);
   }
 
@@ -335,8 +340,15 @@ function legacyImportModal() {
       const x = j.result;
       const line = `Đã chuyển từ ${x.label}: ${x.depts_created} bộ phận mới · ${x.emps_created} NV mới, ${x.emps_updated} NV cập nhật`
         + (x.emps_linked ? `, ${x.emps_linked} NV gắn Số ID` : '') + ` · ${x.punches_new.toLocaleString('vi')} lượt chấm mới / ${x.punches_read.toLocaleString('vi')} lượt đọc được`;
+      const caLine = x.shifts_created || x.schedules_created || x.assign_created || x.temp_created || x.assign_skipped
+        ? `Ca + lịch trình: ${x.shifts_created} ca mới · ${x.inouts_created} lịch trình vào ra mới · ${x.schedules_created} lịch trình ca mới · gán lịch trình ${x.assign_created} NV`
+          + (x.temp_created ? ` (+ ${x.temp_created} lịch trình tạm)` : '') + (x.assign_skipped ? ` · ${x.assign_skipped} NV đã tự gán ca ở Digiplus nên giữ nguyên` : '')
+          + (x.recomputed_emps ? ` · đã tính lại công ${x.recomputed_emps} NV` : '') : '';
       box.append(el('div', { class: 'panel', style: 'padding:10px 14px;margin:12px 0 0;border-color:#86efac;background:#f0fdf4' }, '✅ ' + line,
-        el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Kiểm tra lại ở trang Nhân viên (bộ phận, Số ID) và Tính công. Nhớ khai báo ca / lịch trình cho NV mới để tính công đúng.')));
+        caLine ? el('div', { style: 'margin:4px 0 0' }, caLine) : '',
+        el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, caLine
+          ? 'Kiểm tra lại ở trang Nhân viên (bộ phận, Số ID), Ca làm (ca, lịch trình) và Tính công.'
+          : 'Kiểm tra lại ở trang Nhân viên (bộ phận, Số ID) và Tính công. Nhớ khai báo ca / lịch trình cho NV mới để tính công đúng.')));
       toast('Chuyển dữ liệu xong', 'ok');
     };
     poll();

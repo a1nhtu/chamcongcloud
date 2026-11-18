@@ -401,7 +401,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
   resyncBtn.className = 'btn';   // nút chính (không phải kiểu mờ)
   const usbBtn = el('button', { class: 'btn' }, '⬆ Nhập từ USB');
   usbBtn.onclick = usbImportModal;
-  const legacyBtn = el('button', { class: 'btn', title: 'Lấy bộ phận + nhân viên + dữ liệu chấm công từ Wise Eye On39 / Wise Eye V5.1 / Ronald Jack Pro (file .mdb)' }, '⇄ Chuyển từ Wise Eye / Ronald Jack');
+  const legacyBtn = el('button', { class: 'btn', title: 'Lấy bộ phận + nhân viên + dữ liệu chấm công (Wise Eye: cả ca + lịch trình) từ Wise Eye On39 / Wise Eye V5.1 / Ronald Jack Pro (file .mdb)' }, '⇄ Chuyển từ Wise Eye / Ronald Jack');
   legacyBtn.onclick = legacyImportModal;
   const delAllBtn = el('button', { class: 'btn ghost', title: 'Xoá nhân viên nghỉ việc trên tất cả máy chấm công 1 lần' }, '🗑 Xóa NV trên tất cả máy');
   delAllBtn.onclick = () => deleteUsersAllModal(pageDevices);

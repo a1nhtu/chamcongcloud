@@ -56,17 +56,18 @@ export function registerLegacyImportRoutes(r, { need }) {
     catch (e) { res.status(500).json({ error: e.message }); }
   });
 
-  // Chạy chuyển: body { token, depts, emps, punches, overwrite, from, to, skip_depts, skip_no_dept } → { job }
+  // Chạy chuyển: body { token, depts, emps, punches, shifts, overwrite, from, to, skip_depts, skip_no_dept } → { job }
+  // shifts (ca + lịch trình, chỉ Wise Eye) phải gửi rõ true — giao diện cũ chưa có ô này thì không tự chép ca
   r.post('/legacy/apply', need('devices'), (req, res) => {
     const b = req.body || {};
     const c = cache.get(String(b.token || ''));
     if (!c || c.tk !== tenantKey()) return res.status(400).json({ error: 'Dữ liệu đã đọc hết hạn (quá 30 phút) — chọn lại file' });
     if (busy) return res.status(409).json({ error: 'Đang chuyển dữ liệu — chờ lượt trước xong' });
     const ISO = /^\d{4}-\d{2}-\d{2}$/;
-    const opts = { depts: b.depts !== false, emps: b.emps !== false, punches: b.punches !== false, overwrite: !!b.overwrite,
+    const opts = { depts: b.depts !== false, emps: b.emps !== false, punches: b.punches !== false, shifts: b.shifts === true, overwrite: !!b.overwrite,
       from: ISO.test(b.from || '') ? b.from : '', to: ISO.test(b.to || '') ? b.to : '',
       skip_depts: Array.isArray(b.skip_depts) ? b.skip_depts.map(String) : [], skip_no_dept: !!b.skip_no_dept };
-    if (!opts.depts && !opts.emps && !opts.punches) return res.status(400).json({ error: 'Chưa chọn phần nào để chuyển' });
+    if (!opts.depts && !opts.emps && !opts.punches && !opts.shifts) return res.status(400).json({ error: 'Chưa chọn phần nào để chuyển' });
     const id = randomBytes(6).toString('hex');
     const j = { state: 'run', pct: 0, msg: 'Bắt đầu…', result: null, at: Date.now() };
     Object.defineProperty(j, 'tk', { value: tenantKey() });
