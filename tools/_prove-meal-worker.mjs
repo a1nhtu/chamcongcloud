@@ -131,5 +131,6 @@ const rows = db.prepare(`SELECT a.employee_id, e.code, a.work_date, a.shift_id, 
 writeFileSync(out, '');
 for (let i = 0; i < rows.length; i += 2000) appendFileSync(out, rows.slice(i, i + 2000).map((r) => JSON.stringify(r)).join('\n') + '\n');
 console.log(JSON.stringify({ scenario, mode, employees: Number(E), days: Number(DAYS), shiftDays, attendanceRows: rows.length, rebuildSeconds: Math.round((Date.now() - t0) / 100) / 10, mealCalls }));
+try { db.close(); } catch {}   // phải đóng trước — Windows không cho xoá file CSDL đang mở (trước đây sót hàng trăm file prove-meal-*.db trong Temp)
 for (const ext of ['', '-wal', '-shm']) { try { rmSync(dbPath + ext); } catch {} }
 process.exit(0);

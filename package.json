@@ -6,7 +6,7 @@
   "main": "server/index.js",
   "scripts": {
     "start": "node --no-warnings server/index.js",
-    "test": "node --no-warnings --test \"test/**/*.test.mjs\"",
+    "test": "node --no-warnings --test --test-global-setup=test/_don-file-tam.mjs \"test/**/*.test.mjs\"",
     "dev": "node --no-warnings --watch server/index.js",
     "seed": "node --no-warnings server/seed.js",
     "cert": "node --no-warnings tools/gen-cert.mjs"
