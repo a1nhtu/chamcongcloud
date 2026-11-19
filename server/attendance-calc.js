@@ -63,6 +63,15 @@ function breakOverlap(brk, a, b) {
   return e > s ? mins(s, e) : 0;
 }
 
+// TĂNG CA TRƯA (ca bật "Tính tăng ca trưa" — mặc định TẮT): số phút GIỜ NGHỈ GIỮA CA mà NV có mặt (giờ vào đầu ≤ … ≤ giờ ra cuối).
+// Không tự cộng vào tăng ca: chỉ dùng để BÙ phần đăng ký làm thêm còn thiếu (xem capOt) — có đăng ký mới được tính.
+// Ca không cho tăng ca / không khai giờ bắt đầu nghỉ → 0.
+export function breakOtAvail(shift, workDate, inIso, outIso) {
+  if (!shift || !shift.break_ot || !shift.allow_ot || !inIso || !outIso) return 0;
+  const { start } = shiftBounds(workDate, shift);
+  return breakOverlap(breakWindow(workDate, shift, start), toMinute(inIso), toMinute(outIso));
+}
+
 // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ… — server/privilege.js): priv = { late, midOut, midIn, early } phút.
 // Số phút được ưu đãi trừ thẳng vào phút đi trễ / về sớm, đúng ĐOẠN của ca:
 //  - vào trước giờ nghỉ trưa → trừ `late` (đầu ca được đến muộn)

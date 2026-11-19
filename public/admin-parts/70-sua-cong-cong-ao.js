@@ -543,14 +543,19 @@ function auditPanelEl(s) {
       el('div', {}, el('div', { class: 'lv-ctl' }, ...ctl.map((c) => (typeof c === 'string' ? el('span', {}, c) : c))), hint ? el('div', { class: 'map-hint', style: 'margin-top:3px' }, hint) : ''));
   };
   const num = (v, step = '0.5') => el('input', { type: 'number', min: 0, step, value: v });
-  const auWeek = num(s.audit_ot_week_h ?? 0), auMonth = num(s.audit_ot_month_h ?? 0), auYear = num(s.audit_ot_year_h ?? 0);
+  // Tăng ca tối đa / tuần · tháng · năm — mỗi mức ảo một ô giờ (để trống = không giới hạn); ngày nghỉ tuần / ngày lễ (để trống = như ngày thường)
+  const lvInputs = (pre, max) => [1, 2, 3].map((l) => el('input', { type: 'number', min: 0, max, step: '0.5', placeholder: '—', value: s[pre + l] ?? '' }));
+  const lvBox = (xs) => el('span', { class: 'lv-pick' }, ...xs.map((x, i) => el('label', {}, `Ảo ${i + 1}`, x)));
+  const weekI = lvInputs('audit_week_l', 168), monthI = lvInputs('audit_month_l', 744), yearI = lvInputs('audit_year_l', 8784);
+  const wkDayI = lvInputs('audit_wkday_l', 24), holDayI = lvInputs('audit_holday_l', 24);
+  const lvVals = (pre, xs) => Object.fromEntries(xs.map((x, i) => [pre + (i + 1), x.value]));
   // Ô tích "Áp cho: Ảo 1 / Ảo 2 / Ảo 3" — hạn mức tuần / tháng / năm và khống chế giờ chấm chọn riêng từng mức
   const lvPick = (csv, def) => {
     const on = new Set(String(csv ?? def).split(',').map((x) => x.trim()));
     const cbs = [1, 2, 3].map((i) => el('input', { type: 'checkbox', ...(on.has(String(i)) ? { checked: '' } : {}) }));
     return { node: el('span', { class: 'lv-pick' }, el('span', {}, 'Áp cho:'), ...cbs.map((c, i) => el('label', {}, c, `Ảo ${i + 1}`))), val: () => cbs.map((c, i) => (c.checked ? i + 1 : 0)).filter(Boolean).join(',') };
   };
-  const pkWeek = lvPick(s.audit_week_lv, '1,2,3'), pkMonth = lvPick(s.audit_month_lv, '1,2,3'), pkYear = lvPick(s.audit_year_lv, '1,2,3'), pkClamp = lvPick(s.audit_clamp_lv, '');
+  const pkClamp = lvPick(s.audit_clamp_lv, '');
   const clIn = num(s.audit_clamp_in_min ?? 14, '1'), clOut = num(s.audit_clamp_out_min ?? 14, '1');
   // Giờ trưa & đi trễ kiểu "công khách K" của HR-ERP (khách chấm 4 lần / ngày) — mặc định không mức nào = TẮT
   const pkK = lvPick(s.audit_k_lv, '');
@@ -585,14 +590,15 @@ function auditPanelEl(s) {
   const save = el('button', { class: 'btn' }, 'Lưu hạn mức công ảo');
   save.onclick = async () => {
     try {
-      if (String(auYear.value) !== String(s.audit_ot_year_h ?? 0)) {
+      if (yearI.some((x, i) => String(x.value) !== String(s['audit_year_l' + (i + 1)] ?? ''))) {
         let locked = [];
         try { locked = (await api('/admin/audit-locks')).locked || []; } catch {}
         if (locked.length && !confirm(`Đang có ${locked.length} tháng đã chốt công ảo. Đổi hạn mức NĂM chỉ áp cho các tháng CHƯA chốt (tháng đã chốt giữ nguyên số cũ, phần năm còn lại tính tiếp từ số đã chốt).\nVẫn đổi?`)) return;
       }
-      await api('/admin/settings', { method: 'PUT', body: { audit_ot_week_h: auWeek.value, audit_ot_month_h: auMonth.value, audit_ot_year_h: auYear.value,
+      await api('/admin/settings', { method: 'PUT', body: {
+        ...lvVals('audit_week_l', weekI), ...lvVals('audit_month_l', monthI), ...lvVals('audit_year_l', yearI),
+        ...lvVals('audit_wkday_l', wkDayI), ...lvVals('audit_holday_l', holDayI),
         audit_incl_weekend: auWk.checked, audit_incl_holiday: auHol.checked, audit_method: auMethod.value, audit_block: auBlock.value,
-        audit_week_lv: pkWeek.val(), audit_month_lv: pkMonth.val(), audit_year_lv: pkYear.val(),
         audit_sun_l1: sunI[0].value, audit_sun_l2: sunI[1].value, audit_sun_l3: sunI[2].value,
         audit_totday_l1: totDayI[0].value, audit_totday_l2: totDayI[1].value, audit_totday_l3: totDayI[2].value,
         audit_totweek_l1: totWeekI[0].value, audit_totweek_l2: totWeekI[1].value, audit_totweek_l3: totWeekI[2].value,
@@ -604,12 +610,14 @@ function auditPanelEl(s) {
   };
   return el('div', { class: 'panel', style: 'padding:20px;max-width:640px;margin-bottom:16px;border:1px dashed #f59e0b' },
     el('h3', { style: 'margin-top:0' }, '🎭 Công ảo / lương ảo (audit)'),
-    el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Công ảo dùng để in bảng công / bảng lương nộp kiểm tra: tăng ca vượt hạn mức bị cắt bớt, giờ ra (hoặc giờ vào khi tăng ca trước ca) lùi lại cho khớp, ngày chỉ toàn tăng ca bị cắt hết thì coi như không đi làm. Công THẬT không đổi. Xem bằng thanh "Thật · Ảo 1 · Ảo 2 · Ảo 3" ở Tính công / Báo cáo / Lương. Hạn mức tuần / tháng / năm dưới đây áp cho mức nào thì tích mức đó (Ảo 1 / 2 / 3). Luật hiện hành: tối đa 4 giờ/ngày (50% giờ làm), 40 giờ/tháng, 200 giờ/năm (300 giờ với một số ngành). Để 0 = không giới hạn.'),
+    el('div', { class: 'map-hint', style: 'margin:-4px 0 12px' }, 'Công ảo dùng để in bảng công / bảng lương nộp kiểm tra: tăng ca vượt hạn mức bị cắt bớt, giờ ra (hoặc giờ vào khi tăng ca trước ca) lùi lại cho khớp, ngày chỉ toàn tăng ca bị cắt hết thì coi như không đi làm. Công THẬT không đổi. Xem bằng thanh "Thật · Ảo 1 · Ảo 2 · Ảo 3" ở Tính công / Báo cáo / Lương. Mỗi mức Ảo 1 / 2 / 3 một số riêng: để trống = không giới hạn, ghi 0 = không cho tăng ca. Luật hiện hành: tối đa 4 giờ/ngày (50% giờ làm), 40 giờ/tháng, 200 giờ/năm (300 giờ với một số ngành).'),
     el('div', { class: 'lv-form' },
       lvRow('Tăng ca tối đa mỗi ngày', (() => { const b = el('button', { class: 'btn ghost sm', type: 'button' }, '⏱️ Khai theo 3 mức →'); b.onclick = () => go('auditlimits'); return b; })(), 'Mỗi mức Ảo 1 / 2 / 3 một số phút riêng, đặt được theo từng NV, từng ngày.'),
-      lvRow('Tăng ca tối đa mỗi tuần', auWeek, 'giờ', pkWeek.node, wkNote),
-      lvRow('Tăng ca tối đa mỗi tháng', auMonth, 'giờ', pkMonth.node, '(theo kỳ lương ở Cài đặt › Lương)'),
-      lvRow('Tăng ca tối đa mỗi năm', auYear, 'giờ', pkYear.node, '(cộng dồn từ kỳ lương tháng 1)'),
+      lvRow(`Tăng ca tối đa 1 ngày ${wkName}`, lvBox(wkDayI), 'giờ', `Ngày nghỉ hằng tuần đi làm (cả ngày tính tăng ca). Để trống = như ngày thường (số phút ở "Khai theo 3 mức"). Ô ngày khai riêng cho từng NV vẫn được ưu tiên.`),
+      lvRow('Tăng ca tối đa 1 ngày lễ', lvBox(holDayI), 'giờ', 'Ngày lễ, Tết đi làm. Để trống = như ngày thường. Ô ngày khai riêng cho từng NV vẫn được ưu tiên.'),
+      lvRow('Tăng ca tối đa mỗi tuần', lvBox(weekI), 'giờ', wkNote),
+      lvRow('Tăng ca tối đa mỗi tháng', lvBox(monthI), 'giờ', '(theo kỳ lương ở Cài đặt › Lương)'),
+      lvRow('Tăng ca tối đa mỗi năm', lvBox(yearI), 'giờ', '(cộng dồn từ kỳ lương tháng 1)'),
       lvRow('Tổng giờ làm tối đa / ngày', totDayBox, 'giờ', 'Giờ công + tăng ca của cả ngày. Mỗi mức một số (để trống = không giới hạn). Vượt thì cắt bớt tăng ca cho tổng không quá số này (giờ công thật giữ nguyên).'),
       lvRow('Tổng giờ làm tối đa / tuần', totWeekBox, 'giờ', 'Giờ công + tăng ca cả tuần (thứ 2 → chủ nhật). Mỗi mức một số (để trống = không giới hạn). Vượt thì cắt bớt tăng ca trong tuần.'),
       lvRow('Số ngày làm liên tục tối đa', streakBox, 'ngày', 'Mỗi mức một số (để trống = không giới hạn). Chuỗi ngày đi làm liền nhau dài hơn số này thì công ảo tự gỡ bớt ngày (coi như nghỉ, kể cả tăng ca ngày đó) để không chuỗi nào vượt — ưu tiên gỡ ngày ít giờ công, cố định theo từng nhân viên.'),

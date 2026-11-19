@@ -428,6 +428,7 @@ function shiftForm(s, can) {
       R('Ở lại sau giờ ra tối thiểu', num('s-otafter', s?.ot_start_after_min ?? 30), 'phút', 'Ở lại ít hơn số này thì không tính tăng ca'),
       C('s-otbefore', s?.ot_before, 'Tính cả tăng ca TRƯỚC giờ vào ca', '(đến sớm)'),
       R('Đến sớm tối thiểu', num('s-otbeforemin', s?.ot_before_min ?? 30), 'phút'),
+      C('s-breakot', s?.break_ot, 'Tính TĂNG CA TRƯA (làm trong giờ nghỉ giữa ca)', '(cần khai giờ bắt đầu nghỉ; chỉ tính khi có Đăng ký làm thêm: giờ nghỉ có mặt bù phần đăng ký còn thiếu, không vượt số đăng ký)'),
       C('s-holidayot', s?.holiday_as_ot, 'Làm ca này vào NGÀY LỄ: cả ca là tăng ca', '(không tính công, toàn bộ giờ làm thành tăng ca ngày lễ)'),
       C('s-shiftot', s?.shift_as_ot, 'Ca này là CA TĂNG CA', '(ngày nào làm ca này cũng không tính công, toàn bộ giờ làm thành tăng ca)'),
       el('div', { class: 'fhint' }, 'Ở lại (hoặc đến sớm) ít hơn số phút tối thiểu thì không tính tăng ca. Làm tròn tăng ca và "đi làm cuối tuần = tăng ca": đặt chung cho cả công ty ở Cài đặt › Quy tắc tính công.')),
@@ -466,7 +467,7 @@ function shiftForm(s, can) {
       ot_before: $('#s-otbefore').checked, ot_before_min: +$('#s-otbeforemin').value || 0,
       ot_tier1_min: +$('#s-t1').value || 0, ot_tier2_min: +$('#s-t2').value || 0, ot_tier3_min: +$('#s-t3').value || 0,
       ot_tier2_rate: +$('#s-r2').value || 0, ot_tier3_rate: +$('#s-r3').value || 0, ot_tier4_rate: +$('#s-r4').value || 0,
-      holiday_as_ot: $('#s-holidayot').checked, shift_as_ot: $('#s-shiftot').checked,
+      holiday_as_ot: $('#s-holidayot').checked, shift_as_ot: $('#s-shiftot').checked, break_ot: $('#s-breakot').checked,
       compensate_late: $('#s-comp').checked, no_out_credit: +$('#s-noout').value,
       grace_deduct: $('#s-gracededuct').checked,
     };

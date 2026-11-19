@@ -16,13 +16,29 @@ const monday = (d) => { const w = new Date(d + 'T12:00:00Z').getUTCDay(); return
 function hoursLv(prefix) {
   return Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting(prefix + l, ''); const n = parseFloat(v); return [l, v === '' || v == null || !Number.isFinite(n) || n < 0 ? null : Math.round(n * 60)]; }));
 }
+// Hạn mức TĂNG CA TUẦN / THÁNG / NĂM của từng mức ảo (giờ, chuỗi; '' = không giới hạn).
+// Bản cũ: 1 số chung (audit_ot_week_h…, 0 = không giới hạn) + ô tích "Áp cho" (audit_week_lv…). Mức nào CHƯA từng lưu số riêng
+// (khoá audit_week_l1… chưa có trong CSDL) thì lấy theo cách cũ → khách cũ chạy y như trước cho tới khi lưu lại khung hạn mức.
+export const PERIOD_KEYS = { week: ['audit_week_l', 'audit_ot_week_h', 'audit_week_lv'], month: ['audit_month_l', 'audit_ot_month_h', 'audit_month_lv'], year: ['audit_year_l', 'audit_ot_year_h', 'audit_year_lv'] };
+export function periodLvRaw(kind) {
+  const [pre, shared, lvKey] = PERIOD_KEYS[kind];
+  const sh = parseFloat(getSetting(shared, '0'));
+  const lvs = new Set(String(getSetting(lvKey, '1,2,3')).split(',').map((x) => x.trim()));
+  return Object.fromEntries([1, 2, 3].map((l) => {
+    const v = getSetting(pre + l, null);
+    if (v != null) return [l, String(v).trim()];
+    return [l, Number.isFinite(sh) && sh > 0 && lvs.has(String(l)) ? String(sh) : ''];
+  }));
+}
+const periodLv = (kind) => Object.fromEntries(Object.entries(periodLvRaw(kind)).map(([l, v]) => { const n = parseFloat(v); return [+l, v === '' || !Number.isFinite(n) || n < 0 ? null : Math.round(n * 60)]; }));
 export function auditSettings() {
   const num = (k, d) => { const v = parseFloat(getSetting(k, String(d))); return Number.isFinite(v) && v >= 0 ? v : d; };
   const lvs = (k, d) => new Set(String(getSetting(k, d)).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)));
   return {
-    weekLv: lvs('audit_week_lv', '1,2,3'),          // hạn mức tuần / tháng / năm áp cho những mức ảo nào (mặc định cả 3)
-    monthLv: lvs('audit_month_lv', '1,2,3'),
-    yearLv: lvs('audit_year_lv', '1,2,3'),
+    // tăng ca tối đa / tuần · / tháng · / năm của từng mức ảo (phút; null = không giới hạn)
+    week: periodLv('week'), month: periodLv('month'), year: periodLv('year'),
+    // tăng ca tối đa 1 NGÀY NGHỈ HẰNG TUẦN / 1 NGÀY LỄ của từng mức ảo (phút; null = như ngày thường)
+    wkDay: hoursLv('audit_wkday_l'), holDay: hoursLv('audit_holday_l'),
     clampLv: lvs('audit_clamp_lv', ''),             // KHỐNG CHẾ GIỜ CHẤM áp cho những mức ảo nào (mặc định không mức nào)
     clampIn: Math.round(num('audit_clamp_in_min', 14)) * 60000,    // giờ vào không sớm hơn giờ vào ca quá N phút
     clampOut: Math.round(num('audit_clamp_out_min', 14)) * 60000,  // giờ ra không trễ hơn (giờ tan ca + tăng ca ảo) quá N phút
@@ -40,9 +56,6 @@ export function auditSettings() {
     // số ngày làm LIÊN TỤC tối đa / mức ảo (ngày; '' / <1 = không giới hạn) — vượt thì gỡ bớt ngày (coi như nghỉ) xen vào
     streak: Object.fromEntries([1, 2, 3].map((l) => { const v = getSetting('audit_streak_l' + l, ''); const n = parseInt(v, 10); return [l, v === '' || v == null || !Number.isFinite(n) || n < 1 ? null : n]; })),
     enabled: getSetting('audit_enabled', '0') === '1',
-    weekMin: num('audit_ot_week_h', 0) * 60,         // tối đa / tuần (giờ)
-    monthMin: num('audit_ot_month_h', 0) * 60,      // tối đa / tháng (giờ, theo kỳ lương)
-    yearMin: num('audit_ot_year_h', 0) * 60,       // tối đa / năm (giờ)
     inclWeekend: getSetting('audit_incl_weekend', '1') === '1',   // tăng ca ngày nghỉ tuần (CN…) tính vào hạn mức & bị cắt
     inclHoliday: getSetting('audit_incl_holiday', '1') === '1',   // tăng ca ngày lễ tính vào hạn mức & bị cắt
     method: getSetting('audit_method', 'ratio') === 'days' ? 'days' : 'ratio',   // chia đều tỷ lệ | gỡ bớt nguyên ngày
@@ -74,7 +87,9 @@ function dayLimitFn(ids, L, R, level) {
         AND ((work_date >= ? AND work_date <= ?) OR work_date='*')`).all(level, ...chunk, L, R)) cells.set(c.employee_id + '|' + c.work_date, c.minutes);
   }
   const def = levelDefaults()[level];
-  return (eid, d) => { const k = eid + '|' + d; if (cells.has(k)) return cells.get(k); const e = eid + '|*'; return cells.has(e) ? cells.get(e) : def; };
+  const fn = (eid, d) => { const k = eid + '|' + d; if (cells.has(k)) return cells.get(k); const e = eid + '|*'; return cells.has(e) ? cells.get(e) : def; };
+  fn.hasCell = (eid, d) => cells.has(eid + '|' + d);   // ô NGÀY khai riêng (thắng cả hạn mức ngày nghỉ / lễ)
+  return fn;
 }
 
 // Người dùng có được xem công ảo không (tính năng bật + là admin / tài khoản tổng / có quyền "audit")
@@ -202,16 +217,25 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
     byEmp.get(r.employee_id).push({ r, date: r.work_date, type: r.ot_type || 'thuong', v: r.ot_min || 0 });
   }
   const group = (items, keyFn) => { const m = new Map(); for (const x of items) { const k = keyFn(x.date); if (!m.has(k)) m.set(k, []); m.get(k).push(x); } return m; };
-  const weekOn = S.weekMin > 0 && S.weekLv.has(lv), monthOn = S.monthMin > 0 && S.monthLv.has(lv), yearOn = S.yearMin > 0 && S.yearLv.has(lv);
+  const weekMin = S.week[lv], monthMin = S.month[lv], yearMin = S.year[lv];
+  const weekOn = weekMin != null, monthOn = monthMin != null, yearOn = yearMin != null;
+  // Tăng ca tối đa của 1 ngày: ô ngày khai riêng → ngày lễ / ngày nghỉ hằng tuần (nếu mức này có đặt) → mức riêng NV / mặc định công ty
+  const wkCap = S.wkDay[lv], holCap = S.holDay[lv];
+  const capOfDay = (eid, d, xs) => {
+    if (dayCap.hasCell(eid, d)) return dayCap(eid, d);
+    if (holCap != null && xs.some((x) => x.type === 'le')) return holCap;
+    if (wkCap != null && xs.some((x) => x.type === 'cuoi_tuan')) return wkCap;
+    return dayCap(eid, d);
+  };
   if (yearOn) for (const k of lockedUse.keys()) { const eid = +k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); }   // NV chỉ có tháng đã chốt
   for (const [eid, items] of byEmp) {
     items.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    for (const [d, xs] of group(items, (d) => d)) { const cap = dayCap(eid, d); if (cap != null) reduce(xs, cap, S, eid * 7919 + Date.parse(d) / DAY + lv); }
-    if (weekOn) for (const [w, xs] of group(items, monday)) reduce(xs, S.weekMin, S, eid * 104729 + Date.parse(w) / DAY);
+    for (const [d, xs] of group(items, (d) => d)) { const cap = capOfDay(eid, d, xs); if (cap != null) reduce(xs, cap, S, eid * 7919 + Date.parse(d) / DAY + lv); }
+    if (weekOn) for (const [w, xs] of group(items, monday)) reduce(xs, weekMin, S, eid * 104729 + Date.parse(w) / DAY);
     if (totDay != null) for (const [d, xs] of group(items, (d) => d)) reduce(xs, Math.max(0, totDay - (dayWork.get(eid + '|' + d) || 0)), S, eid * 2750159 + Date.parse(d) / DAY + lv);
     if (totWeek != null) for (const [w, xs] of group(items, monday)) reduce(xs, Math.max(0, totWeek - (weekWork.get(eid + '|' + w) || 0)), S, eid * 49979687 + Date.parse(w) / DAY + lv);
     const months = group(items, P.key);
-    if (monthOn) for (const [k, xs] of months) reduce(xs, S.monthMin, S, eid * 1299709 + +k.replace('-', ''));
+    if (monthOn) for (const [k, xs] of months) reduce(xs, monthMin, S, eid * 1299709 + +k.replace('-', ''));
     if (yearOn) {
       let year = null, used = 0;
       const lockedKs = locks.map((k) => k.month).filter((m) => lockedUse.has(eid + '|' + m));
@@ -219,7 +243,7 @@ export function virtualOt(empIds, from, to, force = false, level = 1) {
         if (k.slice(0, 4) !== year) { year = k.slice(0, 4); used = 0; }
         if (!months.has(k)) { used += lockedUse.get(eid + '|' + k) || 0; continue; }   // tháng đã chốt: cộng đúng số đã chốt
         const xs = months.get(k);
-        reduce(xs, Math.max(0, S.yearMin - used), S, eid * 15485863 + +k.replace('-', ''));
+        reduce(xs, Math.max(0, yearMin - used), S, eid * 15485863 + +k.replace('-', ''));
         used += xs.reduce((a, x) => a + x.v, 0);
       }
     }

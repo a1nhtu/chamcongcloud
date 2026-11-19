@@ -2,7 +2,7 @@
 import { db, getSetting, setSetting, attModeMix } from '../../db.js';
 import { saveBrandLogo, removeBrandLogo } from '../../storage.js';
 import { checkUpdate, startUpdate, updateStatus, currentVersion, updateConfig } from '../../update.js';
-import { auditAllowed } from '../../virtual-att.js';
+import { auditAllowed, periodLvRaw } from '../../virtual-att.js';
 import { cfg, MULTI } from '../../tenant.js';
 import { PROFILES, activeProfile, previewProfile, applyProfile, revertProfile } from '../../profiles.js';
 
@@ -73,6 +73,11 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
         audit_totday_l1: getSetting('audit_totday_l1', ''), audit_totday_l2: getSetting('audit_totday_l2', ''), audit_totday_l3: getSetting('audit_totday_l3', ''),
         audit_totweek_l1: getSetting('audit_totweek_l1', ''), audit_totweek_l2: getSetting('audit_totweek_l2', ''), audit_totweek_l3: getSetting('audit_totweek_l3', ''),
         audit_streak_l1: getSetting('audit_streak_l1', ''), audit_streak_l2: getSetting('audit_streak_l2', ''), audit_streak_l3: getSetting('audit_streak_l3', ''),
+        // tăng ca tối đa / tuần · tháng · năm RIÊNG từng mức ảo (giờ; mức chưa lưu số riêng thì hiện số theo cách cũ: số chung + ô tích)
+        ...Object.fromEntries(['week', 'month', 'year'].flatMap((k) => Object.entries(periodLvRaw(k)).map(([l, v]) => [`audit_${k}_l${l}`, v]))),
+        // tăng ca tối đa 1 ngày nghỉ hằng tuần / 1 ngày lễ (giờ; '' = như ngày thường)
+        audit_wkday_l1: getSetting('audit_wkday_l1', ''), audit_wkday_l2: getSetting('audit_wkday_l2', ''), audit_wkday_l3: getSetting('audit_wkday_l3', ''),
+        audit_holday_l1: getSetting('audit_holday_l1', ''), audit_holday_l2: getSetting('audit_holday_l2', ''), audit_holday_l3: getSetting('audit_holday_l3', ''),
         audit_clamp_lv: getSetting('audit_clamp_lv', ''), audit_clamp_in_min: getSetting('audit_clamp_in_min', '14'), audit_clamp_out_min: getSetting('audit_clamp_out_min', '14'),
         audit_k_lv: getSetting('audit_k_lv', ''), audit_k_early_min: getSetting('audit_k_early_min', '15'), audit_k_late_max: getSetting('audit_k_late_max', '60'),
         audit_k_out_gap: getSetting('audit_k_out_gap', '15'), audit_k_in_gap: getSetting('audit_k_in_gap', '5'),
@@ -189,6 +194,17 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       // hạn mức tuần / tháng / năm + khống chế giờ chấm: áp cho những mức ảo nào ('1,2,3'; '' = không mức nào)
       for (const k of ['audit_week_lv', 'audit_month_lv', 'audit_year_lv', 'audit_clamp_lv', 'audit_k_lv'])
         if (b[k] != null) setSetting(k, [...new Set(String(b[k]).split(',').map((x) => parseInt(x, 10)).filter((x) => [1, 2, 3].includes(x)))].sort().join(','));
+      // TĂNG CA tối đa / tuần (0–168h) · / tháng (0–744h) · / năm (0–8784h) và 1 ngày nghỉ tuần / 1 ngày lễ (0–24h) — RIÊNG từng mức ảo ('' = không giới hạn)
+      for (const [pre, max, what] of [['audit_week_l', 168, 'mỗi tuần'], ['audit_month_l', 744, 'mỗi tháng'], ['audit_year_l', 8784, 'mỗi năm'],
+        ['audit_wkday_l', 24, '1 ngày nghỉ hằng tuần'], ['audit_holday_l', 24, '1 ngày lễ']]) for (const l of [1, 2, 3]) {
+        const k = pre + l;
+        if (b[k] == null) continue;
+        const v = String(b[k]).trim();
+        if (v === '') { setSetting(k, ''); continue; }
+        const x = parseFloat(v);
+        if (!Number.isFinite(x) || x < 0 || x > max) return res.status(400).json({ error: `Tăng ca tối đa ${what} (Ảo ${l}) phải là số 0 – ${max} giờ (để trống = không giới hạn)` });
+        setSetting(k, String(x));
+      }
       // TỔNG giờ làm (công + TC) tối đa / ngày (0–24h) · / tuần (0–168h) của từng mức ảo ('' = không giới hạn)
       for (const [k, max] of [['audit_totday_l1', 24], ['audit_totday_l2', 24], ['audit_totday_l3', 24], ['audit_totweek_l1', 168], ['audit_totweek_l2', 168], ['audit_totweek_l3', 168]]) if (b[k] != null) {
         const v = String(b[k]).trim();

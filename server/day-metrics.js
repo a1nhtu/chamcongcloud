@@ -1,7 +1,7 @@
 // Tính chỉ số công cho MỘT ngày/bản ghi — nguồn chân lý DUY NHẤT.
 // Gộp phần logic đang lặp ở recompute + computeManual (admin.js) và check-out (attendance.js).
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
-import { computeLate, computeCheckout, computeNoOut, computeSinglePunch, singlePunchFull, presenceFull, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv } from './attendance-calc.js';
+import { computeLate, computeCheckout, computeNoOut, computeSinglePunch, singlePunchFull, presenceFull, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv, breakOtAvail } from './attendance-calc.js';
 import { privilegeLookup, halfLeaveLookup } from './privilege.js';
 import { otRegCapper } from './ot-cap.js';
 import { dayRules } from './swap.js';
@@ -147,6 +147,8 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   if (c.ot_min) { const r = ctx.otRound || {}; c = { ...c, ot_min: roundOtParts(c.ot_min, c.ot_parts, r.decimals ?? 2, r.mode || 0, r.block || 0, ctx.weekendWorkExact ? wkExact : 0) }; }
   delete c.ot_parts;
   const ot_raw = c.ot_min || 0;
-  if (ot_raw && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw) };
+  // tăng ca trưa (ca bật break_ot): giờ nghỉ có mặt chỉ bù phần đăng ký còn thiếu — ot_raw giữ nguyên (soát "làm thêm quá đăng ký" không đổi)
+  const brkOt = shift && inIso && outIso && c.day_status === 'lam_viec' ? breakOtAvail(shift, workDate, inIso, outIso) : 0;
+  if ((ot_raw || brkOt) && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw, brkOt) };
   return { shiftId: shift?.id ?? null, late, ...c, ot_raw };
 }
