@@ -11,6 +11,7 @@ import { multiMissingFn } from '../multi-shift.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
 import { customLeaveTypes } from '../leave-quota.js';
+import { leaveShiftSymOn, leaveShiftCoder, joinLeaveSym } from '../leave-shift-sym.js';
 import { trackCell, TRACK_ROWS } from '../track6.js';
 import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
 import { currentTenant } from '../tenant.js';
@@ -301,6 +302,11 @@ function loadRange(from, to, filter) {
     const kind = leaveKind(l.type, KINDS);
     const k2 = l.half && l.from_date === l.to_date ? { ...kind, half: true } : kind;   // nửa ngày: đếm 0,5
     for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) { leaveDays.set(l.employee_id + '|' + d, k2); usedKinds.add(kind.key); }
+  }
+  // Công tắc "ghép mã ca + ký hiệu nghỉ" (VD HC + PN → HCPN): chỉ đổi chữ hiện trên ô ngày, đếm theo loại nghỉ (key) giữ nguyên
+  if (leaveShiftSymOn()) {
+    const codeOf = leaveShiftCoder();
+    for (const [key, k] of leaveDays) { const [eid, d] = key.split('|'); const c = codeOf(+eid, d); if (c) leaveDays.set(key, { ...k, sym: joinLeaveSym(c, k.sym) }); }
   }
   // Các loại nghỉ có phát sinh trong kỳ (giữ đúng thứ tự LEAVE_KINDS) → báo cáo thêm cột cho từng loại
   const leaveKinds = KINDS.filter((k) => usedKinds.has(k.key));

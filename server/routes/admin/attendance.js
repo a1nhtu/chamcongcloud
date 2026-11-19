@@ -1,6 +1,7 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren, splitDeptList, hourlyNoOvernight } from '../../db.js';
 import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
+import { leaveShiftSymOn, leaveShiftCoder, joinLeaveSym } from '../../leave-shift-sym.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays, rebuildDay } from '../../device-sync.js';
@@ -243,9 +244,13 @@ export function registerAttendanceRoutes(r, { need }) {
     const leaves = db.prepare(`SELECT * FROM leave_requests WHERE status='approved' AND employee_id IN (${ph}) AND from_date<=? AND to_date>=?`).all(...empIds, to, from);
     const leaveSym = Object.fromEntries([...LEAVE_TYPES, ...customLeaveTypes(true)].map((t) => [t.type, t.sym]));
     const leaveMap = new Map();
+    const codeOf = leaveShiftSymOn() ? leaveShiftCoder() : null;   // công tắc ghép mã ca + ký hiệu nghỉ (HC + PN → HCPN)
     for (const l of leaves) {
       let d = l.from_date < from ? from : l.from_date; const end = l.to_date > to ? to : l.to_date;
-      while (d <= end) { leaveMap.set(l.employee_id + '|' + d, { sym: (leaveSym[l.type] || 'N') + (l.half ? '½' : ''), type: l.type + (l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d); }
+      while (d <= end) {
+        const sym = joinLeaveSym(codeOf ? codeOf(l.employee_id, d) : '', leaveSym[l.type] || 'N');
+        leaveMap.set(l.employee_id + '|' + d, { sym: sym + (l.half ? '½' : ''), type: l.type + (l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d);
+      }
     }
 
     // CÔNG ẢO (chỉ xem): tăng ca + giờ ra theo hạn mức, không hiện lượt quẹt thật / dấu sửa tay

@@ -1,5 +1,6 @@
 import { Router } from 'express';
-import { db } from '../db.js';
+import { db, setSetting } from '../db.js';
+import { leaveShiftSymOn } from '../leave-shift-sym.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
 import { LEAVE_TYPES, leaveTypes, customLeaveTypes, leaveBalance, overQuotaMsg, leaveSettings } from '../leave-quota.js';
@@ -49,7 +50,12 @@ function typeBody(b, selfId = 0) {
 }
 r.get('/types/all', permRequired('leaves'), (req, res) => {
   const used = new Map(db.prepare('SELECT type, COUNT(*) c FROM leave_requests GROUP BY type').all().map((x) => [x.type, x.c]));
-  res.json({ builtin: LEAVE_TYPES, custom: customLeaveTypes(true).map((x) => ({ ...x, used: used.get(x.type) || 0 })) });
+  res.json({ builtin: LEAVE_TYPES, custom: customLeaveTypes(true).map((x) => ({ ...x, used: used.get(x.type) || 0 })), sym_shift: leaveShiftSymOn() });
+});
+// Công tắc bảng công: ngày nghỉ hiện mã ca + ký hiệu nghỉ (HC + PN → HCPN). Mặc định TẮT.
+r.put('/sym-shift', permRequired('leaves'), (req, res) => {
+  setSetting('leave_sym_shift', req.body?.on ? '1' : '0');
+  res.json({ ok: true, on: leaveShiftSymOn() });
 });
 r.post('/types', permRequired('leaves'), (req, res) => {
   const b = typeBody(req.body || {});

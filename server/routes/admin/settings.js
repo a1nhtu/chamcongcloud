@@ -18,6 +18,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       weekend_need_pairs: getSetting('weekend_need_pairs', '0'),
       pairs_fixed_break: getSetting('pairs_fixed_break', '0'),
       multi_shift_assist: getSetting('multi_shift_assist', '0'),   // Bảng phân ca: hỗ trợ nhiều ca/ngày (chỉ hiển thị/cảnh báo)
+      weekend_ot_no_late: getSetting('weekend_ot_no_late', '0'),   // ngày nghỉ đi làm (tăng ca): không tính đi trễ / về sớm
       weekend_ot_before: getSetting('weekend_ot_before', '0'),   // ngày nghỉ: tăng ca tính cả phần đến sớm trước giờ vào ca
       workunit_rounding: getSetting('workunit_rounding', '2'),
       workunit_rounding_mode: getSetting('workunit_rounding_mode', '0'), // 0=lùi,1=tới,2=gần nhất
@@ -103,6 +104,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.weekend_days != null) setSetting('weekend_days', b.weekend_days);
     if (b.weekend_work_as_ot != null) setSetting('weekend_work_as_ot', b.weekend_work_as_ot ? '1' : '0');
     if (b.weekend_ot_before != null) setSetting('weekend_ot_before', b.weekend_ot_before ? '1' : '0');
+    if (b.weekend_ot_no_late != null) setSetting('weekend_ot_no_late', b.weekend_ot_no_late ? '1' : '0');
     if (b.weekend_work_exact != null) setSetting('weekend_work_exact', b.weekend_work_exact ? '1' : '0');
     if (b.weekend_need_pairs != null) setSetting('weekend_need_pairs', b.weekend_need_pairs ? '1' : '0');
     if (b.pairs_fixed_break != null) setSetting('pairs_fixed_break', b.pairs_fixed_break ? '1' : '0');

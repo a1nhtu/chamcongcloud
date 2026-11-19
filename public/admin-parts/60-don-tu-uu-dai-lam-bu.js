@@ -364,9 +364,16 @@ async function leaveTypesModal() {
   const reset = () => { editing = null; nameI.value = ''; symI.value = ''; paidC.checked = false; quotaC.checked = false; addB.textContent = '+ Thêm lý do nghỉ'; cancelB.style.display = 'none'; };
   cancelB.onclick = reset;
   const yn = (v) => (v ? '✔' : '—');
+  // Bảng công ghép MÃ CA + KÝ HIỆU NGHỈ (bảng mã kiểu HCPN, DPB…) — mặc định tắt
+  const symShiftC = el('input', { type: 'checkbox' });
+  symShiftC.onchange = async () => {
+    try { await api('/leaves/sym-shift', { method: 'PUT', body: { on: symShiftC.checked } }); toast(symShiftC.checked ? 'Bảng công sẽ ghép mã ca + ký hiệu nghỉ' : 'Bảng công chỉ hiện ký hiệu nghỉ', 'ok'); }
+    catch (e) { symShiftC.checked = !symShiftC.checked; toast(e.message, 'err'); }
+  };
   const draw = async () => {
     let d;
     try { d = await api('/leaves/types/all'); } catch (e) { box.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
+    symShiftC.checked = !!d.sym_shift;
     const tbl = el('table', { class: 'data', style: 'width:100%' }), tb = el('tbody');
     tbl.append(el('thead', {}, el('tr', {}, ...['Lý do nghỉ', 'Ký hiệu', 'Lương', 'Trừ phép', ''].map((t) => el('th', {}, t)))), tb);
     for (const t of d.builtin) tb.append(el('tr', {}, el('td', { style: 'white-space:nowrap' }, t.type, el('span', { style: 'color:#9ca3af;font-size:12px' }, t.system ? ' · tự sinh khi đăng ký làm bù' : ' · có sẵn')), el('td', {}, el('b', {}, t.sym)), el('td', {}, yn(t.paid)), el('td', {}, yn(t.quota)), el('td', {}, '')));
@@ -399,6 +406,9 @@ async function leaveTypesModal() {
     el('div', { style: 'display:grid;grid-template-columns:minmax(0,1fr) 110px;gap:12px;margin-top:6px' }, field('Tên lý do nghỉ', nameI), field('Ký hiệu', symI)),
     el('div', { style: 'display:flex;gap:22px;flex-wrap:wrap' }, el('label', { class: 'lv-chk' }, paidC, el('span', {}, 'Có lương')), el('label', { class: 'lv-chk' }, quotaC, el('span', {}, 'Trừ phép năm'))),
     el('div', { style: 'display:flex;gap:8px' }, addB, cancelB),
+    el('label', { class: 'lv-chk', style: 'margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb' }, symShiftC,
+      el('span', {}, 'Bảng công: ghép MÃ CA + KÝ HIỆU NGHỈ', el('br'), el('span', { style: 'color:#6b7280;font-size:12px' },
+        'VD đang ca HC nghỉ phép năm PN → hiện "HCPN"; ca đêm D nghỉ bệnh PB → "DPB". Ca của ngày nghỉ lấy theo phân ca ngày đó; bộ phận tự nhận ca theo giờ chấm thì lấy ca làm gần nhất trong 7 ngày trước. Không xác định được ca thì chỉ hiện ký hiệu nghỉ.'))),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
   draw();
 }

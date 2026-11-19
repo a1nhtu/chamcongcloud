@@ -32,6 +32,7 @@ export function payrollCtx(getSetting, db) {
     weekend: getSetting('weekend_days', '7'),
     weekendOt: getSetting('weekend_work_as_ot', '1') === '1',   // đi làm ngày cuối tuần = tăng ca
     weekendOtBefore: getSetting('weekend_ot_before', '0') === '1',   // ngày nghỉ: tăng ca tính cả phần đến sớm trước giờ vào ca
+    weekendNoLate: getSetting('weekend_ot_no_late', '0') === '1',   // ngày nghỉ đi làm (cả ngày là tăng ca): không tính đi trễ / về sớm (Hualida, ca "+k" ngày CN)
     pairsFixedBreak: getSetting('pairs_fixed_break', '0') === '1',   // nhiều lần vào/ra + nghỉ trưa cố định (kiểu HR-ERP 4 lần quẹt)
     weekendNeedPairs: getSetting('weekend_need_pairs', '0') === '1',   // ngày nghỉ: chỉ 2 lần quẹt thì không tính giờ làm trong ca
     weekendWorkExact: getSetting('weekend_work_exact', '0') === '1',   // ngày nghỉ: giờ làm trong ca giữ đúng số phút, chỉ làm tròn phần ngoài ca
@@ -150,5 +151,7 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   // tăng ca trưa (ca bật break_ot): giờ nghỉ có mặt chỉ bù phần đăng ký còn thiếu — ot_raw giữ nguyên (soát "làm thêm quá đăng ký" không đổi)
   const brkOt = shift && inIso && outIso && c.day_status === 'lam_viec' ? breakOtAvail(shift, workDate, inIso, outIso) : 0;
   if ((ot_raw || brkOt) && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw, brkOt) };
+  // ngày nghỉ hằng tuần đi làm, cả ngày đã thành tăng ca: vào muộn / về sớm chỉ làm ít giờ tăng ca hơn, không phải lỗi đi trễ (công tắc, mặc định tắt)
+  if (ctx.weekendNoLate && c !== beforeWk && c.ot_type === 'cuoi_tuan') return { shiftId: shift?.id ?? null, late: 0, ...c, early_min: 0, ot_raw };
   return { shiftId: shift?.id ?? null, late, ...c, ot_raw };
 }
