@@ -412,9 +412,19 @@ r.get('/calendar', (req, res) => {
   const today = vnDateStr();
   const weekend = getSetting('weekend_days', '7');
 
+  // Ngày làm 2 ca = 2 dòng công → GỘP (cộng giờ / công / muộn / sớm / tăng ca; giờ vào sớm nhất, giờ ra muộn nhất)
   const cell = new Map();
-  for (const a of db.prepare('SELECT * FROM attendance WHERE employee_id=? AND work_date LIKE ?').all(req.user.id, month + '%'))
-    cell.set(a.work_date, a);
+  for (const a of db.prepare('SELECT * FROM attendance WHERE employee_id=? AND work_date LIKE ? ORDER BY check_in_at').all(req.user.id, month + '%')) {
+    const g = cell.get(a.work_date);
+    if (!g) { cell.set(a.work_date, { ...a }); continue; }
+    for (const k of ['work_minutes', 'work_unit', 'late_min', 'early_min', 'ot_min']) g[k] = (g[k] || 0) + (a[k] || 0);
+    if (a.check_in_at && (!g.check_in_at || a.check_in_at < g.check_in_at)) g.check_in_at = a.check_in_at;
+    if (!a.check_out_at && a.day_status !== 'mot_lan') g._missOut = true;
+    if (a.check_out_at && (!g.check_out_at || a.check_out_at > g.check_out_at)) g.check_out_at = a.check_out_at;
+    if ((a.ot_min || 0) > 0 && (!g.ot_type || g.ot_type === 'thuong')) g.ot_type = a.ot_type;
+    if (a.manual) { g.manual = 1; g.manual_at = a.manual_at || g.manual_at; }
+    if (a.note) g.note = g.note ? g.note + '; ' + a.note : a.note;
+  }
   const holidays = new Set(db.prepare('SELECT holiday_date FROM public_holidays WHERE holiday_date LIKE ?').all(month + '%').map((h) => h.holiday_date));
   const offDays = new Set(db.prepare('SELECT work_date FROM dsa_effective WHERE employee_id=? AND is_off=1 AND work_date LIKE ?').all(req.user.id, month + '%').map((r) => r.work_date));
   const leaveDays = new Set();
@@ -435,9 +445,9 @@ r.get('/calendar', (req, res) => {
     else if (holidays.has(d)) status = 'le';
     else if (offDays.has(d)) status = 'nghi';
     else if (c) {
-      if (!c.check_out_at && c.day_status !== 'mot_lan') status = 'thieu_ra';   // mot_lan = ca "chấm 1 lần là đủ công"
+      if ((!c.check_out_at && c.day_status !== 'mot_lan') || c._missOut) status = 'thieu_ra';   // mot_lan = ca "chấm 1 lần là đủ công"
       else if ((c.late_min || 0) > 0 || (c.early_min || 0) > 0) status = 'muon_som';
-      else if ((c.work_unit || 0) > 0) status = 'du_cong';
+      else if ((c.work_unit || 0) > 0 || (c.ot_min || 0) > 0) status = 'du_cong';   // làm cuối tuần tính cả ngày là tăng ca: công 0 nhưng CÓ đi làm
       else status = 'vang';
     } else if (d > today) status = 'chua_toi';
     else if (scheduled(d)) status = 'vang';
@@ -446,8 +456,8 @@ r.get('/calendar', (req, res) => {
       date: d, day: +d.slice(8), wd: vnWeekday(d), weekend: isWeekendDay(d, weekend),
       status,
       check_in: c?.check_in_at || null, check_out: c?.check_out_at || null,
-      work_minutes: c?.work_minutes || 0, work_unit: c?.work_unit || 0,
-      late_min: c?.late_min || 0, early_min: c?.early_min || 0, ot_min: c?.ot_min || 0,
+      work_minutes: c?.work_minutes || 0, work_unit: Math.round((c?.work_unit || 0) * 100) / 100,
+      late_min: c?.late_min || 0, early_min: c?.early_min || 0, ot_min: c?.ot_min || 0, ot_type: c?.ot_type || null,
       manual: c?.manual || 0, manual_at: c?.manual_at || null, note: c?.note || '',
     };
   });

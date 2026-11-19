@@ -361,7 +361,8 @@ export function isoToHMS(iso) {
   return d.toLocaleTimeString('vi-VN', { hour12: false, timeZone: 'Asia/Ho_Chi_Minh' });
 }
 export function humanMinutes(min) {
-  if (!min || min <= 0) return '0g';
+  min = Math.round(+min || 0);   // tăng ca làm tròn có thể lẻ (vd 15.6 phút) → hiện phút chẵn
+  if (min <= 0) return '0g';
   const h = Math.floor(min / 60), m = min % 60;
   return `${h}g${m ? ' ' + m + 'p' : ''}`;
 }

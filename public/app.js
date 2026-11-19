@@ -495,6 +495,7 @@ async function renderBaocao() {
     c.append(el('div', { class: 'stat-row' },
       stat(humanMinutes(sum.totalMinutes), 'TỔNG GIỜ'),
       stat(sum.days, 'NGÀY CHẤM'),
+      sum.otMinutes > 0 ? stat(humanMinutes(sum.otMinutes), 'TĂNG CA') : '',
     ));
   } else {
     c.append(el('div', { class: 'stat-row' },
@@ -502,8 +503,7 @@ async function renderBaocao() {
       stat(humanMinutes(sum.totalMinutes), 'TỔNG GIỜ'),
       stat(sum.lateCount, 'ĐI MUỘN'),
     ));
-    if (sum.otMinutes > 0 || sum.earlyCount > 0)
-      c.append(el('div', { class: 'stat-row', style: 'margin-top:10px' },
+    c.append(el('div', { class: 'stat-row', style: 'margin-top:10px' },   // luôn hiện TĂNG CA (kể cả 0) để NV đối chiếu
         stat(humanMinutes(sum.otMinutes), 'TĂNG CA'),
         stat(sum.earlyCount, 'VỀ SỚM'),
         stat(sum.days, 'NGÀY CHẤM'),
@@ -517,8 +517,9 @@ function stat(n, l) { return el('div', { class: 'stat' }, el('div', { class: 'n'
 function monthTable(rows) {
   if (!rows.length) return el('div', { class: 'card' }, el('div', { class: 'empty' }, 'Chưa có dữ liệu chấm công.'));
   const hasManual = rows.some((r) => r.manual);
+  const hasOt = rows.some((r) => (r.ot_min || 0) > 0);   // có tăng ca → thêm cột "TC"
   const t = el('table', { class: 'tbl' });
-  t.innerHTML = '<thead><tr><th>Ngày</th><th>Vào</th><th>Ra</th><th>Giờ</th><th>Công</th><th>Muộn</th></tr></thead>';
+  t.innerHTML = '<thead><tr><th>Ngày</th><th>Vào</th><th>Ra</th><th>Giờ</th><th>Công</th>' + (hasOt ? '<th>TC</th>' : '') + '<th>Muộn</th></tr></thead>';
   const tb = el('tbody');
   for (const r of rows) {
     const dCell = el('td', {}, r.work_date.slice(8) + '/' + r.work_date.slice(5, 7));
@@ -538,11 +539,13 @@ function monthTable(rows) {
       el('td', {}, r.check_out_at ? isoToHM(r.check_out_at) : el('span', { class: 'pill bad' }, 'chưa ra')),
       el('td', {}, humanMinutes(r.work_minutes)),
       el('td', {}, el('b', {}, String(r.work_unit ?? 0))),
+      hasOt ? el('td', {}, (r.ot_min || 0) > 0 ? el('span', { class: 'pill', style: 'background:#dbeafe;color:#1d4ed8;white-space:nowrap', title: OT_TYPE_VI[r.ot_type] || 'Tăng ca' }, otFmt(r.ot_min)) : '—') : '',
       el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—'),
     ));
   }
   t.append(tb);
   const card = el('div', { class: 'card', style: 'overflow-x:auto' }, t);
+  if (hasOt) card.append(el('div', { style: 'font-size:12.5px;color:var(--muted);margin-top:8px' }, 'TC = giờ tăng ca / làm thêm được tính.'));
   if (hasManual) card.append(el('div', { style: 'font-size:12.5px;color:#92400e;margin-top:8px' }, '✏ = giờ đã được quản lý điều chỉnh (bấm vào dấu để xem).'));
   return card;
 }
@@ -642,6 +645,8 @@ const CAL_ST = {
   ngoai_lich:{ bg: '#fbfbfb', fg: '#cbd5e1', ic: '', label: 'Ngoài lịch' },
 };
 const WDH = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+const otFmt = (m) => { m = Math.round(+m || 0); return m < 60 ? m + 'p' : humanMinutes(m); };   // tăng ca gọn: "33p", "1g 30p"
+const OT_TYPE_VI = { thuong: 'Tăng ca ngày thường', cuoi_tuan: 'Tăng ca ngày nghỉ tuần', le: 'Tăng ca ngày lễ' };
 
 async function renderBangcong() {
   const c = $('#content'); c.innerHTML = '';
@@ -668,7 +673,8 @@ async function renderBangcong() {
       const cell = el('div', {
         style: `background:${st.bg};color:${st.fg};border-radius:9px;padding:5px 2px;text-align:center;cursor:pointer;min-height:44px;border:1px solid ${d.date === (new Date().toLocaleDateString('sv',{timeZone:'Asia/Ho_Chi_Minh'})) ? 'var(--brand)' : 'transparent'}`,
       }, el('div', { style: 'font-size:13px;font-weight:700' }, String(d.day)),
-         el('div', { style: 'font-size:14px;line-height:1.1' }, st.ic || ''));
+         el('div', { style: 'font-size:14px;line-height:1.1' }, st.ic || ''),
+         d.ot_min > 0 ? el('div', { style: 'font-size:10px;font-weight:700;color:#1d4ed8;line-height:1.2;white-space:nowrap' }, '+' + otFmt(d.ot_min)) : '');
       cell.addEventListener('click', () => showDay(d, detail));
       grid.append(cell);
     }
@@ -705,7 +711,7 @@ function showDay(d, detailEl) {
       row2('Số công', String(d.work_unit || 0)),
       row2('Đi muộn', d.late_min > 0 ? d.late_min + ' phút' : '—'),
       row2('Về sớm', d.early_min > 0 ? d.early_min + ' phút' : '—'),
-      row2('Tăng ca', d.ot_min > 0 ? d.ot_min + ' phút' : '—'),
+      row2(d.ot_min > 0 && OT_TYPE_VI[d.ot_type] ? OT_TYPE_VI[d.ot_type] : 'Tăng ca', d.ot_min > 0 ? otFmt(d.ot_min) : '—'),
     )));
 }
 function row2(k, v) { return el('tr', {}, el('td', { style: 'color:var(--muted)' }, k), el('td', { style: 'text-align:right;font-weight:600' }, v)); }
