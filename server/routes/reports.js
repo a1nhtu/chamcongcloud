@@ -16,6 +16,7 @@ import { trackCell, TRACK_ROWS } from '../track6.js';
 import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
 import { currentTenant } from '../tenant.js';
 import { dataGen } from '../heavy.js';
+import { otherPunches, rawPunchDays, virtPunchDays } from '../lan-cham-khac.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -344,7 +345,22 @@ function loadRange(from, to, filter) {
 
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
 const hasPunch = (c) => !!(c && (c.check_in_at || c.check_out_at));   // dòng chỉ có giờ ra (quên chấm vào, Theo ID máy) vẫn là có chấm
-const pairsHM = (io, c) => (!hasPunch(c) ? [] : io.pairs ? io.pairs.map(([a, b]) => [a ? isoToVnHM(a) : '?', b ? isoToVnHM(b) : '?']) : [[io.cin || '?', io.cout]]);
+const pairsHM = (io, c) => (!hasPunch(c) ? [] : io.pairs ? io.pairs.map(([a, b]) => [a ? isoToVnHM(a) : '?', b ? isoToVnHM(b) : (io.all ? '' : '?')]) : [[io.cin || '?', io.cout]]);
+// Báo cáo "nhiều lần vào/ra" (Chi tiết nhiều lần vào/ra + Bảng từng NV in A4) — Anh 20/11/2026, trankimxuyen: ngày ghép ĐẦU–CUỐI
+// (không ghép cặp) mà còn lượt quẹt khác (giữa giờ 13h, ca gãy không nhận…) → liệt kê MỌI lượt của ngày theo thứ tự vào các cột
+// Vào 1 · Ra 1 · Vào 2 …, như tab Giờ nguồn. Ngày ghép cặp (Nhiều lần vào/ra, Theo ID máy…) giữ y như cũ. Công ảo: không lộ lượt thật.
+// Lượt "khác" = lượt không làm giờ vào / ra của dòng công nào, gắn đúng ngày công (lan-cham-khac.js); chỉ hiển thị, công không đổi.
+function allPunchResolver(ctx, ioOf, from, to) {
+  if (ctx.virt) return ioOf;
+  let byDay = null;
+  return (empId, date, c) => {
+    const io = ioOf(empId, date, c);
+    if (!hasPunch(c) || io.pairs) return io;
+    if (!byDay) byDay = otherPunches(ctx.employees.map((e) => e.id), from, to).byDay;
+    const ts = byDay.get(empId + '|' + date);
+    return ts && ts.length > 2 ? { ...io, pairs: toPairs(ts), all: true } : io;
+  };
+}
 // Báo cáo danh sách: quy tắc "Nhiều lần vào/ra" → MỖI LẦN CHẤM 1 CỘT (Giờ vào 1 · Giờ ra 1 · Giờ vào 2 …) thay vì dồn nhiều giờ vào 1 ô.
 // Dòng mang _io = pairsHM(...); chỉ tách khi có ngày > 1 cặp (FILO giữ nguyên 2 cột như cũ).
 function splitPairCols(rep, inKey, outKey) {
@@ -999,9 +1015,35 @@ function buildReportRaw(type, from, to, filter) {
       return { ...base, rows, title: `Đi muộn / về sớm theo nhân viên ${PERIOD} — bấm Xuất Excel để in mỗi người 1 trang A4` };
     }
 
+    /* --- GIỜ NGUỒN (nút Xuất Excel ở Tính công → tab 🕘 Giờ nguồn, Anh 20/11/2026): mỗi NV × ngày 1 dòng, Lần 1 · Lần 2 … = mọi lượt
+       quẹt theo thứ tự, không theo ca / quy tắc ghép (✎ thêm tay · 📱 điện thoại), y như bảng trên màn hình. Công ảo: giờ vào / ra ảo. --- */
+    case 'rawpunch': {
+      const ids = ctx.employees.map((e) => e.id);
+      const groups = ctx.virt ? virtPunchDays(ids, from, to, virtualOt(ids, from, to, !!filter.force, filter.virt)) : rawPunchDays(ids, from, to);
+      const byEmp = new Map();
+      for (const g of groups) { if (!byEmp.has(g.eid)) byEmp.set(g.eid, []); byEmp.get(g.eid).push(g); }
+      const N = Math.max(2, ...groups.map((g) => g.times.length));
+      const columns = [
+        { key: 'stt', label: 'STT', w: 6 }, { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 },
+        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 16 },
+        ...Array.from({ length: N }, (_, i) => ({ key: 'l' + (i + 1), label: 'Lần ' + (i + 1), w: 8 })),
+        { key: 'nlan', label: 'Số lần', w: 8 },
+      ];
+      const rows = [];
+      for (const e of ctx.employees) {   // xếp theo nhân viên (bộ phận, tên) rồi theo ngày
+        for (const g of (byEmp.get(e.id) || []).sort((p, q) => (p.date < q.date ? -1 : 1))) {
+          const row = { stt: rows.length + 1, date: fmtDMY(g.date), wd: WD[vnWeekday(g.date)], code: e.code, name: e.full_name, dept: e.department || '', nlan: g.times.length };
+          g.times.forEach((t, i) => { row['l' + (i + 1)] = t; });
+          rows.push(row);
+        }
+      }
+      return { title: `Giờ nguồn — mọi lượt chấm công ${PERIOD}`, columns, rows };
+    }
+
     /* --- Chi tiết chấm công NHIỀU LẦN VÀO/RA: mỗi NV × mỗi ngày 1 dòng, các lần chấm xếp vào Vào1/Ra1 … Vào4/Ra4 --- */
     case 'detailmulti': {
-      const PAIRS = Math.max(4, maxPairs(ctx, ioOf, days));   // quẹt hơn 4 cặp/ngày → thêm cột, không mất lượt
+      const ioAll = allPunchResolver(ctx, ioOf, from, to);   // ngày ghép đầu–cuối còn lượt khác → liệt kê đủ (20/11/2026)
+      const PAIRS = Math.max(4, maxPairs(ctx, ioAll, days));   // quẹt hơn 4 cặp/ngày → thêm cột, không mất lượt
       const columns = [
         { key: 'stt', label: 'STT', w: 6 }, { key: 'code', label: 'Mã nhân viên', w: 12 },
         { key: 'name', label: 'Tên nhân viên', w: 22 }, { key: 'dept', label: 'Phòng ban', w: 14 },
@@ -1027,7 +1069,7 @@ function buildReportRaw(type, from, to, filter) {
           }
           stt++;
           const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)] };
-          const io = c ? ioOf(e.id, d, c) : null;
+          const io = c ? ioAll(e.id, d, c) : null;
           const ts = !io ? [] : io.pairs ? io.pairs.flat().filter(Boolean) : [c.check_in_at, c.check_out_at].filter(Boolean);
           for (let i = 0; i < PAIRS * 2; i++) row[(i % 2 ? 'out' : 'in') + (Math.floor(i / 2) + 1)] = ts[i] ? isoToVnHM(ts[i]) : '';
           Object.assign(row, {
@@ -1210,7 +1252,7 @@ async function exportEmpSheetXlsx(res, from, to, filter, company, onlyLateEarly)
   const ctx = loadRange(from, to, filter);
   PROG && PROG(30, 'Đã đọc xong dữ liệu, đang ghi từng nhân viên…');
   const days = daysBetween(from, to);
-  const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
+  const ioOf = allPunchResolver(ctx, inOutResolver(ctx.employees, from, to, ctx.virt), from, to);   // ngày ghép đầu–cuối còn lượt khác → liệt kê đủ (20/11/2026)
   const HOURLY = formHourly(filter);
   const PAIRS = Math.max(4, maxPairs(ctx, ioOf, days));   // quẹt hơn 4 cặp/ngày → thêm cột, không mất lượt
   const TITLE = onlyLateEarly ? 'BẢNG ĐI MUỘN / VỀ SỚM' : 'BẢNG CHI TIẾT CHẤM CÔNG';

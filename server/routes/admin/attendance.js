@@ -9,6 +9,7 @@ import { rulePairs, ruleWindow } from '../../attendance-calc.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../../virtual-att.js';
+import { otherPunches, rawPunchDays, virtPunchDays, punchMark } from '../../lan-cham-khac.js';
 
 const WDVN = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
 // HH:MM giờ VN từ ISO (cho nội dung thông báo)
@@ -263,23 +264,9 @@ export function registerAttendanceRoutes(r, { need }) {
     // ghép) — thay cột "Các lần chấm" của tab Chi tiết (ngày tách Sáng + Chiều thì 2 dòng cùng lặp đủ lượt của ngày).
     // Ngày chỉ chấm điện thoại (không có lượt máy) lấy giờ vào / ra của phiên chấm; công ảo: giờ vào / ra ảo, không lộ lượt thật.
     if (mode === 'raw') {
-      const groups = new Map();
-      const put = (eid, d, t, src) => { const k = eid + '|' + d; if (!groups.has(k)) groups.set(k, { eid, date: d, times: [], srcs: [] }); const g = groups.get(k); g.times.push(t); g.srcs.push(src); };
-      const attQ = `SELECT employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY check_in_at`;
-      if (vmap) {
-        for (const a of applyVirtual(db.prepare(attQ).all(...empIds, from, to), vmap)) for (const x of [a.check_in_at, a.check_out_at]) if (x) put(a.employee_id, a.work_date, vnHM(x), '');
-      } else {
-        const dn = new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
-        const srcOf = (sr) => { sr = String(sr || ''); if (sr.startsWith('TAY_')) return 'Thêm tay'; if (sr.startsWith('DT_')) return 'Điện thoại'; const d = dn.get(sr); return d ? (d.name || sr) + (d.machine_number ? ` (máy ${d.machine_number})` : '') : sr; };
-        for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to))
-          put(p.employee_id, p.work_date, vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : String(p.serial).startsWith('DT_') ? '📱' : ''), srcOf(p.serial));
-        const has = new Set(groups.keys());
-        for (const a of db.prepare(attQ).all(...empIds, from, to)) {
-          if (has.has(a.employee_id + '|' + a.work_date) || !(a.check_in_photo || a.check_out_photo)) continue;
-          for (const x of [a.check_in_at, a.check_out_at]) if (x) put(a.employee_id, a.work_date, vnHM(x) + '📱', 'Điện thoại');
-        }
-      }
-      const rows = [...groups.values()].map((g) => { const e = empById.get(g.eid); return e && { date: g.date, wd: WDVN[vnWd(g.date)], employee_id: g.eid, code: e.code, name: e.full_name, dept: e.department || '', times: g.times, srcs: g.srcs }; }).filter(Boolean);
+      // dựng nhóm dùng chung với file Excel của tab (server/lan-cham-khac.js); công ảo: giờ vào / ra ảo
+      const groups = vmap ? virtPunchDays(empIds, from, to, vmap) : rawPunchDays(empIds, from, to);
+      const rows = groups.map((g) => { const e = empById.get(g.eid); return e && { date: g.date, wd: WDVN[vnWd(g.date)], employee_id: g.eid, code: e.code, name: e.full_name, dept: e.department || '', times: g.times, srcs: g.srcs }; }).filter(Boolean);
       return res.json({ mode, rows, ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
     }
 
@@ -302,6 +289,9 @@ export function registerAttendanceRoutes(r, { need }) {
     const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
     const punchMap = new Map();
     for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : String(p.serial).startsWith('DT_') ? '📱' : '')); }   // ✎ = lượt thêm tay
+    // LẦN CHẤM KHÁC của từng dòng (Anh 20/11/2026): lượt quẹt không làm giờ Vào / Ra (giữa giờ, ca không nhận…) — công ảo: không lộ
+    const others = vmap ? new Map() : otherPunches(empIds, from, to).byRow;
+    const otherOf = (id) => (others.get(id) || []).map((p) => vnHM(p.at) + punchMark(p.serial));
 
     const marks = vmap ? new Set() : new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
     const rows = []; const seen = new Set();
@@ -319,7 +309,7 @@ export function registerAttendanceRoutes(r, { need }) {
       rows.push({
         ...capInfo(a),
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
-        shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
+        shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at), other: otherOf(a.id),
         punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || ((a.check_in_photo || a.check_out_photo) ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean).map((t) => t + '📱') : [])),   // công ảo: chỉ giờ vào · ra ảo; 📱 = chấm bằng điện thoại
         late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
         cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: leaveOfRow(a, lv),
