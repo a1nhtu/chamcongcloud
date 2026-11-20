@@ -65,6 +65,10 @@ function deptOrdered(list = DEPARTMENTS) {
 }
 // Trang Nhân viên: bộ phận đang chọn trên cây ('*' = tất cả), các nhánh đang gọn, ô tìm — giữ khi làm mới/sửa
 let empDeptSel = '*', empSearch = '';
+// CHIA TRANG danh sách NV (công ty vài nghìn NV vẽ hết 1 lần rất chậm): 50 / 100 / 200 dòng, nhớ lựa chọn trên máy
+const EMP_PAGE_SIZES = [50, 100, 200];
+let empPage = 1;
+const empPageSize = () => { try { const v = +localStorage.getItem('emp_page_size'); if (EMP_PAGE_SIZES.includes(v)) return v; } catch {} return 50; };
 const EMP_NONE = '\u0000none';                    // khoá cây cho NV chưa có bộ phận
 const empPicked = new Set();                      // id NV đang tích chọn (xoá hàng loạt) — giữ khi đổi bộ phận/tìm kiếm
 let empSort = null;   // { key, dir: 1 tăng | -1 giảm } — null = mặc định: nhóm theo bộ phận
@@ -158,7 +162,7 @@ async function pageEmployees() {
         const tog = node && node.hasKids
           ? el('span', { class: 'tg', title: 'Mở/gọn', onclick: (ev) => { ev.stopPropagation(); empDeptClosed.has(key) ? empDeptClosed.delete(key) : empDeptClosed.add(key); renderTree(); } }, empDeptClosed.has(key) ? '▸' : '▾')
           : el('span', { class: 'tg' }, '');
-        tree.append(el('div', { class: 'tn' + (empDeptSel === key ? ' on' : ''), style: 'padding-left:' + (6 + depth * 14) + 'px', onclick: () => { empDeptSel = key; renderTree(); renderList(); } },
+        tree.append(el('div', { class: 'tn' + (empDeptSel === key ? ' on' : ''), style: 'padding-left:' + (6 + depth * 14) + 'px', onclick: () => { empDeptSel = key; empPage = 1; renderTree(); renderList(); } },
           tog, el('span', { class: 'nm' }, label), el('span', { class: 'ct' }, String(count))));
       };
       row('*', 'Tất cả nhân viên', rows.length, 0, null);
@@ -184,7 +188,7 @@ async function pageEmployees() {
       countLbl.append(list.length + ' nhân viên' + (sel ? ' · ' + sel.label : ''));
       if (empSort) {
         const lb = EMP_SORT_COLS.find((c) => c[0] === empSort.key)?.[1] || '';
-        countLbl.append(' · ', el('span', { class: 'pill', style: 'cursor:pointer', title: 'Bỏ sắp xếp — về nhóm theo bộ phận', onclick: () => { empSort = null; renderList(); } },
+        countLbl.append(' · ', el('span', { class: 'pill', style: 'cursor:pointer', title: 'Bỏ sắp xếp — về nhóm theo bộ phận', onclick: () => { empSort = null; empPage = 1; renderList(); } },
           `Sắp theo ${lb} ${empSort.dir > 0 ? '▲' : '▼'}  ✕`));
       }
       const tbl = el('table', { class: 'data emp-compact' });
@@ -192,7 +196,7 @@ async function pageEmployees() {
       const hrow = el('tr');
       visList = list; allCb = null;
       if (canEdit) {
-        allCb = el('input', { type: 'checkbox', title: 'Chọn / bỏ chọn tất cả nhân viên đang hiện trong bảng' });
+        allCb = el('input', { type: 'checkbox', title: 'Chọn / bỏ chọn tất cả ' + list.length + ' nhân viên đang lọc (cả các trang)' });
         allCb.onchange = () => { for (const e of list) allCb.checked ? empPicked.add(e.id) : empPicked.delete(e.id); renderList(); };
         hrow.append(el('th', { style: 'width:30px' }, allCb));
       }
@@ -200,18 +204,23 @@ async function pageEmployees() {
         if (key === 'device_pin' && !showPin) continue;
         const on = empSort && empSort.key === key;
         hrow.append(el('th', { class: 'sortable' + (on ? ' on' : ''), title: (tip ? tip + ' — ' : '') + 'Bấm để sắp xếp (lần 1 thấp → cao, lần 2 cao → thấp)',
-          onclick: () => { empSort = on && empSort.dir > 0 ? { key, dir: -1 } : { key, dir: 1 }; renderList(); } },
+          onclick: () => { empSort = on && empSort.dir > 0 ? { key, dir: -1 } : { key, dir: 1 }; empPage = 1; renderList(); } },
           label, el('span', { class: 'sort-ic' }, on ? (empSort.dir > 0 ? ' ▲' : ' ▼') : ' ⇅')));
       }
       hrow.append(el('th'));
       tbl.append(el('thead', {}, hrow));
       const tb = el('tbody');
+      // Chỉ vẽ 1 trang (50 / 100 / 200 dòng); tiêu đề nhóm bộ phận vẫn đếm đủ cả danh sách đang lọc
+      const size = empPageSize(), pages = Math.max(1, Math.ceil(list.length / size));
+      empPage = Math.min(Math.max(1, empPage), pages);
+      const from = (empPage - 1) * size, part = list.slice(from, from + size);
+      const grpN = new Map(); for (const x of list) { const k = x.department || NONE; grpN.set(k, (grpN.get(k) || 0) + 1); }
       let lastDept = null;
-      for (const e of list) {
+      for (const e of part) {
         const dk = e.department || NONE;
         if (!empSort && dk !== lastDept) {   // dòng tiêu đề nhóm bộ phận (chỉ khi không sắp xếp theo cột)
           lastDept = dk;
-          const n = list.filter((x) => (x.department || NONE) === dk).length;
+          const n = grpN.get(dk) || 0;
           tb.append(el('tr', { class: 'grp' }, el('td', { colspan: NCOL }, (dk === NONE ? 'Chưa có bộ phận' : dk) + ' (' + n + ')')));
         }
         const delBtn = btnSm('🗑', () => delEmp(e), 'ghost'); delBtn.style.color = '#c0392b'; delBtn.title = 'Xóa nhân viên';
@@ -241,10 +250,24 @@ async function pageEmployees() {
       }
       if (!list.length) tb.append(el('tr', {}, el('td', { colspan: NCOL }, el('div', { class: 'empty' }, 'Không có nhân viên nào.'))));
       tbl.append(tb);
+      // Thanh chia trang: "Hiện 1–50 / 3.211" · Mỗi trang 50/100/200 · ‹ Trước · Trang x/y · Sau ›
+      const go = (p) => { empPage = p; renderList(); listBox.scrollTop = 0; listBox.scrollIntoView({ block: 'nearest' }); };
+      const sizeSel = el('select', { style: 'width:auto;padding:4px 8px' }, ...EMP_PAGE_SIZES.map((n) => el('option', { value: n, ...(n === size ? { selected: '' } : {}) }, n + ' dòng')));
+      sizeSel.onchange = () => { try { localStorage.setItem('emp_page_size', sizeSel.value); } catch {} empPage = 1; renderList(); };
+      const pageI = el('input', { type: 'number', min: 1, max: pages, value: empPage, title: 'Gõ số trang rồi Enter', style: 'width:64px;padding:4px 6px;text-align:center' });
+      pageI.onchange = () => { const v = Math.round(+pageI.value); if (v >= 1 && v <= pages) go(v); else pageI.value = empPage; };
+      const nav = (txt, p, dis, tip) => el('button', { class: 'btn ghost sm', title: tip, ...(dis ? { disabled: '' } : {}), onclick: () => go(p) }, txt);
+      const bar = el('div', { class: 'pager', style: 'display:flex;gap:8px;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding:10px 14px;border-top:1px solid var(--line);font-size:13px' },
+        el('span', { style: 'color:var(--muted);margin-right:auto' }, list.length ? `Hiện ${(from + 1).toLocaleString('vi')}–${(from + part.length).toLocaleString('vi')} / ${list.length.toLocaleString('vi')} nhân viên` : ''),
+        'Mỗi trang:', sizeSel,
+        nav('«', 1, empPage <= 1, 'Trang đầu'), nav('‹ Trước', empPage - 1, empPage <= 1, 'Trang trước'),
+        el('span', {}, 'Trang ', pageI, ' / ' + pages),
+        nav('Sau ›', empPage + 1, empPage >= pages, 'Trang sau'), nav('»', pages, empPage >= pages, 'Trang cuối'));
       listBox.innerHTML = ''; listBox.append(tbl);
+      if (list.length > EMP_PAGE_SIZES[0]) listBox.append(bar);   // ít NV (≤ 50) thì không cần thanh chia trang
       renderBulk();
     };
-    searchI.oninput = () => { empSearch = searchI.value; renderList(); };
+    searchI.oninput = () => { empSearch = searchI.value; empPage = 1; renderList(); };
     renderTree(); renderList();
     let pcCount = 0;
     if (hasPerm('devices') && deviceEnabled()) { try { pcCount = (await api('/admin/devices/pin-conflicts?count=1')).count; } catch {} }
