@@ -510,6 +510,7 @@ const REPORT_GROUPS = [
     ['daytime', '⏱️', 'Chi tiết giờ vào/ra', 'Giờ vào–ra thực tế từng ngày trong tháng (ma trận)'],
     ['workhours', '🕘', 'Giờ công & tăng ca', 'Ma trận giờ công mỗi ngày + tổng giờ, giờ tăng ca'],
     ['track6', '🗒️', 'Bảng theo dõi chấm công (4 lần quẹt)', 'Mỗi nhân viên 6 dòng × từng ngày: Vào 1 · Ra 1 · Vào 2 · Ra 2 · Giờ HC · Giờ TC, kèm ngày công, giờ công, nghỉ từng loại, tăng ca. Dành cho công ty chấm 4 lần/ngày (Đến – Ra trưa – Vào lại – Về)'],
+    ['shiftcode', '🧵', 'Bảng công theo mã ca (3 dòng)', 'Mỗi nhân viên 3 dòng × từng ngày: Ký hiệu (mã ca đã làm HC, D… hoặc ký hiệu nghỉ PN, PM…) · Giờ hành chính · Giờ tăng ca, cột Tổng, kèm ngày vào làm. Mẫu bảng công nhà máy may'],
     ['horizontal', '📊', 'Bảng công ngang', 'Ma trận ngày × NV: mỗi ô là SỐ CÔNG trong ngày + tổng công, tăng ca, trễ, sớm, vắng, nghỉ (xem số giờ ở Bảng thống kê chấm công (giờ))'],
     ['hourstat', '🕒', 'Bảng thống kê chấm công (giờ)', 'Ma trận ngày × NV theo SỐ GIỜ mỗi ngày + giờ công, tăng ca TC1–TC3, vắng, nghỉ từng loại, trễ, sớm'],
     ['symbol', '🔤', 'Bảng ký hiệu / Thống kê tháng', 'X=làm · T=trễ/sớm · P=phép · KL=không lương · CT=công tác · K=nghỉ khác · L=lễ · V=vắng · O=thiếu ra'],
@@ -532,7 +533,7 @@ const REPORT_GROUPS = [
 ];
 
 // Báo cáo có ảnh mẫu ở public/mau-bao-cao (nút "👁 Xem mẫu" trên thẻ) — khớp danh sách TYPES trong tools/anh-mau-bao-cao/xuat-excel-mau.mjs
-const REPORT_SAMPLES = ['attendance', 'firstlast', 'detail', 'detaillist', 'empsheet', 'empsheetlate', 'detailmulti', 'daytime', 'workhours', 'track6',
+const REPORT_SAMPLES = ['attendance', 'firstlast', 'detail', 'detaillist', 'empsheet', 'empsheetlate', 'detailmulti', 'daytime', 'workhours', 'track6', 'shiftcode',
   'horizontal', 'hourstat', 'symbol', 'late', 'ot', 'summary', 'absence', 'leave', 'payroll', 'manualtime'];
 // MẪU THEO GIỜ: không có công / trễ sớm / tăng ca → ẩn báo cáo chỉ toàn những thứ đó (máy chủ cũng bỏ các cột đó ở báo cáo còn lại)
 const REPORT_HOURLY_HIDE = ['late', 'ot', 'symbol', 'horizontal', 'empsheetlate', 'audit3', 'audit3day'];

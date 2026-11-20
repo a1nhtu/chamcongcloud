@@ -70,7 +70,7 @@ const server = await new Promise((ok) => { const s = app.listen(0, '127.0.0.1', 
 const root = `http://127.0.0.1:${server.address().port}`;
 
 // Mọi báo cáo trên màn thẻ (public/admin-parts/84-may-hikvision-ai.js REPORT_GROUPS) — theo ca + theo giờ (báo cáo nào có ở mẫu theo giờ)
-const TYPES = ['attendance', 'firstlast', 'detail', 'detaillist', 'empsheet', 'empsheetlate', 'detailmulti', 'daytime', 'workhours', 'track6',
+const TYPES = ['attendance', 'firstlast', 'detail', 'detaillist', 'empsheet', 'empsheetlate', 'detailmulti', 'daytime', 'workhours', 'track6', 'shiftcode',
   'horizontal', 'hourstat', 'symbol', 'late', 'ot', 'summary', 'absence', 'leave', 'payroll', 'manualtime'];
 const HOURLY_HIDE = ['late', 'ot', 'symbol', 'horizontal', 'empsheetlate', 'audit3', 'audit3day'];
 const done = [];

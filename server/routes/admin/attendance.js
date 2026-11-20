@@ -1,7 +1,7 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren, splitDeptList, hourlyNoOvernight } from '../../db.js';
 import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
-import { leaveShiftSymOn, leaveShiftCoder, joinLeaveSym } from '../../leave-shift-sym.js';
+import { leaveShiftSymOn, workedCell, joinLeaveSym } from '../../leave-shift-sym.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays, rebuildDay } from '../../device-sync.js';
@@ -244,14 +244,13 @@ export function registerAttendanceRoutes(r, { need }) {
     const leaves = db.prepare(`SELECT * FROM leave_requests WHERE status='approved' AND employee_id IN (${ph}) AND from_date<=? AND to_date>=?`).all(...empIds, to, from);
     const leaveSym = Object.fromEntries([...LEAVE_TYPES, ...customLeaveTypes(true)].map((t) => [t.type, t.sym]));
     const leaveMap = new Map();
-    const codeOf = leaveShiftSymOn() ? leaveShiftCoder() : null;   // công tắc ghép mã ca + ký hiệu nghỉ (HC + PN → HCPN)
     for (const l of leaves) {
       let d = l.from_date < from ? from : l.from_date; const end = l.to_date > to ? to : l.to_date;
-      while (d <= end) {
-        const sym = joinLeaveSym(codeOf ? codeOf(l.employee_id, d) : '', leaveSym[l.type] || 'N');
-        leaveMap.set(l.employee_id + '|' + d, { sym: sym + (l.half ? '½' : ''), type: l.type + (l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d);
-      }
+      while (d <= end) { leaveMap.set(l.employee_id + '|' + d, { sym: (leaveSym[l.type] || 'N') + (l.half ? '½' : ''), type: l.type + (l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d); }
     }
+    // Bảng mã kiểu may mặc (công tắc): ngày VỪA LÀM VỪA NGHỈ → mã ca + ký hiệu nghỉ (HC + PN → HCPN); nghỉ cả ngày giữ "PN"
+    const joinSym = leaveShiftSymOn();
+    const leaveOfRow = (a, lv) => (!lv ? '' : joinSym && workedCell(a) ? joinLeaveSym(a.shift_code, lv.sym) : lv.sym);
 
     // CÔNG ẢO (chỉ xem): tăng ca + giờ ra theo hạn mức, không hiện lượt quẹt thật / dấu sửa tay
     const lv = virtLevel(req.query, req), virt = lv > 0;   // 1|2|3 = công ảo mức đó; tài khoản kiểm tra: luôn công ảo
@@ -295,7 +294,7 @@ export function registerAttendanceRoutes(r, { need }) {
     }
 
     // detail
-    let att = db.prepare(`SELECT a.*, s.name shift_name FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
+    let att = db.prepare(`SELECT a.*, s.name shift_name, s.code shift_code FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
       WHERE a.employee_id IN (${ph}) AND a.work_date>=? AND a.work_date<=?`).all(...empIds, from, to);
     if (vmap) att = applyVirtual(att, vmap).map((a) => ({ ...a, manual: 0 }));
     const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
@@ -321,7 +320,7 @@ export function registerAttendanceRoutes(r, { need }) {
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
         punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || ((a.check_in_photo || a.check_out_photo) ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean).map((t) => t + '📱') : [])),   // công ảo: chỉ giờ vào · ra ảo; 📱 = chấm bằng điện thoại
         late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
-        cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: lv ? lv.sym : '',
+        cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: leaveOfRow(a, lv),
         status: a.check_out_at || a.day_status === 'mot_lan' ? (!a.check_in_at && a.day_status !== 'mot_lan' ? 'Thiếu vào' : a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
         att_id: a.id,
       });

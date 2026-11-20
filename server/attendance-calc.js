@@ -72,6 +72,22 @@ export function breakOtAvail(shift, workDate, inIso, outIso) {
   return breakOverlap(breakWindow(workDate, shift, start), toMinute(inIso), toMinute(outIso));
 }
 
+// Số phút làm TRONG KHUNG CA (giờ vào–ra cắt theo giờ bắt đầu–kết thúc ca, trừ giờ nghỉ giữa ca) — chỉ để HIỂN THỊ
+// (bảng công theo mã ca: ngày nghỉ hằng tuần đi làm tách "giờ trong ca" / "giờ ngoài ca"). Không dùng để tính công.
+// Ca không khai giờ bắt đầu nghỉ: trừ trọn số phút nghỉ khi làm từ nửa ca trở lên.
+export function inShiftMinutes(shift, workDate, inIso, outIso) {
+  if (!shift || !shift.start_time || !shift.end_time || !inIso || !outIso) return 0;
+  const { start, end } = shiftBounds(workDate, shift);
+  const a = toMinute(inIso), b = toMinute(outIso);
+  const s = a > start ? a : start, e = b < end ? b : end;
+  if (!(e > s)) return 0;
+  const span = mins(s, e);
+  const brk = breakWindow(workDate, shift, start);
+  if (brk) return Math.max(0, span - breakOverlap(brk, s, e));
+  const bm = shift.break_minutes || 0;
+  return bm > 0 && span * 2 >= mins(start, end) ? Math.max(0, span - bm) : span;
+}
+
 // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ… — server/privilege.js): priv = { late, midOut, midIn, early } phút.
 // Số phút được ưu đãi trừ thẳng vào phút đi trễ / về sớm, đúng ĐOẠN của ca:
 //  - vào trước giờ nghỉ trưa → trừ `late` (đầu ca được đến muộn)

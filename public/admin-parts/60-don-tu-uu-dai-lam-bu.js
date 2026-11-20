@@ -407,8 +407,8 @@ async function leaveTypesModal() {
     el('div', { style: 'display:flex;gap:22px;flex-wrap:wrap' }, el('label', { class: 'lv-chk' }, paidC, el('span', {}, 'Có lương')), el('label', { class: 'lv-chk' }, quotaC, el('span', {}, 'Trừ phép năm'))),
     el('div', { style: 'display:flex;gap:8px' }, addB, cancelB),
     el('label', { class: 'lv-chk', style: 'margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb' }, symShiftC,
-      el('span', {}, 'Bảng công: ghép MÃ CA + KÝ HIỆU NGHỈ', el('br'), el('span', { style: 'color:#6b7280;font-size:12px' },
-        'VD đang ca HC nghỉ phép năm PN → hiện "HCPN"; ca đêm D nghỉ bệnh PB → "DPB". Ca của ngày nghỉ lấy theo phân ca ngày đó; bộ phận tự nhận ca theo giờ chấm thì lấy ca làm gần nhất trong 7 ngày trước. Không xác định được ca thì chỉ hiện ký hiệu nghỉ.'))),
+      el('span', {}, 'Bảng mã kiểu may mặc: ghép MÃ CA + KÝ HIỆU NGHỈ', el('br'), el('span', { style: 'color:#6b7280;font-size:12px' },
+        'Ngày vừa làm vừa nghỉ (VD làm ca HC 7 giờ + nghỉ phép năm PN) → hiện "HCPN"; ca đêm D + nghỉ bệnh PB → "DPB". Nghỉ cả ngày vẫn chỉ hiện "PN". Ở báo cáo "Bảng công theo mã ca": làm chủ nhật → "HCk", nghỉ chủ nhật "L", ngày lễ "NL", đã nghỉ việc "NV".'))),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
   draw();
 }

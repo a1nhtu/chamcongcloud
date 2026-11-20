@@ -3,7 +3,7 @@ import ExcelJS from 'exceljs';
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, globalAttMode, deptWithChildren, splitDeptList, fillCheckoutGeo } from '../db.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { vnDateStr, humanMinutes } from '../util.js';
-import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs, idmRows, stateRows } from '../attendance-calc.js';
+import { isWeekendDay, vnWeekday, splitOtTiers, dropRepeatPunches, OT_DAY_MIN, rulePairs, idmRows, stateRows, inShiftMinutes } from '../attendance-calc.js';
 import { deviceMachineMap, pairDup } from '../device-sync.js';
 import { computePayrollTable, reportPayRange } from '../payroll-calc.js';
 import { resolveEffectiveShift, ioParamsFor } from '../shift-resolver.js';
@@ -11,7 +11,7 @@ import { multiMissingFn } from '../multi-shift.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
 import { customLeaveTypes } from '../leave-quota.js';
-import { leaveShiftSymOn, leaveShiftCoder, joinLeaveSym } from '../leave-shift-sym.js';
+import { leaveShiftSymOn, workedCell, joinLeaveSym } from '../leave-shift-sym.js';
 import { trackCell, TRACK_ROWS } from '../track6.js';
 import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
 import { currentTenant } from '../tenant.js';
@@ -303,10 +303,15 @@ function loadRange(from, to, filter) {
     const k2 = l.half && l.from_date === l.to_date ? { ...kind, half: true } : kind;   // nửa ngày: đếm 0,5
     for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) { leaveDays.set(l.employee_id + '|' + d, k2); usedKinds.add(kind.key); }
   }
-  // Công tắc "ghép mã ca + ký hiệu nghỉ" (VD HC + PN → HCPN): chỉ đổi chữ hiện trên ô ngày, đếm theo loại nghỉ (key) giữ nguyên
+  // Công tắc "bảng mã kiểu may mặc": ngày VỪA LÀM VỪA NGHỈ hiện mã ca + ký hiệu nghỉ (làm HC + nghỉ PN → HCPN); nghỉ cả ngày giữ "PN".
+  // Chỉ đổi chữ hiện trên ô ngày, đếm theo loại nghỉ (key) giữ nguyên.
   if (leaveShiftSymOn()) {
-    const codeOf = leaveShiftCoder();
-    for (const [key, k] of leaveDays) { const [eid, d] = key.split('|'); const c = codeOf(+eid, d); if (c) leaveDays.set(key, { ...k, sym: joinLeaveSym(c, k.sym) }); }
+    for (const [key, k] of leaveDays) {
+      const c = cell.get(key);
+      if (!workedCell(c)) continue;
+      const code = shiftsById.get(c.shift_id)?.code;
+      if (code) leaveDays.set(key, { ...k, sym: joinLeaveSym(code, k.sym), plainSym: k.sym });
+    }
   }
   // Các loại nghỉ có phát sinh trong kỳ (giữ đúng thứ tự LEAVE_KINDS) → báo cáo thêm cột cho từng loại
   const leaveKinds = KINDS.filter((k) => usedKinds.has(k.key));
@@ -814,6 +819,54 @@ function buildReportRaw(type, from, to, filter) {
         rows.push(...rs);
       }
       return { title: `Bảng theo dõi chấm công ${PERIOD}`, columns, rows };
+    }
+
+    /* --- Bảng công theo MÃ CA: mỗi NV 3 dòng × từng ngày — Ký hiệu · Giờ hành chính · Giờ tăng ca, cột Tổng (mẫu bảng công nhà máy may).
+     *  Ô ký hiệu = MÃ CA đã làm (HC, HC3, D…); nghỉ cả ngày = ký hiệu nghỉ (PN, PM…); thiếu giờ vào / ra = O; ngày phải làm mà không có = V.
+     *  Công tắc "bảng mã kiểu may mặc" (leave_sym_shift) BẬT: vừa làm vừa nghỉ → HCPN · làm ngày nghỉ hằng tuần → HCk, giờ TRONG khung ca
+     *  ở dòng Giờ hành chính, ngoài ca ở dòng Tăng ca · nghỉ hằng tuần L · ngày lễ NL · đã nghỉ việc NV.
+     *  TẮT: nghỉ tuần để trống, lễ L, làm ngày nghỉ = toàn bộ ở dòng tăng ca. Chỉ là cách HIỂN THỊ — số công / tăng ca không đổi. --- */
+    case 'shiftcode': {
+      const MAY = leaveShiftSymOn();
+      const today = vnDateStr(new Date());
+      const dayCols = days.map((d) => ({ key: 'd' + d, label: String(+d.slice(8)), sub: WD_LABEL[new Date(d + 'T12:00:00Z').getUTCDay()], weekend: ctx.paintWeekend(d), w: 5 }));
+      const columns = [
+        { key: 'stt', label: 'STT', w: 5 }, { key: 'code', label: 'MSNV', w: 11 }, { key: 'name', label: 'Họ tên', w: 22 },
+        { key: 'dept', label: 'Bộ phận', w: 18 }, { key: 'hire', label: 'Ngày vào làm', w: 11 }, ...dayCols,
+        { key: 'total', label: 'Tổng', w: 8 }, { key: 'loai', label: 'Ghi chú', w: 14 },
+      ];
+      const h = (m) => (m > 0 ? round2(m / 60) : '');
+      const rows = []; let stt = 0;
+      for (const e of ctx.employees) {
+        const blank = { stt: '', code: '', name: '', dept: '', hire: '' };
+        const r1 = { stt: ++stt, code: e.code, name: e.full_name, dept: e.department || '', hire: e.start_date ? fmtDMY(e.start_date) : '', loai: 'Ký hiệu', total: '' };
+        const r2 = { ...blank, loai: 'Giờ hành chính' }, r3 = { ...blank, loai: 'Giờ tăng ca' };
+        let m2 = 0, m3 = 0;
+        for (const d of days) {
+          const key = e.id + '|' + d;
+          const c = ctx.cell.get(key), lv = ctx.leaveDays.get(key);
+          let sym = '', hcM = 0, tcM = 0;
+          if (workedCell(c)) {
+            const sh = ctx.shiftsById.get(c.shift_id);
+            const code = (sh && String(sh.code || '').trim()) || 'X';
+            hcM = c.work_minutes || 0; tcM = c.ot_min || 0;
+            const offDay = (c.ot_type || 'thuong') !== 'thuong' && !(hcM > 0);   // ngày nghỉ tuần / lễ đi làm: cả ngày là tăng ca
+            if (MAY && offDay && sh) { const ins = Math.min(tcM, inShiftMinutes(sh, d, c.check_in_at, c.check_out_at)); hcM = ins; tcM -= ins; }
+            sym = lv ? (MAY ? lv.sym : code) : (MAY && offDay && c.ot_type === 'cuoi_tuan' ? code + 'k' : code);
+          } else if (lv) sym = lv.plainSym || lv.sym;
+          else if (c && (c.check_in_at || c.check_out_at)) sym = 'O';
+          else if (e.leave_date && d > e.leave_date) sym = MAY ? 'NV' : '';
+          else if (e.start_date && d < e.start_date) sym = '';
+          else if (ctx.holidays.has(d)) sym = MAY ? 'NL' : 'L';
+          else if (isWeekendDay(d, ctx.weekend) && !ctx.isScheduled(e.id, d)) sym = MAY ? 'L' : '';
+          else if (d < today && ctx.isScheduled(e.id, d)) sym = 'V';
+          r1['d' + d] = sym; r2['d' + d] = h(hcM); r3['d' + d] = h(tcM);
+          m2 += hcM; m3 += tcM;
+        }
+        r2.total = round2(m2 / 60); r3.total = round2(m3 / 60);
+        rows.push(r1, r2, ...(HOURLY ? [] : [r3]));
+      }
+      return { title: `Bảng công theo mã ca ${PERIOD}`, columns, rows };
     }
 
     /* --- Vắng mặt / nghỉ phép — mẫu VangMatNghiPhep --- */
@@ -2029,4 +2082,5 @@ async function writeReportXlsx(res, { title, columns, rows, from, to, company, a
   PROG(100, 'Xong');
 }
 
+export { buildAny as buildReportData };   // cho test (dựng số liệu báo cáo không qua HTTP)
 export default r;
