@@ -4,7 +4,7 @@
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
 import { guardIncoming } from '../pin-guard.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd, askDraftNames } from '../device-sync.js';
 import { vnDateStr } from '../util.js';
 
 const r = Router();
@@ -109,6 +109,7 @@ function handleCData(req, res) {
       if (sn) db.prepare('UPDATE push_devices SET push_ver=? WHERE serial=?').run(queryParam(req, 'pushver', 'pushversion').slice(0, 20) || '-', sn);
       if (enabled() && isActive(sn)) {
         try { syncFillDevice(sn); } catch (e) { console.error('[device] fill lỗi:', e.message); } // xếp lệnh đồng bộ khi máy kết nối
+        try { askDraftNames(sn); } catch (e) { console.error('[device] hỏi tên NV nháp lỗi:', e.message); }   // NV còn tên tạm "NV <Số ID>"
         return res.type('text/plain').send(initInfo(sn));
       }
       if (enabled() && sn) return res.type('text/plain').send(pendingInfo(sn));   // chờ duyệt: chỉ gửi múi giờ
@@ -158,6 +159,8 @@ function ingestUserTables(sn, table, body, stamp, newOnly = false) {
           const oplogLines = lines.filter((l) => /^OPLOG\b/i.test(l));   // nhật ký thao tác trên máy
           // Đăng ký ngay trên máy (mốc đã có) — khác lúc máy gửi lại cả danh sách vì mốc về 0
           track.realtime = !['', '0'].includes(String(db.prepare('SELECT oper_stamp FROM push_devices WHERE serial=?').get(sn)?.oper_stamp ?? '').trim());
+          // Số ID có dòng người dùng (kèm tên) ngay trong khối này → mẫu đi trước không cần hỏi máy tên người đó
+          track.userPins = new Set(userLines.map((l) => ((/\bPIN=([^\t]*)/i.exec(l) || [])[1] || '').trim()).filter(Boolean));
           // dòng BIODATA (vân tay 10 / khuôn mặt) lưu đúng loại, không gộp vào vân tay ZKFinger 9 như dòng FP
           const bioLines = tmplLines.filter((l) => /^BIODATA\b/i.test(l)), fpLines = tmplLines.filter((l) => !/^BIODATA\b/i.test(l));
           if (fpLines.length) storeTemplates(sn, 'FP', fpLines.join('\n'), track);

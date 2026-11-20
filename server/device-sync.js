@@ -38,7 +38,8 @@ function uniqueValue(column, base) {
 // Tự tạo / cập nhật NV từ dữ liệu máy đẩy về (đăng ký vân tay hoặc USERINFO).
 // Trả về id NV (hoặc null nếu tắt auto-create và chưa có NV).
 // code: mã NV máy gửi kèm (máy Hik do nền tảng quản lý — Số ID 32 ký tự, mã thật VD TB034118); '' = như cũ.
-export function upsertEmployeeFromDevice(pin, name, force = false, code = '') {
+// opts.create === false: chỉ khớp / gán NV đã có, KHÔNG tạo NV nháp mới (mẫu sinh trắc không kèm tên — xem bioDraftRule).
+export function upsertEmployeeFromDevice(pin, name, force = false, code = '', opts = {}) {
   pin = String(pin || '').trim();
   if (!pin) return null;
   name = (name || '').trim();
@@ -80,8 +81,29 @@ export function upsertEmployeeFromDevice(pin, name, force = false, code = '') {
   }
 
   // Tự tạo NV nháp (force=true khi nhập từ USB — luôn tạo dù tắt auto-create)
+  if (opts.create === false) return null;
   if (!force && getSetting('device_autocreate', '1') !== '1') return null;
   return createDraftEmployee(pin, name, code);
+}
+// MẪU SINH TRẮC / ẢNH KHÔNG KÈM TÊN của Số ID chưa có NV — có tạo NV nháp không?
+// Lỗi micayseoul 20/11/2026: máy có Nhóm đồng bộ, vừa DUYỆT → bắt tay → phần mềm hỏi máy toàn bộ vân tay / khuôn mặt để đồng bộ
+// (syncFillDevice) → trước đây mỗi Số ID trên máy thành 1 NV nháp tên tạm "NV <Số ID>", phải bấm Tải NV mới có tên thật.
+// Trái quy tắc duyệt máy KHÔNG tự tải NV (Anh chốt 07/10/2026, v1.15.59). Giờ mẫu không kèm tên chỉ tạo NV khi:
+//  - vừa bấm "Tải nhân viên từ máy" (force — lệnh hỏi danh sách NV đi cùng, tên về ngay sau), hoặc
+//  - phần mềm vừa hỏi máy đúng người này vì họ quẹt mà chưa khớp NV (askUserFromDevice trong 24 giờ).
+// Đăng ký ngay trên máy (OPERLOG real-time) mà khối dữ liệu không kèm dòng người dùng → hỏi máy thông tin người đó: NV về với tên thật.
+// Còn lại chỉ lưu mẫu theo máy (vẫn đồng bộ máy ↔ máy như cũ); NV về khi họ quẹt hoặc khi bấm Tải NV.
+const askedPins = (serial) => new Set(db.prepare(`SELECT substr(content, 25) pin FROM push_device_commands
+  WHERE serial=? AND content LIKE 'DATA QUERY USERINFO PIN=%' AND created_at > datetime('now','-1 day')`).all(serial).map((r) => r.pin));
+function bioDraftRule(serial, force, track) {
+  let asked = null;
+  const later = new Set();
+  return {
+    create: (pin) => force || (asked ||= askedPins(serial)).has(pin),
+    // không tạo được NV (chưa được phép / tắt tự tạo): đăng ký real-time trên máy thì hỏi máy tên người đó
+    missed(pin) { if (track?.realtime && !track.userPins?.has(pin)) later.add(pin); },
+    finish() { for (const pin of later) askUserFromDevice(serial, pin); },
+  };
 }
 // Tạo NV nháp "từ máy" cho Số ID (mã NV / tài khoản tự sinh, mật khẩu mặc định) + gán lượt quẹt sẵn có của Số ID đó
 // realCode: mã NV máy gửi kèm (nếu có) dùng làm mã NV thay cho Số ID
@@ -213,6 +235,7 @@ export function storeTemplates(serial, table, rawBody, track = null) {
   const pins = new Set();
   const held = heldSet();
   const force = pullRequested(serial);
+  const draft = bioDraftRule(serial, force, track);
   const gone = deletedOn(serial), left = [], fresh = new Set();
   const prevTmp = track && db.prepare('SELECT tmp FROM device_bio_templates WHERE serial=? AND pin=? AND bio_type=? AND idx=?');
   const up = db.prepare(`INSERT INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)
@@ -239,10 +262,12 @@ export function storeTemplates(serial, table, rawBody, track = null) {
     try { up.run(serial, pin, bioType, idx, isNaN(valid) ? 1 : valid, duress, major, minor, tmp); } catch {}
     upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
     if (held.has(serial + '|' + pin)) continue;   // nghi trùng: giữ template theo máy, không tạo NV / không đồng bộ
-    upsertEmployeeFromDevice(pin, '', force);   // đăng ký vân tay-only vẫn tạo NV nháp
+    // mẫu không kèm tên: khớp NV đã có; NV mới chỉ tạo theo bioDraftRule (không còn NV tên tạm "NV <Số ID>" hàng loạt)
+    if (!upsertEmployeeFromDevice(pin, '', force, '', { create: draft.create(pin) })) draft.missed(pin);
     pins.add(pin);
     if (track && (!pt || (!track.newOnly && pt.tmp !== tmp))) track.changed.add(pin);
   }
+  draft.finish();
   for (const pin of fresh) gone.clear(pin);
   if (left.length) reDeleteLeftover(serial, left, fresh, gone);
   return pins;
@@ -372,6 +397,25 @@ export function askUserFromDevice(serial, pin) {
   if (recent) return;
   queueCmd(serial, content);
   queueCmd(serial, `DATA QUERY FINGERTMP PIN=${pin}`);
+}
+// NV nháp còn tên tạm "NV <Số ID>" mà Số ID có trên máy này (VD tạo từ mẫu vân tay khi máy nhóm đồng bộ vừa duyệt, trước bản sửa
+// lỗi micayseoul) → mỗi lần máy bắt tay hỏi máy tên thật của từng người (DATA QUERY USERINFO PIN=…): tối đa `max` người / lần,
+// mỗi người 1 lần / 24 giờ (máy không có tên thì không hỏi dồn). Máy trả tên → upsertEmployeeFromDevice thay tên tạm.
+export function askDraftNames(serial, max = 20) {
+  const rows = db.prepare(`SELECT e.device_pin pin FROM employees e
+    JOIN device_users_serial s ON s.serial=? AND s.pin=e.device_pin
+    WHERE e.from_device=1 AND e.active=1 AND e.device_pin<>'' AND e.full_name='NV ' || e.device_pin
+    ORDER BY e.id`).all(serial);
+  if (!rows.length) return 0;
+  const asked = askedPins(serial);
+  let n = 0;
+  for (const { pin } of rows) {
+    if (n >= max) break;
+    if (asked.has(pin) || /\s/.test(pin)) continue;
+    queueCmd(serial, `DATA QUERY USERINFO PIN=${pin}`);
+    n++;
+  }
+  return n;
 }
 // Mở cửa từ xa (máy kiểm soát cửa) — lệnh ADMS "AC_UNLOCK" (mục 12.7.2 Attendance PUSH Protocol),
 // máy kích relay mở khóa cửa; nextCommand bọc thành C:<id>:AC_UNLOCK. Máy phản hồi Return=0 nếu OK.
@@ -553,6 +597,7 @@ export function storeUserPhotos(serial, rawBody, track = null) {
   const held = heldSet();
   const prevPhoto = track && db.prepare('SELECT photo FROM device_user_photos WHERE pin=?');
   const gone = deletedOn(serial), left = [];
+  const draft = bioDraftRule(serial, pullRequested(serial), track);
   const up = db.prepare(`INSERT INTO device_user_photos(pin,kind,face_type,photo)
     VALUES(?,?,?,?)
     ON CONFLICT(pin) DO UPDATE SET kind=excluded.kind,face_type=excluded.face_type,photo=excluded.photo,updated_at=datetime('now')`);
@@ -574,10 +619,11 @@ export function storeUserPhotos(serial, rawBody, track = null) {
     const pp = prevPhoto ? prevPhoto.get(pin) : null;
     try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
     markPhotoOn(serial, pin);   // máy gửi ảnh lên = máy đang có ảnh này
-    upsertEmployeeFromDevice(pin, '');
+    if (!upsertEmployeeFromDevice(pin, '', false, '', { create: draft.create(pin) })) draft.missed(pin);
     pins.add(pin);
     if (track && (!pp || (!track.newOnly && pp.photo !== content))) track.changed.add(pin);
   }
+  draft.finish();
   if (left.length) reDeleteLeftover(serial, left, new Set(), gone);
   return pins;
 }
@@ -728,7 +774,7 @@ export function syncPinsToGroup(sourceSerial, pins) {
 export function syncFillDevice(serial, force = false) {
   const dev = db.prepare(`SELECT sync_group FROM push_devices WHERE serial=? AND ${ZK_TYPES}`).get(serial);
   if (!dev || !dev.sync_group) return;
-  // 1) kéo template hiện có trên máy này về server (học dữ liệu sẵn có)
+  // 1) kéo template hiện có trên máy này về server (học dữ liệu sẵn có) — chỉ để đồng bộ, KHÔNG tạo NV (bioDraftRule)
   queueCmd(serial, 'DATA QUERY FINGERTMP');
   queueCmd(serial, 'DATA QUERY BIODATA');
   // 2) đẩy template của nhóm mà máy này CHƯA có (force → đẩy hết)

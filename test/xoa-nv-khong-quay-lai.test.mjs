@@ -207,7 +207,8 @@ test('máy TCP/IP: dữ liệu sót xếp vào danh sách xoá chờ, không g�
 test('máy không có ghi nhớ nào: đường nhận dữ liệu không đụng bảng hash', () => {
   assert.equal(db.prepare('SELECT COUNT(*) c FROM device_deleted_pins').get().c, 0);
   post('CN1', 'FINGERTMP', `FP PIN=99\tFID=0\tSize=200\tValid=1\tTMP=${NEW('99')}`);
-  assert.ok(emps().includes('99'));
+  // mẫu được nhận như thường (mẫu không kèm tên không còn tự tạo NV tên tạm — test/duyet-may-khong-tao-nv-ten-tam.test.mjs)
+  assert.ok(db.prepare("SELECT 1 FROM device_bio_templates WHERE serial='CN1' AND pin='99'").get());
 });
 
 test.after?.(() => { for (const ext of ['', '-wal', '-shm']) { try { rmSync(DBP + ext); } catch {} } });
