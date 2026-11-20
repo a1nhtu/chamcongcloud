@@ -34,6 +34,8 @@ before(async () => {
   leave(E.a, '2026-11-03');           // nghỉ cả ngày
   leave(E.a, '2026-11-04', 'chieu');  // nghỉ chiều
   db.prepare("INSERT INTO public_holidays(holiday_date, name, kind) VALUES ('2026-11-24', 'Nghỉ lễ thử', 'le')").run();
+  // T6 06/11 được phân là ngày nghỉ (đổi ngày nghỉ tuần sang ngày thường)
+  db.prepare("INSERT INTO daily_shift_assignments(employee_id, work_date, shift_id, is_off) VALUES (?, '2026-11-06', NULL, 1)").run(E.a);
 
   const { registerAttendanceRoutes } = await import('../server/routes/admin/attendance.js');
   const routes = {};
@@ -87,6 +89,7 @@ test('Bảng công theo mã ca — TẮT: 3 dòng, mã ca / ký hiệu nghỉ, C
   assert.equal(k['d2026-11-01'], '');      // nghỉ CN để trống
   assert.equal(k['d2026-11-24'], 'L');     // lễ
   assert.equal(k['d2026-11-05'], 'V');     // ngày phải làm, đã qua, không chấm
+  assert.equal(k['d2026-11-06'], '');      // ngày thường được phân nghỉ: không tính vắng
   assert.deepEqual([hc.total, tc.total], [12, 11.5]);
   assert.equal(rowsOf(rep, E.nv)[0]['d2026-11-12'], '');
 });
@@ -102,6 +105,7 @@ test('Bảng công theo mã ca — BẬT: HCP, HCk (giờ trong ca / ngoài ca),
     assert.deepEqual([k['d2026-11-08'], hc['d2026-11-08'], tc['d2026-11-08']], ['HCk', 6.5, 2]);
     assert.equal(k['d2026-11-01'], 'L');
     assert.equal(k['d2026-11-24'], 'NL');
+    assert.equal(k['d2026-11-06'], 'L');   // đổi ngày nghỉ tuần sang T6 → L
     assert.deepEqual([hc.total, tc.total], [18.5, 5]);   // tổng giờ không đổi: 12 + 11,5 = 18,5 + 5
     assert.equal(rowsOf(rep, E.nv)[0]['d2026-11-12'], 'NV');
   } finally { setSetting('leave_sym_shift', '0'); }

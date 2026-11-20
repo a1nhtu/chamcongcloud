@@ -334,7 +334,9 @@ function loadRange(from, to, filter) {
   const hasTiers = [...shiftsById.values()].some((x) => (x.ot_tier1_min || 0) > 0);
   // paintWeekend: CHỈ để tô màu — luôn tô thứ 7 + chủ nhật (Anh chốt 04/11/2026: mọi báo cáo bôi màu T7, CN; T7 nhạt hơn CN), cộng
   // ngày cuối tuần khai ở Cài đặt → 'T7' | 'CN' | 'X' (ngày khác, tô như CN) | false. Tính công dùng isWeekendDay(…, weekend) như cũ.
-  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, paintWeekend: (d) => { const w = vnWeekday(d); return w === 6 ? 'T7' : w === 7 ? 'CN' : isWeekendDay(d, weekend) ? 'X' : false; }, virt, shiftsById, hourly: formHourly(filter) };
+  // Ngày được phân là NGÀY NGHỈ (Phân ca theo ngày › Nghỉ) — VD đổi ngày nghỉ tuần sang ngày thường
+  const isOffDay = (empId, date) => !!assigns.get(empId + '|' + date)?.is_off;
+  return { missShift: multiMissingFn(from, to), from, to, weekend, employees, cell, holidays, compOff, leaveDays, leaveRows, leaveKinds, hasTiers, isScheduled, isOffDay, paintWeekend: (d) => { const w = vnWeekday(d); return w === 6 ? 'T7' : w === 7 ? 'CN' : isWeekendDay(d, weekend) ? 'X' : false; }, virt, shiftsById, hourly: formHourly(filter) };
 }
 
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
@@ -859,6 +861,7 @@ function buildReportRaw(type, from, to, filter) {
           else if (e.start_date && d < e.start_date) sym = '';
           else if (ctx.holidays.has(d)) sym = MAY ? 'NL' : 'L';
           else if (isWeekendDay(d, ctx.weekend) && !ctx.isScheduled(e.id, d)) sym = MAY ? 'L' : '';
+          else if (MAY && ctx.isOffDay(e.id, d)) sym = 'L';   // ngày thường được phân nghỉ (đổi ngày nghỉ tuần) → L như nghỉ tuần
           else if (d < today && ctx.isScheduled(e.id, d)) sym = 'V';
           r1['d' + d] = sym; r2['d' + d] = h(hcM); r3['d' + d] = h(tcM);
           m2 += hcM; m3 += tcM;
