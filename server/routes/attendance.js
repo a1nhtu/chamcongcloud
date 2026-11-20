@@ -8,7 +8,7 @@ import { vnDateStr, nowIso } from '../util.js';
 import { computeLate, computeCheckout, ruleWindow, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
 import { otRoundingFrom, payrollCtx, computeDayMetrics, standardMinutesFrom } from '../day-metrics.js';
-import { otRegCapper } from '../ot-cap.js';
+import { otRegCapper, otLuncher } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
 import { dayRules } from '../swap.js';
 import { recordPhonePunch } from '../device-sync.js';
@@ -356,6 +356,9 @@ r.post('/check-out', (req, res) => {
   // ĐĂNG KÝ LÀM THÊM: làm quá số phút đăng ký thì chỉ tính theo đăng ký (giữ số thực tế ở ot_raw_min)
   const otRaw = calc.ot_min || 0;
   if (otRaw) calc = { ...calc, ot_min: otRegCapper(db, getSetting)(req.user.id, wdate, otRaw) };
+  // TĂNG CA TRƯA THEO GIỜ ĐĂNG KÝ (công tắc ot_lunch_reg; tắt → null, như cũ): cộng phần có mặt trong khung giờ trưa đã đăng ký
+  const lunchFn = shift ? otLuncher(db, getSetting) : null;
+  if (lunchFn) { const lm = lunchFn(req.user.id, wdate, shift, row.check_in_at, at, calc.day_status); if (lm) calc = { ...calc, ot_min: (calc.ot_min || 0) + lm }; }
   // Dò lại ca có thể đổi ca so với lúc vào → cập nhật luôn shift_id + tính lại đi muộn theo ca cuối
   const finalShiftId = shift ? shift.id : row.shift_id;
   const finalSource = shift ? rs.source : (row.shift_source || '');

@@ -716,6 +716,36 @@ function migrateColumns() {
       PRIMARY KEY (employee_id, work_date)
     );
     CREATE INDEX IF NOT EXISTS idx_otreg_date ON ot_registrations(work_date);`);
+  // TĂNG CA TRƯA THEO GIỜ ĐĂNG KÝ (công tắc ot_lunch_reg, mặc định tắt): mỗi NV mỗi ngày 1 khung giờ 'HH:MM' → 'HH:MM'
+  db.exec(`CREATE TABLE IF NOT EXISTS ot_lunch_reg (
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      work_date   TEXT NOT NULL,
+      from_hm     TEXT NOT NULL,
+      to_hm       TEXT NOT NULL,
+      updated_by  TEXT NOT NULL DEFAULT '',
+      updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (employee_id, work_date)
+    );
+    CREATE INDEX IF NOT EXISTS idx_otlunch_date ON ot_lunch_reg(work_date);`);
+  // ĐƠN ĐĂNG KÝ LÀM THÊM do NV tự gửi trên app (công tắc ot_self_reg, mặc định tắt) → quản lý duyệt mới ghi vào đăng ký
+  //   kind 'ot' = làm thêm ngoài ca (duyệt: CỘNG số phút vào ot_registrations) · 'lunch' = tăng ca trưa (duyệt: ghi khung giờ vào ot_lunch_reg)
+  db.exec(`CREATE TABLE IF NOT EXISTS ot_requests (
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      work_date   TEXT NOT NULL,
+      kind        TEXT NOT NULL DEFAULT 'ot',
+      from_hm     TEXT NOT NULL,
+      to_hm       TEXT NOT NULL,
+      minutes     INTEGER NOT NULL,
+      reason      TEXT NOT NULL DEFAULT '',
+      status      TEXT NOT NULL DEFAULT 'pending',
+      reviewed_by TEXT NOT NULL DEFAULT '',
+      reviewed_at TEXT,
+      review_note TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_otreq_emp ON ot_requests(employee_id, work_date);
+    CREATE INDEX IF NOT EXISTS idx_otreq_status ON ot_requests(status);`);
   // Ngày có LƯỢT CHẤM được thêm / sửa / xoá bằng tay (menu Sửa giờ chấm công) → hiện dấu (*) như giờ sửa tay
   db.exec(`CREATE TABLE IF NOT EXISTS att_edit_marks (
       employee_id INTEGER NOT NULL, work_date TEXT NOT NULL, at TEXT NOT NULL DEFAULT (datetime('now')),

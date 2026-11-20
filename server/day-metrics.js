@@ -3,7 +3,7 @@
 // KHÔNG đổi công thức: vẫn dùng computeLate / computeCheckout / noShiftUnit như cũ.
 import { computeLate, computeCheckout, computeNoOut, computeSinglePunch, singlePunchFull, presenceFull, isWeekendDay, noShiftUnit, sumPairsMinutes, weekendToOt, roundOtParts, halfLeavePriv, breakOtAvail } from './attendance-calc.js';
 import { privilegeLookup, halfLeaveLookup } from './privilege.js';
-import { otRegCapper } from './ot-cap.js';
+import { otRegCapper, otLuncher } from './ot-cap.js';
 import { dayRules } from './swap.js';
 
 /**
@@ -66,6 +66,7 @@ export function payrollCtx(getSetting, db) {
     })(),
     isHoliday: rules.isHoliday, isCompOff: rules.isCompOff, isSwapWork: rules.isSwapWork,
     otReg: otRegCapper(db, getSetting),   // ĐĂNG KÝ LÀM THÊM: (NV, ngày, phút thực tế) → phút được tính
+    otLunch: otLuncher(db, getSetting),   // TĂNG CA TRƯA THEO GIỜ ĐĂNG KÝ (null = công tắc tắt → như cũ)
   };
 }
 
@@ -149,8 +150,14 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
   delete c.ot_parts;
   const ot_raw = c.ot_min || 0;
   // tăng ca trưa (ca bật break_ot): giờ nghỉ có mặt chỉ bù phần đăng ký còn thiếu — ot_raw giữ nguyên (soát "làm thêm quá đăng ký" không đổi)
-  const brkOt = shift && inIso && outIso && c.day_status === 'lam_viec' ? breakOtAvail(shift, workDate, inIso, outIso) : 0;
-  if ((ot_raw || brkOt) && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw, brkOt) };
+  if (ctx.otLunch) {
+    // công tắc "Đăng ký tăng ca trưa theo giờ" BẬT: tăng ca trưa chỉ theo khung giờ đã đăng ký, cộng thêm vào phần ngoài ca đã chặn theo đăng ký
+    const lunch = opts.empId ? ctx.otLunch(opts.empId, workDate, shift, inIso, outIso, c.day_status) : 0;
+    if ((ot_raw || lunch) && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw, 0) + lunch };
+  } else {
+    const brkOt = shift && inIso && outIso && c.day_status === 'lam_viec' ? breakOtAvail(shift, workDate, inIso, outIso) : 0;
+    if ((ot_raw || brkOt) && opts.empId && ctx.otReg) c = { ...c, ot_min: ctx.otReg(opts.empId, workDate, ot_raw, brkOt) };
+  }
   // ngày nghỉ hằng tuần đi làm, cả ngày đã thành tăng ca: vào muộn / về sớm chỉ làm ít giờ tăng ca hơn, không phải lỗi đi trễ (công tắc, mặc định tắt)
   if (ctx.weekendNoLate && c !== beforeWk && c.ot_type === 'cuoi_tuan') return { shiftId: shift?.id ?? null, late: 0, ...c, early_min: 0, ot_raw };
   return { shiftId: shift?.id ?? null, late, ...c, ot_raw };

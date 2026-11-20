@@ -22,6 +22,7 @@ import adminRoutes from './routes/admin.js';
 import reportRoutes from './routes/reports.js';
 import licenseRoutes from './routes/license.js';
 import shiftRequestRoutes from './routes/shift-requests.js';
+import otRequestRoutes from './routes/ot-requests.js';
 import mealRoutes from './routes/meal.js';
 import payRoutes from './routes/pay.js';
 import { mealStaticGate } from './meal.js';
@@ -118,6 +119,7 @@ app.use('/api/reports', offload([/^\/data$/, /^\/export\.xlsx$/, /^\/attendance$
 app.use('/api/admin', adminRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/shift-requests', shiftRequestRoutes);
+app.use('/api/ot-requests', otRequestRoutes);   // NV tự đăng ký làm thêm, quản lý duyệt — công tắc ot_self_reg (mặc định tắt)
 app.use('/api/meal', mealRoutes);   // quản lý suất ăn — công tắc meal_enabled (tắt: 403)
 app.use('/api/pay', payRoutes);     // phiếu lương của nhân viên trên app — công tắc pay_pro + pay_app_slip (tắt: 403)
 app.get('/api/config', (req, res) => res.json({

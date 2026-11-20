@@ -551,8 +551,24 @@ function monthTable(rows) {
 }
 
 /* ---------------- Tab ĐƠN TỪ ---------------- */
+// Công ty bật "Nhân viên tự đăng ký làm thêm trên app" (ot_self_reg) → đầu tab có 2 nút: Đơn nghỉ / Đăng ký làm thêm. Tắt → y như cũ.
+let _dtView = 'leave';
 async function renderDontu() {
   const c = $('#content'); c.innerHTML = '';
+  let otInfo = null;
+  try { otInfo = await api('/ot-requests/info'); } catch {}
+  if (currentTab !== 'dontu') return;   // đã chuyển tab trong lúc chờ
+  c.innerHTML = '';
+  if (otInfo && otInfo.enabled) {
+    const seg = el('div', { class: 'bc-seg', style: 'margin-bottom:10px' });
+    for (const [k, label] of [['leave', '📝 Đơn nghỉ'], ['ot', '⏰ Đăng ký làm thêm']]) {
+      const b = el('button', { type: 'button', class: k === _dtView ? 'on' : '' }, label);
+      b.addEventListener('click', () => { _dtView = k; renderDontu(); });
+      seg.append(b);
+    }
+    c.append(seg);
+    if (_dtView === 'ot') return renderOtReq(c, otInfo);
+  }
   const form = el('div', { class: 'card' });
   form.innerHTML = `
     <div class="sec-title" style="margin-top:0">Gửi đơn</div>
@@ -639,6 +655,75 @@ async function loadMyLeaves() {
   } catch (e) { showErr(list, e); }
 }
 const fmtD = (d) => d.slice(8) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4);
+
+// ĐĂNG KÝ LÀM THÊM: NV gửi ngày + từ giờ → đến giờ (+ lý do), quản lý duyệt mới tính. Tăng ca trưa chỉ có khi công ty bật "tăng ca trưa theo giờ".
+function renderOtReq(c, info) {
+  const today = new Date().toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const date = el('input', { type: 'date', value: today, min: info.minDate || '', max: info.maxDate || '' });
+  const kind = el('select', {}, el('option', { value: 'ot' }, 'Làm thêm (trước / sau ca)'));
+  if (info.lunch) kind.append(el('option', { value: 'lunch' }, '☀ Tăng ca trưa (làm trong giờ nghỉ trưa)'));
+  const from = el('input', { type: 'time' }), to = el('input', { type: 'time' });
+  const reason = el('textarea', { rows: 2, placeholder: 'Ghi rõ việc làm thêm để quản lý duyệt nhanh' });
+  const hint = el('div', { style: 'font-size:13px;color:var(--muted);margin-top:6px' });
+  let sug = info.suggest || {};
+  // điền sẵn giờ theo ca của ngày: làm thêm bắt đầu từ giờ hết ca; tăng ca trưa = giờ nghỉ giữa ca
+  const fill = () => {
+    if (kind.value === 'lunch') { from.value = sug.lunch_from || ''; to.value = sug.lunch_to || ''; }
+    else { from.value = sug.ot_from || ''; to.value = ''; }
+    hint.textContent = sug.shift ? `Ca ngày này: ${sug.shift}` + (kind.value === 'lunch' && !sug.lunch_from ? ' — ca chưa khai giờ nghỉ trưa, hỏi quản lý trước khi gửi' : '') : '';
+  };
+  const reSuggest = async () => { try { sug = (await api('/ot-requests/info?date=' + date.value)).suggest || {}; } catch { sug = {}; } fill(); };
+  kind.addEventListener('change', fill);
+  date.addEventListener('change', reSuggest);
+  fill();
+  const send = el('button', { class: 'btn block' }, 'Gửi đăng ký');
+  send.addEventListener('click', async () => {
+    if (!date.value) return toast('Chọn ngày', 'err');
+    if (!from.value || !to.value) return toast('Nhập giờ bắt đầu và giờ kết thúc', 'err');
+    send.disabled = true;
+    try {
+      await api('/ot-requests', { method: 'POST', body: { work_date: date.value, kind: kind.value, from_hm: from.value, to_hm: to.value, reason: reason.value } });
+      toast('Đã gửi, chờ quản lý duyệt', 'ok'); reason.value = ''; loadMyOtReq();
+    } catch (e) { toast(e.message, 'err'); }
+    finally { send.disabled = false; }
+  });
+  c.append(el('div', { class: 'card' },
+    el('div', { class: 'sec-title', style: 'margin-top:0' }, 'Đăng ký làm thêm'),
+    el('div', { class: 'status-banner', style: 'background:#eef2ff;color:#3730a3' }, 'Gửi giờ làm thêm của bạn, quản lý duyệt rồi mới tính vào công. Làm quá số giờ đã đăng ký thì chỉ tính theo đăng ký.'),
+    el('div', { class: 'form-grid' },
+      el('div', {}, el('label', {}, 'Ngày làm thêm'), date),
+      el('div', {}, el('label', {}, 'Loại'), kind, hint),
+      el('div', { style: 'display:flex;gap:10px' },
+        el('div', { style: 'flex:1' }, el('label', {}, 'Từ giờ'), from),
+        el('div', { style: 'flex:1' }, el('label', {}, 'Đến giờ'), to)),
+      el('div', {}, el('label', {}, 'Lý do'), reason),
+      send)));
+  c.append(el('div', { class: 'sec-title' }, 'Đăng ký làm thêm của tôi'));
+  c.append(el('div', { id: 'ot-list' }, el('div', { class: 'empty' }, 'Đang tải…')));
+  loadMyOtReq();
+}
+
+async function loadMyOtReq() {
+  const list = $('#ot-list'); if (!list) return;
+  try {
+    const { rows } = await api('/ot-requests/mine');
+    if (!rows.length) { list.innerHTML = '<div class="empty">Chưa có đăng ký nào.</div>'; return; }
+    list.innerHTML = '';
+    for (const r of rows) {
+      const st = { pending: ['warn', 'Chờ duyệt'], approved: ['ok', 'Đã duyệt'], rejected: ['bad', 'Từ chối'] }[r.status] || ['muted', r.status];
+      const item = el('div', { class: 'leave-item' },
+        el('div', { class: 'top' }, el('b', {}, fmtD(r.work_date)), el('span', { class: 'pill ' + st[0] }, st[1])),
+        el('div', { class: 'meta' }, `${r.kind === 'lunch' ? '☀ Tăng ca trưa' : 'Làm thêm'} ${r.from_hm}–${r.to_hm} (${humanMinutes(r.minutes)})${r.reason ? ' · ' + r.reason : ''}`));
+      if (r.status === 'pending') {
+        const del = el('button', { class: 'btn ghost sm', style: 'margin-top:8px' }, 'Huỷ đăng ký');
+        del.addEventListener('click', async () => { try { await api('/ot-requests/' + r.id, { method: 'DELETE' }); loadMyOtReq(); } catch (e) { toast(e.message, 'err'); } });
+        item.append(del);
+      }
+      if (r.review_note) item.append(el('div', { class: 'meta' }, 'Ghi chú: ' + r.review_note));
+      list.append(item);
+    }
+  } catch (e) { showErr(list, e); }
+}
 
 /* ---------------- Tab BẢNG CÔNG ---------------- */
 const CAL_ST = {

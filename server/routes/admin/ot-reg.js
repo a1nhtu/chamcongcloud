@@ -2,8 +2,9 @@
 // Quy tắc chặn tăng ca theo đăng ký: xem server/ot-reg.js. Đổi đăng ký → áp ngay lên dòng công đã có (không cần "Tính lại").
 import ExcelJS from 'exceljs';
 import { db, getSetting, setSetting, adminAttWhere, deptWithChildren, splitDeptList } from '../../db.js';
-import { syncOtReg, otRegRequired } from '../../ot-reg.js';
-import { vnDateStr, sendCaughtError } from '../../util.js';
+import { syncOtReg, otRegRequired, otLunchOn, otSelfOn, normHm, hmSpan, approveOtRequest, OT_REQ_KIND } from '../../ot-reg.js';
+import { vnDateStr, sendCaughtError, nowIso } from '../../util.js';
+import { notifyEmployee } from '../../push.js';
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const DAY = 86400000;
@@ -94,20 +95,83 @@ export function registerOtRegRoutes(r, { need }) {
     const cells = db.prepare('SELECT employee_id, work_date, minutes FROM ot_registrations WHERE work_date>=? AND work_date<=?').all(from, to).map((c) => [c.employee_id, c.work_date, c.minutes]);
     const actual = db.prepare(`SELECT employee_id, work_date, SUM(COALESCE(ot_raw_min, ot_min, 0)) raw FROM attendance
       WHERE work_date>=? AND work_date<=? AND (ot_min>0 OR ot_raw_min>0) GROUP BY employee_id, work_date`).all(from, to).map((a) => [a.employee_id, a.work_date, a.raw]);
-    res.json({ required: otRegRequired(), emps, cells, actual });
+    // tăng ca trưa theo giờ: khung đăng ký + số phút tăng ca trưa đã tính (= tăng ca được tính − phần ngoài ca được tính) — chỉ khi công tắc bật
+    const lunchOn = otLunchOn();
+    const lunch = lunchOn ? db.prepare('SELECT employee_id, work_date, from_hm, to_hm FROM ot_lunch_reg WHERE work_date>=? AND work_date<=?').all(from, to)
+      .map((l) => [l.employee_id, l.work_date, l.from_hm, l.to_hm]) : [];
+    let pending = 0;
+    try { pending = db.prepare("SELECT COUNT(*) c FROM ot_requests WHERE status='pending'").get().c; } catch { /* CSDL cũ chưa có bảng */ }
+    res.json({ required: otRegRequired(), lunchOn, selfOn: otSelfOn(), pending, emps, cells, actual, lunch });
   });
 
-  // "Phải đăng ký mới tính tăng ca" (ngày không đăng ký → tăng ca = 0). Đổi xong áp lại cho TOÀN BỘ dòng công.
+  // Công tắc của trang (cần quyền Cài đặt) — chỉ đổi khoá có gửi lên:
+  //  · required: "Phải đăng ký mới tính tăng ca" (ngày không đăng ký → tăng ca = 0)
+  //  · lunch:    "Đăng ký tăng ca trưa theo giờ" (mặc định TẮT)
+  //  · self:     "Nhân viên tự đăng ký làm thêm trên app, quản lý duyệt" (mặc định TẮT — không đổi công)
+  // Đổi required / lunch xong áp lại cho TOÀN BỘ dòng công.
   r.put('/ot-reg/settings', need('settings'), (req, res) => {
-    const on = req.body && (req.body.required === true || req.body.required === '1' || req.body.required === 1);
-    if (on === otRegRequired()) return res.json({ ok: true, required: on, changed: 0 });
+    const b = req.body || {};
+    const bool = (v) => v === true || v === '1' || v === 1;
+    const want = {};
+    if ('required' in b) want.ot_reg_required = bool(b.required);
+    if ('lunch' in b) want.ot_lunch_reg = bool(b.lunch);
+    if ('self' in b) want.ot_self_reg = bool(b.self);
+    const diff = Object.entries(want).filter(([k, on]) => (getSetting(k, '0') === '1') !== on);
+    const out = () => ({ ok: true, required: otRegRequired(), lunch: otLunchOn(), self: otSelfOn() });
+    if (!diff.length) return res.json({ ...out(), changed: 0 });
     db.exec('BEGIN');
     try {
-      setSetting('ot_reg_required', on ? '1' : '0');
-      const changed = syncOtReg(null, '0000-01-01', '9999-12-31');
+      for (const [k, on] of diff) setSetting(k, on ? '1' : '0');
+      const changed = diff.some(([k]) => k !== 'ot_self_reg') ? syncOtReg(null, '0000-01-01', '9999-12-31') : 0;
       db.exec('COMMIT');
-      res.json({ ok: true, required: on, changed });
+      res.json({ ...out(), changed });
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'PUT /admin/ot-reg/settings', e); }
+  });
+
+  // ---------- ĐƠN NV TỰ ĐĂNG KÝ (duyệt) ----------
+  // ?status=pending (mặc định) | done (đã duyệt / từ chối, 60 ngày gần nhất theo ngày làm)
+  r.get('/ot-reg/requests', need('attendance_edit'), (req, res) => {
+    const done = req.query.status === 'done';
+    const rows = db.prepare(`SELECT q.*, e.code, e.full_name, e.department, g.minutes reg, l.from_hm lunch_from, l.to_hm lunch_to
+      FROM ot_requests q JOIN employees e ON e.id=q.employee_id
+        LEFT JOIN ot_registrations g ON g.employee_id=q.employee_id AND g.work_date=q.work_date
+        LEFT JOIN ot_lunch_reg l ON l.employee_id=q.employee_id AND l.work_date=q.work_date
+      WHERE ${done ? "q.status<>'pending' AND q.work_date>=?" : "q.status='pending' AND q.work_date>=?"}
+      ORDER BY ${done ? 'q.reviewed_at DESC' : 'q.work_date, e.department, e.code, q.from_hm'} LIMIT 3000`)
+      .all(done ? addDays(vnDateStr(), -60) : '0000-01-01');
+    res.json({ rows, kinds: OT_REQ_KIND, lunchOn: otLunchOn() });
+  });
+  // Duyệt / từ chối nhiều đơn 1 lần: { ids, action: 'approve' | 'reject', note }. Chỉ xử lý đơn CÒN CHỜ (người khác vừa xử lý → bỏ qua).
+  r.post('/ot-reg/requests/review', need('attendance_edit'), (req, res) => {
+    const b = req.body || {};
+    if (!['approve', 'reject'].includes(b.action)) return res.status(400).json({ error: 'Hành động không hợp lệ' });
+    const ids = [...new Set((Array.isArray(b.ids) ? b.ids : []).map(Number).filter(Boolean))];
+    if (!ids.length) return res.status(400).json({ error: 'Chọn ít nhất 1 đơn' });
+    if (ids.length > 5000) return res.status(400).json({ error: 'Tối đa 5.000 đơn một lần' });
+    const by = req.user.full_name || req.user.username || '';
+    const note = String(b.note || '').trim().slice(0, 300);
+    const get = db.prepare('SELECT * FROM ot_requests WHERE id=?');
+    const set = db.prepare("UPDATE ot_requests SET status=?, reviewed_by=?, reviewed_at=?, review_note=? WHERE id=? AND status='pending'");
+    const done = []; let skipped = 0, changed = 0;
+    db.exec('BEGIN');
+    try {
+      for (const id of ids) {
+        const row = get.get(id);
+        if (!row || row.status !== 'pending') { skipped++; continue; }
+        set.run(b.action === 'approve' ? 'approved' : 'rejected', by, nowIso(), note, id);
+        if (b.action === 'approve') changed += approveOtRequest(row, by);
+        done.push(row);
+      }
+      db.exec('COMMIT');
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/ot-reg/requests/review', e); }
+    res.json({ ok: true, done: done.length, skipped, changed });
+    // báo kết quả cho NV (không chờ, lỗi gửi bỏ qua)
+    const ok = b.action === 'approve';
+    for (const q of done) {
+      const d = q.work_date.slice(8) + '/' + q.work_date.slice(5, 7);
+      notifyEmployee(q.employee_id, { title: ok ? '✅ Đơn làm thêm đã được duyệt' : '❌ Đơn làm thêm bị từ chối',
+        body: `${OT_REQ_KIND[q.kind] || 'Làm thêm'} ngày ${d}: ${q.from_hm}–${q.to_hm}` + (note ? ` · ${note}` : ''), url: '/', tag: 'otreq-' + q.id }).catch(() => {});
+    }
   });
 
   // Ghi 1 loạt ô rồi áp lại lên dòng công các NV-ngày đó
@@ -141,11 +205,20 @@ export function registerOtRegRoutes(r, { need }) {
   });
 
   // Áp nhanh: nhiều NV × khoảng ngày × 1 số phút (rỗng = xoá đăng ký). skip_sun / skip_sat: bỏ qua chủ nhật / thứ 7.
+  // kind 'lunch' (công tắc trưa theo giờ bật): áp KHUNG GIỜ tăng ca trưa from_hm → to_hm (cả 2 trống = xoá đăng ký trưa).
   r.post('/ot-reg/apply', need('attendance_edit'), (req, res) => {
     const b = req.body || {};
     const ids = [...new Set((b.employee_ids || []).map(Number).filter(Boolean))];
     if (!ids.length) return res.status(400).json({ error: 'Chọn ít nhất 1 nhân viên' });
-    const m = minutesOf(b.minutes);
+    const lunch = b.kind === 'lunch';
+    let lf = '', lt = '';
+    if (lunch) {
+      if (!otLunchOn()) return res.status(400).json({ error: 'Chưa bật "Đăng ký tăng ca trưa theo giờ"' });
+      lf = normHm(b.from_hm); lt = normHm(b.to_hm);
+      if (lf === null || lt === null || !lf !== !lt) return res.status(400).json({ error: 'Nhập giờ tăng ca trưa dạng 11:30 (cả 2 ô trống = xoá đăng ký trưa)' });
+      if (lf && !hmSpan(lf, lt)) return res.status(400).json({ error: 'Giờ kết thúc phải khác giờ bắt đầu' });
+    }
+    const m = lunch ? 0 : minutesOf(b.minutes);
     if (m === undefined) return res.status(400).json({ error: 'Số phút phải từ 0 đến 1440 (để trống = xoá đăng ký)' });
     if (!ISO.test(b.from || '') || !ISO.test(b.to || '') || b.to < b.from) return res.status(400).json({ error: 'Khoảng ngày không hợp lệ' });
     if (spanDays(b.from, b.to) > 366) return res.status(400).json({ error: 'Tối đa 1 năm một lần' });
@@ -158,10 +231,22 @@ export function registerOtRegRoutes(r, { need }) {
     if (ids.length * days.length > 1200000) return res.status(400).json({ error: 'Quá nhiều ô một lần — chia nhỏ khoảng ngày hoặc số nhân viên' });
     const empOk = new Set(db.prepare('SELECT id FROM employees').all().map((e) => e.id));
     const list = []; for (const id of ids) if (empOk.has(id)) for (const d of days) list.push([id, d, m]);
+    const by = req.user.full_name || req.user.username || '';
     db.exec('BEGIN');
-    try { const changed = save(list, req.user.full_name || req.user.username || ''); db.exec('COMMIT'); res.json({ ok: true, cells: list.length, people: ids.length, days: days.length, changed }); }
-    catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/ot-reg/apply', e); }
+    try {
+      const changed = lunch ? saveLunch(list, lf, lt, by) : save(list, by);
+      db.exec('COMMIT'); res.json({ ok: true, cells: list.length, people: ids.length, days: days.length, changed });
+    } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/ot-reg/apply', e); }
   });
+  // ghi / xoá khung giờ tăng ca trưa cho loạt NV-ngày rồi áp lại lên dòng công
+  const saveLunch = (list, from, to, by) => {
+    const up = db.prepare(`INSERT INTO ot_lunch_reg(employee_id, work_date, from_hm, to_hm, updated_by, updated_at) VALUES (?,?,?,?,?,datetime('now'))
+      ON CONFLICT(employee_id, work_date) DO UPDATE SET from_hm=excluded.from_hm, to_hm=excluded.to_hm, updated_by=excluded.updated_by, updated_at=excluded.updated_at`);
+    const del = db.prepare('DELETE FROM ot_lunch_reg WHERE employee_id=? AND work_date=?');
+    const ids = new Set(); let lo = '9999-12-31', hi = '0000-01-01';
+    for (const [id, d] of list) { if (from) up.run(id, d, from, to, by); else del.run(id, d); ids.add(id); if (d < lo) lo = d; if (d > hi) hi = d; }
+    return list.length ? syncOtReg([...ids], lo, hi) : 0;
+  };
 
   // ---------- XUẤT MẪU / NHẬP EXCEL ----------
   // Xuất file mẫu: mỗi dòng 1 NV, mỗi cột 1 ngày trong [from, to] (tối đa 62 ngày), ô = số phút đã đăng ký (trống = chưa đăng ký).

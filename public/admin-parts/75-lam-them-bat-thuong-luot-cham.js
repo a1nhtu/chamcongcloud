@@ -2,7 +2,80 @@
  * Trái: cây phòng ban · Phải: lưới NV × ngày, mỗi ô = số phút ĐĂNG KÝ làm thêm (số nhỏ bên cạnh = làm thêm THỰC TẾ).
  * Làm quá đăng ký → chỉ tính theo đăng ký; làm thiếu → tính thực tế. Lưu xong áp ngay vào công, không cần "Tính lại".
  * Sửa: bấm ô gõ số (Enter lưu, để trống = xoá đăng ký) · dán cả khối số copy từ Excel · áp nhanh nhiều NV × nhiều ngày. */
-const _or = { dept: '', q: '', from: null, to: null, picked: new Set(), bulk: null };
+const _or = { dept: '', q: '', from: null, to: null, picked: new Set(), bulk: null, reqView: 'pending' };
+
+/* Khung "📥 Đơn nhân viên gửi" (công tắc "Nhân viên tự đăng ký làm thêm trên app"): duyệt / từ chối từng đơn hoặc nhiều đơn đã tích.
+ * Duyệt: làm thêm → CỘNG số phút vào đăng ký của ngày; tăng ca trưa → ghi khung giờ của ngày. Áp ngay vào công (máy chủ). */
+function otReqPanel(pending, onDone) {
+  const box = el('div', {}, loading());
+  const picked = new Set();
+  const tabP = el('button', { class: 'btn sm' + (_or.reqView === 'pending' ? '' : ' ghost') }, `Chờ duyệt (${pending.toLocaleString('vi')})`);
+  const tabD = el('button', { class: 'btn sm' + (_or.reqView === 'done' ? '' : ' ghost') }, 'Đã xử lý (60 ngày)');
+  const note = el('input', { placeholder: 'Ghi chú gửi NV (không bắt buộc)', style: 'margin:0;width:220px' });
+  const bOk = el('button', { class: 'btn sm' }, '✓ Duyệt đơn đã tích'), bNo = el('button', { class: 'btn ghost sm' }, '✕ Từ chối đơn đã tích');
+  const review = async (ids, action) => {
+    if (!ids.length) return toast('Tích chọn đơn trước', 'err');
+    if (!confirm(`${action === 'approve' ? 'DUYỆT' : 'TỪ CHỐI'} ${ids.length} đơn?` + (action === 'approve' ? '\nLàm thêm: cộng số phút vào đăng ký của ngày · Tăng ca trưa: ghi khung giờ của ngày.' : ''))) return;
+    try {
+      const r = await api('/admin/ot-reg/requests/review', { method: 'POST', body: { ids, action, note: note.value } });
+      toast(`Đã ${action === 'approve' ? 'duyệt' : 'từ chối'} ${r.done} đơn` + (r.skipped ? ` · bỏ qua ${r.skipped} đơn đã được người khác xử lý` : ''), 'ok');
+      onDone();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  bOk.onclick = () => review([...picked], 'approve');
+  bNo.onclick = () => review([...picked], 'reject');
+  const dm = (d) => d.slice(8) + '/' + d.slice(5, 7);
+  const hm = (m) => (m >= 60 ? Math.floor(m / 60) + 'g' : '') + (m % 60 ? String(m % 60).padStart(m >= 60 ? 2 : 1, '0') + "'" : '');
+  const load = async () => {
+    box.replaceChildren(loading()); picked.clear();
+    let d;
+    try { d = await api('/admin/ot-reg/requests?status=' + _or.reqView); }
+    catch (e) { return box.replaceChildren(el('div', { class: 'empty' }, e.message)); }
+    const done = _or.reqView === 'done';
+    bOk.style.display = bNo.style.display = note.style.display = done ? 'none' : '';
+    if (!d.rows.length) return box.replaceChildren(el('div', { class: 'empty', style: 'padding:14px' }, done ? 'Chưa có đơn nào được xử lý trong 60 ngày qua.' : 'Không có đơn nào đang chờ duyệt.'));
+    const all = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+    const cbs = [];
+    all.onchange = () => { for (const [cb, id] of cbs) { cb.checked = all.checked; all.checked ? picked.add(id) : picked.delete(id); } };
+    const ST = { approved: ['ok', 'Đã duyệt'], rejected: ['bad', 'Từ chối'] };
+    const tb = el('tbody');
+    for (const q of d.rows) {
+      const cur = q.kind === 'lunch' ? (q.lunch_from ? `☀ ${q.lunch_from}–${q.lunch_to}` : '') : (q.reg != null ? `${q.reg}'` : '');
+      const tr = el('tr', {});
+      if (!done) {
+        const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
+        cb.onchange = () => { cb.checked ? picked.add(q.id) : picked.delete(q.id); };
+        cbs.push([cb, q.id]);
+        tr.append(el('td', {}, cb));
+      }
+      tr.append(el('td', {}, dm(q.work_date)), el('td', {}, q.code || ''), el('td', {}, el('b', {}, q.full_name)), el('td', { class: 'muted' }, q.department || '—'),
+        el('td', {}, q.kind === 'lunch' ? '☀ ' + (d.kinds.lunch || 'Tăng ca trưa') : (d.kinds.ot || 'Làm thêm')),
+        el('td', { style: 'white-space:nowrap' }, `${q.from_hm}–${q.to_hm}`), el('td', { style: 'text-align:right' }, hm(q.minutes)),
+        el('td', { class: 'muted', style: 'max-width:260px' }, q.reason || ''),
+        el('td', { class: 'muted', title: q.kind === 'lunch' ? 'Khung tăng ca trưa đang đăng ký của ngày này' : 'Số phút làm thêm đang đăng ký của ngày này (duyệt sẽ cộng thêm)' }, cur));
+      if (done) tr.append(el('td', {}, el('span', { class: 'pill ' + (ST[q.status] || ['', q.status])[0] }, (ST[q.status] || ['', q.status])[1])),
+        el('td', { class: 'muted' }, (q.reviewed_by || '') + (q.review_note ? ' · ' + q.review_note : '')));
+      else {
+        const ok = el('button', { class: 'btn sm', title: 'Duyệt đơn này' }, '✓'), no = el('button', { class: 'btn ghost sm', title: 'Từ chối đơn này' }, '✕');
+        ok.onclick = () => review([q.id], 'approve'); no.onclick = () => review([q.id], 'reject');
+        tr.append(el('td', { style: 'white-space:nowrap' }, ok, ' ', no));
+      }
+      tb.append(tr);
+    }
+    const th = (t) => el('th', {}, t);
+    box.replaceChildren(el('div', { style: 'max-height:340px;overflow:auto' }, el('table', { class: 'data' },
+      el('thead', {}, el('tr', {}, done ? '' : el('th', {}, all), th('Ngày'), th('Mã NV'), th('Họ tên'), th('Bộ phận'), th('Loại'), th('Giờ'), th('Số phút'), th('Lý do'), th('Đang đăng ký'),
+        ...(done ? [th('Kết quả'), th('Người duyệt · ghi chú')] : [th('')]))), tb)));
+  };
+  tabP.onclick = () => { _or.reqView = 'pending'; tabP.classList.remove('ghost'); tabD.classList.add('ghost'); load(); };
+  tabD.onclick = () => { _or.reqView = 'done'; tabD.classList.remove('ghost'); tabP.classList.add('ghost'); load(); };
+  load();
+  return el('div', { class: 'panel or-req', style: 'padding:12px 14px;margin-bottom:12px' },
+    el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px' },
+      el('b', {}, '📥 Đơn nhân viên gửi'), tabP, tabD, el('span', { style: 'flex:1' }), note, bOk, bNo),
+    box);
+}
+
 async function pageOtReg() {
   const T = '⏰ Đăng ký làm thêm';
   setMain(head(T), loading());
@@ -18,6 +91,7 @@ async function pageOtReg() {
   catch (e) { return setMain(head(T), el('div', { class: 'empty' }, e.message)); }
   const reg = new Map(data.cells.map(([e, d, m]) => [e + '|' + d, m]));
   const act = new Map(data.actual.map(([e, d, m]) => [e + '|' + d, m]));
+  const lunchReg = new Map((data.lunch || []).map(([e, d, f, t]) => [e + '|' + d, [f, t]]));   // tăng ca trưa theo giờ (công tắc bật)
   const emps = data.emps;
 
   // ----- cây phòng ban (gồm bộ phận con) -----
@@ -61,46 +135,74 @@ async function pageOtReg() {
   const q = el('input', { placeholder: 'Tìm tên / mã NV', value: _or.q, style: 'margin:0;width:180px' });
   q.oninput = () => { _or.q = q.value; draw(); };
 
-  // ----- quy tắc: ngày không đăng ký -----
-  const reqCb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(data.required ? { checked: '' } : {}), ...(hasPerm('settings') ? {} : { disabled: '' }) });
-  reqCb.onchange = async () => {
-    const on = reqCb.checked;
-    if (!confirm(on ? 'BẬT "Phải đăng ký mới tính tăng ca"?\nNgày nào KHÔNG đăng ký làm thêm thì tăng ca = 0 (áp cho cả dữ liệu đã có).'
-      : 'TẮT "Phải đăng ký mới tính tăng ca"?\nNgày không đăng ký sẽ tính tăng ca theo thực tế như trước.')) { reqCb.checked = !on; return; }
-    try { const r = await api('/admin/ot-reg/settings', { method: 'PUT', body: { required: on } }); toast(`Đã ${on ? 'bật' : 'tắt'} — cập nhật ${r.changed.toLocaleString('vi')} dòng công`, 'ok'); pageOtReg(); }
-    catch (e) { reqCb.checked = !on; toast(e.message, 'err'); }
+  // ----- quy tắc + công tắc (cần quyền Cài đặt) -----
+  // key: khoá gửi lên PUT /admin/ot-reg/settings · onMsg / offMsg: hỏi lại trước khi đổi
+  const ruleCb = (key, checked, onMsg, offMsg) => {
+    const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(checked ? { checked: '' } : {}), ...(hasPerm('settings') ? {} : { disabled: '' }) });
+    cb.onchange = async () => {
+      const on = cb.checked;
+      if (!confirm(on ? onMsg : offMsg)) { cb.checked = !on; return; }
+      try { const r = await api('/admin/ot-reg/settings', { method: 'PUT', body: { [key]: on } }); toast(`Đã ${on ? 'bật' : 'tắt'}` + (r.changed ? ` — cập nhật ${r.changed.toLocaleString('vi')} dòng công` : ''), 'ok'); pageOtReg(); }
+      catch (e) { cb.checked = !on; toast(e.message, 'err'); }
+    };
+    return cb;
   };
+  const reqCb = ruleCb('required', data.required, 'BẬT "Phải đăng ký mới tính tăng ca"?\nNgày nào KHÔNG đăng ký làm thêm thì tăng ca = 0 (áp cho cả dữ liệu đã có).',
+    'TẮT "Phải đăng ký mới tính tăng ca"?\nNgày không đăng ký sẽ tính tăng ca theo thực tế như trước.');
+  const selfCb = ruleCb('self', data.selfOn, 'BẬT "Nhân viên tự đăng ký làm thêm trên app"?\nNhân viên gửi đơn ở tab Đơn từ (ngày, từ giờ – đến giờ, lý do); quản lý duyệt ở trang này thì mới ghi vào đăng ký.',
+    'TẮT "Nhân viên tự đăng ký làm thêm trên app"?\nApp nhân viên ẩn phần đăng ký làm thêm (đơn đang chờ vẫn giữ để duyệt).');
+  const lunchCb = ruleCb('lunch', data.lunchOn, 'BẬT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa CHỈ tính theo khung giờ đã đăng ký (VD 11:30–13:30): phút có mặt trong khung, phần nằm trong giờ nghỉ giữa ca. Áp cho cả dữ liệu đã có.',
+    'TẮT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa quay về cách cũ (ca bật "Tính tăng ca trưa": giờ nghỉ có mặt bù phần đăng ký làm thêm còn thiếu). Áp cho cả dữ liệu đã có.');
+  const permTip = hasPerm('settings') ? '' : 'Cần quyền Cài đặt để đổi';
   const rulePanel = el('div', { class: 'panel al-def or-rule' },
-    el('label', { title: hasPerm('settings') ? '' : 'Cần quyền Cài đặt để đổi' }, reqCb, 'Phải đăng ký mới tính tăng ca (ngày không đăng ký → tăng ca = 0)'),
+    el('label', { title: permTip }, reqCb, 'Phải đăng ký mới tính tăng ca (ngày không đăng ký → tăng ca = 0)'),
+    el('label', { title: permTip }, selfCb, 'Nhân viên tự đăng ký làm thêm trên app (quản lý duyệt)'),
+    el('label', { title: permTip }, lunchCb, 'Đăng ký tăng ca trưa theo giờ (từ … đến …)'),
     el('div', { class: 'map-hint', style: 'flex-basis:100%;margin:0' }, 'Quy tắc: làm thêm NHIỀU hơn số phút đăng ký → chỉ tính đúng số phút đăng ký · làm ÍT hơn → tính theo thực tế · đăng ký 0 = không cho làm thêm ngày đó. '
-      + 'Không tích ô trên: ngày chưa đăng ký vẫn tính tăng ca thực tế. Lưu đăng ký là áp ngay vào công, không cần bấm Tính lại. Ai làm quá đăng ký xem ở menu "🚨 Chấm công bất thường".'));
+      + 'Không tích ô đầu: ngày chưa đăng ký vẫn tính tăng ca thực tế. Lưu đăng ký là áp ngay vào công, không cần bấm Tính lại. Ai làm quá đăng ký xem ở menu "🚨 Chấm công bất thường".'
+      + (data.lunchOn ? ' · TĂNG CA TRƯA THEO GIỜ (☀): đăng ký khung giờ ở "Áp nhanh" (hoặc NV gửi đơn) → tính số phút có mặt trong khung, chỉ phần nằm trong giờ nghỉ giữa ca (ca phải khai giờ bắt đầu nghỉ + cho tăng ca), cộng thêm vào tăng ca. Ngày có quẹt đủ 4 lần (ra trưa – vào chiều) là không ở lại trưa → 0.' : '')));
 
   // ----- áp nhanh -----
-  const B = _or.bulk || { min: '', from: _or.from, to: _or.to, sun: true, sat: false };
+  const B = _or.bulk || { min: '', from: _or.from, to: _or.to, sun: true, sat: false, kind: 'ot', lf: '', lt: '' };
   const bMin = el('input', { type: 'number', min: 0, max: 1440, step: 5, placeholder: 'số phút', title: 'Để trống = xoá đăng ký', value: B.min, style: 'width:100px;margin:0' });
   const bFrom = el('input', { type: 'date', value: B.from, style: 'width:auto;margin:0' }), bTo = el('input', { type: 'date', value: B.to, style: 'width:auto;margin:0' });
   const bSun = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(B.sun ? { checked: '' } : {}) }), bSat = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(B.sat ? { checked: '' } : {}) });
-  const saveBulk = () => { _or.bulk = { min: bMin.value, from: bFrom.value, to: bTo.value, sun: bSun.checked, sat: bSat.checked }; };
-  for (const x of [bMin, bFrom, bTo, bSun, bSat]) { x.addEventListener('change', saveBulk); x.addEventListener('input', saveBulk); }
+  // tăng ca trưa theo giờ (công tắc bật): áp KHUNG GIỜ thay cho số phút
+  const bKind = el('select', { style: 'width:auto;margin:0' }, el('option', { value: 'ot' }, 'Làm thêm (số phút)'), el('option', { value: 'lunch' }, '☀ Tăng ca trưa (từ giờ – đến giờ)'));
+  bKind.value = data.lunchOn && B.kind === 'lunch' ? 'lunch' : 'ot';
+  const bLf = el('input', { type: 'time', value: B.lf || '', style: 'width:auto;margin:0', title: 'Giờ bắt đầu tăng ca trưa' });
+  const bLt = el('input', { type: 'time', value: B.lt || '', style: 'width:auto;margin:0', title: 'Giờ kết thúc tăng ca trưa' });
+  const minBox = el('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, bMin, el('span', { class: 'muted' }, 'phút (trống = xoá đăng ký)'));
+  const lunchBox = el('span', { style: 'display:inline-flex;gap:8px;align-items:center' }, el('span', { class: 'muted' }, 'trưa từ'), bLf, el('span', { class: 'muted' }, 'đến'), bLt, el('span', { class: 'muted' }, '(trống cả 2 = xoá)'));
+  const syncKind = () => { const l = bKind.value === 'lunch'; minBox.style.display = l ? 'none' : ''; lunchBox.style.display = l ? '' : 'none'; };
+  syncKind();
+  const saveBulk = () => { _or.bulk = { min: bMin.value, from: bFrom.value, to: bTo.value, sun: bSun.checked, sat: bSat.checked, kind: bKind.value, lf: bLf.value, lt: bLt.value }; };
+  bKind.addEventListener('change', syncKind);
+  for (const x of [bMin, bFrom, bTo, bSun, bSat, bKind, bLf, bLt]) { x.addEventListener('change', saveBulk); x.addEventListener('input', saveBulk); }
   const bScope = el('select', { style: 'width:auto;margin:0' }, el('option', { value: 'list' }, 'Tất cả NV đang lọc'), el('option', { value: 'picked' }, 'Chỉ NV đã tích'));
   const bGo = el('button', { class: 'btn sm' }, 'Áp đăng ký');
   bGo.onclick = async () => {
     const ids = bScope.value === 'picked' ? [..._or.picked] : visible().map((e) => e.id);
     if (!ids.length) return toast(bScope.value === 'picked' ? 'Tích chọn nhân viên ở lưới trước' : 'Không có nhân viên nào', 'err');
     if (!bFrom.value || !bTo.value || bTo.value < bFrom.value) return toast('Khoảng ngày áp không hợp lệ', 'err');
-    const what = bMin.value === '' ? 'XOÁ đăng ký làm thêm' : `Đăng ký làm thêm ${bMin.value} phút / ngày`;
+    const lunch = bKind.value === 'lunch';
+    if (lunch && !bLf.value !== !bLt.value) return toast('Nhập đủ giờ bắt đầu và giờ kết thúc tăng ca trưa (để trống cả 2 = xoá)', 'err');
+    const what = lunch ? (bLf.value ? `Đăng ký TĂNG CA TRƯA ${bLf.value}–${bLt.value}` : 'XOÁ đăng ký tăng ca trưa')
+      : bMin.value === '' ? 'XOÁ đăng ký làm thêm' : `Đăng ký làm thêm ${bMin.value} phút / ngày`;
     if (!confirm(`${what}\nTừ ${bFrom.value} đến ${bTo.value} cho ${ids.length} nhân viên?`)) return;
     try {
-      const r = await api('/admin/ot-reg/apply', { method: 'POST', body: { minutes: bMin.value, employee_ids: ids, from: bFrom.value, to: bTo.value, skip_sun: bSun.checked, skip_sat: bSat.checked } });
+      const r = await api('/admin/ot-reg/apply', { method: 'POST', body: { minutes: bMin.value, kind: lunch ? 'lunch' : 'ot', from_hm: bLf.value, to_hm: bLt.value,
+        employee_ids: ids, from: bFrom.value, to: bTo.value, skip_sun: bSun.checked, skip_sat: bSat.checked } });
       toast(`Đã cập nhật ${r.cells.toLocaleString('vi')} ô (${r.people} NV × ${r.days} ngày)`, 'ok'); pageOtReg();
     } catch (e) { toast(e.message, 'err'); }
   };
   const applyPanel = el('div', { class: 'panel al-apply' },
-    bMin, el('span', { class: 'muted' }, 'phút (trống = xoá đăng ký) · từ'), bFrom, el('span', { class: 'muted' }, 'đến'), bTo,
+    data.lunchOn ? bKind : '', minBox, data.lunchOn ? lunchBox : '', el('span', { class: 'muted' }, '· từ ngày'), bFrom, el('span', { class: 'muted' }, 'đến'), bTo,
     el('label', {}, bSun, 'Bỏ qua chủ nhật'), el('label', {}, bSat, 'Bỏ qua thứ 7'), bScope, bGo);
   for (const k of ['fold_or_rule', 'fold_or_apply']) { try { if (localStorage.getItem(k) == null) localStorage.setItem(k, '1'); } catch {} }   // 2 khung trên mặc định GỌN
-  foldPanel(rulePanel, 'or_rule', 'Quy tắc tính', () => (data.required ? 'Phải đăng ký mới tính tăng ca' : 'Ngày không đăng ký: tính tăng ca thực tế') + ' · làm quá đăng ký chỉ tính theo đăng ký');
-  foldPanel(applyPanel, 'or_apply', 'Áp nhanh', () => 'Đăng ký 1 số phút cho nhiều NV × nhiều ngày — bấm để mở');
+  foldPanel(rulePanel, 'or_rule', 'Quy tắc tính', () => (data.required ? 'Phải đăng ký mới tính tăng ca' : 'Ngày không đăng ký: tính tăng ca thực tế') + ' · làm quá đăng ký chỉ tính theo đăng ký'
+    + (data.selfOn ? ' · NV tự đăng ký trên app' : '') + (data.lunchOn ? ' · tăng ca trưa theo giờ' : ''));
+  foldPanel(applyPanel, 'or_apply', 'Áp nhanh', () => (data.lunchOn ? 'Đăng ký số phút làm thêm hoặc khung giờ tăng ca trưa' : 'Đăng ký 1 số phút') + ' cho nhiều NV × nhiều ngày — bấm để mở');
 
   // ----- lưới NV × ngày -----
   const visible = () => {
@@ -125,8 +227,10 @@ async function pageOtReg() {
       else if (a < r && d < today) { cls += ' under'; tip = `Đăng ký ${r}' · thực tế ${a}' → tính ${a}'`; }
       else tip = `Đăng ký ${r}'` + (a ? ` · thực tế ${a}'` : '');
     } else if (a) { cls += ' noreg'; tip = `Chưa đăng ký · làm thêm thực tế ${a}'` + (data.required ? ' → KHÔNG được tính' : ' → tính thực tế'); }
+    const l = lunchReg.get(k);
+    if (l) { cls += ' lunch'; tip = (tip ? tip + '\n' : '') + `☀ Tăng ca trưa ${l[0]}–${l[1]}`; }
     td.className = cls; td.title = tip;
-    td.replaceChildren(r != null ? el('b', {}, String(r)) : '', a ? el('small', {}, String(a)) : '');
+    td.replaceChildren(r != null ? el('b', {}, String(r)) : '', a ? el('small', {}, String(a)) : '', l ? el('i', { class: 'or-sun' }, '☀') : '');
   };
   const sumOf = (e) => { let s = 0; for (const d of days) s += reg.get(e.id + '|' + d) || 0; return s; };
   const mkRow = (e) => {
@@ -259,7 +363,7 @@ async function pageOtReg() {
     ], [closeB, go]);
   };
   setMain(head(T, fromI, toI, dApply.btn, prev, next, weekB, monthB, xlOut, xlIn),
-    rulePanel, applyPanel,
+    rulePanel, data.selfOn || data.pending ? otReqPanel(data.pending || 0, pageOtReg) : '', applyPanel,
     el('div', { class: 'ft-wrap' }, el('div', { class: 'panel ft-left' }, tree),
       el('div', { class: 'panel', style: 'padding:10px;min-width:0' },
         el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px' }, q, total,

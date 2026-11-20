@@ -72,6 +72,31 @@ export function breakOtAvail(shift, workDate, inIso, outIso) {
   return breakOverlap(breakWindow(workDate, shift, start), toMinute(inIso), toMinute(outIso));
 }
 
+// TĂNG CA TRƯA THEO GIỜ ĐĂNG KÝ (công tắc "Đăng ký tăng ca trưa theo giờ" ot_lunch_reg — mặc định TẮT):
+// số phút NV CÓ MẶT trong khung đã đăng ký [fromHm, toHm], chỉ tính phần nằm trong GIỜ NGHỈ GIỮA CA (phần trùng giờ làm trong ca
+// đã là giờ công, không tính 2 lần). Ca phải cho tăng ca + khai giờ bắt đầu nghỉ; không → 0.
+// Có mặt: ngày có ≥ 4 lượt quẹt (số chẵn) trong khoảng vào–ra → theo từng cặp (ra trưa 11:30 · vào 13:30 = KHÔNG có mặt giờ trưa);
+// còn lại (2 lượt, chấm điện thoại, số lượt lẻ) → từ giờ vào đầu tới giờ ra cuối.
+export function lunchOtMinutes(shift, workDate, inIso, outIso, fromHm, toHm, punches = null) {
+  if (!shift || !shift.allow_ot || !inIso || !outIso || !fromHm || !toHm) return 0;
+  const { start } = shiftBounds(workDate, shift);
+  const brk = breakWindow(workDate, shift, start);
+  if (!brk) return 0;
+  let ws = vnInstant(workDate, fromHm);
+  if (ws < start) ws = new Date(ws.getTime() + 24 * HH);   // ca đêm: giờ trưa (nghỉ giữa ca) sau nửa đêm
+  const span = (mins(vnInstant(workDate, fromHm), vnInstant(workDate, toHm)) + 1440) % 1440;
+  if (!span) return 0;
+  const win = { bs: ws > brk.bs ? ws : brk.bs, be: new Date(Math.min(ws.getTime() + span * 60000, brk.be.getTime())) };
+  if (!(win.be > win.bs)) return 0;
+  const ts = [...new Set((punches || []).map((p) => toMinute(p).getTime()))].sort((a, b) => a - b);
+  const segs = ts.length >= 4 && ts.length % 2 === 0
+    ? ts.reduce((a, t, i) => (i % 2 ? (a[a.length - 1][1] = new Date(t), a) : (a.push([new Date(t), null]), a)), [])
+    : [[toMinute(inIso), toMinute(outIso)]];
+  let total = 0;
+  for (const [a, b] of segs) total += breakOverlap(win, a, b);
+  return Math.min(total, span);
+}
+
 // Số phút làm TRONG KHUNG CA (giờ vào–ra cắt theo giờ bắt đầu–kết thúc ca, trừ giờ nghỉ giữa ca) — chỉ để HIỂN THỊ
 // (bảng công theo mã ca: ngày nghỉ hằng tuần đi làm tách "giờ trong ca" / "giờ ngoài ca"). Không dùng để tính công.
 // Ca không khai giờ bắt đầu nghỉ: trừ trọn số phút nghỉ khi làm từ nửa ca trở lên.
