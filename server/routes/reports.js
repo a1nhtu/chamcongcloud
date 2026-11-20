@@ -859,7 +859,7 @@ function buildReportRaw(type, from, to, filter) {
           else if (c && (c.check_in_at || c.check_out_at)) sym = 'O';
           else if (e.leave_date && d > e.leave_date) sym = MAY ? 'NV' : '';
           else if (e.start_date && d < e.start_date) sym = '';
-          else if (ctx.holidays.has(d)) sym = MAY ? 'NL' : 'L';
+          else if (ctx.holidays.has(d)) sym = MAY && !ctx.compOff.has(d) ? 'NL' : 'L';   // ngày nghỉ bù lễ (VD 27/4 bù Giỗ Tổ trùng CN) → L
           else if (isWeekendDay(d, ctx.weekend) && !ctx.isScheduled(e.id, d)) sym = MAY ? 'L' : '';
           else if (MAY && ctx.isOffDay(e.id, d)) sym = 'L';   // ngày thường được phân nghỉ (đổi ngày nghỉ tuần) → L như nghỉ tuần
           else if (d < today && ctx.isScheduled(e.id, d)) sym = 'V';
