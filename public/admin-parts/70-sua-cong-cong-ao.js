@@ -111,10 +111,8 @@ async function pageEditAtt() {
     // Chế độ tính theo GIỜ: bỏ Trễ/Sớm/OT/Công, hiện Tổng giờ + Tổng phút
     const metricHeads = hrly ? ['Tổng giờ', 'Tổng phút'] : ['Trễ(p)', 'Sớm(p)', 'OT(p)', 'Công'];
     // cột "Các lần chấm" chuyển sang tab "🕘 Giờ nguồn" (Anh 16/11/2026: ngày chấm 4 lần đã ra 2 dòng Sáng + Chiều)
-    // Cột "Lần chấm khác" (Anh 20/11/2026, trankimxuyen): lượt quẹt KHÔNG làm giờ Vào / Ra của dòng nào (quẹt giữa giờ, ca không nhận…),
-    // không lặp lại Vào / Ra, mỗi lượt chỉ ở 1 dòng. Chỉ hiện khi trong phạm vi đang xem có ít nhất 1 lượt như vậy.
-    const hasOther = rows.some((r) => r.other && r.other.length);
-    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', ...(hasOther ? ['Lần chấm khác'] : []), ...metricHeads, 'Nghỉ', 'Trạng thái', ''];
+    // (v1.37.3 thử thêm cột "Lần chấm khác" — Anh 20/11/2026 bỏ vì nhìn rối: lượt giữa giờ xem ở tab Giờ nguồn / Xuất Excel của tab)
+    const heads = ['Ngày', 'Thứ', ...(showNV ? ['Mã', 'Họ tên', 'Bộ phận'] : []), 'Ca', 'Vào', 'Ra', ...metricHeads, 'Nghỉ', 'Trạng thái', ''];
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tb = el('tbody');
@@ -126,12 +124,6 @@ async function pageEditAtt() {
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
         inlineCell(r, 'in', [r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : '']),
         inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')]),
-        ...(hasOther ? [(() => {
-          const td = el('td', { style: 'font-variant-numeric:tabular-nums;white-space:nowrap' }, r.other && r.other.length ? r.other.join(' · ') : el('span', { class: 'muted' }, '—'));
-          if (canEdit && !_virt && r.att_id) { td.className = 'att-inl'; td.title = 'Lượt quẹt không dùng làm giờ Vào / Ra (quẹt giữa giờ, ca không nhận…) — bấm để xem / thêm / sửa / xoá từng lượt chấm ngày này'; td.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
-          else td.title = 'Lượt quẹt không dùng làm giờ Vào / Ra (quẹt giữa giờ, ca không nhận…)';
-          return td;
-        })()] : []),
         ...(hrly ? [
           el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
           el('td', { style: 'text-align:center' }, r.mins ? (r.mins + ' phút') : '—'),
@@ -156,8 +148,7 @@ async function pageEditAtt() {
     wrap.innerHTML = '';
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Xem / sửa từng lượt quẹt: tab "🕘 Giờ nguồn". Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác.'
-        + (hasOther ? ' "Lần chấm khác" = lượt quẹt không dùng làm giờ Vào / Ra (quẹt giữa giờ, ca không nhận…), chỉ để xem, không tính công.' : '')),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Xem / sửa từng lượt quẹt: tab "🕘 Giờ nguồn". Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác.'),
       floatHeadPanel(tbl, pager));
   };
   // Giữ trang đang xem khi tải lại sau khi sửa giờ; đổi phạm vi (ngày / phòng ban / NV / tab) thì về trang 1

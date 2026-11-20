@@ -1,6 +1,7 @@
 // LẦN CHẤM KHÁC (Anh 20/11/2026, khách trankimxuyen): Vệ sinh quẹt 06h · 13h (chứng minh có mặt) · 16h · 21h, ca ghép Đầu–cuối
 // chỉ lấy lượt đầu + cuối → lượt 13h / lượt ca gãy không nhận trước đây chỉ thấy ở tab Giờ nguồn.
-//  - Tính công → Chi tiết: mỗi dòng có `other` = lượt không làm giờ Vào / Ra, gắn đúng dòng (không lặp ở 2 dòng, ca đêm giữ lượt sau nửa đêm)
+//  - otherPunches gắn lượt không làm giờ Vào / Ra vào đúng dòng công (ca đêm giữ lượt sau nửa đêm) — dùng cho báo cáo dưới
+//    (cột "Lần chấm khác" ở Tính công → Chi tiết đã bỏ 20/11/2026: Anh thấy rối, xem ở tab Giờ nguồn)
 //  - Báo cáo "Chi tiết chấm công (nhiều lần vào/ra)": ngày ghép đầu–cuối liệt kê đủ mọi lượt vào Giờ vào 1 · Giờ ra 1 · Giờ vào 2 …
 //  - Báo cáo 'rawpunch' (nút Xuất Excel ở tab Giờ nguồn): mỗi NV × ngày 1 dòng, Lần 1 · Lần 2 … y như bảng trên màn hình
 // Chỉ hiển thị: công / giờ không đổi.
@@ -90,17 +91,13 @@ test('otherPunches: gắn đúng dòng chứa lượt, không chứa thì dòng 
   assert.equal(only6.byDay.size, 0);
 });
 
-test('Tính công → Chi tiết: mỗi dòng có cột Lần chấm khác (✎ = thêm tay), công không đổi', async () => {
+test('Tính công → Chi tiết: KHÔNG có cột Lần chấm khác (Anh bỏ 20/11/2026 vì nhìn rối — xem ở tab Giờ nguồn)', async () => {
   const g = await get(`/admin/attendance/grid?mode=detail&from=2026-11-01&to=2026-11-07&ids=${E},${F}`);
-  const at = (id) => g.rows.find((r) => r.att_id === id);
-  assert.deepEqual(at(ids.d01).other, ['12:57', '20:56']);
-  assert.deepEqual([at(ids.d01).in, at(ids.d01).out, at(ids.d01).cong], ['05:51', '16:00', 1]);
-  assert.deepEqual(at(ids.d02a).other, ['13:05']);
-  assert.deepEqual(at(ids.d02b).other, ['18:00✎']);
-  assert.deepEqual(at(ids.d04).other, ['12:56', '20:56']);
-  assert.equal(at(ids.d04).status, 'Thiếu ra');
-  assert.deepEqual(at(ids.d05).other, ['01:30']);
-  assert.deepEqual(at(ids.d07).other, []);
+  const r = g.rows.find((x) => x.att_id === ids.d01);
+  assert.deepEqual([r.in, r.out, r.cong], ['05:51', '16:00', 1]);
+  assert.ok(g.rows.every((x) => !('other' in x)));
+  const raw = await get(`/admin/attendance/grid?mode=raw&from=2026-11-01&to=2026-11-01&ids=${E}`);
+  assert.deepEqual(raw.rows[0].times, ['05:51', '12:57', '12:57', '16:00', '20:56']);   // Giờ nguồn vẫn đủ mọi lượt
 });
 
 test('Báo cáo Chi tiết chấm công (nhiều lần vào/ra): ngày ghép đầu–cuối liệt kê đủ mọi lượt', async () => {
