@@ -29,7 +29,7 @@ async function pageLeaves() {
       const st = { pending: ['warn', 'Chờ duyệt'], approved: ['ok', 'Đã duyệt'], rejected: ['bad', 'Từ chối'] }[r.status];
       const delBtn = r.swap_id ? el('span', { style: 'color:#9ca3af;font-size:12px' }, 'xoá ở Đăng ký làm bù') : btnSm('Xoá', async () => {
         if (!confirm(`Xoá đơn "${r.type}" ${fmtD(r.from_date)}–${fmtD(r.to_date)} của ${r.full_name}?`)) return;
-        try { await api('/leaves/admin/' + r.id, { method: 'DELETE' }); if (r.half && r.status === 'approved') await privRecompute([r.employee_id], r.from_date, r.to_date); toast('Đã xoá đơn', 'ok'); pageLeaves(); } catch (e) { toast(e.message, 'err'); }
+        try { await api('/leaves/admin/' + r.id, { method: 'DELETE' }); if ((r.half || r.hours > 0) && r.status === 'approved') await privRecompute([r.employee_id], r.from_date, r.to_date); toast('Đã xoá đơn', 'ok'); pageLeaves(); } catch (e) { toast(e.message, 'err'); }
       }, 'ghost');
       const act = r.status === 'pending' ? el('div', { style: 'display:flex;gap:6px' },
         btnSm('Duyệt', () => review(r, 'approve'), 'green'),
@@ -37,7 +37,7 @@ async function pageLeaves() {
       tb.append(el('tr', {},
         el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code + ' · ' + (r.department || ''))),
         el('td', {}, r.type),
-        el('td', {}, fmtD(r.from_date)), el('td', {}, fmtD(r.to_date), r.half ? el('div', { style: 'font-size:12px;color:#b45309' }, HALF_TXT[r.half] || '') : ''),
+        el('td', {}, fmtD(r.from_date)), el('td', {}, fmtD(r.to_date), r.hours > 0 ? el('div', { style: 'font-size:12px;color:#b45309' }, String(r.hours).replace('.', ',') + ' giờ') : r.half ? el('div', { style: 'font-size:12px;color:#b45309' }, HALF_TXT[r.half] || '') : ''),
         el('td', {}, r.reason || '—'),
         el('td', {}, el('span', { class: 'pill ' + st[0] }, st[1])),
         el('td', {}, act),
@@ -366,6 +366,12 @@ async function leaveTypesModal() {
   const yn = (v) => (v ? '✔' : '—');
   // Bảng công ghép MÃ CA + KÝ HIỆU NGHỈ (bảng mã kiểu HCPN, DPB…) — mặc định tắt
   const symShiftC = el('input', { type: 'checkbox' });
+  // NGHỈ THEO GIỜ (đơn 1 ngày nhập số giờ, 8 giờ = 1 ngày phép) — mặc định tắt
+  const hoursC = el('input', { type: 'checkbox' });
+  hoursC.onchange = async () => {
+    try { await api('/leaves/hours-on', { method: 'PUT', body: { on: hoursC.checked } }); toast(hoursC.checked ? 'Đã cho đăng ký nghỉ theo giờ' : 'Đã tắt nghỉ theo giờ', 'ok'); }
+    catch (e) { hoursC.checked = !hoursC.checked; toast(e.message, 'err'); }
+  };
   symShiftC.onchange = async () => {
     try { await api('/leaves/sym-shift', { method: 'PUT', body: { on: symShiftC.checked } }); toast(symShiftC.checked ? 'Bảng công sẽ ghép mã ca + ký hiệu nghỉ' : 'Bảng công chỉ hiện ký hiệu nghỉ', 'ok'); }
     catch (e) { symShiftC.checked = !symShiftC.checked; toast(e.message, 'err'); }
@@ -373,7 +379,7 @@ async function leaveTypesModal() {
   const draw = async () => {
     let d;
     try { d = await api('/leaves/types/all'); } catch (e) { box.replaceChildren(el('div', { class: 'empty' }, e.message)); return; }
-    symShiftC.checked = !!d.sym_shift;
+    symShiftC.checked = !!d.sym_shift; hoursC.checked = !!d.hours_on;
     const tbl = el('table', { class: 'data', style: 'width:100%' }), tb = el('tbody');
     tbl.append(el('thead', {}, el('tr', {}, ...['Lý do nghỉ', 'Ký hiệu', 'Lương', 'Trừ phép', ''].map((t) => el('th', {}, t)))), tb);
     for (const t of d.builtin) tb.append(el('tr', {}, el('td', { style: 'white-space:nowrap' }, t.type, el('span', { style: 'color:#9ca3af;font-size:12px' }, t.system ? ' · tự sinh khi đăng ký làm bù' : ' · có sẵn')), el('td', {}, el('b', {}, t.sym)), el('td', {}, yn(t.paid)), el('td', {}, yn(t.quota)), el('td', {}, '')));
@@ -409,6 +415,9 @@ async function leaveTypesModal() {
     el('label', { class: 'lv-chk', style: 'margin-top:14px;padding-top:12px;border-top:1px solid #e5e7eb' }, symShiftC,
       el('span', {}, 'Bảng mã kiểu may mặc: ghép MÃ CA + KÝ HIỆU NGHỈ', el('br'), el('span', { style: 'color:#6b7280;font-size:12px' },
         'Ngày vừa làm vừa nghỉ (VD làm ca HC 7 giờ + nghỉ phép năm PN) → hiện "HCPN"; ca đêm D + nghỉ bệnh PB → "DPB". Nghỉ cả ngày vẫn chỉ hiện "PN". Ở báo cáo "Bảng công theo mã ca": làm chủ nhật → "HCk", nghỉ chủ nhật "L", ngày lễ "NL", đã nghỉ việc "NV".'))),
+    el('label', { class: 'lv-chk', style: 'margin-top:10px' }, hoursC,
+      el('span', {}, 'Cho đăng ký NGHỈ THEO GIỜ', el('br'), el('span', { style: 'color:#6b7280;font-size:12px' },
+        'Đơn 1 ngày chọn "Theo giờ" và nhập số giờ nghỉ (0,5 → 7,5 giờ). 8 giờ = 1 ngày phép (nghỉ 1 giờ phép năm trừ 0,125 ngày). Trong số giờ đã xin, đến muộn / về sớm không bị tính trễ – sớm; giờ công vẫn tính theo giờ thực làm.'))),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
   draw();
 }
@@ -419,11 +428,16 @@ async function leaveAddModal() {
   try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0 && e.role !== 'admin'); } catch (e) { return toast(e.message, 'err'); }
   const pick = await empMultiPicker(emps), picked = pick.picked;
   let types = [];
-  try { types = (await api('/leaves/types')).rows || []; } catch {}
+  let hoursOn = false;
+  try { const d = await api('/leaves/types'); types = d.rows || []; hoursOn = !!d.hours_on; } catch {}
   const typeSel = el('select', {}, ...types.map((t) => el('option', { value: t.type }, t.label || t.type)));
   const fromI = el('input', { type: 'date', value: todayVN() }), toI = el('input', { type: 'date', value: todayVN() });
   const halfSel = el('select', {}, el('option', { value: '' }, 'Cả ngày'), el('option', { value: 'sang' }, 'Nửa ngày sáng'), el('option', { value: 'chieu' }, 'Nửa ngày chiều'));
-  const syncHalf = () => { const one = fromI.value && fromI.value === toI.value; halfSel.disabled = !one; if (!one) halfSel.value = ''; };
+  if (hoursOn) halfSel.append(el('option', { value: 'gio' }, 'Theo giờ'));
+  const hoursI = el('input', { type: 'number', min: '0.5', max: '7.5', step: '0.5', value: '1' });
+  const hoursF = field('Số giờ nghỉ', hoursI); hoursF.style.display = 'none';
+  const syncHalf = () => { const one = fromI.value && fromI.value === toI.value; halfSel.disabled = !one; if (!one) halfSel.value = ''; hoursF.style.display = halfSel.value === 'gio' ? '' : 'none'; };
+  halfSel.onchange = syncHalf;
   fromI.onchange = () => { if (!toI.value || toI.value < fromI.value) toI.value = fromI.value; syncHalf(); };
   toI.onchange = syncHalf;
   const reasonI = el('input', { placeholder: 'Lý do (tuỳ chọn)' });
@@ -433,18 +447,22 @@ async function leaveAddModal() {
     if (!fromI.value || !toI.value || toI.value < fromI.value) return toast('Chọn từ ngày / đến ngày (đến ngày không trước từ ngày)', 'err');
     save.disabled = true;
     const body = { employee_ids: [...picked], type: typeSel.value, from_date: fromI.value, to_date: toI.value, half: halfSel.value, reason: reasonI.value };
+    if (body.half === 'gio') {   // nghỉ theo giờ
+      body.half = ''; body.hours = parseFloat(String(hoursI.value).replace(',', '.'));
+      if (!(body.hours > 0 && body.hours < 8)) { save.disabled = false; return toast('Nhập số giờ nghỉ từ 0,5 đến 7,5', 'err'); }
+    }
     try {
       let r;
       try { r = await api('/leaves/admin', { method: 'POST', body }); }
       catch (e) { if (!(e.data && e.data.canForce) || !confirm(e.message + '\n\nVẫn lưu (nghỉ vượt phép)?')) throw e; r = await api('/leaves/admin', { method: 'POST', body: { ...body, force: true } }); }
-      if (body.half) await privRecompute(body.employee_ids, body.from_date, body.to_date);   // nửa ngày nghỉ: bỏ trễ / sớm của buổi nghỉ
+      if (body.half || body.hours) await privRecompute(body.employee_ids, body.from_date, body.to_date);   // nửa ngày / theo giờ: bỏ trễ / sớm phần nghỉ
       toast(`Đã thêm ${r.count} đơn (đã duyệt)`, 'ok'); closeModal(); pageLeaves();
     } catch (e) { toast(e.message, 'err'); save.disabled = false; }
   };
   openModal('Thêm đơn nghỉ cho nhân viên', [
     pick.node,
     el('div', { class: 'two-col' }, field('Loại đơn', typeSel), field('Lý do', reasonI)),
-    el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px' }, field('Từ ngày', fromI), field('Đến ngày', toI), field('Thời gian', halfSel)),
+    el('div', { style: 'display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px' }, field('Từ ngày', fromI), field('Đến ngày', toI), field('Thời gian', halfSel), hoursF),
     el('div', { class: 'map-hint' }, 'Đơn do quản lý thêm được duyệt luôn, hiện ngay ở Tính công và báo cáo. Nghỉ phép năm trừ vào quỹ phép; nghỉ nửa ngày chỉ chọn được khi từ ngày = đến ngày.'),
   ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
 }
@@ -452,7 +470,7 @@ async function leaveAddModal() {
 async function review(r, action) {
   let note = '';
   if (action === 'reject') { note = prompt('Lý do từ chối (tuỳ chọn):') ?? ''; }
-  const after = async () => { if (action === 'approve' && r.half) await privRecompute([r.employee_id], r.from_date, r.to_date); };   // nửa ngày nghỉ: bỏ trễ / sớm buổi nghỉ
+  const after = async () => { if (action === 'approve' && (r.half || r.hours > 0)) await privRecompute([r.employee_id], r.from_date, r.to_date); };   // nửa ngày nghỉ: bỏ trễ / sớm buổi nghỉ
   try { await api('/leaves/' + r.id + '/review', { method: 'POST', body: { action, note } }); await after(); toast('Đã cập nhật', 'ok'); pageLeaves(); }
   catch (e) {
     if (e.data && e.data.canForce && confirm(e.message + '\n\nVẫn duyệt (nghỉ vượt phép)?')) {

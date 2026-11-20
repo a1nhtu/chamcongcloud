@@ -3,9 +3,11 @@ import { db, setSetting } from '../db.js';
 import { leaveShiftSymOn } from '../leave-shift-sym.js';
 import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
-import { LEAVE_TYPES, leaveTypes, customLeaveTypes, leaveBalance, overQuotaMsg, leaveSettings } from '../leave-quota.js';
+import { LEAVE_TYPES, leaveTypes, customLeaveTypes, leaveBalance, overQuotaMsg, leaveSettings, leaveHoursOn, HOURS_PER_DAY } from '../leave-quota.js';
 import { PRIV_KINDS } from '../privilege.js';
 const normHalf = (h, f, t) => (f === t && (h === 'sang' || h === 'chieu') ? h : '');
+// Số giờ nghỉ (công tắc leave_hours): chỉ đơn 1 ngày, 0,5 → 7,5 giờ, bước 0,5; không hợp lệ / công tắc tắt → 0 (nghỉ theo ngày như cũ)
+const normHours = (h, f, t) => { const n = parseFloat(h); return leaveHoursOn() && f === t && Number.isFinite(n) && n > 0 && n < HOURS_PER_DAY && Number.isInteger(n * 2) ? n : 0; };
 
 const r = Router();
 r.use(authRequired);
@@ -19,20 +21,21 @@ r.post('/', (req, res) => {
   if (!leaveTypes().some((x) => x.type === type)) return res.status(400).json({ error: 'Loại đơn không hợp lệ — tải lại trang rồi chọn lại loại đơn.' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from_date) || !/^\d{4}-\d{2}-\d{2}$/.test(to_date)) return res.status(400).json({ error: 'Chọn từ ngày / đến ngày' });
   if (to_date < from_date) return res.status(400).json({ error: 'Đến ngày phải sau từ ngày' });
-  const half = normHalf(req.body?.half, from_date, to_date);
+  const hours = normHours(req.body?.hours, from_date, to_date);
+  const half = hours ? '' : normHalf(req.body?.half, from_date, to_date);
   // phép năm: không cho xin vượt số phép còn lại (trừ khi Cài đặt cho phép)
-  const over = overQuotaMsg(req.user.id, { type, from_date, to_date, half });
+  const over = overQuotaMsg(req.user.id, { type, from_date, to_date, half, hours });
   if (over && !leaveSettings().allowOver) return res.status(400).json({ error: over + ' Chọn "Nghỉ không lương" hoặc liên hệ quản lý.' });
   const info = db.prepare(
-    `INSERT INTO leave_requests(employee_id, type, from_date, to_date, reason, half)
-     VALUES (?,?,?,?,?,?)`
-  ).run(req.user.id, type, from_date, to_date, reason || '', half);
+    `INSERT INTO leave_requests(employee_id, type, from_date, to_date, reason, half, hours)
+     VALUES (?,?,?,?,?,?,?)`
+  ).run(req.user.id, type, from_date, to_date, reason || '', half, hours);
   const row = db.prepare('SELECT * FROM leave_requests WHERE id = ?').get(info.lastInsertRowid);
   res.json({ ok: true, leave: row });
 });
 
 // Danh mục loại đơn
-r.get('/types', (req, res) => res.json({ rows: leaveTypes() }));
+r.get('/types', (req, res) => res.json({ rows: leaveTypes(), hours_on: leaveHoursOn() }));
 
 /* ---------- LÝ DO NGHỈ TỰ KHAI BÁO: tên + ký hiệu bảng công + có lương / trừ phép năm ---------- */
 function typeBody(b, selfId = 0) {
@@ -50,12 +53,17 @@ function typeBody(b, selfId = 0) {
 }
 r.get('/types/all', permRequired('leaves'), (req, res) => {
   const used = new Map(db.prepare('SELECT type, COUNT(*) c FROM leave_requests GROUP BY type').all().map((x) => [x.type, x.c]));
-  res.json({ builtin: LEAVE_TYPES, custom: customLeaveTypes(true).map((x) => ({ ...x, used: used.get(x.type) || 0 })), sym_shift: leaveShiftSymOn() });
+  res.json({ builtin: LEAVE_TYPES, custom: customLeaveTypes(true).map((x) => ({ ...x, used: used.get(x.type) || 0 })), sym_shift: leaveShiftSymOn(), hours_on: leaveHoursOn() });
 });
 // Công tắc bảng công: ngày nghỉ hiện mã ca + ký hiệu nghỉ (HC + PN → HCPN). Mặc định TẮT.
 r.put('/sym-shift', permRequired('leaves'), (req, res) => {
   setSetting('leave_sym_shift', req.body?.on ? '1' : '0');
   res.json({ ok: true, on: leaveShiftSymOn() });
+});
+// Công tắc NGHỈ THEO GIỜ: đơn 1 ngày được chọn số giờ nghỉ (8 giờ = 1 ngày phép). Mặc định TẮT.
+r.put('/hours-on', permRequired('leaves'), (req, res) => {
+  setSetting('leave_hours', req.body?.on ? '1' : '0');
+  res.json({ ok: true, on: leaveHoursOn() });
 });
 r.post('/types', permRequired('leaves'), (req, res) => {
   const b = typeBody(req.body || {});
@@ -133,18 +141,19 @@ r.post('/admin', permRequired('leaves'), (req, res) => {
   if (!leaveTypes().some((x) => x.type === type)) return res.status(400).json({ error: 'Loại đơn không hợp lệ' });
   if (!/^\d{4}-\d{2}-\d{2}$/.test(from_date || '') || !/^\d{4}-\d{2}-\d{2}$/.test(to_date || '')) return res.status(400).json({ error: 'Chọn từ ngày / đến ngày' });
   if (to_date < from_date) return res.status(400).json({ error: 'Đến ngày phải sau từ ngày' });
-  const half = normHalf(req.body?.half, from_date, to_date);
+  const hours = normHours(req.body?.hours, from_date, to_date);
+  const half = hours ? '' : normHalf(req.body?.half, from_date, to_date);
   const ok = db.prepare('SELECT id, full_name FROM employees WHERE id = ? AND active = 1');
   // phép năm vượt số còn lại → báo danh sách, quản lý xác nhận (force) mới lưu
   if (!req.body?.force) {
-    const over = ids.map((id) => { const e = ok.get(id); const m = e && overQuotaMsg(id, { type, from_date, to_date, half }); return m ? `${e.full_name}: ${m}` : ''; }).filter(Boolean);
+    const over = ids.map((id) => { const e = ok.get(id); const m = e && overQuotaMsg(id, { type, from_date, to_date, half, hours }); return m ? `${e.full_name}: ${m}` : ''; }).filter(Boolean);
     if (over.length) return res.status(409).json({ error: 'Vượt số phép năm còn lại:\n' + over.slice(0, 15).join('\n') + (over.length > 15 ? `\n… và ${over.length - 15} người khác` : ''), canForce: true });
   }
-  const ins = db.prepare(`INSERT INTO leave_requests(employee_id, type, from_date, to_date, reason, status, reviewed_by, reviewed_at, review_note, half)
-    VALUES (?,?,?,?,?, 'approved', ?, ?, 'Quản lý thêm trực tiếp', ?)`);
+  const ins = db.prepare(`INSERT INTO leave_requests(employee_id, type, from_date, to_date, reason, status, reviewed_by, reviewed_at, review_note, half, hours)
+    VALUES (?,?,?,?,?, 'approved', ?, ?, 'Quản lý thêm trực tiếp', ?, ?)`);
   let n = 0;
   db.exec('BEGIN');
-  try { for (const id of ids) if (ok.get(id)) { ins.run(id, type, from_date, to_date, String(reason || '').slice(0, 500), req.user.id || null, nowIso(), half); n++; } db.exec('COMMIT'); }
+  try { for (const id of ids) if (ok.get(id)) { ins.run(id, type, from_date, to_date, String(reason || '').slice(0, 500), req.user.id || null, nowIso(), half, hours); n++; } db.exec('COMMIT'); }
   catch (e) { db.exec('ROLLBACK'); throw e; }
   res.json({ ok: true, count: n });
 });

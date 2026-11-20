@@ -42,7 +42,8 @@ export function privilegeLookup(db) {
 }
 
 // Đơn NGHỈ PHÉP NỬA NGÀY đã duyệt của NV trong ngày: 'sang' | 'chieu' | '' (để không tính trễ / sớm phần nghỉ)
-const HALF_SQL = "SELECT employee_id, from_date, half FROM leave_requests WHERE status='approved' AND half IN ('sang','chieu') AND from_date=to_date";
+// Nghỉ THEO GIỜ trả 'h<số giờ>' (VD 'h1.5') → halfLeavePriv cho đến muộn / về sớm tối đa ngần ấy giờ.
+const HALF_SQL = "SELECT employee_id, from_date, CASE WHEN IFNULL(hours,0) > 0 THEN 'h' || hours ELSE half END AS half FROM leave_requests WHERE status='approved' AND (half IN ('sang','chieu') OR IFNULL(hours,0) > 0) AND from_date=to_date";
 export function halfLeaveFor(db, empId, date) {
   if (!empId || !date) return '';
   try { return (db.prepare(HALF_SQL + ' AND employee_id=? AND from_date=?').get(empId, date) || {}).half || ''; } catch { return ''; }

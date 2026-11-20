@@ -569,6 +569,7 @@ async function renderDontu() {
       </div>
       <div><label>Thời gian</label>
         <select id="lv-half"><option value="">Cả ngày</option><option value="sang">Nửa ngày sáng</option><option value="chieu">Nửa ngày chiều</option></select></div>
+      <div id="lv-hours-wrap" style="display:none"><label>Số giờ nghỉ</label><input id="lv-hours" type="number" min="0.5" max="7.5" step="0.5" value="1" inputmode="decimal" /></div>
       <div><label>Lý do</label><textarea id="lv-reason" rows="2" placeholder="Ghi rõ lý do để quản lý duyệt nhanh"></textarea></div>
       <button class="btn block" id="lv-submit">Gửi đơn</button>
     </div>`;
@@ -580,9 +581,12 @@ async function renderDontu() {
   api('/leaves/types').then((d) => {
     const s = $('#lv-type'); if (!s) return;
     for (const t of (d.rows || [])) if (t.custom && ![...s.options].some((o) => o.value === t.type)) s.insertBefore(new Option(t.label || t.type, t.type), s.querySelector('option[value="Khác"]'));
+    // công ty bật NGHỈ THEO GIỜ → thêm lựa chọn "Theo giờ" (đơn 1 ngày, nhập số giờ)
+    const h = $('#lv-half'); if (d.hours_on && h && !h.querySelector('option[value="gio"]')) h.append(new Option('Theo giờ', 'gio'));
   }).catch(() => {});
   // nửa ngày chỉ khi nghỉ 1 ngày
-  const syncHalf = () => { const one = $('#lv-from').value === $('#lv-to').value; $('#lv-half').disabled = !one; if (!one) $('#lv-half').value = ''; };
+  const syncHalf = () => { const one = $('#lv-from').value === $('#lv-to').value; $('#lv-half').disabled = !one; if (!one) $('#lv-half').value = ''; $('#lv-hours-wrap').style.display = $('#lv-half').value === 'gio' ? '' : 'none'; };
+  form.querySelector('#lv-half').addEventListener('change', syncHalf);
   form.querySelector('#lv-from').addEventListener('change', () => { if ($('#lv-to').value < $('#lv-from').value) $('#lv-to').value = $('#lv-from').value; syncHalf(); });
   form.querySelector('#lv-to').addEventListener('change', syncHalf);
   // số phép năm còn lại
@@ -601,6 +605,10 @@ async function submitLeave() {
     type: $('#lv-type').value, from_date: $('#lv-from').value,
     to_date: $('#lv-to').value, reason: $('#lv-reason').value, half: $('#lv-half').value,
   };
+  if (body.half === 'gio') {   // nghỉ theo giờ
+    body.half = ''; body.hours = parseFloat(String($('#lv-hours').value).replace(',', '.'));
+    if (!(body.hours > 0 && body.hours < 8)) return toast('Nhập số giờ nghỉ từ 0,5 đến 7,5', 'err');
+  }
   if (!body.from_date || !body.to_date) return toast('Chọn ngày', 'err');
   try { await api('/leaves', { method: 'POST', body }); toast('Đã gửi đơn', 'ok'); $('#lv-reason').value = ''; loadMyLeaves(); }
   catch (e) { toast(e.message, 'err'); }
@@ -618,7 +626,7 @@ async function loadMyLeaves() {
         el('div', { class: 'top' },
           el('b', {}, r.type),
           el('span', { class: 'pill ' + status[0] }, status[1])),
-        el('div', { class: 'meta' }, `${fmtD(r.from_date)} → ${fmtD(r.to_date)}${r.half ? ' (' + (r.half === 'sang' ? 'nửa ngày sáng' : 'nửa ngày chiều') + ')' : ''}${r.reason ? ' · ' + r.reason : ''}`),
+        el('div', { class: 'meta' }, `${fmtD(r.from_date)} → ${fmtD(r.to_date)}${r.hours > 0 ? ' (' + String(r.hours).replace('.', ',') + ' giờ)' : r.half ? ' (' + (r.half === 'sang' ? 'nửa ngày sáng' : 'nửa ngày chiều') + ')' : ''}${r.reason ? ' · ' + r.reason : ''}`),
       );
       if (r.status === 'pending') {
         const del = el('button', { class: 'btn ghost sm', style: 'margin-top:8px' }, 'Xoá đơn');

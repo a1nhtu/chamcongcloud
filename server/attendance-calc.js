@@ -115,6 +115,9 @@ function privAllowOut(priv, brk, t) {
 // Trả priv đã gộp (giữ ưu đãi thai sản nếu có). CHỈ dùng để tính số phút trễ / sớm — giờ công vẫn tính đúng phần đã làm
 // (nửa ngày nghỉ do đơn nghỉ phép trả), nên nơi gọi tính giờ công bằng priv gốc.
 export function halfLeavePriv(shift, workDate, half, priv = null) {
+  // NGHỈ THEO GIỜ ('h1.5' = 1,5 giờ): đến muộn HOẶC về sớm trong số giờ đã xin không tính trễ / sớm (giờ công vẫn tính theo giờ thực làm)
+  const hm = /^h(\d+(?:\.\d+)?)$/.exec(String(half || ''));
+  if (shift && hm) { const m = Math.round(parseFloat(hm[1]) * 60); const p = { late: 0, midOut: 0, midIn: 0, early: 0, ...(priv || {}) }; p.halfIn = (p.halfIn || 0) + m; p.halfOut = (p.halfOut || 0) + m; return p; }
   if (!shift || (half !== 'sang' && half !== 'chieu')) return priv;
   const { start, end } = shiftBounds(workDate, shift);
   const brk = breakWindow(workDate, shift, start);

@@ -1,6 +1,6 @@
 // Nhóm route CÔNG: tính lại công, lưới chấm công, sửa/thêm/xoá giờ chấm tay, xoá theo khoảng.
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren, splitDeptList, hourlyNoOvernight } from '../../db.js';
-import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL } from '../../leave-quota.js';
+import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL, isHourLeave, hoursLabel } from '../../leave-quota.js';
 import { leaveShiftSymOn, workedCell, joinLeaveSym } from '../../leave-shift-sym.js';
 import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
@@ -246,11 +246,13 @@ export function registerAttendanceRoutes(r, { need }) {
     const leaveMap = new Map();
     for (const l of leaves) {
       let d = l.from_date < from ? from : l.from_date; const end = l.to_date > to ? to : l.to_date;
-      while (d <= end) { leaveMap.set(l.employee_id + '|' + d, { sym: (leaveSym[l.type] || 'N') + (l.half ? '½' : ''), type: l.type + (l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d); }
+      const hr = isHourLeave(l);   // nghỉ theo giờ: ký hiệu kèm số giờ (PN 1,5h)
+      const suf = hr ? String(+l.hours).replace('.', ',') + 'h' : l.half ? '½' : '';
+      while (d <= end) { leaveMap.set(l.employee_id + '|' + d, { sym: (leaveSym[l.type] || 'N') + suf, part: hr || !!l.half, type: l.type + (hr ? ' (' + hoursLabel(l.hours) + ')' : l.half ? ' (' + HALF_LABEL[l.half] + ')' : '') }); d = addDay(d); }
     }
-    // Bảng mã kiểu may mặc (công tắc): ngày VỪA LÀM VỪA NGHỈ → mã ca + ký hiệu nghỉ (HC + PN → HCPN); nghỉ cả ngày giữ "PN"
+    // Bảng mã kiểu may mặc (công tắc): ngày VỪA LÀM VỪA NGHỈ (nửa ngày / theo giờ) → mã ca + ký hiệu nghỉ (HC + PN → HCPN); nghỉ cả ngày giữ "PN"
     const joinSym = leaveShiftSymOn();
-    const leaveOfRow = (a, lv) => (!lv ? '' : joinSym && workedCell(a) ? joinLeaveSym(a.shift_code, lv.sym) : lv.sym);
+    const leaveOfRow = (a, lv) => (!lv ? '' : joinSym && lv.part && workedCell(a) ? joinLeaveSym(a.shift_code, lv.sym) : lv.sym);
 
     // CÔNG ẢO (chỉ xem): tăng ca + giờ ra theo hạn mức, không hiện lượt quẹt thật / dấu sửa tay
     const lv = virtLevel(req.query, req), virt = lv > 0;   // 1|2|3 = công ảo mức đó; tài khoản kiểm tra: luôn công ảo

@@ -27,6 +27,11 @@ const typeNamed = (n) => LEAVE_TYPES.find((x) => x.type === n);
 export const leaveTypeOf = (t) => typeNamed(t) || customLeaveTypes(true).find((x) => x.type === t)
   || (String(t || '').toLowerCase().includes('không lương') ? typeNamed('Nghỉ không lương') : typeNamed('Khác'));
 export const HALF_LABEL = { '': 'Cả ngày', sang: 'Nửa ngày sáng', chieu: 'Nửa ngày chiều' };
+// NGHỈ THEO GIỜ (công tắc leave_hours, mặc định TẮT): đơn 1 ngày ghi số giờ nghỉ (0,5 → 7,5); 8 giờ = 1 ngày phép
+export const HOURS_PER_DAY = 8;
+export const leaveHoursOn = () => getSetting('leave_hours', '0') === '1';
+export const isHourLeave = (l) => !!l && l.from_date === l.to_date && +l.hours > 0;
+export const hoursLabel = (h) => String(+h).replace('.', ',') + ' giờ';
 
 const DAY = 86400000;
 const dnum = (d) => Math.round(Date.parse(d + 'T00:00:00Z') / DAY);
@@ -35,6 +40,7 @@ export function leaveDaysIn(l, from, to) {
   const f = l.from_date < from ? from : l.from_date, t = l.to_date > to ? to : l.to_date;
   if (t < f) return 0;
   const n = dnum(t) - dnum(f) + 1;
+  if (isHourLeave(l)) return Math.round((+l.hours / HOURS_PER_DAY) * 1000) / 1000;
   return l.half && l.from_date === l.to_date ? 0.5 : n;
 }
 

@@ -638,6 +638,7 @@ function migrateColumns() {
   add('employees', 'pw_ver', 'INTEGER NOT NULL DEFAULT 0');   // tăng 1 mỗi lần đổi mật khẩu → phiên đăng nhập cấp trước đó hết hiệu lực (xem auth.js)
   add('employees', 'audit_only', 'INTEGER NOT NULL DEFAULT 0');   // 1/2/3 = TÀI KHOẢN KIỂM TRA: chỉ xem công ảo MỨC đó, không thấy công thật, không sửa gì
   add('leave_requests', 'half',       "TEXT DEFAULT ''");   // '' cả ngày | 'sang' | 'chieu' (nửa ngày, chỉ khi từ ngày = đến ngày)
+  add('leave_requests', 'hours',      'REAL DEFAULT 0');    // NGHỈ THEO GIỜ (công tắc leave_hours): số giờ nghỉ trong 1 ngày, 8 giờ = 1 ngày phép
   // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…): trong [from_date, to_date] NV được đến muộn / về sớm số phút này, không trừ công
   db.exec(`CREATE TABLE IF NOT EXISTS employee_privileges (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

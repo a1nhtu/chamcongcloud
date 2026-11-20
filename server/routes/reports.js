@@ -10,7 +10,7 @@ import { resolveEffectiveShift, ioParamsFor } from '../shift-resolver.js';
 import { multiMissingFn } from '../multi-shift.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../virtual-att.js';
 import { progressOf, getProgress, loopProg } from '../progress.js';
-import { customLeaveTypes } from '../leave-quota.js';
+import { customLeaveTypes, isHourLeave, HOURS_PER_DAY, leaveDaysIn, hoursLabel } from '../leave-quota.js';
 import { leaveShiftSymOn, workedCell, joinLeaveSym } from '../leave-shift-sym.js';
 import { trackCell, TRACK_ROWS } from '../track6.js';
 import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
@@ -300,15 +300,18 @@ function loadRange(from, to, filter) {
   for (const l of leaveRows) {
     if (l.status !== 'approved') continue;
     const kind = leaveKind(l.type, KINDS);
-    const k2 = l.half && l.from_date === l.to_date ? { ...kind, half: true } : kind;   // nửa ngày: đếm 0,5
+    // nửa ngày: đếm 0,5 · nghỉ THEO GIỜ: đếm số giờ / 8
+    const k2 = isHourLeave(l) ? { ...kind, hours: +l.hours, label: (kind.label || kind.type || '') + ' (' + hoursLabel(l.hours) + ')' }
+      : l.half && l.from_date === l.to_date ? { ...kind, half: true } : kind;
     for (const d of rangeDays) if (d >= l.from_date && d <= l.to_date) { leaveDays.set(l.employee_id + '|' + d, k2); usedKinds.add(kind.key); }
   }
-  // Công tắc "bảng mã kiểu may mặc": ngày VỪA LÀM VỪA NGHỈ hiện mã ca + ký hiệu nghỉ (làm HC + nghỉ PN → HCPN); nghỉ cả ngày giữ "PN".
+  // Công tắc "bảng mã kiểu may mặc": ngày VỪA LÀM VỪA NGHỈ (đơn nửa ngày / theo giờ) hiện mã ca + ký hiệu nghỉ (làm HC + nghỉ PN → HCPN);
+  // nghỉ CẢ NGÀY giữ "PN" — kể cả nghỉ có lương mà vẫn có giờ công (VD thăm thân PA tính như đi làm).
   // Chỉ đổi chữ hiện trên ô ngày, đếm theo loại nghỉ (key) giữ nguyên.
   if (leaveShiftSymOn()) {
     for (const [key, k] of leaveDays) {
       const c = cell.get(key);
-      if (!workedCell(c)) continue;
+      if (!workedCell(c) || !(k.half || k.hours)) continue;
       const code = shiftsById.get(c.shift_id)?.code;
       if (code) leaveDays.set(key, { ...k, sym: joinLeaveSym(code, k.sym), plainSym: k.sym });
     }
@@ -401,7 +404,7 @@ function leaveCols(ctx, always = false) {
 // Đếm số ngày nghỉ từng loại của 1 NV trong danh sách ngày → { lvP: n, lvKL: n, ... }
 function leaveCounts(ctx, empId, days) {
   const out = Object.fromEntries([...LEAVE_KINDS, ...ctx.leaveKinds].map((k) => [k.key, 0]));
-  for (const d of days) { const k = ctx.leaveDays.get(empId + '|' + d); if (k) out[k.key] += k.half ? 0.5 : 1; }
+  for (const d of days) { const k = ctx.leaveDays.get(empId + '|' + d); if (k) out[k.key] += k.hours ? k.hours / HOURS_PER_DAY : k.half ? 0.5 : 1; }
   return out;
 }
 
@@ -1141,7 +1144,7 @@ function buildReportRaw(type, from, to, filter) {
       const rows = ctx.leaveRows.map((l) => ({
         code: l.code, name: l.full_name, dept: l.department || '', type: l.type,
         from: fmtDMY(l.from_date), to: fmtDMY(l.to_date),
-        days: l.half && l.from_date === l.to_date ? 0.5 : Math.round((new Date(l.to_date) - new Date(l.from_date)) / 86400000) + 1,
+        days: leaveDaysIn(l, l.from_date, l.to_date),   // nửa ngày 0,5 · theo giờ = số giờ / 8
         reason: l.reason || '', status: stLabel[l.status] || l.status,
       }));
       return { title: `Nghỉ phép / đơn từ ${PERIOD}`, columns, rows };
