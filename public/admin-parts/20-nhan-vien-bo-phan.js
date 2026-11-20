@@ -89,6 +89,7 @@ async function pageEmployees() {
   // Thanh nút GỌN: các việc Excel và máy chấm công gom vào 2 menu thả xuống
   const excelMenu = canEdit ? rowMenu([
     { label: '⬇ Xuất danh sách nhân viên', hint: 'Xuất bộ phận đang chọn bên trái (chọn "Tất cả nhân viên" = cả công ty) — cùng mẫu cột file nhập', fn: downloadEmpExport },
+    ...(empExtraOn() ? [{ label: '🧾 Xuất thông tin thêm + gia cảnh', hint: 'CCCD, quê quán, liên hệ, ngân hàng… (1 NV / dòng) + sheet Gia cảnh / người phụ thuộc', fn: downloadEmpExtraExport }] : []),
     { label: '📄 Tải file mẫu', fn: downloadEmpTemplate },
     { label: '⬆ Nhập nhân viên mới từ Excel', fn: () => importEmployees('add') },
     { label: '🔄 Cập nhật nhân viên từ Excel', fn: () => importEmployees('update') },
@@ -263,6 +264,87 @@ async function downloadEmpExport() {
     saveFile(await res.blob(), name);
     toast('Đã xuất danh sách nhân viên ' + (dept === '__none__' ? '· Chưa có bộ phận' : dept ? '· ' + dept : 'cả công ty'), 'ok');
   } catch { toast('Không xuất được danh sách', 'err'); }
+}
+// THÔNG TIN THÊM của NV (công tắc emp_extra_info — chỉ tài khoản tổng bật, mặc định TẮT)
+const empExtraOn = () => SETTINGS.emp_extra_info === '1';
+async function downloadEmpExtraExport() {
+  try {
+    const res = await api('/admin/employees/extra/export.xlsx', { raw: true });
+    if (!res.ok) { toast('Không xuất được thông tin thêm', 'err'); return; }
+    const name = (/filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') || '') || [])[1] || 'thong_tin_them_nhan_vien.xlsx';
+    saveFile(await res.blob(), name);
+    toast('Đã xuất thông tin thêm + gia cảnh của nhân viên', 'ok');
+  } catch { toast('Không xuất được thông tin thêm', 'err'); }
+}
+// Tab "🧾 Thông tin thêm": các nhóm trường + bảng gia cảnh. Trả về { box, load(), save() } — save() chỉ gửi khi đã mở tab.
+function empExtraTab(e) {
+  const box = el('div', {}, loading());
+  let loaded = false, famBody = null, meta = null;
+  const inputs = {};
+  const famRows = [];
+  const depCount = el('b', {});
+  const recount = () => { depCount.textContent = String(famRows.filter((r) => r.dep.checked).length); };
+  const addFam = (x = {}) => {
+    const rel = el('select', {}, el('option', { value: '' }, '—'), ...meta.relations.map((v) => el('option', { value: v }, v)));
+    if (x.relation && !meta.relations.includes(x.relation)) rel.append(el('option', { value: x.relation }, x.relation));
+    rel.value = x.relation || '';
+    const r = {
+      full_name: el('input', { placeholder: 'Họ tên', value: x.full_name || '' }), relation: rel,
+      birth_date: el('input', { type: 'date', value: x.birth_date || '' }),
+      phone: el('input', { placeholder: 'SĐT', value: x.phone || '' }), job: el('input', { placeholder: 'Nghề nghiệp', value: x.job || '' }),
+      dep: el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.15)', title: 'Người phụ thuộc (giảm trừ gia cảnh thuế TNCN)', ...(x.dependent ? { checked: '' } : {}) }),
+      note: el('input', { placeholder: 'Ghi chú', value: x.note || '' }),
+    };
+    r.dep.onchange = recount;
+    // mỗi người thân 1 thẻ (khung sửa NV hẹp — bảng ngang bị chật)
+    const del = btnSm('✕ Xoá', () => { card.remove(); famRows.splice(famRows.indexOf(r), 1); recount(); }, 'ghost');
+    const card = el('div', { style: 'border:1px solid var(--line,#eee);border-radius:10px;padding:10px;margin-bottom:8px' },
+      el('div', { class: 'two-col' }, field('Họ tên người thân', r.full_name), field('Quan hệ', r.relation)),
+      el('div', { class: 'two-col', style: 'margin-top:8px' }, field('Ngày sinh', r.birth_date), field('Số điện thoại', r.phone)),
+      el('div', { class: 'two-col', style: 'margin-top:8px' }, field('Nghề nghiệp', r.job), field('Ghi chú', r.note)),
+      el('div', { style: 'display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px' },
+        el('label', { style: 'display:flex;gap:8px;align-items:center;cursor:pointer;margin:0;font-weight:600' }, r.dep, 'Người phụ thuộc (giảm trừ gia cảnh)'), del));
+    famRows.push(r); famBody.append(card); recount();
+  };
+  async function load() {
+    if (loaded) return; loaded = true;
+    let d;
+    try { d = await api('/admin/employees/' + e.id + '/extra'); }
+    catch (err) { box.innerHTML = ''; box.append(el('div', { class: 'map-hint' }, err.message)); loaded = false; return; }
+    meta = d; box.innerHTML = '';
+    for (const [g, title] of d.groups) {
+      const fs = d.fields.filter((f) => f[3] === g);
+      if (!fs.length) continue;
+      const grid = el('div', { class: 'two-col', style: 'flex-wrap:wrap' });
+      for (const [k, label, type, , opts] of fs) {
+        let inp;
+        if (type === 'select') { inp = el('select', {}, el('option', { value: '' }, '—'), ...opts.map((v) => el('option', { value: v }, v))); inp.value = d.profile[k] || ''; }
+        else if (type === 'textarea') { inp = el('textarea', { rows: 2, style: 'width:100%' }); inp.value = d.profile[k] || ''; }
+        else inp = el('input', { type: type === 'date' ? 'date' : 'text', value: d.profile[k] || '' });
+        inputs[k] = inp;
+        grid.append(el('div', { style: type === 'textarea' ? 'grid-column:1/-1' : '' }, el('label', {}, label), inp));
+      }
+      box.append(formSection(title, () => fs.filter(([k]) => inputs[k].value).length + '/' + fs.length + ' ô đã nhập', [grid], g === 'chung'));
+    }
+    famBody = el('div', {});
+    for (const x of d.family) addFam(x);
+    const addB = btnSm('+ Thêm người thân', () => addFam(), 'ghost');
+    box.append(formSection('👪 Gia cảnh & người phụ thuộc', () => famRows.length + ' người · ' + famRows.filter((r) => r.dep.checked).length + ' phụ thuộc', [
+      famBody,
+      el('div', { style: 'display:flex;gap:10px;align-items:center;margin-top:8px;flex-wrap:wrap' }, addB,
+        el('span', { class: 'map-hint', style: 'margin:0' }, 'Người phụ thuộc (giảm trừ gia cảnh): ', depCount, ' người — tích ô "Phụ thuộc" ở người đã đăng ký giảm trừ với cơ quan thuế.')),
+    ], true));
+    box.append(el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Bấm "Lưu thay đổi" ở dưới để lưu cả thông tin thêm.' + (d.updated_at ? ` Cập nhật lần cuối: ${d.updated_by || ''} lúc ${d.updated_at}.` : '')));
+  }
+  async function save() {
+    if (!meta) return;   // chưa mở tab → không đụng dữ liệu
+    const profile = {};
+    for (const k of Object.keys(inputs)) profile[k] = inputs[k].value;
+    const family = famRows.map((r) => ({ full_name: r.full_name.value, relation: r.relation.value, birth_date: r.birth_date.value, phone: r.phone.value, job: r.job.value, dependent: r.dep.checked, note: r.note.value }));
+    if (family.some((x) => !x.full_name.trim() && (x.relation || x.birth_date || x.phone || x.job))) throw new Error('Gia cảnh: có dòng chưa nhập họ tên người thân');
+    await api('/admin/employees/' + e.id + '/extra', { method: 'PUT', body: { profile, family } });
+  }
+  return { box, load, save };
 }
 // Tải file Excel mẫu nhập nhân viên
 async function downloadEmpTemplate() {
@@ -584,6 +666,10 @@ function empModal(e) {
     const saved = r && r.relinked ? `Đã lưu — gán ${r.relinked} lượt quẹt cũ của Số ID máy và tính lại công` : 'Đã lưu';
     const empId = e ? e.id : r.id;
     save.disabled = true;
+    if (extra) {
+      try { await extra.save(); }
+      catch (err) { toast('Đã lưu nhân viên nhưng chưa lưu được thông tin thêm: ' + err.message, 'err'); save.disabled = false; return; }
+    }
     if (faceB64) {
       try { await api('/admin/employees/' + empId + '/face-photo', { method: 'PUT', body: { photo: faceB64 } }); }
       catch (err) { toast('Đã lưu nhân viên nhưng chưa lưu được ảnh: ' + err.message, 'err'); closeModal(); pageEmployees(); return; }
@@ -602,25 +688,29 @@ function empModal(e) {
   };
   // ----- 2 tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) -----
   let modalBody = body;
+  const extra = e && empExtraOn() && hasPerm('employees') ? empExtraTab(e) : null;
   if (e) {
     const tabInfo = el('div', {}, ...body);
     const tabBio = el('div', { hidden: true }, loading());
     let bioLoaded = false;
     const mkTab = (label) => el('button', { class: 'btn sm ghost', type: 'button', style: 'border:none;border-radius:0;border-bottom:2px solid transparent' }, label);
-    const tI = mkTab('📋 Thông tin'), tB = mkTab('🖐 Sinh trắc / Máy');
+    const tI = mkTab('📋 Thông tin'), tB = mkTab('🖐 Sinh trắc / Máy'), tX = extra ? mkTab('🧾 Thông tin thêm') : null;
+    const tabX = extra ? el('div', { hidden: true }, extra.box) : null;
+    const tabs = [['info', tI, tabInfo], ['bio', tB, tabBio], ...(extra ? [['extra', tX, tabX]] : [])];
     const sel = (t) => {
-      const info = t === 'info';
-      tabInfo.hidden = !info; tabBio.hidden = info;
-      tI.style.borderBottomColor = info ? 'var(--brand,#E8541E)' : 'transparent';
-      tI.style.color = info ? 'var(--brand-dark,#c0410f)' : ''; tI.style.fontWeight = info ? '700' : '';
-      tB.style.borderBottomColor = info ? 'transparent' : 'var(--brand,#E8541E)';
-      tB.style.color = info ? '' : 'var(--brand-dark,#c0410f)'; tB.style.fontWeight = info ? '' : '700';
-      if (!info && !bioLoaded) { bioLoaded = true; loadEmpBio(e, tabBio); }
+      for (const [k, btn, pane] of tabs) {
+        const on = k === t;
+        pane.hidden = !on;
+        btn.style.borderBottomColor = on ? 'var(--brand,#E8541E)' : 'transparent';
+        btn.style.color = on ? 'var(--brand-dark,#c0410f)' : ''; btn.style.fontWeight = on ? '700' : '';
+      }
+      if (t === 'bio' && !bioLoaded) { bioLoaded = true; loadEmpBio(e, tabBio); }
+      if (t === 'extra') extra.load();
     };
-    tI.onclick = () => sel('info'); tB.onclick = () => sel('bio');
-    const tabBar = el('div', { style: 'display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line,#eee)' }, tI, tB);
+    for (const [k, btn] of tabs) btn.onclick = () => sel(k);
+    const tabBar = el('div', { style: 'display:flex;gap:4px;margin-bottom:14px;border-bottom:1px solid var(--line,#eee);flex-wrap:wrap' }, ...tabs.map((t) => t[1]));
     sel('info');
-    modalBody = [tabBar, tabInfo, tabBio];
+    modalBody = [tabBar, ...tabs.map((t) => t[2])];
   }
   openModal(e ? 'Sửa nhân viên' : 'Thêm nhân viên', modalBody, [el('button', { class: 'btn ghost' , onclick: closeModal }, 'Huỷ'), save]);
 }

@@ -19,6 +19,7 @@ import { registerSwapRoutes } from './admin/swap.js';
 import { registerHrRoutes } from './admin/hr.js';
 import { registerHrDocRoutes } from './admin/hr-docs.js';
 import { registerHrImportRoutes } from './admin/hr-import.js';
+import { registerEmpExtraRoutes } from './admin/emp-extra.js';
 import { registerMealRoutes } from './admin/meal.js';
 import { registerPayProRoutes } from './admin/payroll-pro.js';
 import { registerLegacyImportRoutes } from './admin/legacy-import.js';
@@ -53,6 +54,7 @@ registerSwapRoutes(r, { need });         // đăng ký làm bù (hoán đổi ng
 registerHrRoutes(r, { need });           // nhân sự: hồ sơ, hợp đồng, thuyên chuyển / nghỉ việc
 registerHrDocRoutes(r, { need });        // nhân sự: mẫu Word + in hợp đồng / phụ lục / quyết định
 registerHrImportRoutes(r, { need });     // nhân sự: nhập hồ sơ / hợp đồng từ Excel
+registerEmpExtraRoutes(r, { need });     // thông tin thêm của NV (CCCD, quê quán, gia cảnh…) — công tắc emp_extra_info
 registerPayProRoutes(r, { need });       // tiền lương nâng cao (BH, thuế, thành phần, bảng lương chốt/khoá) — sau công tắc pay_pro
 registerCustomReportRoutes(r);           // mẫu báo cáo riêng của công ty — chỉ tài khoản tổng sửa
 registerMealRoutes(r);                   // quản lý suất ăn (HR): đối chiếu 3 ca, chốt số, thực đơn — sau công tắc meal_enabled
