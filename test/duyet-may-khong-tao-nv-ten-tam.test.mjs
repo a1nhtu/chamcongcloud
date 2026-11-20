@@ -58,6 +58,23 @@ test('máy có nhóm đồng bộ vừa duyệt: phần mềm học vân tay / k
   assert.deepEqual(pending('SN_SEOUL'), [], 'không tự hỏi danh sách NV (duyệt máy không tự tải NV)');
 });
 
+test('máy khuôn mặt 1 máy, KHÔNG nhóm: duyệt xong máy tự gửi lên bảng khuôn mặt + ảnh (không có dòng người dùng) → không tạo NV tên tạm; giờ chấm cũ → hỏi tên từng người', () => {
+  newApprovedDevice('SN_1MAY', '');
+  assert.deepEqual(drain('SN_1MAY').filter((c) => /DATA QUERY/.test(c)), [], 'không nhóm → phần mềm không hỏi máy gì');
+  // máy giữ mốc OPERLOG 9999 từ lúc chờ duyệt (như máy thật 647) nên không gửi dòng USER; bảng khuôn mặt / ảnh thì gửi hết
+  const pins = ['11', '12', '13', '14', '15', '16', '17'];
+  post('SN_1MAY', 'BIODATA', pins.map((p) => `BIODATA Pin=${p}\tNo=0\tIndex=0\tValid=1\tDuress=0\tType=9\tMajorVer=5\tMinorVer=8\tFormat=0\tTmp=RkFDRQ${p}==`).join('\n'), '9999');
+  post('SN_1MAY', 'BIOPHOTO', pins.map(photo).join('\n'), '9999');
+  assert.equal(pins.filter((p) => emp(p)).length, 0, 'trước bản 1.37.2: 7 NV "NV 11…NV 17"');
+  // giờ chấm của 7 người về (lượt mới hoặc máy gửi bù) → không khớp NV → hỏi máy tên từng người
+  post('SN_1MAY', 'ATTLOG', pins.map((p) => `${p}\t2026-11-20 07:5${p.slice(1)}:00\t0\t15\t0`).join('\n'));
+  const asks = pending('SN_1MAY');
+  assert.equal(asks.filter((c) => /^DATA QUERY USERINFO PIN=/.test(c)).length, 7);
+  drain('SN_1MAY');
+  for (const p of pins) queryData('SN_1MAY', 'user', `user uid=${p}\tcardno=\tpin=${p}\tpassword=\tgroup=1\tname=Nhân viên ${p}\tprivilege=0`);
+  for (const p of pins) assert.equal(emp(p), `Nhân viên ${p}`);
+});
+
 test('NV quẹt mà chưa khớp → hỏi máy đúng người đó → NV về với TÊN THẬT; máy trả vân tay trước tên thì tên tạm được thay', () => {
   post('SN_SEOUL', 'ATTLOG', '3\t2026-11-20 08:01:00\t0\t1\t0');
   assert.deepEqual(pending('SN_SEOUL'), ['DATA QUERY USERINFO PIN=3', 'DATA QUERY FINGERTMP PIN=3']);
