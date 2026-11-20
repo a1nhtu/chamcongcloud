@@ -346,19 +346,22 @@ function loadRange(from, to, filter) {
 // Các lần vào/ra của 1 ô (NV×ngày) theo quy tắc ghép log → [[vào, ra], ...] dạng HH:MM (FILO… = 1 cặp đầu/cuối; ra thiếu = '?')
 const hasPunch = (c) => !!(c && (c.check_in_at || c.check_out_at));   // dòng chỉ có giờ ra (quên chấm vào, Theo ID máy) vẫn là có chấm
 const pairsHM = (io, c) => (!hasPunch(c) ? [] : io.pairs ? io.pairs.map(([a, b]) => [a ? isoToVnHM(a) : '?', b ? isoToVnHM(b) : (io.all ? '' : '?')]) : [[io.cin || '?', io.cout]]);
-// Báo cáo "nhiều lần vào/ra" (Chi tiết nhiều lần vào/ra + Bảng từng NV in A4) — Anh 20/11/2026, trankimxuyen: ngày ghép ĐẦU–CUỐI
-// (không ghép cặp) mà còn lượt quẹt khác (giữa giờ 13h, ca gãy không nhận…) → liệt kê MỌI lượt của ngày theo thứ tự vào các cột
-// Vào 1 · Ra 1 · Vào 2 …, như tab Giờ nguồn. Ngày ghép cặp (Nhiều lần vào/ra, Theo ID máy…) giữ y như cũ. Công ảo: không lộ lượt thật.
+// Báo cáo "nhiều lần vào/ra" (Chi tiết nhiều lần vào/ra + Bảng từng NV in A4 + Chi tiết giờ vào/ra) — Anh 20/11/2026, trankimxuyen:
+// ngày ghép ĐẦU–CUỐI (không ghép cặp) mà còn lượt quẹt khác (giữa giờ 13h, ca gãy không nhận…) → liệt kê MỌI lượt của ngày theo
+// thứ tự (Vào 1 · Ra 1 · Vào 2 …). Ngày ghép cặp (Nhiều lần vào/ra, Theo ID máy…) giữ y như cũ. Công ảo: không lộ lượt thật.
 // Lượt "khác" = lượt không làm giờ vào / ra của dòng công nào, gắn đúng ngày công (lan-cham-khac.js); chỉ hiển thị, công không đổi.
+// Bỏ lượt bấm LẶP theo ngưỡng "Bỏ qua lần chấm trùng" (như báo cáo ghép cặp) — bấm 2 phát không làm phình thêm cột; muốn xem từng
+// lượt thô (kể cả bấm lặp) thì tab Giờ nguồn → Xuất Excel.
 function allPunchResolver(ctx, ioOf, from, to) {
   if (ctx.virt) return ioOf;
   let byDay = null;
+  const dupMin = parseInt(getSetting('punch_dedup_min', '15'), 10) || 5;   // cùng ngưỡng với lúc tính công
   return (empId, date, c) => {
     const io = ioOf(empId, date, c);
     if (!hasPunch(c) || io.pairs) return io;
     if (!byDay) byDay = otherPunches(ctx.employees.map((e) => e.id), from, to).byDay;
-    const ts = byDay.get(empId + '|' + date);
-    return ts && ts.length > 2 ? { ...io, pairs: toPairs(ts), all: true } : io;
+    const ts = dropRepeatPunches(byDay.get(empId + '|' + date) || [], dupMin);
+    return ts.length > 2 ? { ...io, pairs: toPairs(ts), all: true } : io;
   };
 }
 // Báo cáo danh sách: quy tắc "Nhiều lần vào/ra" → MỖI LẦN CHẤM 1 CỘT (Giờ vào 1 · Giờ ra 1 · Giờ vào 2 …) thay vì dồn nhiều giờ vào 1 ô.
@@ -744,6 +747,7 @@ function buildReportRaw(type, from, to, filter) {
 
     /* --- Chi tiết giờ vào/ra theo ngày (ma trận) --- */
     case 'daytime': {
+      const ioAll = allPunchResolver(ctx, ioOf, from, to);   // ngày ghép đầu–cuối còn lượt khác → liệt kê đủ (20/11/2026)
       const dayCols = days.map((d) => ({ key: 'd' + d, label: d.slice(8), weekend: ctx.paintWeekend(d) }));
       const columns = [
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 },
@@ -758,8 +762,8 @@ function buildReportRaw(type, from, to, filter) {
         for (const d of days) {
           const c = ctx.cell.get(e.id + '|' + d);
           if (hasPunch(c)) {
-            const io = ioOf(e.id, d, c);
-            row['d' + d] = io.pairs ? io.pairs.map(([a, b]) => (a ? isoToVnHM(a) : '?') + '-' + (b ? isoToVnHM(b) : '?')).join('\n') : (io.cin || '?') + '-' + (io.cout || '?');
+            const io = ioAll(e.id, d, c);   // nhiều cặp: mỗi cặp 1 dòng trong ô; liệt kê đủ lượt mà số lẻ thì lượt cuối đứng 1 mình
+            row['d' + d] = io.pairs ? io.pairs.map(([a, b]) => (a ? isoToVnHM(a) : '?') + (b ? '-' + isoToVnHM(b) : io.all ? '' : '-?')).join('\n') : (io.cin || '?') + '-' + (io.cout || '?');
             total += HOURLY ? (c.work_minutes || 0) / 60 : (c.work_unit || 0);   // theo giờ: tổng giờ, không có công
           } else row['d' + d] = ctx.leaveDays.has(e.id + '|' + d) ? ctx.leaveDays.get(e.id + '|' + d).sym : '';
         }
@@ -1758,7 +1762,7 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
   const days = daysBetween(from, to);
   const PERIOD = periodLabel(from, to).toUpperCase();
   const HOURLY = ctx.hourly;   // theo giờ: cột cuối = Tổng giờ (không có công)
-  const ioOf = inOutResolver(ctx.employees, from, to, ctx.virt);
+  const ioOf = allPunchResolver(ctx, inOutResolver(ctx.employees, from, to, ctx.virt), from, to);   // ngày ghép đầu–cuối còn lượt khác → liệt kê đủ (20/11/2026)
   const NP = maxPairs(ctx, ioOf, days);   // nhiều lần vào/ra → mỗi ngày 2 × NP cột, mỗi lần chấm 1 cột
   const PER = NP * 2;
   const FIXED = 5;

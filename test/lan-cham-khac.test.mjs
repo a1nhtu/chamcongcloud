@@ -105,7 +105,8 @@ test('Báo cáo Chi tiết chấm công (nhiều lần vào/ra): ngày ghép đ�
   const row = (code, date) => rep.rows.find((r) => r.code === code && r.date === date);
   const t = (r) => [1, 2, 3, 4].flatMap((i) => [r['in' + i], r['out' + i]]).filter(Boolean);
   assert.deepEqual(t(row('VS1', '01/11/2026')), ['05:51', '12:57', '16:00', '20:56']);
-  assert.deepEqual(t(row('VS1', '02/11/2026')), ['06:02', '13:05', '15:58', '16:01', '18:00', '20:58']);
+  // 16:01 cách 15:58 dưới ngưỡng "Bỏ qua lần chấm trùng" (mặc định 15') → bỏ như báo cáo ghép cặp; xem lượt thô ở Giờ nguồn
+  assert.deepEqual(t(row('VS1', '02/11/2026')), ['06:02', '13:05', '15:58', '18:00', '20:58']);
   assert.deepEqual(t(row('VS1', '04/11/2026')), ['05:56', '12:56', '20:56']);
   assert.deepEqual(t(row('VS2', '05/11/2026')), ['19:00', '01:30', '07:00']);
   assert.deepEqual(t(row('VS2', '07/11/2026')), ['08:00', '17:00']);   // chấm 2 lần: y như cũ
@@ -115,6 +116,24 @@ test('Báo cáo Chi tiết chấm công (nhiều lần vào/ra): ngày ghép đ�
   const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
   const lines = []; wb.worksheets[0].eachRow((r) => lines.push(r.values.slice(1).map((v) => (v == null ? '' : String(v))).join('|')));
   assert.ok(lines.some((l) => l.startsWith('01/11/2026') && l.includes('|05:51|12:57|16:00|20:56|')), lines.find((l) => l.startsWith('01/11/2026')));
+});
+
+test('Báo cáo Chi tiết giờ vào/ra (ma trận): màn hình mỗi cặp 1 dòng trong ô, Excel mỗi lần chấm 1 cột', async () => {
+  const rep = await get(`/api/reports/data?type=daytime&from=2026-11-01&to=2026-11-07&ids=${E},${F}`);
+  const vs1 = rep.rows.find((r) => r.code === 'VS1'), vs2 = rep.rows.find((r) => r.code === 'VS2');
+  assert.equal(vs1['d2026-11-01'], '05:51-12:57\n16:00-20:56');
+  assert.equal(vs1['d2026-11-02'], '06:02-13:05\n15:58-18:00\n20:58');   // số lẻ: lượt cuối đứng 1 mình, không có "-?"
+  assert.equal(vs1['d2026-11-04'], '05:56-12:56\n20:56');
+  assert.equal(vs2['d2026-11-07'], '08:00-17:00');   // chấm 2 lần: y như cũ
+  assert.equal(vs1.total, 4);   // công không đổi (4 dòng công × 1)
+  const buf = await get(`/api/reports/export.xlsx?type=daytime&from=2026-11-01&to=2026-11-07&ids=${E}`);
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const ws = wb.worksheets[0];
+  const vals = (r) => ws.getRow(r).values.slice(1).map((v) => (v == null ? '' : String(v)));
+  const head = vals(6), data = vals(7);
+  assert.deepEqual(head.slice(5, 11), ['Vào 1', 'Ra 1', 'Vào 2', 'Ra 2', 'Vào 3', 'Ra 3']);   // ngày nhiều lượt nhất 5 lượt → 3 cặp
+  assert.deepEqual(data.slice(5, 11), ['05:51', '12:57', '16:00', '20:56', '', '']);   // 01/11
+  assert.deepEqual(data.slice(11, 17), ['06:02', '13:05', '15:58', '18:00', '20:58', '']);   // 02/11
 });
 
 test('Giờ nguồn → Xuất Excel (rawpunch): mỗi NV × ngày 1 dòng, Lần 1 · Lần 2 … như màn hình', async () => {
