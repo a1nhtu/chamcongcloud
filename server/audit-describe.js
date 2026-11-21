@@ -35,7 +35,7 @@ const what = (b) => (b.is_off ? 'Nghỉ' : b.work_schedule_id || b.mode === 'sch
 const SHIFT_F = {
   name: ['Tên ca'], code: ['Mã ca'], start_time: ['Giờ vào'], end_time: ['Giờ ra'],
   late_grace_min: ['Cho phép đi muộn', 'phút'], early_grace_min: ['Cho phép về sớm', 'phút'], break_minutes: ['Nghỉ giữa ca', 'phút'],
-  work_unit_value: ['Số công của ca'], allow_ot: ['Tính tăng ca', 'yn'], ot_start_after_min: ['Ở lại tối thiểu mới tính tăng ca', 'phút'],
+  work_unit_value: ['Số công của ca'], allow_ot: ['Tính tăng ca', 'yn'], ot_start_after_min: ['Ở lại tối thiểu mới tính tăng ca', 'phút'], ot_from_time: ['Tăng ca tính từ giờ'],
   check_in_start: ['Bắt đầu vào'], check_in_end: ['Kết thúc vào'], check_out_start: ['Bắt đầu ra'], check_out_end: ['Kết thúc ra'],
   ot_before: ['Tăng ca trước giờ vào', 'yn'], ot_before_min: ['Đến sớm tối thiểu', 'phút'], holiday_as_ot: ['Cả ca là tăng ca ngày lễ', 'yn'],
   shift_as_ot: ['Ca tăng ca', 'yn'], compensate_late: ['Tính bù trừ', 'yn'], no_out_credit: ['Chấm thiếu / có mặt', 'noout'],

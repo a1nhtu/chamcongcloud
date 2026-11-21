@@ -302,17 +302,23 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   // các cặp và lượt VÀO lẻ cuối không phải tăng ca (như Ronald Jack: mỗi cặp 1 dòng). VD ca 8–17, quẹt 08/17/18/22 → 240p.
   const pairSum = (lo, hi) => full.reduce((m, [pi, po]) => { const a = toMinute(pi), b = toMinute(po);
     return m + Math.max(0, mins(lo && a < lo ? lo : a, hi && b > hi ? hi : b)); }, 0);
-  let otAfterRaw = full ? pairSum(end, null) : Math.max(0, mins(ci > end ? ci : end, co));
+  const afterEnd = full ? pairSum(end, null) : Math.max(0, mins(ci > end ? ci : end, co));
+  // "Tăng ca tính từ giờ" (ot_from_time, tùy chọn của ca): tăng ca chỉ đếm từ mốc này (VD ca ra 17:30, tăng ca từ 18:00 —
+  // 17:30–18:00 không tính). Để trống = tính từ giờ ra ca như cũ. "Ở lại tối thiểu" đo từ mốc này.
+  const otFrom = otStartAt(workDate, shift, end);
+  const afterFrom = otFrom === end ? afterEnd : full ? pairSum(otFrom, null) : Math.max(0, mins(ci > otFrom ? ci : otFrom, co));
+  let otAfterRaw = afterFrom;
   // Bù trừ (tùy chọn của ca): đi trễ quá dung sai thì phần ở lại sau giờ tan ca được BÙ vào giờ công
   // (tối đa bằng số phút trễ; phần dùng để bù KHÔNG tính tăng ca; giờ công không vượt giờ chuẩn của ca)
   const standard = Math.max(1, shiftLen - (shift.break_minutes || 0));
   let compensated = 0;
   if (shift.compensate_late) {
     const lateRaw = mins(start, ci);
-    if (lateRaw > lateGrace && otAfterRaw > 0) {
-      compensated = Math.min(lateRaw, otAfterRaw, Math.max(0, standard - work_minutes));
+    if (lateRaw > lateGrace && afterEnd > 0) {
+      compensated = Math.min(lateRaw, afterEnd, Math.max(0, standard - work_minutes));
       work_minutes += compensated;
-      otAfterRaw -= compensated;
+      // phần bù lấy từ ngay sau giờ ra ca: dùng hết khoảng trước mốc tăng ca rồi mới trừ vào tăng ca
+      otAfterRaw = Math.max(0, afterFrom - Math.max(0, compensated - (afterEnd - afterFrom)));
     }
   }
   let ot_min = 0;
@@ -345,6 +351,16 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   }
 
   return { early_min, ot_min, work_minutes, work_unit, ot_type, day_status: 'lam_viec', compensated, ot_parts };
+}
+
+// Mốc bắt đầu tính tăng ca SAU ca: "Tăng ca tính từ giờ" của ca (sau giờ ra ca, trong 24 giờ; ca đêm 22–06 khai 06:30
+// → 06:30 sáng hôm sau), không khai / khai sớm hơn giờ ra → giờ ra ca (end, trả đúng đối tượng end).
+export function otStartAt(workDate, shift, end) {
+  const hm = shift && shift.ot_from_time;
+  if (!hm || !/^\d{2}:\d{2}$/.test(hm)) return end;
+  let t = vnInstant(workDate, hm);
+  while (t < end) t = new Date(t.getTime() + 24 * HH);
+  return t.getTime() === end.getTime() ? end : t;
 }
 
 // Ca được xem là TĂNG CA cả ca: ca đánh dấu "ca này là ca tăng ca" (mọi ngày), hoặc làm vào ngày lễ mà ca bật tùy chọn.

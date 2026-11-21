@@ -28,7 +28,7 @@ r.get('/info', (req, res) => {
   try {
     const sh = resolveEffectiveShift(req.user.id, date, `${date}T00:00:00Z`, null).shift;
     if (sh) {
-      suggest = { ot_from: sh.end_time || '', shift: `${sh.name || ''} (${sh.start_time}–${sh.end_time})` };
+      suggest = { ot_from: sh.ot_from_time || sh.end_time || '', shift: `${sh.name || ''} (${sh.start_time}–${sh.end_time})` };
       if (sh.break_start && sh.break_minutes > 0) { suggest.lunch_from = sh.break_start; suggest.lunch_to = toHm(minOf(sh.break_start) + sh.break_minutes); }
     }
   } catch { /* không dò được ca → không gợi ý */ }
