@@ -10,7 +10,7 @@ import { onEmployeesSaved } from '../../pin-guard.js';
 import { enrollDevices, startRemoteEnroll, finishEnroll, FINGERS } from '../../remote-enroll.js';
 import { doBackup } from '../../backup.js';
 import { ADMIN_DEPT } from '../../seed.js';
-import { extraEnabled, extraXlHeads, extraXlRow, styleExtraCols, addFamilySheet, familyXlRows, readExtraXl, saveExtraXl } from './emp-extra.js';
+import { extraEnabled, extraXlHeads, extraXlRow, styleExtraCols, addFamilySheet, familyXlRows, readExtraXl, saveExtraXl, xlText } from './emp-extra.js';
 import { who as hrWho } from './hr.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
@@ -71,8 +71,9 @@ function saveAuditOnly(caller, id, b) {
 }
 
 // Lưu NV có Số ID → (bật tự đẩy) đẩy Số ID + tên xuống máy / (bật đẩy tên) ghi tên mới ở máy đang có. Lỗi chỉ ghi log.
-function pushNameSafe(...pins) {
-  try { onEmployeesSaved(pins.flat()); } catch (e) { console.error('[device] đẩy NV xuống máy lỗi:', e.message); }
+// fresh = Số ID vừa gắn cho NV (NV mới / lần đầu có Số ID) → đẩy cả xuống máy từng xoá Số ID đó (onEmployeesSaved).
+function pushNameSafe(pins, fresh = false) {
+  try { onEmployeesSaved([pins].flat(), { fresh }); } catch (e) { console.error('[device] đẩy NV xuống máy lỗi:', e.message); }
 }
 
 export function registerEmployeeRoutes(r, { need }) {
@@ -169,7 +170,7 @@ export function registerEmployeeRoutes(r, { need }) {
       saveLeaveFields(info.lastInsertRowid, b);
       saveAuditOnly(req.user, info.lastInsertRowid, b);
       const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
-      pushNameSafe(b.device_pin);
+      pushNameSafe(b.device_pin, true);
       res.json({ ok: true, id: info.lastInsertRowid, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });
@@ -288,15 +289,17 @@ export function registerEmployeeRoutes(r, { need }) {
     let extraSaved = 0;
     const by = hrWho(req);
 
-    const cellStr = (row, c) => String(row.getCell(c).value ?? '').trim();
-    const cellNum = (row, c) => { const n = Number(String(row.getCell(c).value ?? '').replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
+    // Đọc CHỮ của ô (chữ định dạng / công thức / liên kết là object): String(value) ra "[object Object]" → từng thành Số ID rác trên máy (mythuatlt 21/11/2026)
+    const cellStr = (row, c) => xlText(row.getCell(c).value);
+    const cellNum = (row, c) => { const n = Number(cellStr(row, c).replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
 
     const deptSet = new Set(db.prepare('SELECT name FROM departments').all().map((d) => d.name));
     const posSet = new Set(db.prepare('SELECT name FROM positions').all().map((p) => p.name));
     const insDept = db.prepare('INSERT OR IGNORE INTO departments(name) VALUES(?)');
     const insPos = db.prepare('INSERT OR IGNORE INTO positions(name) VALUES(?)');
     const empByCode = new Map(db.prepare('SELECT id, code, role, device_pin FROM employees').all().map((e) => [String(e.code).trim().toUpperCase(), e]));
-    const savedPins = [];   // Số ID vừa thêm / đổi tên → đẩy xuống máy sau khi lưu xong
+    const savedPins = [];   // Số ID của NV vừa đổi tên → đẩy xuống máy sau khi lưu xong
+    const freshPins = [];   // Số ID vừa gắn (NV mới / NV lần đầu có Số ID) → đẩy cả xuống máy từng xoá Số ID đó
     const pwHash = passwordHasher();   // các dòng cùng mật khẩu (thường để trống = 123456) chỉ mã hoá 1 lần
     const pinUsed = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?");
 
@@ -346,7 +349,7 @@ export function registerEmployeeRoutes(r, { need }) {
               normPerms(role, role === 'admin' ? null : []), pinOk);
             empByCode.set(CODE, { id: info.lastInsertRowid, code, role, device_pin: pinOk });
             relinkSafe(info.lastInsertRowid, pinOk);
-            if (pinOk) savedPins.push(pinOk);
+            if (pinOk) freshPins.push(pinOk);
             if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
             if (XT) { if (XT.fam.has(CODE)) famUsed.add(CODE); if (saveExtraXl(info.lastInsertRowid, XT.rowProfile(row, r2, errors), XT.fam.get(CODE), by)) extraSaved++; }
             if (role !== 'admin') activeCount++;
@@ -370,7 +373,8 @@ export function registerEmployeeRoutes(r, { need }) {
           if (pin && !(existing.device_pin || '').trim() && !pinUsed.get(pin, existing.id)) { sets.push('device_pin=?'); args.push(pin); }
           if (sets.length) { args.push(existing.id); db.prepare(`UPDATE employees SET ${sets.join(', ')} WHERE id=?`).run(...args); }
           if (sets.includes('device_pin=?')) relinkSafe(existing.id, pin);
-          if (name || sets.includes('device_pin=?')) savedPins.push(sets.includes('device_pin=?') ? pin : existing.device_pin);
+          if (sets.includes('device_pin=?')) freshPins.push(pin);
+          else if (name) savedPins.push(existing.device_pin);
           if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=?, pw_ver=IFNULL(pw_ver,0)+1 WHERE id=?').run(pwHash(cellStr(row, 10)), existing.id);
           if (basic > 0) setBasicSalary(existing.id, basic);
           if (XT) { if (XT.fam.has(CODE)) famUsed.add(CODE); if (saveExtraXl(existing.id, XT.rowProfile(row, r2, errors), XT.fam.get(CODE), by)) extraSaved++; }
@@ -379,6 +383,7 @@ export function registerEmployeeRoutes(r, { need }) {
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/import', e, { status: 400 }); }
+    pushNameSafe(freshPins, true);
     pushNameSafe(savedPins);
     if (XT) {
       errors.push(...XT.famErr);
@@ -403,6 +408,7 @@ export function registerEmployeeRoutes(r, { need }) {
       const newRole = roleGuard.role;
       const newPerms = b.permissions !== undefined ? normPerms(newRole, roleGuard.permissions) : emp.permissions;
       let relinked = 0;   // số lượt quẹt cũ vừa gán lại cho NV khi khai Số ID máy
+      let pinNew = false; // NV lần đầu có Số ID → đẩy cả xuống máy từng xoá Số ID đó
       // SỐ ID (device_pin): chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
       if (b.device_pin !== undefined && !(emp.device_pin || '').trim()) {
         const pin1 = (b.device_pin || '').trim();
@@ -411,6 +417,7 @@ export function registerEmployeeRoutes(r, { need }) {
             return res.status(400).json({ error: `Số ID máy chấm công "${pin1}" đã có nhân viên dùng` });
           db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin1, emp.id);
           relinked = relinkSafe(emp.id, pin1);
+          pinNew = true;
         }
       }
       db.prepare(`UPDATE employees SET code=?, full_name=?, department=?, position=?, phone=?,
@@ -428,7 +435,7 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
       saveLeaveFields(emp.id, b);
       saveAuditOnly(req.user, emp.id, b);
-      if (b.full_name != null || b.device_pin !== undefined) pushNameSafe(db.prepare('SELECT device_pin FROM employees WHERE id=?').get(emp.id)?.device_pin);
+      if (b.full_name != null || b.device_pin !== undefined) pushNameSafe(db.prepare('SELECT device_pin FROM employees WHERE id=?').get(emp.id)?.device_pin, pinNew);
       res.json({ ok: true, relinked });
     } catch (e) {
       if (/UNIQUE/.test(e.message)) return res.status(400).json({ error: 'Mã NV hoặc tài khoản đã tồn tại' });

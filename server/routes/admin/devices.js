@@ -709,8 +709,12 @@ export function registerDeviceRoutes(r, { need }) {
     res.json({ reach });
   });
   // Xóa các Số ID đã chọn trên MỌI máy đang dùng: máy đẩy (ADMS) xếp lệnh chờ máy lấy; máy TCP/IP chạy nền qua SDK
+  // Số ID lạ (dấu cách, ngoặc… — VD "[object Object]" do ô Excel từng đọc sai) vẫn xoá được nếu máy đang báo có ĐÚNG số đó;
+  // trước đây bị lọc bỏ im lặng → bấm xoá báo xong mà người đó vẫn nằm trên máy (mythuatlt 21/11/2026)
   r.post('/devices/delete-users-all', needDevOrEmp, (req, res) => {
-    const pins = cleanPins(req.body?.pins, HIK_MAX_PIN);
+    const raw = Array.isArray(req.body?.pins) ? req.body.pins.map((p) => String(p).trim()) : [];
+    const onDevicePin = db.prepare('SELECT 1 FROM device_users_serial WHERE pin=? UNION ALL SELECT 1 FROM device_bio_templates WHERE pin=? LIMIT 1');
+    const pins = [...new Set([...cleanPins(raw, HIK_MAX_PIN), ...raw.filter((p) => p && p.length <= HIK_MAX_PIN && onDevicePin.get(p, p))])];
     if (!pins.length) return res.status(400).json({ error: 'Chưa chọn nhân viên' });
     const short = pins.filter((p) => p.length <= 20);   // Số ID dài hơn 20 ký tự chỉ có trên máy Hikvision, không gửi sang máy khác
     // Chọn máy (máy đang mất kết nối thì bỏ ra): serials = các máy được chọn; không gửi serials = mọi máy như cũ

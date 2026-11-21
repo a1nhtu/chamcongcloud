@@ -12,7 +12,7 @@
 import { db, getSetting } from './db.js';
 import {
   queueCmd, buildUserCommand, buildBioCommand, buildPhotoCommand, createDraftEmployee, upsertEmployeeFromDevice,
-  relinkPunchesForPin, rebuildDays, syncPinsToGroup, syncFillDevice,
+  relinkPunchesForPin, rebuildDays, syncPinsToGroup, syncFillDevice, clearDeletedMarks,
 } from './device-sync.js';
 
 export const guardOn = () => getSetting('device_pin_guard', '1') === '1';
@@ -428,8 +428,15 @@ export function pushEmployees(pins, { serials = null, withBio = false } = {}) {
 }
 
 // Vừa lưu NV (khai báo / sửa / nhập Excel): bật đồng bộ NV xuống máy → đẩy Số ID + tên xuống máy. Trả số lệnh đã xếp.
-export function onEmployeesSaved(pins) {
+// fresh = Số ID VỪA GẮN cho NV (thêm NV mới, hoặc NV lần đầu có Số ID) → chủ động đưa Số ID này về máy: gỡ ghi nhớ
+// "đã xoá trên máy" ở các máy sẽ nhận rồi đẩy. Khách hay xoá NV (kèm xoá trên máy) rồi nhập lại đúng Số ID cũ — trước đây
+// tự đẩy bỏ qua các máy đã xoá nên NV mới không xuống máy nào (mythuatlt 21/11/2026). Sửa NV đang có (đổi tên…) vẫn giữ ghi nhớ.
+export function onEmployeesSaved(pins, { fresh = false } = {}) {
   const list = [...new Set((pins || []).map((p) => String(p || '').trim()).filter(Boolean))];
   if (!list.length || !autoPushOn()) return 0;
+  if (fresh) {
+    const emp = db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND active=1");
+    for (const pin of list) if (emp.get(pin)) clearDeletedMarks(targetsFor(pin), [pin]);
+  }
   return pushEmployees(list).users;
 }

@@ -8,6 +8,7 @@ import { vnWeekday } from '../../attendance-calc.js';
 import { sendCaughtError } from '../../util.js';
 import { rebuildDays } from '../../device-sync.js';
 import { multiAssistExtra, multiAssistReport } from '../../multi-shift.js';
+import { xlText } from './emp-extra.js';
 
 // Đổi phân ca theo NGÀY xong → tính lại công ngay các ngày đó (ngày đã có giờ chấm từ máy), khỏi phải bấm "Tính lại công".
 // keys: tập 'empId|YYYY-MM-DD'. Ngày kế tiếp cũng được tính lại (ca đêm lấy giờ ra sáng hôm sau).
@@ -532,7 +533,7 @@ export function registerAssignmentRoutes(r, { need }) {
     try {
       for (let r2 = 2; r2 <= ws.rowCount; r2++) {
         const row = ws.getRow(r2);
-        const code = String(row.getCell(1).value ?? '').trim().toUpperCase();
+        const code = xlText(row.getCell(1).value).toUpperCase();   // ô Mã NV định dạng chữ / công thức vẫn đọc đúng
         if (!code) continue;
         const empId = empByCode.get(code);
         if (!empId) { errors.push(`Mã NV "${code}" không tồn tại`); continue; }
