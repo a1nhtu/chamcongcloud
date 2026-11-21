@@ -53,7 +53,7 @@ test('tạo công ty: mã sai / mã dành riêng → 400, trùng → 409', () =>
   const a = H.createTenant({ slug: 'cta', name: 'Công ty A' });
   assert.equal(a.slug, 'cta');
   assert.equal(a.admin_user, 'admin');
-  assert.match(a.admin_pass, /^[a-z2-9]{8}$/);
+  assert.match(a.admin_pass, /^\d{6}$/);   // 6 chữ số ngẫu nhiên, mỗi công ty một mật khẩu
   H.createTenant({ slug: 'ctb', name: 'Công ty B' });
   for (const slug of ['', 'A B', '-abc', 'abc-', 'www', 'huongdan', 'x'.repeat(41), '../ctb'])
     assert.throws(() => H.createTenant({ slug }), (e) => e.status === 400, `mã "${slug}" phải bị từ chối`);

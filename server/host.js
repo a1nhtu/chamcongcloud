@@ -79,9 +79,9 @@ export async function reloadTenant(slug) {
   return true;
 }
 
-// Mật khẩu admin ban đầu cho công ty mới (dễ đọc qua điện thoại: bỏ các ký tự dễ nhầm)
-const PASS_CH = 'abcdefghjkmnpqrstuvwxyz23456789';
-const newPass = () => Array.from({ length: 8 }, () => PASS_CH[randomInt(PASS_CH.length)]).join('');
+// Mật khẩu admin ban đầu cho công ty mới: 6 chữ số ngẫu nhiên (Anh 21/11/2026: khách gõ dễ như 123456 —
+// điện thoại hiện bàn phím số — nhưng mỗi công ty một mật khẩu riêng, KHÔNG dùng chung 123456)
+const newPass = () => String(randomInt(1000000)).padStart(6, '0');
 
 // Tạo công ty mới. opts: { slug, name, env:{USE_DEVICE,USE_PHONE}, phone, email }. Trả { slug, name, admin_user, admin_pass, machine_id }.
 export function createTenant(opts = {}) {
