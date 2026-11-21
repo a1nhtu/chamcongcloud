@@ -10,6 +10,8 @@ import { onEmployeesSaved } from '../../pin-guard.js';
 import { enrollDevices, startRemoteEnroll, finishEnroll, FINGERS } from '../../remote-enroll.js';
 import { doBackup } from '../../backup.js';
 import { ADMIN_DEPT } from '../../seed.js';
+import { extraEnabled, extraXlHeads, extraXlRow, styleExtraCols, addFamilySheet, familyXlRows, readExtraXl, saveExtraXl } from './emp-extra.js';
+import { who as hrWho } from './hr.js';
 
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
@@ -179,14 +181,20 @@ export function registerEmployeeRoutes(r, { need }) {
   r.get('/employees/template.xlsx', need('employees'), async (req, res) => {
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('NhanVien');
-    const hr = ws.addRow(EMP_IMPORT_COLS);
+    const XT = extraEnabled();   // công tắc "Thông tin thêm của nhân viên": bật → thêm cột CCCD… + sheet GiaCanh
+    const hr = ws.addRow([...EMP_IMPORT_COLS, ...(XT ? extraXlHeads() : [])]);
     hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     hr.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
     // 2 dòng ví dụ
-    ws.addRow(['NV001', 'Nguyễn Văn A', 'Kinh doanh', 'Nhân viên bán hàng', '0900000001', 'Nhân viên', '1', 8000000, 'nv001', '123456']);
+    const ex1 = XT ? extraXlRow({ gender: 'Nam', birth_date: '1990-05-15', hometown: 'Nam Định', id_number: '036090012345', id_issue_date: '2021-06-20', id_issue_place: 'Cục CS QLHC về TTXH' }) : [];
+    ws.addRow(['NV001', 'Nguyễn Văn A', 'Kinh doanh', 'Nhân viên bán hàng', '0900000001', 'Nhân viên', '1', 8000000, 'nv001', '123456', ...ex1]);
     ws.addRow(['QL001', 'Trần Thị B', 'Kinh doanh', 'Trưởng phòng', '0900000002', 'Quản lý', '2', 15000000, 'ql001', '123456']);
     const widths = [12, 22, 18, 20, 14, 12, 16, 14, 18, 12];
-    ws.columns.forEach((c, i) => { c.width = widths[i] || 14; });
+    widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    if (XT) {
+      styleExtraCols(ws, EMP_IMPORT_COLS.length + 1);
+      addFamilySheet(wb, [['NV001', 'Nguyễn Văn A', 'Nguyễn Văn Con', 'Con', '10/03/2018', '', 'Học sinh', 'Có', '']]);
+    }
     // Sheet hướng dẫn
     const g = wb.addWorksheet('HuongDan');
     g.addRow(['HƯỚNG DẪN NHẬP NHÂN VIÊN']).font = { bold: true, size: 13 };
@@ -203,6 +211,9 @@ export function registerEmployeeRoutes(r, { need }) {
       ['', ''],
       ['CHẾ ĐỘ THÊM MỚI', 'Thêm nhân viên mới. Mã đã tồn tại sẽ bỏ qua.'],
       ['CHẾ ĐỘ CẬP NHẬT', 'Sửa nhân viên theo Mã. Ô để trống = giữ nguyên. Mã chưa có sẽ bỏ qua.'],
+      ...(XT ? [['', ''],
+        ['• Cột màu cam (CCCD…)', 'Thông tin thêm của nhân viên. Ngày ghi dd/mm/yyyy. Để trống = giữ nguyên (khi Cập nhật).'],
+        ['• Sheet GiaCanh', 'Mỗi người thân 1 dòng, ghi Mã NV. NV nào có dòng ở sheet này thì danh sách gia cảnh được THAY bằng các dòng trong file; NV không có dòng nào thì giữ nguyên. Cột "Người phụ thuộc" ghi Có nếu đã đăng ký giảm trừ.']] : []),
     ].forEach((r2) => g.addRow(r2));
     g.getColumn(1).width = 26; g.getColumn(2).width = 60;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
@@ -216,7 +227,7 @@ export function registerEmployeeRoutes(r, { need }) {
   // ?dept=<tên bộ phận> → chỉ bộ phận đó + mọi bộ phận con; ?dept=__none__ → NV chưa có bộ phận; không có = cả công ty.
   r.get('/employees/export.xlsx', need('employees'), async (req, res) => {
     const canSalary = hasPerm(req.user, 'salary');
-    let rows = db.prepare(`SELECT e.code, e.full_name, e.department, e.position, e.phone, e.role, e.device_pin, e.username, e.active, s.basic_salary
+    let rows = db.prepare(`SELECT e.id, e.code, e.full_name, e.department, e.position, e.phone, e.role, e.device_pin, e.username, e.active, s.basic_salary
       FROM employees e LEFT JOIN salary_configs s ON s.employee_id = e.id ORDER BY e.active DESC, e.department, e.full_name`).all();
     const deptQ = String(req.query.dept || '').trim();
     let fileTag = '';
@@ -236,17 +247,21 @@ export function registerEmployeeRoutes(r, { need }) {
     const ROLE = { employee: 'Nhân viên', manager: 'Quản lý', admin: 'Admin' };
     const wb = new ExcelJS.Workbook();
     const ws = wb.addWorksheet('NhanVien');
-    const hr = ws.addRow([...EMP_IMPORT_COLS, 'Trạng thái']);
+    const XT = extraEnabled();
+    const profs = XT ? new Map(db.prepare('SELECT * FROM hr_profiles').all().map((p) => [p.employee_id, p])) : null;
+    const hr = ws.addRow([...EMP_IMPORT_COLS, 'Trạng thái', ...(XT ? extraXlHeads() : [])]);
     hr.font = { bold: true, color: { argb: 'FFFFFFFF' } };
     hr.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF2563EB' } }; c.alignment = { vertical: 'middle', horizontal: 'center' }; });
     for (const e of rows) {
       ws.addRow([e.code, e.full_name, e.department || '', e.position || '', e.phone || '', ROLE[e.role] || 'Nhân viên', e.device_pin || '',
-        canSalary && e.basic_salary ? e.basic_salary : '', e.username || '', '', e.active ? 'Đang làm' : 'Đã khoá']);
+        canSalary && e.basic_salary ? e.basic_salary : '', e.username || '', '', e.active ? 'Đang làm' : 'Đã khoá',
+        ...(XT ? extraXlRow(profs.get(e.id)) : [])]);
     }
     const widths = [12, 24, 20, 20, 14, 12, 16, 14, 18, 10, 12];
-    ws.columns.forEach((c, i) => { c.width = widths[i] || 14; });
+    widths.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
     ws.views = [{ state: 'frozen', ySplit: 1 }];
-    ws.autoFilter = { from: 'A1', to: 'K1' };
+    ws.autoFilter = XT ? { from: { row: 1, column: 1 }, to: { row: 1, column: ws.getRow(1).cellCount } } : { from: 'A1', to: 'K1' };
+    if (XT) { styleExtraCols(ws, EMP_IMPORT_COLS.length + 2); addFamilySheet(wb, familyXlRows(rows.map((e) => e.id))); }
     const d = new Date(Date.now() + 7 * 3600e3).toISOString().slice(0, 10);
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="danh_sach_nhan_vien_${fileTag}${d}.xlsx"`);
@@ -265,6 +280,13 @@ export function registerEmployeeRoutes(r, { need }) {
     try { await wb.xlsx.load(buf); } catch { return res.status(400).json({ error: 'File Excel không đọc được' }); }
     const ws = wb.worksheets[0];
     if (!ws) return res.status(400).json({ error: 'File rỗng' });
+    // File "Xuất thông tin thêm + gia cảnh" có cột khác (cột 6 = Trạng thái) → nhập nhầm sẽ đổi vai trò NV
+    if (ws.name === 'ThongTinThem') return res.status(400).json({ error: 'Đây là file "Xuất thông tin thêm + gia cảnh" (chỉ để xem). Muốn nhập / cập nhật hãy dùng file "Xuất danh sách nhân viên" hoặc "Tải file mẫu".' });
+    // Công tắc "Thông tin thêm" bật → đọc thêm cột CCCD… (theo tên cột) + sheet GiaCanh
+    const XT = extraEnabled() ? readExtraXl(wb, ws) : null;
+    const famUsed = new Set();
+    let extraSaved = 0;
+    const by = hrWho(req);
 
     const cellStr = (row, c) => String(row.getCell(c).value ?? '').trim();
     const cellNum = (row, c) => { const n = Number(String(row.getCell(c).value ?? '').replace(/[^\d.-]/g, '')); return isNaN(n) ? 0 : n; };
@@ -326,6 +348,7 @@ export function registerEmployeeRoutes(r, { need }) {
             relinkSafe(info.lastInsertRowid, pinOk);
             if (pinOk) savedPins.push(pinOk);
             if (basic > 0) setBasicSalary(info.lastInsertRowid, basic);
+            if (XT) { if (XT.fam.has(CODE)) famUsed.add(CODE); if (saveExtraXl(info.lastInsertRowid, XT.rowProfile(row, r2, errors), XT.fam.get(CODE), by)) extraSaved++; }
             if (role !== 'admin') activeCount++;
             added++;
           } catch (e) {
@@ -350,13 +373,18 @@ export function registerEmployeeRoutes(r, { need }) {
           if (name || sets.includes('device_pin=?')) savedPins.push(sets.includes('device_pin=?') ? pin : existing.device_pin);
           if (cellStr(row, 10)) db.prepare('UPDATE employees SET password_hash=?, pw_ver=IFNULL(pw_ver,0)+1 WHERE id=?').run(pwHash(cellStr(row, 10)), existing.id);
           if (basic > 0) setBasicSalary(existing.id, basic);
+          if (XT) { if (XT.fam.has(CODE)) famUsed.add(CODE); if (saveExtraXl(existing.id, XT.rowProfile(row, r2, errors), XT.fam.get(CODE), by)) extraSaved++; }
           updated++;
         }
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/import', e, { status: 400 }); }
     pushNameSafe(savedPins);
-    res.json({ ok: true, mode, added, updated, skipped, newDepts, newPos, errors: errors.slice(0, 80) });
+    if (XT) {
+      errors.push(...XT.famErr);
+      for (const K of XT.fam.keys()) if (!famUsed.has(K)) errors.push(`Gia cảnh: Mã NV "${K}" không được ${mode === 'add' ? 'thêm' : 'cập nhật'} ở sheet nhân viên — bỏ qua người thân của mã này`);
+    }
+    res.json({ ok: true, mode, added, updated, skipped, newDepts, newPos, ...(XT ? { extraSaved } : {}), errors: errors.slice(0, 80) });
   });
 
   r.put('/employees/:id', need('employees'), (req, res) => {

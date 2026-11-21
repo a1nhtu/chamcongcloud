@@ -398,6 +398,7 @@ function importEmployees(mode) {
           r.skipped ? `⏭️ Bỏ qua: ${r.skipped}` : '',
           r.newDepts ? `🏢 Tạo mới bộ phận: ${r.newDepts}` : '',
           r.newPos ? `🏷️ Tạo mới chức danh: ${r.newPos}` : '',
+          r.extraSaved ? `🧾 Lưu thông tin thêm / gia cảnh: ${r.extraSaved} nhân viên` : '',
         ].filter(Boolean);
         if (r.errors && r.errors.length) lines.push('', '⚠️ Chi tiết bỏ qua:', ...r.errors);
         alert(lines.join('\n'));

@@ -126,3 +126,127 @@ export function registerEmpExtraRoutes(r, { need }) {
     } catch (err) { sendCaughtError(res, 'GET /admin/employees/extra/export.xlsx', err); }
   });
 }
+
+/* ===== Excel NHÂN VIÊN (File mẫu · Xuất danh sách · Nhập mới / Cập nhật từ Excel) khi BẬT công tắc =====
+ * Tắt công tắc: các file y như cũ (10 cột), cột lạ trong file nhập bị bỏ qua.
+ * Bật: sheet đầu thêm các cột thông tin thêm SAU các cột cũ (nhận theo TÊN CỘT ở dòng 1, không theo vị trí),
+ * thêm sheet "GiaCanh" (1 người thân / dòng, theo Mã NV). Nhập: ô trống = giữ nguyên; NV có dòng ở GiaCanh thì
+ * danh sách gia cảnh được THAY bằng các dòng trong file (NV không có dòng nào → giữ nguyên). */
+const XL_LABEL = { emergency_relation: 'Quan hệ (liên hệ khẩn cấp)', hr_note: 'Ghi chú hồ sơ' };
+const xlLabel = (f) => XL_LABEL[f[0]] || f[1];
+export const extraXlHeads = () => EXTRA_FIELDS.map(xlLabel);
+export const extraXlRow = (p = {}) => EXTRA_FIELDS.map(([k, , t]) => (t === 'date' ? dmy(p[k]) : p[k] || ''));
+export const FAM_XL_HEAD = ['Mã NV', 'Họ tên NV', 'Họ tên người thân', 'Quan hệ', 'Ngày sinh', 'SĐT', 'Nghề nghiệp', 'Người phụ thuộc (giảm trừ)', 'Ghi chú'];
+const normH = (s) => String(s || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+// Giá trị ô Excel → chuỗi (rich text, công thức, liên kết, ngày)
+export function xlText(v) {
+  if (v == null) return '';
+  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === 'object') {
+    if (Array.isArray(v.richText)) return v.richText.map((x) => x.text || '').join('').trim();
+    if (v.result != null) return xlText(v.result);
+    if (v.text != null) return xlText(v.text);
+    return '';
+  }
+  return String(v).trim();
+}
+// Ô ngày: ô kiểu ngày của Excel, số seri, 'dd/mm/yyyy', 'd-m-yyyy', 'yyyy-mm-dd'. Trả 'YYYY-MM-DD', '' (trống) hoặc null (sai)
+export function xlDate(v) {
+  if (v == null || v === '') return '';
+  if (v instanceof Date) return isNaN(v) ? null : v.toISOString().slice(0, 10);
+  if (typeof v === 'number') { const d = new Date(Date.UTC(1899, 11, 30) + Math.round(v) * 86400000); return v > 0 && !isNaN(d) ? d.toISOString().slice(0, 10) : null; }
+  const s = xlText(v);
+  if (!s) return '';
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(s);
+  let y, mo, d;
+  if (m) [, y, mo, d] = m; else if ((m = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})$/.exec(s))) [, d, mo, y] = m; else return null;
+  const out = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return isDate(out) && new Date(out + 'T00:00:00Z').getUTCDate() === +d ? out : null;
+}
+
+// Thêm cột thông tin thêm vào sheet NV (dòng tiêu đề đã có) — định dạng chữ để CCCD / số TK không mất số 0 đầu
+export function styleExtraCols(ws, fromCol) {
+  EXTRA_FIELDS.forEach(([, , t], i) => {
+    const c = ws.getColumn(fromCol + i);
+    c.width = t === 'textarea' ? 28 : 16;
+    if (t !== 'date') c.numFmt = '@';
+  });
+  ws.getRow(1).eachCell((c, n) => { if (n >= fromCol) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8541E' } }; });
+}
+export function addFamilySheet(wb, rows) {
+  const wf = wb.addWorksheet('GiaCanh');
+  wf.addRow(FAM_XL_HEAD);
+  for (const r of rows) wf.addRow(r);
+  const h = wf.getRow(1);
+  h.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+  h.eachCell((c) => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE8541E' } }; c.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }; });
+  [10, 24, 24, 10, 12, 13, 18, 14, 24].forEach((w, i) => { wf.getColumn(i + 1).width = w; });
+  wf.getColumn(1).numFmt = '@'; wf.getColumn(6).numFmt = '@';
+  wf.views = [{ state: 'frozen', ySplit: 1 }];
+  return wf;
+}
+// Gia cảnh của các NV (đã sắp theo NV) → các dòng sheet GiaCanh
+export function familyXlRows(empIds) {
+  const want = new Set(empIds);
+  const emps = new Map(db.prepare('SELECT id, code, full_name FROM employees').all().map((e) => [e.id, e]));
+  return db.prepare('SELECT * FROM hr_family ORDER BY employee_id, id').all().filter((x) => want.has(x.employee_id)).map((x) => {
+    const e = emps.get(x.employee_id);
+    return [e.code, e.full_name, x.full_name, x.relation, dmy(x.birth_date), x.phone, x.job, x.dependent ? 'Có' : '', x.note];
+  });
+}
+
+// Đọc file nhập: cột thông tin thêm ở sheet đầu (theo tên cột) + sheet GiaCanh
+export function readExtraXl(wb, ws) {
+  const byHead = new Map();
+  for (const f of EXTRA_FIELDS) { byHead.set(normH(xlLabel(f)), f); if (!byHead.has(normH(f[1]))) byHead.set(normH(f[1]), f); }
+  const cols = [];   // [số cột, field]
+  ws.getRow(1).eachCell((c, n) => { if (n > 10) { const f = byHead.get(normH(xlText(c.value))); if (f) cols.push([n, f]); } });
+  const fam = new Map();   // MÃ NV (in hoa) → [{dòng, người thân}]
+  const famErr = [];
+  const wf = wb.getWorksheet('GiaCanh');
+  if (wf) {
+    for (let r = 2; r <= wf.rowCount; r++) {
+      const row = wf.getRow(r);
+      const code = xlText(row.getCell(1).value);
+      const name = xlText(row.getCell(3).value);
+      if (!code && !name) continue;
+      if (!code || !name) { famErr.push(`Gia cảnh dòng ${r}: thiếu ${code ? 'họ tên người thân' : 'Mã NV'} — bỏ qua`); continue; }
+      const bd = xlDate(row.getCell(5).value);
+      if (bd === null) famErr.push(`Gia cảnh dòng ${r}: ngày sinh "${xlText(row.getCell(5).value)}" không đúng (dd/mm/yyyy) — để trống`);
+      const dep = normH(xlText(row.getCell(8).value));
+      const x = { full_name: name, relation: xlText(row.getCell(4).value), birth_date: bd || '', phone: xlText(row.getCell(6).value),
+        job: xlText(row.getCell(7).value), dependent: ['có', 'co', 'x', '1', 'yes', 'phụ thuộc', 'v', '✓'].includes(dep), note: xlText(row.getCell(9).value) };
+      const K = code.toUpperCase();
+      if (!fam.has(K)) fam.set(K, []);
+      fam.get(K).push(x);
+    }
+  }
+  // 1 dòng NV → các trường có điền (ô trống = giữ nguyên); ngày sai → báo lỗi, bỏ ô
+  const rowProfile = (row, r2, errors) => {
+    const out = {};
+    for (const [n, [k, label, t]] of cols) {
+      const raw = row.getCell(n).value;
+      if (t === 'date') {
+        const d = xlDate(raw);
+        if (d === null) { errors.push(`Dòng ${r2}: ${label} "${xlText(raw)}" không đúng (dd/mm/yyyy) — bỏ qua ô này`); continue; }
+        if (d) out[k] = d;
+      } else { const s = xlText(raw); if (s) out[k] = s; }
+    }
+    return cleanProfile(out);
+  };
+  return { cols: cols.length, rowProfile, fam, famErr };
+}
+// Lưu phần thông tin thêm của 1 NV khi nhập Excel (trong transaction của nơi gọi)
+export function saveExtraXl(empId, profile, family, by) {
+  let did = false;
+  if (profile && Object.keys(profile).length) { saveProfile(empId, profile, by); did = true; }
+  if (family) {
+    const fam = cleanFamily(family);
+    db.prepare('DELETE FROM hr_family WHERE employee_id = ?').run(empId);
+    const ins = db.prepare('INSERT INTO hr_family (employee_id, full_name, relation, birth_date, phone, job, dependent, note) VALUES (?,?,?,?,?,?,?,?)');
+    for (const x of fam) ins.run(empId, x.full_name, x.relation, x.birth_date, x.phone, x.job, x.dependent, x.note);
+    did = true;
+  }
+  return did;
+}
