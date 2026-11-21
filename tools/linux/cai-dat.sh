@@ -329,10 +329,12 @@ WantedBy=multi-user.target
 EOF
 
 HAS_TOKEN=0; printf '%s' "$CFG" | grep -q '^TUNNEL_TOKEN=.' && HAS_TOKEN=1
+# Tên miền tunnel phục vụ: máy chủ nhiều công ty = ctl-<tên> (điều khiển) + tên miền từng công ty; khách thường = <slug>
+TUN_DOMAIN="$NAME.$ZONE"; [ -n "$HOST" ] && TUN_DOMAIN="ctl-$HOST.$ZONE"
 if [ "$HAS_TOKEN" = 1 ]; then
 cat > "/etc/systemd/system/$SVC_TUN.service" <<EOF
 [Unit]
-Description=Digiplus Tunnel - $NAME ($NAME.$ZONE)
+Description=Digiplus Tunnel - $NAME ($TUN_DOMAIN)
 After=network-online.target
 Wants=network-online.target
 
@@ -362,7 +364,12 @@ ok "Đã bật dịch vụ $SVC$([ "$HAS_TOKEN" = 1 ] && echo " + $SVC_TUN")"
 say "Đang chờ phần mềm khởi động (lần đầu có thể mất 1 phút)..."
 up=0
 for i in $(seq 1 90); do
-  if curl -fsS -m 3 "http://127.0.0.1:$PORT/api/version" >/dev/null 2>&1; then up=1; break; fi
+  if [ -n "$HOST" ]; then
+    # Máy chủ nhiều công ty: 127.0.0.1 không phải tên miền công ty nào → /api/version trả 404 "Không tìm thấy công ty".
+    # Hỏi API điều khiển /_host/ping (không gửi token → app trả 401 "Sai mã máy chủ"): có trả lời = phần mềm đã lên
+    code="$(curl -sS -m 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/_host/ping" 2>/dev/null)" || code=000
+    case "$code" in 200|401) up=1; break ;; esac
+  elif curl -fsS -m 3 "http://127.0.0.1:$PORT/api/version" >/dev/null 2>&1; then up=1; break; fi
   sleep 1
 done
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
