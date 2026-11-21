@@ -41,6 +41,13 @@ export function cleanFamily(list) {
 export function registerEmpExtraRoutes(r, { need }) {
   const g = [extraGate, need('employees')];
 
+  // Khung trống cho form THÊM MỚI nhân viên (chưa có id): nhóm, trường, quan hệ — lưu sau khi tạo NV bằng PUT /employees/:id/extra
+  r.get('/employees/extra/meta', g, (req, res) => {
+    const profile = {};
+    for (const k of EXTRA_KEYS) profile[k] = '';
+    res.json({ groups: EXTRA_GROUPS, fields: EXTRA_FIELDS, relations: RELATIONS, profile, family: [], updated_by: '', updated_at: '' });
+  });
+
   r.get('/employees/:id/extra', g, (req, res) => {
     const e = getEmp(req.params.id);
     if (!e) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });

@@ -299,7 +299,8 @@ async function downloadEmpExtraExport() {
     toast('Đã xuất thông tin thêm + gia cảnh của nhân viên', 'ok');
   } catch { toast('Không xuất được thông tin thêm', 'err'); }
 }
-// Tab "🧾 Thông tin thêm": các nhóm trường + bảng gia cảnh. Trả về { box, load(), save() } — save() chỉ gửi khi đã mở tab.
+// Tab "🧾 Thông tin thêm": các nhóm trường + bảng gia cảnh. Trả về { box, load(), save(id) } — save() chỉ gửi khi đã mở tab.
+// e = null: form THÊM MỚI (khung trống, lưu vào NV vừa tạo).
 function empExtraTab(e) {
   const box = el('div', {}, loading());
   let loaded = false, famBody = null, meta = null;
@@ -332,7 +333,7 @@ function empExtraTab(e) {
   async function load() {
     if (loaded) return; loaded = true;
     let d;
-    try { d = await api('/admin/employees/' + e.id + '/extra'); }
+    try { d = await api(e ? '/admin/employees/' + e.id + '/extra' : '/admin/employees/extra/meta'); }
     catch (err) { box.innerHTML = ''; box.append(el('div', { class: 'map-hint' }, err.message)); loaded = false; return; }
     meta = d; box.innerHTML = '';
     for (const [g, title] of d.groups) {
@@ -359,13 +360,14 @@ function empExtraTab(e) {
     ], true));
     box.append(el('div', { class: 'map-hint', style: 'margin-top:10px' }, 'Bấm "Lưu thay đổi" ở dưới để lưu cả thông tin thêm.' + (d.updated_at ? ` Cập nhật lần cuối: ${d.updated_by || ''} lúc ${d.updated_at}.` : '')));
   }
-  async function save() {
+  async function save(id) {
     if (!meta) return;   // chưa mở tab → không đụng dữ liệu
     const profile = {};
     for (const k of Object.keys(inputs)) profile[k] = inputs[k].value;
     const family = famRows.map((r) => ({ full_name: r.full_name.value, relation: r.relation.value, birth_date: r.birth_date.value, phone: r.phone.value, job: r.job.value, dependent: r.dep.checked, note: r.note.value }));
     if (family.some((x) => !x.full_name.trim() && (x.relation || x.birth_date || x.phone || x.job))) throw new Error('Gia cảnh: có dòng chưa nhập họ tên người thân');
-    await api('/admin/employees/' + e.id + '/extra', { method: 'PUT', body: { profile, family } });
+    if (!e && !Object.values(profile).some((v) => String(v || '').trim()) && !family.length) return;   // thêm mới, không nhập gì
+    await api('/admin/employees/' + (e ? e.id : id) + '/extra', { method: 'PUT', body: { profile, family } });
   }
   return { box, load, save };
 }
@@ -690,8 +692,12 @@ function empModal(e) {
     const empId = e ? e.id : r.id;
     save.disabled = true;
     if (extra) {
-      try { await extra.save(); }
-      catch (err) { toast('Đã lưu nhân viên nhưng chưa lưu được thông tin thêm: ' + err.message, 'err'); save.disabled = false; return; }
+      try { await extra.save(empId); }
+      catch (err) {
+        toast('Đã lưu nhân viên nhưng chưa lưu được thông tin thêm: ' + err.message, 'err');
+        if (!e) { closeModal(); pageEmployees(); return; }   // NV mới đã tạo → bấm lại sẽ tạo trùng; mở Sửa để nhập lại
+        save.disabled = false; return;
+      }
     }
     if (faceB64) {
       try { await api('/admin/employees/' + empId + '/face-photo', { method: 'PUT', body: { photo: faceB64 } }); }
@@ -709,17 +715,17 @@ function empModal(e) {
     toast(saved + (faceB64 ? ' + ảnh khuôn mặt. Đẩy xuống máy: Máy chấm công ▾ → Đẩy NV xuống máy.' : ''), 'ok');
     closeModal(); pageEmployees();
   };
-  // ----- 2 tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) -----
+  // ----- Tab: Thông tin | Sinh trắc/Máy (chỉ khi sửa NV đã có) | Thông tin thêm (công tắc bật — cả Thêm mới lẫn Sửa) -----
   let modalBody = body;
-  const extra = e && empExtraOn() && hasPerm('employees') ? empExtraTab(e) : null;
-  if (e) {
+  const extra = empExtraOn() && hasPerm('employees') ? empExtraTab(e || null) : null;
+  if (e || extra) {
     const tabInfo = el('div', {}, ...body);
     const tabBio = el('div', { hidden: true }, loading());
     let bioLoaded = false;
     const mkTab = (label) => el('button', { class: 'btn sm ghost', type: 'button', style: 'border:none;border-radius:0;border-bottom:2px solid transparent' }, label);
-    const tI = mkTab('📋 Thông tin'), tB = mkTab('🖐 Sinh trắc / Máy'), tX = extra ? mkTab('🧾 Thông tin thêm') : null;
+    const tI = mkTab('📋 Thông tin'), tB = e ? mkTab('🖐 Sinh trắc / Máy') : null, tX = extra ? mkTab('🧾 Thông tin thêm') : null;
     const tabX = extra ? el('div', { hidden: true }, extra.box) : null;
-    const tabs = [['info', tI, tabInfo], ['bio', tB, tabBio], ...(extra ? [['extra', tX, tabX]] : [])];
+    const tabs = [['info', tI, tabInfo], ...(e ? [['bio', tB, tabBio]] : []), ...(extra ? [['extra', tX, tabX]] : [])];
     const sel = (t) => {
       for (const [k, btn, pane] of tabs) {
         const on = k === t;

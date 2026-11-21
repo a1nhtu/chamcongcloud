@@ -115,6 +115,23 @@ test('xuất Excel: sheet ThongTinThem (CCCD, quê quán, số người phụ th
   assert.equal(wf.getRow(2).values[8], 'Có');
 });
 
+test('form THÊM MỚI: /employees/extra/meta trả khung trống (nhóm, trường, quan hệ) — tắt công tắc thì 403', async () => {
+  user = ADMIN;
+  const m = await call('GET', '/employees/extra/meta');
+  assert.equal(m.status, 200);
+  assert.ok(m.data.groups.length >= 4 && m.data.fields.some((f) => f[0] === 'id_number') && m.data.relations.includes('Con'));
+  assert.deepEqual(m.data.family, []);
+  assert.ok(Object.values(m.data.profile).every((v) => v === ''));
+  assert.ok(!('manager_id' in m.data.profile));   // trường riêng Nhân sự không hiện
+  // NV vừa tạo → lưu thông tin thêm bằng PUT như form Sửa
+  const nid = Number(db.prepare("INSERT INTO employees(code, full_name, role, username, password_hash) VALUES ('NV02','Trần Thị Bình','employee','nv02','x')").run().lastInsertRowid);
+  assert.equal((await call('PUT', `/employees/${nid}/extra`, { profile: { id_number: '001199000111' }, family: [{ full_name: 'Trần Văn Cha', relation: 'Bố' }] })).status, 200);
+  assert.equal(db.prepare('SELECT id_number FROM hr_profiles WHERE employee_id=?').get(nid).id_number, '001199000111');
+  setSetting('emp_extra_info', '0');
+  assert.equal((await call('GET', '/employees/extra/meta')).status, 403);
+  setSetting('emp_extra_info', '1');
+});
+
 test('tắt lại: API 403 nhưng dữ liệu đã nhập vẫn còn', async () => {
   setSetting('emp_extra_info', '0');
   user = ADMIN;
