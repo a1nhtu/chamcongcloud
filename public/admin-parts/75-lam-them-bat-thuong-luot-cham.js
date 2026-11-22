@@ -152,7 +152,7 @@ async function pageOtReg() {
   const selfCb = ruleCb('self', data.selfOn, 'BẬT "Nhân viên tự đăng ký làm thêm trên app"?\nNhân viên gửi đơn ở tab Đơn từ (ngày, từ giờ – đến giờ, lý do); quản lý duyệt ở trang này thì mới ghi vào đăng ký.',
     'TẮT "Nhân viên tự đăng ký làm thêm trên app"?\nApp nhân viên ẩn phần đăng ký làm thêm (đơn đang chờ vẫn giữ để duyệt).');
   const lunchCb = ruleCb('lunch', data.lunchOn, 'BẬT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa CHỈ tính khi có đăng ký khung giờ (VD 11:30–12:30 = 60 phút), phần nằm trong giờ nghỉ giữa ca. Lượt quẹt ra trưa / vào chiều không xét. Áp cho cả dữ liệu đã có.',
-    'TẮT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa quay về cách cũ (ca bật "Tính tăng ca trưa": giờ nghỉ có mặt bù phần đăng ký làm thêm còn thiếu). Áp cho cả dữ liệu đã có.');
+    'TẮT "Đăng ký tăng ca trưa theo giờ"?\nKhung giờ trưa đã đăng ký KHÔNG còn được cộng vào tăng ca (chỉ ca đang tích ô cũ "Tính tăng ca trưa" mới tính theo cách cũ: giờ nghỉ có mặt bù phần đăng ký làm thêm còn thiếu). Áp cho cả dữ liệu đã có.');
   const permTip = hasPerm('settings') ? '' : 'Cần quyền Cài đặt để đổi';
   const rulePanel = el('div', { class: 'panel al-def or-rule' },
     el('label', { title: permTip }, reqCb, 'Phải đăng ký mới tính tăng ca (ngày không đăng ký → tăng ca = 0)'),

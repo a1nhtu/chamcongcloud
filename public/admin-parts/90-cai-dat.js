@@ -145,7 +145,7 @@ const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 // Người khác (admin công ty) chỉ xem đang bật gì.
 function displayPanel(s) {
   if (!hasPerm('settings') && !isMaster()) return null;
-  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1', pay: s.pay_pro === '1', mach: s.meal_machine_signup === '1', ext: s.emp_extra_info === '1' };
+  const on = { att: s.att_enabled !== '0', meal: s.meal_enabled === '1', hr: s.hr_enabled === '1', self: s.meal_self_order !== '0', dish: s.meal_dish_choice !== '0', head: s.meal_dept_head !== '0', inv: s.meal_ingredient === '1', pay: s.pay_pro === '1', mach: s.meal_machine_signup === '1', ext: s.emp_extra_info === '1', bot: s.break_ot_ui === '1' };
   // mach = báo cơm bằng quẹt máy chấm công (chỉ ở chế độ không chọn món)
   const mealWay = (o) => {
     const mach = o.mach && !o.dish;
@@ -163,11 +163,12 @@ function displayPanel(s) {
       el('div', {}, '📇 Nhân sự: ', st(on.hr)),
       el('div', {}, '💰 Tiền lương nâng cao: ', st(on.pay)),
       el('div', {}, '🧾 Thông tin thêm của nhân viên: ', st(on.ext)),
+      el('div', {}, '☀ Ô "Tính tăng ca trưa" trong form ca (cách cũ): ', st(on.bot)),
       el('div', { class: 'map-hint' }, '🔒 Chỉ tài khoản tổng bật / tắt được các phân hệ này.')));
     return box;
   }
   const cb = (v) => el('input', { type: 'checkbox', style: 'width:auto;transform:scale(1.15)', ...(v ? { checked: '' } : {}) });
-  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head), inv: cb(on.inv), pay: cb(on.pay), ext: cb(on.ext) };
+  const c = { att: cb(on.att), meal: cb(on.meal), hr: cb(on.hr), self: cb(on.self), dish: cb(on.dish), head: cb(on.head), inv: cb(on.inv), pay: cb(on.pay), ext: cb(on.ext), bot: cb(on.bot) };
   // Cách NV báo ăn khi KHÔNG chọn món: chỉ app · chỉ quẹt máy · cả hai · không (trưởng BP / HR báo) = 2 công tắc meal_self_order + meal_machine_signup
   const how = el('select', { style: 'width:auto;max-width:100%' },
     el('option', { value: 'app' }, '📱 Chỉ trên app (bấm Có ăn / Không ăn)'), el('option', { value: 'may' }, '🖐️ Chỉ quẹt máy chấm công'),
@@ -204,7 +205,7 @@ function displayPanel(s) {
     if (!c.att.checked && !c.meal.checked && !c.hr.checked) return toast('Phải bật ít nhất 1 phân hệ (Chấm công / Suất ăn / Nhân sự)', 'err');
     try {
       await api('/admin/settings', { method: 'PUT', body: { att_enabled: c.att.checked, meal_enabled: c.meal.checked, hr_enabled: c.hr.checked,
-        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked, pay_pro: c.pay.checked, emp_extra_info: c.ext.checked,
+        meal_self_order: c.self.checked, meal_dish_choice: c.dish.checked, meal_dept_head: c.head.checked, meal_ingredient: c.inv.checked, pay_pro: c.pay.checked, emp_extra_info: c.ext.checked, break_ot_ui: c.bot.checked,
         ...(c.dish.checked ? {} : { meal_machine_signup: how.value === 'may' || how.value === 'both' }) } });
       toast('Đã lưu. Đang tải lại…', 'ok'); setTimeout(() => location.reload(), 700);
     } catch (e) { toast(e.message, 'err'); }
@@ -217,6 +218,9 @@ function displayPanel(s) {
       row(c.hr, '📇 Nhân sự', 'Hồ sơ nhân sự, hợp đồng lao động, thuyên chuyển / nghỉ việc, mẫu giấy tờ. Quản lý cần được tích quyền "Nhân sự".'),
       row(c.pay, '💰 Tiền lương nâng cao (kiểu AMIS)', 'Mặc định TẮT. Bật: trang Lương có bảo hiểm (BHXH/BHYT/BHTN), thuế TNCN, thành phần lương (phụ cấp, thưởng, khấu trừ, công thức), dữ liệu theo kỳ, tạm ứng, mẫu bảng lương, bảng lương chốt / duyệt / khoá, file chuyển khoản, báo cáo + quyết toán thuế, phiếu lương trên app. Tắt: trang Lương y như cũ (dữ liệu lương nâng cao giữ nguyên). Chỉ hiện khi bật Chấm công.'),
       row(c.ext, '🧾 Thông tin thêm của nhân viên', 'Mặc định TẮT — công ty khác không bị ảnh hưởng. Bật: form Sửa nhân viên có thêm tab "Thông tin thêm" để nhập Số CCCD (ngày cấp, nơi cấp), ngày sinh, giới tính, quê quán, dân tộc, tôn giáo, hôn nhân, mã số thuế, số BHXH, địa chỉ thường trú / tạm trú, người liên hệ khẩn cấp, học vấn, tài khoản ngân hàng và GIA CẢNH (bố mẹ, vợ / chồng, con… tích người phụ thuộc để giảm trừ thuế); trang Nhân viên có nút xuất Excel thông tin thêm. Người có quyền "Nhân viên" là nhập được. Tắt: ẩn tab, dữ liệu đã nhập giữ nguyên.'),
+      row(c.bot, '☀ Ô "Tính tăng ca trưa" trong form ca (cách cũ)', 'Mặc định TẮT cho đỡ rối — tăng ca trưa dùng ô "Đăng ký tăng ca trưa theo giờ" ở menu ⏰ Đăng ký làm thêm (đăng ký từ giờ … đến giờ, ngày tách ca Sáng + Chiều vẫn tính). '
+        + 'Bật: form ca (tab Tăng ca) hiện lại ô cũ — giờ nghỉ trưa có mặt bù cho đủ số phút đã đăng ký làm thêm (chỉ ca có giờ nghỉ; ngày tách ca Sáng + Chiều thì không tính). '
+        + 'Ca nào đang tích sẵn ô cũ thì vẫn hiện và vẫn tính như trước, dù công tắc tắt.'),
       el('div', {}, save)));
   return box;
 }

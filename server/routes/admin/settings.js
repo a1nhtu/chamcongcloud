@@ -62,6 +62,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       meal_self_order: getSetting('meal_self_order', '1'), meal_dish_choice: getSetting('meal_dish_choice', '1'), meal_dept_head: getSetting('meal_dept_head', '1'),
       meal_machine_signup: getSetting('meal_machine_signup', '0'),   // Báo cơm bằng quẹt máy chấm công (mặc định TẮT)
       meal_ingredient: getSetting('meal_ingredient', '0'),   // Định lượng nguyên liệu + kho bếp (mặc định TẮT)
+      break_ot_ui: getSetting('break_ot_ui', '0'),   // HIỆN ô cũ "Tính TĂNG CA TRƯA" (break_ot) trong form ca — mặc định TẮT cho đỡ rối (ca đang tích vẫn hiện, vẫn tính như cũ)
       emp_extra_info: getSetting('emp_extra_info', '0'),     // Thông tin thêm của NV — tab riêng trong form NV (mặc định TẮT, chỉ tài khoản tổng bật)
       pay_pro: req.forceVirt ? '0' : getSetting('pay_pro', '0'),
       ...(() => { const p = activeProfile(); return p ? { profile: p.id, profile_name: p.name, profile_reports: p.reports } : {}; })(),   // GÓI CÀI ĐẶT đang dùng (chưa áp gói → không có 3 trường này)   // TIỀN LƯƠNG NÂNG CAO (BH, thuế, thành phần lương…) — mặc định TẮT, chỉ tài khoản tổng bật
@@ -184,7 +185,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.audit_enabled != null) setSetting('audit_enabled', b.audit_enabled ? '1' : '0');
       if (b.hr_enabled != null) setSetting('hr_enabled', b.hr_enabled ? '1' : '0');
       if (b.meal_enabled != null) setSetting('meal_enabled', b.meal_enabled ? '1' : '0');
-      for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head', 'meal_machine_signup', 'meal_ingredient', 'pay_pro', 'emp_extra_info']) if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
+      for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head', 'meal_machine_signup', 'meal_ingredient', 'pay_pro', 'emp_extra_info', 'break_ot_ui']) if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
     }
     // Hạn mức công ảo: người được xem công ảo mới chỉnh được
     if (auditAllowed(req.user)) {
