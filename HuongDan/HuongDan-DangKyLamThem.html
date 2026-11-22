@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Đăng ký làm thêm &amp; tăng ca trưa — Digiplus Chấm Công</title>
+<meta name="description" content="Hướng dẫn đăng ký làm thêm trên phần mềm Digiplus chấm công: quy tắc tính tăng ca theo đăng ký, quản lý áp nhanh và duyệt đơn, nhân viên tự đăng ký làm thêm và tăng ca trưa trên điện thoại." />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+:root{
+  --paper:#FBF4EF;--surface:#fff;--surface-2:#FDF7F3;--ink:#2A1D16;--muted:#8C7B71;--line:#ECE0D8;
+  --brand:#E8541E;--brand-2:#E11D23;--brand-ink:#A8380F;--brand-wash:#FCEBE2;
+  --green:#15803D;--green-bg:#DCFCE7;--amber:#B45309;--amber-bg:#FDECCB;--blue:#1D4ED8;--blue-bg:#DBEAFE;--red:#DC2626;--red-bg:#FCE1E1;
+  --shadow:0 10px 34px rgba(80,30,10,.10);--shadow-sm:0 4px 14px rgba(80,30,10,.08);--radius:16px;--maxw:900px;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}}
+:root[data-theme="dark"]{
+  --paper:#191210;--surface:#241A15;--surface-2:#2C1F19;--ink:#F4EAE3;--muted:#AC9C92;--line:#3A2A22;
+  --brand:#FF6A38;--brand-2:#FF5A52;--brand-ink:#FFB596;--brand-wash:#3A231A;
+  --green:#4ADE80;--green-bg:#123222;--amber:#FBBF24;--amber-bg:#3A2A12;--blue:#93B4FF;--blue-bg:#182647;--red:#F87171;--red-bg:#3A1B1B;
+  --shadow:0 12px 40px rgba(0,0,0,.5);--shadow-sm:0 4px 16px rgba(0,0,0,.4);}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);font-family:'Be Vietnam Pro',system-ui,-apple-system,Segoe UI,Roboto,sans-serif;font-size:16px;line-height:1.62;-webkit-font-smoothing:antialiased}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 20px}
+.mono{font-family:'JetBrains Mono',ui-monospace,monospace}
+a{color:var(--brand-ink)}
+h1,h2,h3{line-height:1.2;text-wrap:balance}
+header.top{background:radial-gradient(120% 140% at 90% -20%,rgba(225,29,35,.28),transparent 60%),linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;padding:40px 0 44px}
+.brandrow{display:flex;align-items:center;gap:12px;margin-bottom:20px}
+.mark{width:42px;height:46px}
+.brandname{font-weight:800;font-size:18px}.brandname small{display:block;font-weight:500;font-size:11px;opacity:.85;letter-spacing:2px;text-transform:uppercase}
+header .tag{display:inline-block;background:rgba(255,255,255,.18);border:1px solid rgba(255,255,255,.28);padding:5px 12px;border-radius:999px;font-size:12.5px;font-weight:700;margin-bottom:14px}
+header h1{margin:0;font-size:clamp(26px,4.6vw,40px);font-weight:800;letter-spacing:-.4px;max-width:20ch}
+header p{margin:12px 0 0;font-size:16px;opacity:.95;max-width:58ch}
+main{padding:0 0 60px}
+.toc{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px 20px;margin:26px 0;box-shadow:var(--shadow-sm)}
+.toc b{display:block;font-size:12.5px;text-transform:uppercase;letter-spacing:1px;color:var(--brand-ink);margin-bottom:8px}
+.toc ol{margin:0;padding-left:20px;columns:2;column-gap:26px}
+@media(max-width:620px){.toc ol{columns:1}}
+.toc li{margin:4px 0}.toc a{text-decoration:none}
+section{padding:30px 0;border-bottom:1px solid var(--line)}
+section:last-child{border-bottom:none}
+.eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:12px;font-weight:800;letter-spacing:1.2px;text-transform:uppercase;color:var(--brand-ink);margin-bottom:10px}
+.eyebrow .num{background:var(--brand);color:#fff;width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-family:'JetBrains Mono',monospace;font-size:13px}
+h2.sec{font-size:clamp(21px,3vw,28px);font-weight:800;letter-spacing:-.3px;margin:0}
+.lead{color:var(--muted);font-size:16px;margin:8px 0 0}
+ol.steps{list-style:none;margin:18px 0 0;padding:0;counter-reset:s;display:flex;flex-direction:column;gap:14px}
+ol.steps li{position:relative;padding-left:44px;counter-increment:s}
+ol.steps li::before{content:counter(s);position:absolute;left:0;top:-2px;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-weight:700;display:grid;place-items:center;font-size:14px;box-shadow:var(--shadow-sm)}
+ol.steps li b{color:var(--ink)}
+ol.steps li span{color:var(--muted);display:block;font-size:14.5px;margin-top:2px}
+ul.plain{margin:14px 0 0;padding-left:20px}ul.plain li{margin:6px 0}
+figure.fig{margin:18px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow-sm);background:var(--surface)}
+figure.fig img{display:block;width:100%;height:auto}
+figure.fig figcaption{font-size:13px;color:var(--muted);padding:8px 13px;border-top:1px solid var(--line);background:var(--surface-2)}
+figure.fig.phone{max-width:300px;margin-left:auto;margin-right:auto;border-radius:20px}
+.note{display:flex;gap:11px;background:var(--surface-2);border:1px solid var(--line);border-left:4px solid var(--brand);border-radius:12px;padding:13px 16px;margin-top:16px;font-size:14.5px}
+.note.ok{border-left-color:var(--green)}.note.warn{border-left-color:var(--amber)}
+.note .ic{flex:0 0 auto;font-size:18px}
+.kbd{font-family:'JetBrains Mono',monospace;background:var(--surface-2);border:1px solid var(--line);border-radius:7px;padding:1px 7px;font-size:13.5px;font-weight:600;color:var(--brand-ink)}
+.faq{display:flex;flex-direction:column;gap:10px;margin-top:16px}
+details{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:2px 18px;box-shadow:var(--shadow-sm)}
+details summary{cursor:pointer;font-weight:700;padding:14px 0;list-style:none;display:flex;justify-content:space-between;gap:12px}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:"+";color:var(--brand);font-weight:800;font-size:20px}
+details[open] summary::after{content:"–"}
+details p{color:var(--muted);margin:0 0 15px;font-size:14.5px}
+table.t{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+table.t th{text-align:left;background:var(--surface-2);color:var(--brand-ink);font-size:12.5px;text-transform:uppercase;letter-spacing:.4px;padding:10px 12px;border-bottom:1px solid var(--line)}
+table.t td{padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+table.t tr:last-child td{border-bottom:none}
+table.t td b{color:var(--ink)}
+footer{background:var(--surface-2);border-top:1px solid var(--line);padding:28px 0;color:var(--muted);font-size:14px;margin-top:10px}
+footer b{color:var(--ink)}
+.crumb{font-size:13.5px;margin:18px 0 0}.crumb a{color:var(--brand-ink);text-decoration:none}
+.themebtn{position:fixed;right:14px;bottom:14px;z-index:50;background:var(--surface);border:1px solid var(--line);color:var(--ink);border-radius:999px;padding:9px 14px;font-weight:700;font-size:13px;cursor:pointer;box-shadow:var(--shadow);font-family:inherit}
+
+/* ---- riêng trang Đăng ký làm thêm (giữ chung kiểu với trang Tạo ca & phân ca) ---- */
+.part{display:flex;align-items:center;gap:12px;margin:34px 0 0;padding:14px 18px;border-radius:14px;background:var(--brand-wash);border:1px solid var(--line);font-weight:800;font-size:17px;color:var(--brand-ink)}
+.part span{flex:0 0 auto;white-space:nowrap;background:var(--brand);color:#fff;border-radius:8px;padding:3px 10px;font-size:12.5px;letter-spacing:1px;font-family:'JetBrains Mono',monospace}
+.tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+.tscroll.wide table.t{min-width:520px}
+h3.sub{font-size:17px;font-weight:800;margin:26px 0 0}
+.flow{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-top:18px}
+@media(max-width:760px){.flow{grid-template-columns:1fr 1fr}}
+@media(max-width:420px){.flow{grid-template-columns:1fr}}
+.fstep{display:flex;flex-direction:column;gap:4px;background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:14px;box-shadow:var(--shadow-sm);text-decoration:none;color:var(--ink);position:relative}
+.fstep:hover{border-color:var(--brand)}
+.fstep .fn{width:34px;height:28px;border-radius:8px;background:var(--brand);color:#fff;font-weight:800;display:grid;place-items:center;font-size:13px;font-family:'JetBrains Mono',monospace}
+.fstep b{font-size:15px}.fstep small{color:var(--muted);font-size:13px;line-height:1.4}
+.twocol{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,6fr);gap:20px;align-items:start;margin-top:4px}
+.twocol>figure.fig{margin-top:18px}
+@media(max-width:760px){.twocol{grid-template-columns:1fr}}
+.cards2{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+@media(max-width:680px){.cards2{grid-template-columns:1fr}}
+.kcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow-sm);font-size:14.5px}
+.kcard p{margin:8px 0 0}.kcard .mut{color:var(--muted);font-size:13.5px}
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;margin-top:14px;font-size:14px}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.lg{font-style:normal;font-family:'JetBrains Mono',monospace;font-size:12.5px;min-width:34px;text-align:center;padding:2px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface)}
+.lg.ex{color:var(--ink);font-weight:800}.lg.ph{color:#9CA3AF}.lg.tmp{color:#C2410C;font-style:italic}.lg.fnd{color:#0F766E}.lg.dirty{background:#FEF08A;color:#1F2937;font-weight:800}
+.ladder{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+.rung{display:flex;gap:14px;align-items:center;background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 16px;box-shadow:var(--shadow-sm)}
+.rung:first-child{border-color:var(--brand);background:var(--brand-wash)}
+.rung .rk{flex:0 0 auto;width:30px;height:30px;border-radius:9px;background:var(--brand);color:#fff;font-weight:800;display:grid;place-items:center;font-family:'JetBrains Mono',monospace}
+.rung.last .rk{background:var(--muted)}
+.rung small{display:block;color:var(--muted);font-size:13.5px}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap">
+  <div class="brandrow">
+    <svg class="mark" viewBox="0 0 44 48" fill="none" aria-hidden="true">
+      <path d="M4 24C4 12 12 4 22 4s18 8 18 20" stroke="#fff" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M9 24c0-8 6-13 13-13s13 5 13 13" stroke="#fff" stroke-width="3.4" stroke-linecap="round" opacity=".8"/>
+      <path d="M16.5 27.5l4 4 8-8.5" stroke="#fff" stroke-width="4.4" stroke-linecap="round" stroke-linejoin="round"/>
+    </svg>
+    <div class="brandname">Digiplus<small>Chấm Công Thông Minh</small></div>
+  </div>
+  <div class="tag">⏰ HƯỚNG DẪN ĐĂNG KÝ LÀM THÊM</div>
+  <h1>Đăng ký làm thêm &amp; tăng ca trưa</h1>
+  <p>Quản lý duyệt trước giờ làm thêm rồi phần mềm mới tính tăng ca. Nhân viên tự gửi đăng ký trên điện thoại. Tăng ca trưa tính theo khung giờ đã đăng ký. Hướng dẫn chia 2 phần: quản lý và nhân viên.</p>
+</div></header>
+
+<main class="wrap">
+  <p class="crumb"><a href="./">← Trang chủ hướng dẫn</a></p>
+
+  <nav class="toc">
+    <b>Nội dung</b>
+    <ol>
+      <li><a href="#quy-tac">Đăng ký làm thêm tính thế nào</a></li>
+      <li><a href="#bat">Bật các ô quy tắc (quản lý)</a></li>
+      <li><a href="#ap-nhanh">Đăng ký cho nhiều người một lúc</a></li>
+      <li><a href="#luoi">Sửa từng ô · nhập Excel</a></li>
+      <li><a href="#duyet">Duyệt đơn nhân viên gửi</a></li>
+      <li><a href="#nv-lam-them">Nhân viên gửi đăng ký làm thêm</a></li>
+      <li><a href="#nv-trua">Nhân viên đăng ký tăng ca trưa</a></li>
+      <li><a href="#nv-theo-doi">Nhân viên theo dõi đơn</a></li>
+      <li><a href="#trua">Tăng ca trưa tính thế nào</a></li>
+      <li><a href="#faq">Câu hỏi thường gặp</a></li>
+    </ol>
+  </nav>
+
+  <!-- 1. Quy tắc -->
+  <section id="quy-tac">
+    <div class="eyebrow"><span class="num">1</span>Đọc trước</div>
+    <h2 class="sec">Đăng ký làm thêm tính thế nào</h2>
+    <p class="lead">Mỗi nhân viên, mỗi ngày có một <b>số phút đăng ký làm thêm</b>. Phần mềm so giờ làm thêm thực tế (theo giờ chấm) với số đăng ký và tính tăng ca như bảng dưới.</p>
+    <div class="tscroll wide"><table class="t">
+      <thead><tr><th style="width:36%">Trường hợp</th><th>Tăng ca được tính</th><th style="width:32%">Ví dụ (ca hết 17:00)</th></tr></thead>
+      <tbody>
+        <tr><td><b>Làm NHIỀU hơn đăng ký</b></td><td>Chỉ tính đúng số phút đã đăng ký</td><td>Đăng ký 120 phút, về 19:30 → tính <b>120</b></td></tr>
+        <tr><td><b>Làm ÍT hơn đăng ký</b></td><td>Tính theo thực tế</td><td>Đăng ký 120 phút, về 18:30 → tính <b>90</b></td></tr>
+        <tr><td><b>Đăng ký 0 phút</b></td><td>Không cho làm thêm ngày đó</td><td>Ở lại tới 19:00 → tính <b>0</b></td></tr>
+        <tr><td><b>Không đăng ký</b>, có tích "Phải đăng ký mới tính tăng ca"</td><td>Tăng ca = 0</td><td>Về 19:00 → tính <b>0</b></td></tr>
+        <tr><td><b>Không đăng ký</b>, không tích ô trên</td><td>Tính theo thực tế như khi chưa dùng đăng ký</td><td>Về 19:00 → tính <b>120</b></td></tr>
+        <tr><td><b>Tăng ca trưa</b> (khi bật)</td><td>Có đăng ký khung giờ trưa mới tính, <b>cộng thêm</b> vào tăng ca</td><td>Đăng ký 11:30–12:30 → cộng <b>60</b></td></tr>
+      </tbody>
+    </table></div>
+    <div class="note ok"><span class="ic">✅</span><div>Lưu hoặc duyệt đăng ký là phần mềm <b>áp ngay vào công</b>, không cần bấm Tính lại công. Ai làm quá số đăng ký thì xem ở menu <b>🚨 Chấm công bất thường</b>.</div></div>
+  </section>
+
+  <div class="part"><span>PHẦN A</span>Dành cho quản lý, làm trên máy tính</div>
+
+  <!-- 2. Bật -->
+  <section id="bat">
+    <div class="eyebrow"><span class="num">2</span>Quản lý</div>
+    <h2 class="sec">Bật các ô quy tắc</h2>
+    <p class="lead">Menu bên trái: <b>Chấm công › ⏰ Đăng ký làm thêm</b>.</p>
+    <figure class="fig"><img src="img/lt-01-trang.jpg" alt="Trang Đăng ký làm thêm" loading="lazy"><figcaption>Trang Đăng ký làm thêm: khung Quy tắc tính, đơn nhân viên gửi, Áp nhanh, bên dưới là lưới nhân viên × ngày.</figcaption></figure>
+    <ol class="steps">
+      <li><b>Bấm "▶ Quy tắc tính" để mở khung.</b><span>Cần tài khoản có quyền Cài đặt. Mỗi lần tích / bỏ tích, phần mềm hỏi lại rồi áp cho cả dữ liệu đã có.</span></li>
+      <li><b>Phải đăng ký mới tính tăng ca</b><span>Tích: ngày nào không đăng ký thì tăng ca = 0, nhân viên ở lại lố giờ không thành tăng ca. Không tích: ngày chưa đăng ký vẫn tính tăng ca thực tế.</span></li>
+      <li><b>Nhân viên tự đăng ký làm thêm trên app (quản lý duyệt)</b><span>App điện thoại của nhân viên hiện nút ⏰ Đăng ký làm thêm. Đơn gửi lên chờ quản lý duyệt ở trang này (mục 5).</span></li>
+      <li><b>Đăng ký tăng ca trưa theo giờ (từ … đến …)</b><span>Thêm loại ☀ Tăng ca trưa: đăng ký khung giờ (VD 11:30–12:30) thay vì số phút. Cách tính xem mục 9.</span></li>
+    </ol>
+    <figure class="fig"><img src="img/lt-02-quy-tac.jpg" alt="Khung Quy tắc tính" loading="lazy"><figcaption>Khung Quy tắc tính với 3 ô, mặc định đều tắt.</figcaption></figure>
+    <div class="note warn"><span class="ic">⚠️</span><div><b>Trước khi tích "Phải đăng ký mới tính tăng ca"</b>: những ngày cũ chưa có đăng ký sẽ về 0 tăng ca. Muốn giữ tăng ca các ngày đã qua, đăng ký bù cho những ngày đó trước (mục 3 hoặc 4) rồi mới tích.</div></div>
+    <div class="note"><span class="ic">🗓️</span><div>Tăng ca trưa cần ca làm việc có khai <b>Nghỉ giữa ca</b> (giờ bắt đầu – kết thúc) và tích <b>Cho phép tính tăng ca cho ca này</b>. Xem <a href="HuongDan-PhanCa.html#ca"><b>Hướng dẫn tạo ca</b></a>.</div></div>
+  </section>
+
+  <!-- 3. Áp nhanh -->
+  <section id="ap-nhanh">
+    <div class="eyebrow"><span class="num">3</span>Quản lý</div>
+    <h2 class="sec">Đăng ký cho nhiều người một lúc (Áp nhanh)</h2>
+    <p class="lead">Dùng khi cả tổ, cả phòng làm thêm giống nhau nhiều ngày. Muốn áp cho một phòng ban: bấm tên phòng ở cột trái của lưới trước, hoặc tích chọn từng người.</p>
+    <h3 class="sub">Đăng ký làm thêm (số phút)</h3>
+    <ol class="steps">
+      <li><b>Bấm "▶ Áp nhanh".</b><span>Ô Loại để <b>Làm thêm (số phút)</b>.</span></li>
+      <li><b>Gõ số phút mỗi ngày.</b><span>VD 120 = 2 giờ. Để trống = xoá đăng ký những ngày đó.</span></li>
+      <li><b>Chọn từ ngày – đến ngày.</b><span>Tích "Bỏ qua chủ nhật" / "Bỏ qua thứ 7" nếu những ngày đó không làm thêm.</span></li>
+      <li><b>Chọn áp cho ai rồi bấm Áp đăng ký.</b><span>"Tất cả NV đang lọc" (theo phòng ban, ô tìm kiếm) hoặc "Chỉ NV đã tích" ở lưới.</span></li>
+    </ol>
+    <figure class="fig"><img src="img/lt-04-ap-nhanh-phut.jpg" alt="Áp nhanh số phút làm thêm" loading="lazy"><figcaption>Đăng ký 120 phút mỗi ngày cho cả tuần, bỏ qua chủ nhật.</figcaption></figure>
+    <h3 class="sub">Đăng ký tăng ca trưa (khung giờ)</h3>
+    <ol class="steps">
+      <li><b>Ô Loại chọn "☀ Tăng ca trưa (từ giờ – đến giờ)".</b><span>Chỉ có khi đã bật ô thứ ba ở mục 2.</span></li>
+      <li><b>Nhập trưa từ … đến …</b><span>VD 11:30 đến 12:30 = 60 phút. Để trống cả 2 ô = xoá tăng ca trưa những ngày đó.</span></li>
+      <li><b>Chọn ngày, chọn người, bấm Áp đăng ký.</b><span>Mỗi người mỗi ngày có 1 khung trưa; áp lại là thay khung cũ.</span></li>
+    </ol>
+    <figure class="fig"><img src="img/lt-05-ap-nhanh-trua.jpg" alt="Áp nhanh tăng ca trưa" loading="lazy"><figcaption>Đăng ký tăng ca trưa 11:30–12:30.</figcaption></figure>
+  </section>
+
+  <!-- 4. Lưới -->
+  <section id="luoi">
+    <div class="eyebrow"><span class="num">4</span>Quản lý</div>
+    <h2 class="sec">Sửa từng ô · nhập Excel</h2>
+    <p class="lead">Lưới bên dưới trang: mỗi dòng một nhân viên, mỗi cột một ngày. Xem tối đa 31 ngày một lần (nút Tuần này, Cả tháng, ◀ ▶).</p>
+    <figure class="fig"><img src="img/lt-06-luoi.jpg" alt="Lưới đăng ký làm thêm" loading="lazy"><figcaption>Số đậm = phút đăng ký, số nhỏ = làm thêm thực tế. Ô có ☀ và gạch cam = ngày có đăng ký tăng ca trưa.</figcaption></figure>
+    <ul class="plain">
+      <li><b>Sửa một ô:</b> bấm vào ô, gõ số phút, <span class="kbd">Enter</span> để lưu, <span class="kbd">Delete</span> để xoá đăng ký.</li>
+      <li><b>Dán từ Excel:</b> copy một khối số trong Excel, bấm ô góc trên bên trái trên lưới rồi <span class="kbd">Ctrl+V</span>.</li>
+      <li><b>Màu ô:</b> đỏ = làm quá đăng ký · vàng = làm thiếu · xám = có làm thêm mà chưa đăng ký.</li>
+      <li><b>Tăng ca trưa:</b> rê chuột lên ô có ☀ để xem khung giờ. Sửa khung trưa bằng Áp nhanh (mục 3).</li>
+      <li><b>Excel cả tháng:</b> bấm <b>⬇ Xuất mẫu Excel</b> (nhân viên đang lọc × các ngày đang xem), điền số phút rồi <b>⬆ Nhập Excel</b>. File Excel chỉ có số phút làm thêm; khung tăng ca trưa đăng ký bằng Áp nhanh.</li>
+    </ul>
+  </section>
+
+  <!-- 5. Duyệt -->
+  <section id="duyet">
+    <div class="eyebrow"><span class="num">5</span>Quản lý</div>
+    <h2 class="sec">Duyệt đơn nhân viên gửi</h2>
+    <p class="lead">Khi bật "Nhân viên tự đăng ký làm thêm trên app", đầu trang có khung <b>📥 Đơn nhân viên gửi</b>. Người có quyền sửa chấm công nhận thông báo khi có đơn mới.</p>
+    <figure class="fig"><img src="img/lt-03-don-cho-duyet.jpg" alt="Đơn nhân viên gửi chờ duyệt" loading="lazy"><figcaption>Đơn chờ duyệt gồm làm thêm và ☀ tăng ca trưa. Cột "Đang đăng ký" là số đã đăng ký sẵn của ngày đó.</figcaption></figure>
+    <ol class="steps">
+      <li><b>Xem đơn ở tab "Chờ duyệt".</b><span>Có ngày, giờ, số phút, lý do. Tab "Đã xử lý (60 ngày)" để xem lại đơn đã duyệt hoặc từ chối.</span></li>
+      <li><b>Duyệt từng đơn bằng ✓, từ chối bằng ✕.</b><span>Hoặc tích nhiều đơn rồi bấm "✓ Duyệt đơn đã tích" / "✕ Từ chối đơn đã tích". Ô ghi chú (không bắt buộc) gửi kèm cho nhân viên.</span></li>
+      <li><b>Kết quả vào công ngay.</b><span>Duyệt đơn làm thêm = <b>cộng</b> số phút vào đăng ký của ngày (đã có 60, duyệt thêm đơn 120 → 180). Duyệt đơn tăng ca trưa = ghi khung giờ trưa của ngày. Nhân viên nhận thông báo được duyệt hay bị từ chối.</span></li>
+    </ol>
+  </section>
+
+  <div class="part"><span>PHẦN B</span>Dành cho nhân viên, làm trên điện thoại</div>
+
+  <!-- 6. NV làm thêm -->
+  <section id="nv-lam-them">
+    <div class="eyebrow"><span class="num">6</span>Nhân viên</div>
+    <h2 class="sec">Gửi đăng ký làm thêm</h2>
+    <div class="twocol">
+      <div>
+        <ol class="steps">
+          <li><b>Mở app chấm công, chọn tab 📝 Đơn từ.</b><span>Bấm nút <b>⏰ Đăng ký làm thêm</b> ở đầu trang. Không thấy nút này là công ty chưa bật, hỏi quản lý.</span></li>
+          <li><b>Chọn ngày làm thêm.</b><span>Gửi được cho ngày trong khoảng 31 ngày trước tới 93 ngày tới. Dưới ô Loại hiện ca của ngày đó.</span></li>
+          <li><b>Loại: "Làm thêm (trước / sau ca)".</b><span>Ô Từ giờ tự điền giờ hết ca. Nhập Đến giờ, VD 17:00 → 19:00 = 2 giờ.</span></li>
+          <li><b>Ghi lý do rồi bấm Gửi đăng ký.</b><span>Đơn ở trạng thái Chờ duyệt. Quản lý duyệt xong mới tính vào công.</span></li>
+        </ol>
+        <div class="note"><span class="ic">💡</span><div>Làm quá giờ đã đăng ký thì chỉ được tính đúng phần đã đăng ký. Cùng một ngày gửi được nhiều đơn làm thêm, miễn là giờ không trùng nhau.</div></div>
+      </div>
+      <figure class="fig phone"><img src="img/lt-07-nv-lam-them.jpg" alt="Nhân viên gửi đăng ký làm thêm trên điện thoại" loading="lazy"><figcaption>Đăng ký làm thêm 17:00–19:00.</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- 7. NV trưa -->
+  <section id="nv-trua">
+    <div class="eyebrow"><span class="num">7</span>Nhân viên</div>
+    <h2 class="sec">Đăng ký tăng ca trưa</h2>
+    <div class="twocol">
+      <div>
+        <ol class="steps">
+          <li><b>Cũng ở ⏰ Đăng ký làm thêm, ô Loại chọn "☀ Tăng ca trưa".</b><span>Chỉ có khi công ty bật tăng ca trưa theo giờ.</span></li>
+          <li><b>Kiểm tra giờ.</b><span>Từ giờ – Đến giờ tự điền theo giờ nghỉ trưa của ca (VD 11:30–13:00). Sửa lại đúng khung được giao, VD 11:30–12:30.</span></li>
+          <li><b>Ghi lý do, bấm Gửi đăng ký.</b><span>Mỗi ngày 1 đơn tăng ca trưa, tối đa 4 giờ. Muốn đổi giờ thì huỷ đơn đang chờ rồi gửi lại.</span></li>
+        </ol>
+        <div class="note ok"><span class="ic">☀</span><div><b>Chấm công vẫn như mọi ngày.</b> Ra trưa, vào chiều quẹt bình thường. Có tăng ca trưa hay không chỉ khác nhau ở đơn đăng ký, không cần quẹt thêm hay bỏ lượt quẹt trưa.</div></div>
+        <div class="note warn"><span class="ic">⚠️</span><div>App báo "ca chưa khai giờ nghỉ trưa" thì hỏi quản lý trước khi gửi: ca chưa có giờ nghỉ thì chưa tính được tăng ca trưa.</div></div>
+      </div>
+      <figure class="fig phone"><img src="img/lt-08-nv-trua.jpg" alt="Nhân viên đăng ký tăng ca trưa trên điện thoại" loading="lazy"><figcaption>Đăng ký tăng ca trưa 11:30–12:30.</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- 8. NV theo dõi -->
+  <section id="nv-theo-doi">
+    <div class="eyebrow"><span class="num">8</span>Nhân viên</div>
+    <h2 class="sec">Theo dõi đơn đã gửi</h2>
+    <div class="twocol">
+      <div>
+        <p class="lead">Ngay dưới form là mục <b>Đăng ký làm thêm của tôi</b>.</p>
+        <ul class="plain">
+          <li><b>Chờ duyệt</b>: còn huỷ được bằng nút "Huỷ đăng ký".</li>
+          <li><b>Đã duyệt</b>: đã tính vào công. Muốn sửa thì báo quản lý.</li>
+          <li><b>Từ chối</b>: xem dòng "Ghi chú" quản lý gửi kèm. Có thể gửi đơn khác.</li>
+        </ul>
+        <p class="lead" style="margin-top:12px">Điện thoại có bật thông báo thì nhân viên nhận tin ngay khi đơn được duyệt hoặc bị từ chối.</p>
+      </div>
+      <figure class="fig phone"><img src="img/lt-09-nv-danh-sach.jpg" alt="Danh sách đăng ký làm thêm của nhân viên" loading="lazy"><figcaption>Đơn chờ duyệt, bị từ chối (kèm ghi chú) và đã duyệt.</figcaption></figure>
+    </div>
+  </section>
+
+  <!-- 9. Tăng ca trưa -->
+  <section id="trua">
+    <div class="eyebrow"><span class="num">9</span>Quản lý &amp; nhân viên</div>
+    <h2 class="sec">Tăng ca trưa tính thế nào</h2>
+    <p class="lead">Ví dụ ca 07:30–17:00, nghỉ trưa 11:30–13:00. Nhân viên ngày nào cũng quẹt 4 lần: <span class="kbd">07:10</span> · ra <span class="kbd">11:32</span> · vào <span class="kbd">12:58</span> · <span class="kbd">17:05</span>.</p>
+    <div class="tscroll"><table class="t">
+      <thead><tr><th style="width:34%">Đăng ký tăng ca trưa</th><th>Tăng ca trưa được tính</th></tr></thead>
+      <tbody>
+        <tr><td>Không đăng ký</td><td><b>0</b>. Ngày công bình thường.</td></tr>
+        <tr><td>11:30–12:00</td><td><b>30 phút</b></td></tr>
+        <tr><td>11:30–12:30</td><td><b>60 phút</b></td></tr>
+        <tr><td>11:00–14:00</td><td><b>90 phút</b>: chỉ phần nằm trong giờ nghỉ 11:30–13:00. Phần trùng giờ làm trong ca đã là giờ công, không tính 2 lần.</td></tr>
+      </tbody>
+    </table></div>
+    <ul class="plain">
+      <li><b>Lượt quẹt ra trưa, vào chiều không làm thay đổi kết quả.</b> Phần mềm chỉ xét có đăng ký hay không, trong khoảng từ lượt vào đầu ngày tới lượt ra cuối ngày. Nghỉ cả buổi chiều thì phần sau giờ về không được tính.</li>
+      <li><b>Cộng thêm, không trừ vào đăng ký làm thêm.</b> Đăng ký làm thêm 120 phút + trưa 11:30–12:30, làm tới 19:00 → tăng ca <b>180 phút</b>.</li>
+      <li><b>Ca chia Sáng + Chiều</b> (ngày quẹt 4 lần phần mềm tách thành 2 dòng ca Sáng và ca Chiều): giờ trưa là khoảng giữa giờ hết ca Sáng và giờ vào ca Chiều; tăng ca trưa cộng vào dòng ca Chiều.</li>
+      <li>Có tích "Phải đăng ký mới tính tăng ca" hay không, tăng ca trưa vẫn chỉ tính khi có đăng ký khung giờ trưa.</li>
+    </ul>
+  </section>
+
+  <!-- 10. FAQ -->
+  <section id="faq">
+    <div class="eyebrow">Hỏi &amp; đáp</div>
+    <h2 class="sec">Câu hỏi thường gặp</h2>
+    <div class="faq">
+      <details><summary>Nhân viên không thấy nút "⏰ Đăng ký làm thêm" trên app?</summary><p>Công ty chưa tích ô "Nhân viên tự đăng ký làm thêm trên app" (mục 2). Nhân viên tính lương theo giờ không có tăng ca nên cũng không có nút này. Đã bật rồi thì bảo nhân viên đóng app mở lại.</p></details>
+      <details><summary>Không có loại "☀ Tăng ca trưa" để chọn?</summary><p>Chưa tích ô "Đăng ký tăng ca trưa theo giờ" ở khung Quy tắc tính.</p></details>
+      <details><summary>Đã đăng ký mà tăng ca vẫn bằng 0?</summary><p>Kiểm tra: ca có tích "Cho phép tính tăng ca cho ca này" không; ngày đó đã có giờ ra chưa; thời gian ở lại có ít hơn ô "Ở lại sau giờ ra tối thiểu" của ca không (mặc định 30 phút). Tăng ca trưa thì ca phải có giờ nghỉ giữa ca.</p></details>
+      <details><summary>Sửa đăng ký xong có phải bấm Tính lại công không?</summary><p>Không. Lưu ô, áp nhanh, nhập Excel hay duyệt đơn đều áp ngay vào công.</p></details>
+      <details><summary>Xem ai làm quá giờ đăng ký ở đâu?</summary><p>Ô màu đỏ trên lưới, hoặc menu "🚨 Chấm công bất thường" để xem và xuất danh sách.</p></details>
+      <details><summary>Duyệt 2 đơn làm thêm cùng một ngày thì sao?</summary><p>Số phút cộng dồn vào đăng ký của ngày đó (tối đa 24 giờ). Tăng ca trưa thì mỗi ngày 1 khung.</p></details>
+      <details><summary>Tắt ô "Đăng ký tăng ca trưa theo giờ" thì sao?</summary><p>Các khung trưa đã đăng ký không còn được cộng vào tăng ca. Bật lại thì được tính như cũ.</p></details>
+    </div>
+  </section>
+</main>
+
+<footer><div class="wrap">
+  <div><b>Digiplus — Chấm công thông minh.</b> Hướng dẫn đăng ký làm thêm &amp; tăng ca trưa.</div>
+  <div style="margin-top:6px">Hỗ trợ · Hotline / Zalo: <b>0372 669 992</b> · maychamcongcloud.com</div>
+</div></footer>
+
+<button class="themebtn" id="tt">🌗 Giao diện</button>
+<script>
+// Chạm / bấm ảnh minh hoạ → mở ảnh cỡ thật (điện thoại xem rõ hơn)
+document.querySelectorAll('figure.fig img').forEach(function(i){i.style.cursor='zoom-in';i.title='Bấm để xem ảnh to';i.addEventListener('click',function(){window.open(i.src,'_blank');});});
+(function(){var b=document.getElementById('tt');b.addEventListener('click',function(){var r=document.documentElement;var c=r.getAttribute('data-theme');if(!c){c=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}r.setAttribute('data-theme',c==='dark'?'light':'dark');});})();
+</script>
+</body>
+</html>
