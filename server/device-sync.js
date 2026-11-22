@@ -6,7 +6,7 @@ import { db, getSetting, setSetting, empHourly, hourlyNoOvernight, USER_TZ, near
 import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, pickDirShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn, fitWindows, seqPairUnits, pickSeqShifts, seqNightTail, seqDayRule } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
-import { syncOtRegDay } from './ot-reg.js';
+import { syncOtRegDay, otLunchOn } from './ot-reg.js';
 import { defaultPasswordHash } from './auth.js';
 import { notifyEmployee } from './push.js';
 import { heldSet, remapLoader, onUserAck, pmNameFor, normName } from './pin-guard.js';
@@ -1419,10 +1419,16 @@ function seedPhonePunches(employeeId, workDate) {
   }
 }
 
+// NV có đăng ký tăng ca trưa ngày này không (CSDL cũ chưa có bảng → không)
+function lunchRegOf(employeeId, workDate) {
+  try { return !!db.prepare('SELECT 1 FROM ot_lunch_reg WHERE employee_id=? AND work_date=?').get(employeeId, workDate); } catch { return false; }
+}
 export function rebuildDay(employeeId, workDate) {
   const out = rebuildDayCore(employeeId, workDate);
-  // Ngày có NHIỀU dòng công cùng có tăng ca: số phút đăng ký làm thêm là của CẢ NGÀY → chia lại theo thứ tự ca
-  if (db.prepare('SELECT COUNT(*) c FROM attendance WHERE employee_id=? AND work_date=? AND ot_raw_min>0').get(employeeId, workDate).c > 1) syncOtRegDay(employeeId, workDate);
+  // Ngày có NHIỀU dòng công cùng có tăng ca: số phút đăng ký làm thêm là của CẢ NGÀY → chia lại theo thứ tự ca.
+  // Ngày nhiều dòng có đăng ký tăng ca trưa (VD quẹt 4 lần tách ca Sáng + Chiều): tăng ca trưa tính theo cả ngày (dayLunchOt)
+  const c = db.prepare('SELECT COUNT(*) n, SUM(ot_raw_min>0) o FROM attendance WHERE employee_id=? AND work_date=?').get(employeeId, workDate);
+  if (c.o > 1 || (c.n > 1 && otLunchOn() && lunchRegOf(employeeId, workDate))) syncOtRegDay(employeeId, workDate);
   return out;
 }
 function rebuildDayCore(employeeId, workDate) {

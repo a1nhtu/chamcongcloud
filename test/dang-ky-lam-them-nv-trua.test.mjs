@@ -1,7 +1,8 @@
 // ĐĂNG KÝ LÀM THÊM — 2 công tắc mới (đều mặc định TẮT, tắt = chạy y như cũ):
 //  · ot_self_reg  "Nhân viên tự đăng ký làm thêm trên app": NV gửi đơn (ngày, từ giờ → đến giờ, lý do), quản lý duyệt mới ghi vào đăng ký.
-//  · ot_lunch_reg "Đăng ký tăng ca trưa theo giờ": tăng ca trưa = phút CÓ MẶT trong khung đã đăng ký (VD 11:30–13:30), chỉ phần nằm trong
-//    giờ nghỉ giữa ca, CỘNG THÊM vào tăng ca được tính. Ngày quẹt đủ 4 lần (ra trưa · vào chiều) = không ở lại trưa → 0.
+//  · ot_lunch_reg "Đăng ký tăng ca trưa theo giờ": tăng ca trưa = phần khung đã đăng ký (VD 11:30–13:30) nằm trong giờ nghỉ giữa ca,
+//    trong khoảng giờ vào đầu → giờ ra cuối, CỘNG THÊM vào tăng ca được tính. CHỈ xét có đăng ký hay không — lượt quẹt giờ trưa
+//    (ra trưa · vào chiều) không xét: NV ngày nào cũng quẹt 4 lần (Anh chốt 22/11/2026, khách Thép Hòn Gai).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -13,7 +14,7 @@ const dir = mkdtempSync(join(tmpdir(), 'dgp-otnv-'));
 process.env.DB_PATH = join(dir, 'test.db');
 const { db, initSchema, setSetting, getSetting } = await import('../server/db.js');
 const { signToken } = await import('../server/auth.js');
-const { lunchOtMinutes } = await import('../server/attendance-calc.js');
+const { lunchOtMinutes, dayLunchOt } = await import('../server/attendance-calc.js');
 const { computeDayMetrics, payrollCtx } = await import('../server/day-metrics.js');
 const { otRegCapper } = await import('../server/ot-cap.js');
 const { syncOtReg, normHm, hmSpan } = await import('../server/ot-reg.js');
@@ -24,7 +25,6 @@ const WD = '2026-11-16';   // Thứ Hai
 // ca 07:30–17:30, nghỉ trưa cố định 11:30–13:30 (120')
 const HC = { id: 1, name: 'HC', start_time: '07:30', end_time: '17:30', break_minutes: 120, break_start: '11:30', late_grace_min: 0, early_grace_min: 0,
   work_unit_value: 1, allow_ot: 1, ot_start_after_min: 30, ot_rounding_unit: 0, break_ot: 0 };
-const P = (...hms) => hms.map((h) => iso(WD, h));
 
 test('normHm / hmSpan', () => {
   assert.equal(normHm('7:30'), '07:30'); assert.equal(normHm('1130'), '11:30'); assert.equal(normHm('17'), '17:00');
@@ -32,24 +32,38 @@ test('normHm / hmSpan', () => {
   assert.equal(hmSpan('11:30', '13:30'), 120); assert.equal(hmSpan('22:00', '01:00'), 180); assert.equal(hmSpan('08:00', '08:00'), 0);
 });
 
-test('lunchOtMinutes: có mặt trong khung đăng ký, chỉ phần nằm trong giờ nghỉ', () => {
-  const L = (inn, out, f, t, punches = null, sh = HC) => lunchOtMinutes(sh, WD, iso(WD, inn), iso(WD, out), f, t, punches);
+test('lunchOtMinutes: khung đăng ký ∩ giờ nghỉ ∩ [vào đầu, ra cuối] — lượt quẹt trưa không xét', () => {
+  const L = (inn, out, f, t, sh = HC) => lunchOtMinutes(sh, WD, iso(WD, inn), iso(WD, out), f, t);
   assert.equal(L('07:30', '17:30', '11:30', '13:30'), 120);                    // quẹt 2 lần, đăng ký đúng giờ nghỉ → 120'
   assert.equal(L('07:30', '17:30', '12:00', '13:00'), 60);                     // đăng ký 1 tiếng giữa giờ nghỉ
   assert.equal(L('07:30', '17:30', '11:00', '14:00'), 120);                    // khung rộng hơn giờ nghỉ: phần trùng giờ làm không tính 2 lần
   assert.equal(L('07:30', '12:30', '11:30', '13:30'), 60);                     // về lúc 12:30 → có mặt 60'
   assert.equal(L('12:00', '17:30', '11:30', '13:30'), 90);                     // vào lúc 12:00 → 90'
-  assert.equal(L('07:30', '17:30', '11:30', '13:30', P('07:30', '11:30', '13:30', '17:30')), 0);    // quẹt 4 lần: ra trưa, vào chiều → không ở lại
-  assert.equal(L('07:30', '17:30', '11:30', '13:30', P('07:30', '12:30', '13:00', '17:30')), 90);   // ra 12:30 vào 13:00 → 60' + 30'
-  assert.equal(L('07:30', '17:30', '11:30', '13:30', P('07:30', '11:30', '17:30')), 120);           // 3 lần (lẻ) → đầu → cuối
-  assert.equal(L('07:30', '17:30', '11:30', '13:30', P('07:30', '17:30')), 120);
-  assert.equal(L('07:30', '17:30', '11:30', '13:30', null, { ...HC, allow_ot: 0 }), 0);            // ca không cho tăng ca
-  assert.equal(L('07:30', '17:30', '11:30', '13:30', null, { ...HC, break_start: '' }), 0);        // ca không khai giờ bắt đầu nghỉ
+  assert.equal(L('07:10', '17:05', '11:30', '12:00'), 30);                     // ví dụ của Anh: 07:10 · 11:32 · 12:58 · 17:05, đăng ký 11:30–12:00
+  assert.equal(L('07:10', '17:05', '11:30', '12:30'), 60);                     //   … đăng ký 11:30–12:30
+  assert.equal(L('07:30', '17:30', '07:00', '14:00'), 120);                    // khung bắt đầu trước giờ vào ca (ca ngày) vẫn là của hôm nay
+  assert.equal(L('07:30', '17:30', '11:30', '13:30', { ...HC, allow_ot: 0 }), 0);            // ca không cho tăng ca
+  assert.equal(L('07:30', '17:30', '11:30', '13:30', { ...HC, break_start: '' }), 0);        // ca không khai giờ bắt đầu nghỉ
   assert.equal(L('07:30', '17:30', '18:00', '19:00'), 0);                      // khung ngoài giờ nghỉ → không phải tăng ca trưa
   assert.equal(L('07:30', '17:30', '11:30', '11:30'), 0);
   // ca đêm 19:00–03:00 nghỉ 00:00–01:00: khung 00:00–01:00 là của rạng sáng hôm sau
   const D = { ...HC, start_time: '19:00', end_time: '03:00', break_start: '00:00', break_minutes: 60, cross_midnight: 1 };
   assert.equal(lunchOtMinutes(D, WD, iso(WD, '19:00'), iso('2026-11-17', '03:00'), '00:00', '01:00'), 60);
+});
+
+test('dayLunchOt: ngày tách ca Sáng + Chiều (không có giờ nghỉ) → khoảng giữa 2 ca, cộng vào dòng ca chiều', () => {
+  const S = { start_time: '07:15', end_time: '11:30', allow_ot: 0 }, C = { start_time: '13:00', end_time: '17:00', allow_ot: 1 };
+  const rows = [{ shift: S, inIso: iso(WD, '07:10'), outIso: iso(WD, '11:32') }, { shift: C, inIso: iso(WD, '12:58'), outIso: iso(WD, '17:05') }];
+  assert.deepEqual(dayLunchOt(rows, WD, '11:30', '12:00'), [0, 30]);
+  assert.deepEqual(dayLunchOt(rows, WD, '11:30', '12:30'), [0, 60]);
+  assert.deepEqual(dayLunchOt(rows, WD, '11:00', '14:00'), [0, 90]);           // phần trùng giờ làm của 2 ca không tính 2 lần
+  assert.deepEqual(dayLunchOt(rows, WD, '', ''), [0, 0]);
+  assert.deepEqual(dayLunchOt([rows[0], { ...rows[1], shift: { ...C, allow_ot: 0 } }], WD, '11:30', '12:30'), [0, 0]);   // 2 ca không cho tăng ca
+  assert.deepEqual(dayLunchOt([{ ...rows[0], shift: { ...S, allow_ot: 1 } }, { ...rows[1], shift: { ...C, allow_ot: 0 } }], WD, '11:30', '12:30'), [60, 0]);
+  assert.deepEqual(dayLunchOt([rows[0], null], WD, '11:30', '12:30'), [0, 0]);   // chỉ làm buổi sáng
+  assert.deepEqual(dayLunchOt([rows[0]], WD, '11:30', '12:30'), [0]);
+  // 1 dòng ca có giờ nghỉ: như lunchOtMinutes
+  assert.deepEqual(dayLunchOt([{ shift: HC, inIso: iso(WD, '07:10'), outIso: iso(WD, '17:05') }], WD, '11:30', '12:30'), [60]);
 });
 
 // ---- computeDayMetrics: ctx giả ----
@@ -177,16 +191,16 @@ test('từ chối đơn → không ghi đăng ký; NV huỷ được đơn còn 
   assert.ok(mine.body.rows.some((x) => x.status === 'rejected' && x.review_note === 'Không cần'));
 });
 
-test('quẹt 4 lần (ra trưa · vào chiều) dù đã đăng ký trưa → tăng ca trưa 0', () => {
+test('quẹt 4 lần (ra trưa · vào chiều) + đã đăng ký trưa → vẫn tính đủ khung đăng ký', () => {
   const D = DAY.c;
   const a = addAtt(D, '07:30', '17:30', 0);
   for (const h of ['07:30', '11:30', '13:30', '17:30']) ins('device_punches', { serial: 'M1', pin: '1', punch_at: iso(D, h), work_date: D, status: 0, verify: 1, employee_id: EMP });
   ins('ot_lunch_reg', { employee_id: EMP, work_date: D, from_hm: '11:30', to_hm: '13:30' });
   syncOtReg([EMP], D, D);
-  assert.equal(otOf(a), 0);
+  assert.equal(otOf(a), 120);
   // payrollCtx (tính lại công) cho cùng kết quả
   const m = computeDayMetrics(payrollCtx(getSetting, db), { ...HC, id: SH }, D, iso(D, '07:30'), iso(D, '17:30'), null, { empId: EMP });
-  assert.equal(m.ot_min, 0);
+  assert.equal(m.ot_min, 120);
 });
 
 test('áp nhanh khung tăng ca trưa cho nhiều ngày, xoá bằng ô trống', async () => {

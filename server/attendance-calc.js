@@ -73,28 +73,48 @@ export function breakOtAvail(shift, workDate, inIso, outIso) {
 }
 
 // TĂNG CA TRƯA THEO GIỜ ĐĂNG KÝ (công tắc "Đăng ký tăng ca trưa theo giờ" ot_lunch_reg — mặc định TẮT):
-// số phút NV CÓ MẶT trong khung đã đăng ký [fromHm, toHm], chỉ tính phần nằm trong GIỜ NGHỈ GIỮA CA (phần trùng giờ làm trong ca
-// đã là giờ công, không tính 2 lần). Ca phải cho tăng ca + khai giờ bắt đầu nghỉ; không → 0.
-// Có mặt: ngày có ≥ 4 lượt quẹt (số chẵn) trong khoảng vào–ra → theo từng cặp (ra trưa 11:30 · vào 13:30 = KHÔNG có mặt giờ trưa);
-// còn lại (2 lượt, chấm điện thoại, số lượt lẻ) → từ giờ vào đầu tới giờ ra cuối.
-export function lunchOtMinutes(shift, workDate, inIso, outIso, fromHm, toHm, punches = null) {
-  if (!shift || !shift.allow_ot || !inIso || !outIso || !fromHm || !toHm) return 0;
-  const { start } = shiftBounds(workDate, shift);
-  const brk = breakWindow(workDate, shift, start);
-  if (!brk) return 0;
+// CHỈ khác nhau ở CÓ ĐĂNG KÝ hay không — lượt quẹt giờ trưa không đổi gì (NV ngày nào cũng quẹt 4 lần 07:10 · 11:32 · 12:58 · 17:05:
+// đăng ký 11:30–12:00 → 30', 11:30–12:30 → 60', không đăng ký → 0 như ngày thường).
+// Số phút = khung đã đăng ký [fromHm, toHm] ∩ GIỜ NGHỈ GIỮA CA ∩ [giờ vào đầu, giờ ra cuối] — bỏ qua các lượt ra / vào giữa ngày;
+// phần trùng giờ làm trong ca đã là giờ công, không tính 2 lần. Ca phải cho tăng ca + khai giờ bắt đầu nghỉ; không → 0.
+// Ngày tách 2 ca Sáng + Chiều (không có giờ nghỉ): xem dayLunchOt.
+const lunchSpan = (fromHm, toHm) => (fromHm && toHm ? (mins(vnInstant('2000-01-01', fromHm), vnInstant('2000-01-01', toHm)) + 1440) % 1440 : 0);
+// phút [a, b] trùng (khung đăng ký ∩ zone); ref / refEnd = đầu / cuối ca để biết khung là của rạng sáng hôm sau (ca đêm)
+function lunchIn(zone, workDate, ref, refEnd, fromHm, toHm, a, b) {
+  const span = lunchSpan(fromHm, toHm);
+  if (!span || !zone) return 0;
   let ws = vnInstant(workDate, fromHm);
-  if (ws < start) ws = new Date(ws.getTime() + 24 * HH);   // ca đêm: giờ trưa (nghỉ giữa ca) sau nửa đêm
-  const span = (mins(vnInstant(workDate, fromHm), vnInstant(workDate, toHm)) + 1440) % 1440;
-  if (!span) return 0;
-  const win = { bs: ws > brk.bs ? ws : brk.bs, be: new Date(Math.min(ws.getTime() + span * 60000, brk.be.getTime())) };
+  if (ws < ref && ws.getTime() + 24 * HH <= refEnd.getTime()) ws = new Date(ws.getTime() + 24 * HH);
+  const win = { bs: ws > zone.bs ? ws : zone.bs, be: new Date(Math.min(ws.getTime() + span * 60000, zone.be.getTime())) };
   if (!(win.be > win.bs)) return 0;
-  const ts = [...new Set((punches || []).map((p) => toMinute(p).getTime()))].sort((a, b) => a - b);
-  const segs = ts.length >= 4 && ts.length % 2 === 0
-    ? ts.reduce((a, t, i) => (i % 2 ? (a[a.length - 1][1] = new Date(t), a) : (a.push([new Date(t), null]), a)), [])
-    : [[toMinute(inIso), toMinute(outIso)]];
-  let total = 0;
-  for (const [a, b] of segs) total += breakOverlap(win, a, b);
-  return Math.min(total, span);
+  return Math.min(breakOverlap(win, a, b), span);
+}
+export function lunchOtMinutes(shift, workDate, inIso, outIso, fromHm, toHm) {
+  if (!shift || !shift.allow_ot || !shift.start_time || !shift.end_time || !inIso || !outIso || !fromHm || !toHm) return 0;
+  const { start, end } = shiftBounds(workDate, shift);
+  return lunchIn(breakWindow(workDate, shift, start), workDate, start, end, fromHm, toHm, toMinute(inIso), toMinute(outIso));
+}
+// Cả NGÀY có nhiều dòng công. rows = [{ shift, inIso, outIso }] theo thứ tự giờ vào (dòng không tính — không phải ngày làm việc,
+// thiếu giờ vào / ra — truyền null). Trả mảng phút tăng ca trưa cùng thứ tự, tổng không quá độ dài khung đăng ký.
+//  · dòng có giờ nghỉ giữa ca → như lunchOtMinutes
+//  · 2 dòng liền nhau (VD quẹt 4 lần bị tách ca Sáng 07:15–11:30 + ca Chiều 13:00–17:00): giờ trưa = khoảng giữa 2 ca
+//    (kết thúc ca trước → bắt đầu ca sau), có mặt từ giờ vào dòng trước tới giờ ra dòng sau; cộng vào dòng sau
+//    (ca sau không cho tăng ca thì vào dòng trước; cả 2 không cho → 0)
+export function dayLunchOt(rows, workDate, fromHm, toHm) {
+  const out = rows.map(() => 0);
+  let left = lunchSpan(fromHm, toHm);
+  const add = (i, m) => { const v = Math.min(m, left); out[i] += v; left -= v; };
+  rows.forEach((r, i) => { if (r && left > 0) add(i, lunchOtMinutes(r.shift, workDate, r.inIso, r.outIso, fromHm, toHm)); });
+  for (let i = 0; i + 1 < rows.length && left > 0; i++) {
+    const x = rows[i], y = rows[i + 1];
+    if (!x || !y || !x.inIso || !y.outIso || !x.shift?.start_time || !x.shift?.end_time || !y.shift?.start_time || !y.shift?.end_time) continue;
+    const to = y.shift.allow_ot ? i + 1 : x.shift.allow_ot ? i : -1;
+    if (to < 0) continue;
+    const A = shiftBounds(workDate, x.shift), B = shiftBounds(workDate, y.shift);
+    if (!(B.start > A.end)) continue;
+    add(to, lunchIn({ bs: A.end, be: B.start }, workDate, A.start, B.end, fromHm, toHm, toMinute(x.inIso), toMinute(y.outIso)));
+  }
+  return out;
 }
 
 // Số phút làm TRONG KHUNG CA (giờ vào–ra cắt theo giờ bắt đầu–kết thúc ca, trừ giờ nghỉ giữa ca) — chỉ để HIỂN THỊ

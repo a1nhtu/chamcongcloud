@@ -151,7 +151,7 @@ async function pageOtReg() {
     'TẮT "Phải đăng ký mới tính tăng ca"?\nNgày không đăng ký sẽ tính tăng ca theo thực tế như trước.');
   const selfCb = ruleCb('self', data.selfOn, 'BẬT "Nhân viên tự đăng ký làm thêm trên app"?\nNhân viên gửi đơn ở tab Đơn từ (ngày, từ giờ – đến giờ, lý do); quản lý duyệt ở trang này thì mới ghi vào đăng ký.',
     'TẮT "Nhân viên tự đăng ký làm thêm trên app"?\nApp nhân viên ẩn phần đăng ký làm thêm (đơn đang chờ vẫn giữ để duyệt).');
-  const lunchCb = ruleCb('lunch', data.lunchOn, 'BẬT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa CHỈ tính theo khung giờ đã đăng ký (VD 11:30–13:30): phút có mặt trong khung, phần nằm trong giờ nghỉ giữa ca. Áp cho cả dữ liệu đã có.',
+  const lunchCb = ruleCb('lunch', data.lunchOn, 'BẬT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa CHỈ tính khi có đăng ký khung giờ (VD 11:30–12:30 = 60 phút), phần nằm trong giờ nghỉ giữa ca. Lượt quẹt ra trưa / vào chiều không xét. Áp cho cả dữ liệu đã có.',
     'TẮT "Đăng ký tăng ca trưa theo giờ"?\nTăng ca trưa quay về cách cũ (ca bật "Tính tăng ca trưa": giờ nghỉ có mặt bù phần đăng ký làm thêm còn thiếu). Áp cho cả dữ liệu đã có.');
   const permTip = hasPerm('settings') ? '' : 'Cần quyền Cài đặt để đổi';
   const rulePanel = el('div', { class: 'panel al-def or-rule' },
@@ -160,7 +160,7 @@ async function pageOtReg() {
     el('label', { title: permTip }, lunchCb, 'Đăng ký tăng ca trưa theo giờ (từ … đến …)'),
     el('div', { class: 'map-hint', style: 'flex-basis:100%;margin:0' }, 'Quy tắc: làm thêm NHIỀU hơn số phút đăng ký → chỉ tính đúng số phút đăng ký · làm ÍT hơn → tính theo thực tế · đăng ký 0 = không cho làm thêm ngày đó. '
       + 'Không tích ô đầu: ngày chưa đăng ký vẫn tính tăng ca thực tế. Lưu đăng ký là áp ngay vào công, không cần bấm Tính lại. Ai làm quá đăng ký xem ở menu "🚨 Chấm công bất thường".'
-      + (data.lunchOn ? ' · TĂNG CA TRƯA THEO GIỜ (☀): đăng ký khung giờ ở "Áp nhanh" (hoặc NV gửi đơn) → tính số phút có mặt trong khung, chỉ phần nằm trong giờ nghỉ giữa ca (ca phải khai giờ bắt đầu nghỉ + cho tăng ca), cộng thêm vào tăng ca. Ngày có quẹt đủ 4 lần (ra trưa – vào chiều) là không ở lại trưa → 0.' : '')));
+      + (data.lunchOn ? ' · TĂNG CA TRƯA THEO GIỜ (☀): đăng ký khung giờ ở "Áp nhanh" (hoặc NV gửi đơn) → cộng số phút của khung nằm trong giờ nghỉ giữa ca (ca phải khai giờ bắt đầu nghỉ + cho tăng ca; ngày tách ca Sáng + Chiều thì lấy khoảng giữa 2 ca) vào tăng ca. Chỉ xét có đăng ký hay không: quẹt ra trưa – vào chiều như ngày thường vẫn tính (VD 11:30–12:00 = 30 phút); không đăng ký → 0.' : '')));
 
   // ----- áp nhanh -----
   const B = _or.bulk || { min: '', from: _or.from, to: _or.to, sun: true, sat: false, kind: 'ot', lf: '', lt: '' };

@@ -5,11 +5,12 @@
 //   · ngày KHÔNG đăng ký          → tính thực tế (mặc định) hoặc 0 nếu bật "Phải đăng ký mới tính tăng ca" (ot_reg_required)
 // attendance.ot_min = tăng ca ĐƯỢC TÍNH (đã chặn); attendance.ot_raw_min = tăng ca THỰC TẾ (trước khi chặn) — để soát
 // "làm thêm quá đăng ký" và để đổi đăng ký là áp lại ngay, không phải tính lại công.
-// TĂNG CA TRƯA THEO GIỜ (công tắc ot_lunch_reg, mặc định TẮT): mỗi NV mỗi ngày 1 khung giờ (bảng ot_lunch_reg) → phút có mặt trong khung,
-// chỉ phần nằm trong giờ nghỉ giữa ca, CỘNG THÊM vào tăng ca được tính (xem lunchOtMinutes). Công tắc tắt → y như cũ.
+// TĂNG CA TRƯA THEO GIỜ (công tắc ot_lunch_reg, mặc định TẮT): mỗi NV mỗi ngày 1 khung giờ (bảng ot_lunch_reg) → số phút của khung
+// nằm trong giờ nghỉ giữa ca (hoặc khoảng giữa ca Sáng – ca Chiều khi ngày bị tách 2 ca), CỘNG THÊM vào tăng ca được tính
+// (xem lunchOtMinutes / dayLunchOt). Chỉ xét CÓ ĐĂNG KÝ hay không, lượt quẹt giờ trưa không xét. Công tắc tắt → y như cũ.
 // NV TỰ ĐĂNG KÝ trên app (công tắc ot_self_reg, mặc định TẮT): đơn ot_requests, quản lý duyệt → ghi vào 2 bảng trên.
 import { db, getSetting } from './db.js';
-import { breakOtAvail, lunchOtMinutes } from './attendance-calc.js';
+import { breakOtAvail, dayLunchOt } from './attendance-calc.js';
 export { capOt, otRegCapper, otLuncher } from './ot-cap.js';
 
 export const otRegRequired = () => getSetting('ot_reg_required', '0') === '1';
@@ -23,7 +24,6 @@ export function syncOtReg(empIds, from, to) {
   const required = otRegRequired();
   const lunchOn = otLunchOn();
   const upd = db.prepare('UPDATE attendance SET ot_min=? WHERE id=?');
-  const punchesOf = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at');
   let changed = 0;
   const run = (ids) => {
     // dòng có tăng ca, dòng của ca bật TĂNG CA TRƯA (giờ nghỉ có mặt bù phần đăng ký — kể cả khi không có tăng ca ngoài ca),
@@ -37,25 +37,34 @@ export function syncOtReg(empIds, from, to) {
       WHERE a.work_date>=? AND a.work_date<=?${ids ? ` AND a.employee_id IN (${ids.map(() => '?').join(',')})` : ''}
         AND (a.ot_min>0 OR a.ot_raw_min>0 OR (s.break_ot=1 AND s.allow_ot=1) OR l.employee_id IS NOT NULL)
       ORDER BY a.employee_id, a.work_date, a.check_in_at`).all(from, to, ...(ids || []));
-    let key = '', left = 0;
+    // gom theo NV + ngày (đã sắp theo giờ vào): số phút đăng ký + khung trưa là của CẢ NGÀY
+    const days = [];
     for (const r of rows) {
-      const k = r.employee_id + '|' + r.work_date;
-      if (k !== key) { key = k; left = r.reg == null ? (required ? 0 : Infinity) : r.reg; }
-      const raw = r.ot_raw_min ?? r.ot_min ?? 0;
-      let v;
-      if (lunchOn) {
-        // trưa theo giờ: phần ngoài ca chặn theo đăng ký phút, tăng ca trưa theo khung giờ cộng thêm (giờ nghỉ không bù số phút)
-        const o = Math.min(raw, left); left -= o;
-        const ok = r.lunch_from && r.start_time && r.day_status === 'lam_viec' && r.check_in_at && r.check_out_at;
-        const lunch = ok ? lunchOtMinutes(r, r.work_date, r.check_in_at, r.check_out_at, r.lunch_from, r.lunch_to,
-          punchesOf.all(r.employee_id, r.check_in_at, r.check_out_at).map((x) => x.punch_at)) : 0;
-        v = o + lunch;
-      } else {
-        // tăng ca trưa: chỉ khi ngày có đăng ký (left hữu hạn) mới bù giờ nghỉ có mặt vào phần đăng ký còn thiếu
-        const brk = r.reg != null && r.break_ot && r.day_status === 'lam_viec' ? breakOtAvail(r, r.work_date, r.check_in_at, r.check_out_at) : 0;
-        v = Math.min(raw + brk, left); left -= v;
-      }
-      if (v !== (r.ot_min || 0)) { upd.run(v, r.id); changed++; }
+      const k = r.employee_id + '|' + r.work_date, d = days[days.length - 1];
+      if (d && d.k === k) d.rows.push(r); else days.push({ k, rows: [r] });
+    }
+    for (const { rows: day } of days) {
+      const r0 = day[0];
+      let left = r0.reg == null ? (required ? 0 : Infinity) : r0.reg;
+      // trưa theo giờ: tính 1 lần cho cả ngày (ngày tách ca Sáng + Chiều: khoảng giữa 2 ca), lượt quẹt giờ trưa không xét
+      const lunch = lunchOn && r0.lunch_from
+        ? dayLunchOt(day.map((r) => (r.start_time && r.day_status === 'lam_viec' && r.check_in_at && r.check_out_at
+          ? { shift: r, inIso: r.check_in_at, outIso: r.check_out_at } : null)), r0.work_date, r0.lunch_from, r0.lunch_to)
+        : null;
+      day.forEach((r, i) => {
+        const raw = r.ot_raw_min ?? r.ot_min ?? 0;
+        let v;
+        if (lunchOn) {
+          // phần ngoài ca chặn theo đăng ký phút, tăng ca trưa theo khung giờ cộng thêm (giờ nghỉ không bù số phút)
+          const o = Math.min(raw, left); left -= o;
+          v = o + (lunch ? lunch[i] : 0);
+        } else {
+          // tăng ca trưa: chỉ khi ngày có đăng ký (left hữu hạn) mới bù giờ nghỉ có mặt vào phần đăng ký còn thiếu
+          const brk = r.reg != null && r.break_ot && r.day_status === 'lam_viec' ? breakOtAvail(r, r.work_date, r.check_in_at, r.check_out_at) : 0;
+          v = Math.min(raw + brk, left); left -= v;
+        }
+        if (v !== (r.ot_min || 0)) { upd.run(v, r.id); changed++; }
+      });
     }
   };
   if (!empIds) run(null);

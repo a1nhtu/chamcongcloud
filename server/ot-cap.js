@@ -6,22 +6,19 @@ import { lunchOtMinutes } from './attendance-calc.js';
 export const capOt = (raw, reg, required, brk = 0) => (reg == null ? (required ? 0 : raw) : Math.min(raw + (brk > 0 ? brk : 0), reg));
 
 // TĂNG CA TRƯA THEO GIỜ ĐĂNG KÝ (công tắc ot_lunch_reg, mặc định TẮT). Trả null khi công tắc TẮT → nơi gọi tính y như cũ
-// (giờ nghỉ có mặt bù phần đăng ký — ca bật break_ot). BẬT: tăng ca trưa CHỈ lấy theo khung giờ đã đăng ký (lunchOtMinutes),
-// cộng thêm vào tăng ca được tính; giờ nghỉ không còn dùng để bù số phút đăng ký làm thêm ngoài ca.
+// (giờ nghỉ có mặt bù phần đăng ký — ca bật break_ot). BẬT: tăng ca trưa CHỈ lấy theo khung giờ đã đăng ký (lunchOtMinutes,
+// lượt quẹt giờ trưa không xét), cộng thêm vào tăng ca được tính; giờ nghỉ không còn dùng để bù số phút đăng ký làm thêm ngoài ca.
+// Dòng của ca không có giờ nghỉ (ngày tách ca Sáng + Chiều) → 0 ở đây; syncOtRegDay tính lại theo cả ngày (dayLunchOt).
 // Hàm trả về: (empId, ngày, ca, giờ vào, giờ ra, trạng thái ngày) → phút tăng ca trưa (0 = ngày không đăng ký trưa).
 export function otLuncher(database, getS) {
   if (getS('ot_lunch_reg', '0') !== '1') return null;
-  let stReg = null, stPunch = null, dead = false;
+  let stReg = null, dead = false;
   return (empId, workDate, shift, inIso, outIso, dayStatus) => {
     if (dead || !empId || !shift || !inIso || !outIso || dayStatus !== 'lam_viec') return 0;
-    try {
-      stReg ||= database.prepare('SELECT from_hm, to_hm FROM ot_lunch_reg WHERE employee_id=? AND work_date=?');
-      stPunch ||= database.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at');
-    } catch { dead = true; return 0; }   // CSDL chưa có bảng (bản cũ / bài test) → như chưa đăng ký
+    try { stReg ||= database.prepare('SELECT from_hm, to_hm FROM ot_lunch_reg WHERE employee_id=? AND work_date=?'); }
+    catch { dead = true; return 0; }   // CSDL chưa có bảng (bản cũ / bài test) → như chưa đăng ký
     const r = stReg.get(empId, workDate);
-    if (!r) return 0;
-    const p = stPunch.all(empId, new Date(inIso).toISOString(), new Date(outIso).toISOString()).map((x) => x.punch_at);
-    return lunchOtMinutes(shift, workDate, inIso, outIso, r.from_hm, r.to_hm, p);
+    return r ? lunchOtMinutes(shift, workDate, inIso, outIso, r.from_hm, r.to_hm) : 0;
   };
 }
 
