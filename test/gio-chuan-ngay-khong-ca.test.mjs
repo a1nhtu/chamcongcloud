@@ -115,8 +115,13 @@ test('chế độ THEO CA nhưng ngày không tìm được ca (không còn ca n
   setHpd(undefined);
 });
 
-test('chấm RA bằng ĐIỆN THOẠI (không ca): làm 510 phút → 1 công (cài 8) / 0,94 (cài 9)', async () => {
-  const today = vnDateStr();
+test('chấm RA bằng ĐIỆN THOẠI (không ca): làm 510 phút → 1 công (cài 8) / 0,94 (cài 9)', async (t) => {
+  // Route chấm ra dùng giờ hiện tại → GIẢ LẬP "bây giờ" là 17:30 thứ Ba 10/11/2026 (giờ VN), không phụ thuộc đồng hồ thật.
+  // Trước đây dùng ngày thật: chạy vào CHỦ NHẬT (weekend_days mặc định 7) thì chế độ theo ca coi đi làm cuối tuần
+  // là tăng ca → 0 phút công / 510 phút tăng ca, test hỏng (CI 22/11/2026). Chỉ giả lập Date; setTimeout, fetch vẫn chạy thật.
+  const today = '2026-11-10';
+  t.mock.timers.enable({ apis: ['Date'], now: Date.parse(iso(today, '17:30')) });
+  assert.equal(vnDateStr(), today);
   const PUNCH = { lat: 21.0, lng: 105.8, photo: 'khong-phai-anh' };
   for (const [mode, v, want] of [['hourly', 8, 1], ['hourly', 9, 0.94], ['hourly', 7.5, 1], ['shift', 8, 1], ['shift', 9, 0.94]]) {
     const id = mkEmp(mode);
