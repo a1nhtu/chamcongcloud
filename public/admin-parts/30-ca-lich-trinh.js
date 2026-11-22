@@ -432,7 +432,10 @@ function shiftForm(s, can) {
       R('Ở lại sau giờ ra tối thiểu', num('s-otafter', s?.ot_start_after_min ?? 30), 'phút', 'Ở lại ít hơn số này thì không tính tăng ca (có khai "Tăng ca tính từ giờ" thì đo từ giờ đó)'),
       C('s-otbefore', s?.ot_before, 'Tính cả tăng ca TRƯỚC giờ vào ca', '(đến sớm)'),
       R('Đến sớm tối thiểu', num('s-otbeforemin', s?.ot_before_min ?? 30), 'phút'),
-      C('s-breakot', s?.break_ot, 'Tính TĂNG CA TRƯA (làm trong giờ nghỉ giữa ca)', '(cần khai giờ bắt đầu nghỉ; chỉ tính khi có Đăng ký làm thêm: giờ nghỉ có mặt bù phần đăng ký còn thiếu, không vượt số đăng ký. Bật "Đăng ký tăng ca trưa theo giờ" ở menu Đăng ký làm thêm thì tăng ca trưa tính theo khung giờ đã đăng ký, ô này không còn tác dụng)'),
+      C('s-breakot', s?.break_ot, 'Tính TĂNG CA TRƯA (làm trong giờ nghỉ giữa ca)', '— chỉ có tác dụng ngày CÓ đăng ký làm thêm (số phút): giờ nghỉ trưa NV có mặt (vào trước, ra sau giờ nghỉ) được cộng vào phần làm thêm sau ca cho tới ĐỦ số đã đăng ký, không vượt quá. '
+        + 'VD nghỉ trưa 90 phút: đăng ký 120, về muộn 60 phút → tính 120 (60 còn thiếu lấy từ giờ trưa); đăng ký 90, về đúng giờ → tính 90. '
+        + 'Không đăng ký → giờ trưa không bao giờ thành tăng ca. Cần khai giờ bắt đầu nghỉ + cho phép tăng ca. '
+        + 'Đã bật "Đăng ký tăng ca trưa theo giờ" (menu Đăng ký làm thêm) thì ô này KHÔNG còn tác dụng: tăng ca trưa tính theo khung giờ đã đăng ký.'),
       C('s-holidayot', s?.holiday_as_ot, 'Làm ca này vào NGÀY LỄ: cả ca là tăng ca', '(không tính công, toàn bộ giờ làm thành tăng ca ngày lễ)'),
       C('s-shiftot', s?.shift_as_ot, 'Ca này là CA TĂNG CA', '(ngày nào làm ca này cũng không tính công, toàn bộ giờ làm thành tăng ca)'),
       el('div', { class: 'fhint' }, 'Ở lại (hoặc đến sớm) ít hơn số phút tối thiểu thì không tính tăng ca. Làm tròn tăng ca và "đi làm cuối tuần = tăng ca": đặt chung cho cả công ty ở Cài đặt › Quy tắc tính công.')),
