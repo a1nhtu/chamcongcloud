@@ -23,6 +23,7 @@ async function pageShifts() {
   for (const r of rows) {
     const tr = el('tr', { class: r.id === _shSel ? 'on' : '' },
       el('td', {}, el('b', {}, r.name), r.code ? el('span', { class: 'pill muted', style: 'margin-left:6px' }, r.code) : '', r.end_time <= r.start_time ? el('span', { title: 'Ca qua đêm' }, ' 🌙') : '',
+        r.work_pct != null && +r.work_pct !== 100 ? el('span', { class: 'pill', style: 'margin-left:6px', title: 'Quy đổi giờ công: giờ làm trong ca × ' + r.work_pct + '%' }, '×' + String(+r.work_pct).replace('.', ',') + '%') : '',
         r.active ? '' : el('span', { class: 'pill bad', style: 'margin-left:6px' }, 'Tắt')),
       el('td', {}, r.start_time), el('td', {}, r.end_time));
     tr.onclick = () => { _shSel = r.id; pageShifts(); };
@@ -335,6 +336,7 @@ function shiftForm(s, can) {
   const bEndI = time24('s-breakEnd', (s?.break_start && s?.break_minutes) ? m2hm(hm2m(s.break_start) + s.break_minutes) : '');
   const bMinI = num('s-break', s?.break_minutes ?? 0);
   const unitI = num('s-unit', s?.work_unit_value ?? 1.0, { step: '0.1' });
+  const pctI = num('s-workpct', s?.work_pct ?? 100, { step: '1', min: '1', max: '1000' });
   const breakWarn = el('div', { class: 'fwarn' });
   // Tổng giờ trong ca = (ra − vào) − nghỉ; nghỉ: nhập giờ bắt đầu + kết thúc → tự ra số phút (hoặc chỉ nhập số phút = không cố định giờ)
   const recalc = () => {
@@ -398,6 +400,7 @@ function shiftForm(s, can) {
       R('Tổng thời gian nghỉ', bMinI, 'phút'),
       breakWarn,
       R('Công tính', unitI, 'công', 'Cả ngày = 1, nửa ngày = 0,5'),
+      R('Quy đổi giờ công', pctI, '%', '100 = như thường. VD 115 → làm 4 giờ ghi 4,6 giờ công, công cũng × 1,15 (kể cả khi giờ đó tính là tăng ca cuối tuần / lễ). Tăng ca ngoài giờ ca không nhân. Đổi xong bấm Tính lại công'),
       R('Bắt đầu vào', ph(time24('s-ciStart', s?.check_in_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm VÀO'),
       R('Kết thúc vào', ph(time24('s-ciEnd', s?.check_in_end || ''), '(tự động)')),
       R('Bắt đầu ra', ph(time24('s-coStart', s?.check_out_start || ''), '(tự động)'), '', 'Khung giờ nhận lượt chấm RA'),
@@ -463,7 +466,7 @@ function shiftForm(s, can) {
       check_out_start: $('#s-coStart').value || '', check_out_end: $('#s-coEnd').value || '',
       late_grace_min: +$('#s-grace').value || 0, early_grace_min: +$('#s-early').value || 0,
       break_minutes: +bMinI.value || 0, break_start: (+bMinI.value || 0) > 0 ? (bStartI.value || '') : '',
-      work_unit_value: +unitI.value || 1, active: actChk.checked,
+      work_unit_value: +unitI.value || 1, work_pct: +pctI.value || 100, active: actChk.checked,
       allow_ot: otChk.checked, ot_start_after_min: +$('#s-otafter').value || 0, ot_from_time: $('#s-otfrom').value || '',
       ot_before: $('#s-otbefore').checked, ot_before_min: +$('#s-otbeforemin').value || 0,
       ot_tier1_min: +$('#s-t1').value || 0, ot_tier2_min: +$('#s-t2').value || 0, ot_tier3_min: +$('#s-t3').value || 0,

@@ -205,6 +205,23 @@ function roundUnit(v, factor, mode) {
   return (mode === 1 ? Math.ceil(x - 1e-9) : mode === 2 ? Math.round(x) : Math.floor(x + 1e-9)) / factor;
 }
 
+// "Quy đổi giờ công (%)" của ca (shifts.work_pct, mặc định 100 = như cũ): giờ làm TRONG ca và số công nhân theo tỉ lệ.
+// VD ca Sáng CN 07:30–11:30 đặt 115 → làm đủ 4 giờ ghi 4,6 giờ công; 0,5 công → 0,575 (làm tròn theo Cài đặt).
+// Giờ trong ca được chuyển thành tăng ca (ca tăng ca, ngày lễ, đi làm cuối tuần) cũng theo số đã nhân;
+// tăng ca NGOÀI giờ ca (ở lại sau ca, đến sớm, tăng ca trưa) giữ nguyên.
+export function workPctFactor(shift) {
+  const p = Number(shift && shift.work_pct);
+  return Number.isFinite(p) && p > 0 && p !== 100 ? p / 100 : 1;
+}
+function scaleWork(shift, work_minutes, work_unit, factor, mode) {
+  const k = workPctFactor(shift);
+  if (k === 1) return [work_minutes, work_unit];
+  // khử sai số số thực trước khi làm tròn (0,5 × 1,15 = 0,57499… → 0,575) rồi làm tròn theo Cài đặt như roundUnit
+  const x = Math.round(work_unit * k * factor * 1e6) / 1e6;
+  const u = (mode === 1 ? Math.ceil(x - 1e-9) : mode === 2 ? Math.round(x) : Math.floor(x + 1e-9)) / factor;
+  return [Math.round(work_minutes * k), u];
+}
+
 // Số công khi KHÔNG có ca (không xác định được giờ chuẩn theo ca):
 // tính theo TỈ LỆ so với 1 ngày công chuẩn (mặc định 8 giờ) → tránh cảnh 6 phút = 1 công.
 // Làm việc >= 1 ngày chuẩn thì tối đa 1 công.
@@ -339,6 +356,7 @@ export function computeCheckout(shift, checkInIso, checkOutIso, workDate, opts =
   const factor = Math.pow(10, roundingDecimals);
   const rawUnit = baseUnit * work_minutes / standard;
   let work_unit = Math.min(baseUnit, roundUnit(rawUnit, factor, roundingMode));   // 0=lùi,1=tới,2=gần nhất
+  [work_minutes, work_unit] = scaleWork(shift, work_minutes, work_unit, factor, roundingMode);   // "Quy đổi giờ công (%)" của ca
 
   const ot_type = isHoliday ? 'le' : isWeekend ? 'cuoi_tuan' : 'thuong';
 
@@ -389,10 +407,10 @@ export function computeNoOut(shift, checkInIso, workDate, opts = {}) {
   const { start, end } = shiftBounds(workDate, shift);
   const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
   const late = computeLate(shift, checkInIso, workDate, lateBlock, priv);
-  const work_minutes = Math.max(0, standard - late);
   const baseUnit = shift.work_unit_value ?? 1.0;
   const factor = Math.pow(10, roundingDecimals);
-  const work_unit = Math.min(baseUnit, roundUnit(baseUnit * work_minutes / standard, factor, roundingMode));
+  const wm0 = Math.max(0, standard - late);
+  const [work_minutes, work_unit] = scaleWork(shift, wm0, Math.min(baseUnit, roundUnit(baseUnit * wm0 / standard, factor, roundingMode)), factor, roundingMode);
   if (shiftIsOt(shift, isHoliday, isWeekend)) return { ...base, ot_min: work_minutes };
   return { ...base, work_minutes, work_unit };
 }
@@ -405,7 +423,8 @@ export function presenceFull(c, shift, workDate, opts = {}) {
   if (!c || !singlePunchFull(shift) || shiftIsOt(shift, !!opts.isHoliday, !!opts.isWeekend)) return c;
   const { start, end } = shiftBounds(workDate, shift);
   const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
-  return { ...c, early_min: 0, work_minutes: standard, work_unit: shift.work_unit_value ?? 1.0 };
+  const [work_minutes, work_unit] = scaleWork(shift, standard, shift.work_unit_value ?? 1.0, Math.pow(10, opts.roundingDecimals ?? 2), opts.roundingMode || 0);
+  return { ...c, early_min: 0, work_minutes, work_unit };
 }
 // Ngày chỉ có giờ vào HOẶC chỉ có giờ ra: đủ giờ chuẩn + đủ công của ca; không đi muộn / về sớm / tăng ca.
 // Ca tính cả ca là tăng ca (ca tăng ca, ngày lễ của ca bật tùy chọn) → không có giờ ra nên không tính gì.
@@ -416,7 +435,8 @@ export function computeSinglePunch(shift, workDate, opts = {}) {
   if (!shift || shiftIsOt(shift, isHoliday, isWeekend)) return { early_min: 0, ot_min: 0, work_minutes: 0, work_unit: 0, ot_type, day_status: 'thieu_ra' };
   const { start, end } = shiftBounds(workDate, shift);
   const standard = Math.max(1, mins(start, end) - (shift.break_minutes || 0));
-  return { early_min: 0, ot_min: 0, work_minutes: standard, work_unit: shift.work_unit_value ?? 1.0, ot_type, day_status: 'mot_lan' };
+  const [work_minutes, work_unit] = scaleWork(shift, standard, shift.work_unit_value ?? 1.0, Math.pow(10, opts.roundingDecimals ?? 2), opts.roundingMode || 0);
+  return { early_min: 0, ot_min: 0, work_minutes, work_unit, ot_type, day_status: 'mot_lan' };
 }
 
 // Chia số phút tăng ca NGÀY THƯỜNG thành 4 mức TC1→TC4 theo giới hạn của ca (như Ronald Jack):

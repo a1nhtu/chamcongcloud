@@ -753,6 +753,7 @@ function migrateColumns() {
   add('shifts', 'tdqd_mode',     "TEXT NOT NULL DEFAULT 'pair'");   // pair|idm — cách ghép log cho quy tắc TĐ-QĐ
   add('shifts', 'ot_from_time',  "TEXT DEFAULT ''");               // 'HH:MM' tăng ca sau ca chỉ tính từ giờ này ('' = từ giờ ra ca) — VD ra 17:30, TC từ 18:00
   add('shifts', 'break_ot',      'INTEGER NOT NULL DEFAULT 0');     // 1 = TĂNG CA TRƯA: giờ nghỉ giữa ca có mặt được dùng bù phần đăng ký làm thêm (mặc định tắt)
+  add('shifts', 'work_pct',      'REAL NOT NULL DEFAULT 100');      // QUY ĐỔI GIỜ CÔNG (%): giờ làm trong ca + số công × tỉ lệ (VD 115 → 4 giờ ghi 4,6); 100 = như cũ
   // Máy chấm công: số máy (IDM: máy lẻ = VÀO, máy chẵn = RA)
   add('push_devices', 'machine_number', 'INTEGER NOT NULL DEFAULT 0');
   add('departments', 'parent_id', 'INTEGER DEFAULT NULL');   // bộ phận cha - con

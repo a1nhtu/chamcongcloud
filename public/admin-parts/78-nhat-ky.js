@@ -4,7 +4,7 @@ const LOG_SKIP = new Set(['merge_rule', 'shift_type', 'tdqd_mode', 'cross_midnig
 const LOG_KEY_VI = {
   scope: 'Phạm vi', mode: 'Kiểu', from_date: 'Từ ngày', to_date: 'Đến ngày', from: 'Từ ngày', to: 'Đến ngày', date: 'Ngày', work_date: 'Ngày',
   start_time: 'Giờ vào', end_time: 'Giờ ra', late_grace_min: 'Cho phép muộn (phút)', early_grace_min: 'Cho phép sớm (phút)',
-  break_minutes: 'Nghỉ giữa ca (phút)', work_unit_value: 'Số công', allow_ot: 'Tính tăng ca', ot_start_after_min: 'Ở lại tối thiểu (phút)',
+  break_minutes: 'Nghỉ giữa ca (phút)', work_unit_value: 'Số công', work_pct: 'Quy đổi giờ công (%)', allow_ot: 'Tính tăng ca', ot_start_after_min: 'Ở lại tối thiểu (phút)',
   check_in_start: 'Bắt đầu vào', check_in_end: 'Kết thúc vào', check_out_start: 'Bắt đầu ra', check_out_end: 'Kết thúc ra',
   check_in: 'Giờ vào', check_out: 'Giờ ra', note: 'Ghi chú', cells: 'Ô sửa', ids: 'Các mục', value: 'Giá trị', employee_id: 'NV (ID)',
   departments: 'Phòng ban', include_children: 'Kèm cấp dưới', is_off: 'Nghỉ', skip_off: 'Bỏ qua ngày nghỉ', month: 'Tháng',
