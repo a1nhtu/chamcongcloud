@@ -80,6 +80,8 @@ const LABELS = {
   'PUT /devices/:id': 'Sửa máy chấm công',
   'POST /devices/:id/open-door': 'Mở cửa từ xa',
   'DELETE /devices/:id': 'Xóa máy chấm công khỏi danh sách',
+  'DELETE /devices/:id/punch/:pid': 'Xóa lượt quẹt trên máy',
+  'POST /devices/:id/punches/delete': 'Xóa lượt quẹt trên máy',
   'POST /devices/rebuild': 'Dựng lại ngày công từ máy',
   'POST /devices/import-usb': 'Nhập dữ liệu chấm công từ USB',
   'POST /legacy/parse-upload': 'Chuyển dữ liệu phần mềm cũ: tải file .mdb lên',

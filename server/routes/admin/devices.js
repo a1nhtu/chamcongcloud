@@ -6,6 +6,7 @@ import JSZip from 'jszip';
 import { db, getSetting } from '../../db.js';
 import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
+import { normText } from '../../hr-import.js';
 import { installDomain, MULTI, ROOT } from '../../tenant.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
@@ -287,10 +288,42 @@ export function registerDeviceRoutes(r, { need }) {
   r.get('/devices/:id/punches', need('devices'), (req, res) => {
     const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
-    const rows = db.prepare(`SELECT p.id, p.pin, p.punch_at, p.verify, p.employee_id, e.full_name
-      FROM device_punches p LEFT JOIN employees e ON e.id = p.employee_id
-      WHERE p.serial=? ORDER BY p.punch_at DESC LIMIT 100`).all(d.serial);
-    res.json({ rows });
+    // Lọc / sắp xếp ngay trên máy chủ (máy có thể có hàng chục nghìn lượt, trình duyệt chỉ nhận tối đa `limit` dòng):
+    //  q: Số ID (đúng số, hoặc có chứa) / mã NV / tên NV · unmatched=1: chỉ lượt chưa khớp NV nào
+    //  sort: time | pin | name · dir: asc | desc · limit: 1–1000 (mặc định 200)
+    const q = String(req.query.q || '').trim().slice(0, 60);
+    const where = ['p.serial=?'], args = [d.serial];
+    if (req.query.unmatched === '1') where.push('p.employee_id IS NULL');
+    if (q) {
+      // Số ID: đúng số hoặc có chứa. Tên / mã NV: so không dấu, không phân biệt hoa thường (lower() của SQLite chỉ hiểu chữ không dấu → lọc bằng JS)
+      const k = normText(q);
+      const empIds = db.prepare('SELECT id, code, full_name FROM employees').all()
+        .filter((e) => normText(e.full_name).includes(k) || normText(e.code).includes(k)).map((e) => e.id).slice(0, 900);
+      where.push(`(p.pin = ? OR p.pin LIKE ? ESCAPE '!'${empIds.length ? ` OR p.employee_id IN (${empIds.map(() => '?').join(',')})` : ''})`);
+      args.push(q, '%' + q.replace(/[!%_]/g, (c) => '!' + c) + '%', ...empIds);
+    }
+    const dir = req.query.dir === 'asc' ? 'ASC' : 'DESC';
+    const order = { pin: `CAST(p.pin AS INTEGER) ${dir}, p.pin ${dir}, p.punch_at DESC`,
+      name: `(e.full_name IS NULL) ${dir === 'ASC' ? 'ASC' : 'DESC'}, e.full_name COLLATE NOCASE ${dir}, p.punch_at DESC` }[req.query.sort] || `p.punch_at ${dir}`;
+    const limit = Math.min(1000, Math.max(1, parseInt(req.query.limit, 10) || 200));
+    const from = `FROM device_punches p LEFT JOIN employees e ON e.id = p.employee_id WHERE ${where.join(' AND ')}`;
+    const total = db.prepare(`SELECT COUNT(*) n ${from}`).get(...args).n;
+    const rows = db.prepare(`SELECT p.id, p.pin, p.punch_at, p.verify, p.employee_id, e.full_name, e.code ${from} ORDER BY ${order} LIMIT ?`).all(...args, limit);
+    res.json({ rows, total });
+  });
+  // Xoá NHIỀU lượt quẹt đã chọn của máy này (lượt quẹt thử / Số ID lạ). Chỉ xoá lượt thuộc đúng máy; không đụng bản ghi công đã tính.
+  r.post('/devices/:id/punches/delete', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn lượt quẹt nào' });
+    if (ids.length > 1000) return res.status(400).json({ error: 'Mỗi lần xoá tối đa 1.000 lượt quẹt' });
+    const del = db.prepare('DELETE FROM device_punches WHERE id=? AND serial=?');
+    let n = 0;
+    db.exec('BEGIN');
+    try { for (const id of ids) n += del.run(id, d.serial).changes; db.exec('COMMIT'); }
+    catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/devices/:id/punches/delete', e); }
+    res.json({ ok: true, deleted: n });
   });
   // Xoá 1 LƯỢT QUẸT lẻ trên máy (quẹt nhầm / nghịch). Không đụng bản ghi công đã tính.
   r.delete('/devices/:id/punch/:pid', need('devices'), (req, res) => {

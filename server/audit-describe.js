@@ -28,6 +28,8 @@ const shiftLabel = (id) => { const s = one('SELECT name, code, start_time, end_t
 const schedLabel = (id) => { const s = one('SELECT name FROM work_schedules WHERE id = ?', +id); return s ? `lịch trình "${s.name}"` : 'lịch trình #' + id; };
 const ioLabel = (id) => { const s = one('SELECT name FROM inout_schedules WHERE id = ?', +id); return s ? s.name : ''; };
 const listShort = (arr, n = 4) => (arr.length > n ? `${arr.slice(0, n).join(', ')} và ${arr.length - n} mục khác` : arr.join(', '));
+// Lượt quẹt máy: "Số ID 9999 lúc 11:08 22/11/2026" (punch_at lưu giờ UTC → cộng 7 giờ)
+const punchLabel = (p) => { const t = new Date(new Date(p.punch_at).getTime() + 7 * 3600000).toISOString(); return `Số ID ${p.pin} lúc ${t.slice(11, 16)} ${t.slice(8, 10)}/${t.slice(5, 7)}/${t.slice(0, 4)}`; };
 const range = (f, t) => (f && t ? (f === t ? dmy(f) : `${dmy(f)} → ${dmy(t)}`) : f ? `từ ${dmy(f)} (không thời hạn)` : '');
 const what = (b) => (b.is_off ? 'Nghỉ' : b.work_schedule_id || b.mode === 'schedule' ? schedLabel(b.work_schedule_id) : b.shift_id ? 'ca ' + shiftLabel(b.shift_id) : '');
 
@@ -161,6 +163,9 @@ const RULES = [
 
   // ----- Máy chấm công -----
   ['PUT', /^\/devices\/(\d+)$/, (r, m) => { const d = one('SELECT name, serial FROM push_devices WHERE id = ?', +m[1]) || {}; return `Máy ${d.name || d.serial || '#' + m[1]}${r.body?.name && r.body.name !== d.name ? ' → tên "' + r.body.name + '"' : ''}`; }],
+  // Xoá lượt quẹt (Xem quẹt): ghi Số ID + giờ của lượt bị xoá (tính TRƯỚC khi xoá nên còn đọc được)
+  ['POST', /^\/devices\/(\d+)\/punches\/delete$/, (r, m) => { const d = one('SELECT name, serial FROM push_devices WHERE id = ?', +m[1]) || {}; const a = ids(r.body?.ids).slice(0, 1000); const rows = a.length ? all(`SELECT pin, punch_at FROM device_punches WHERE serial = ? AND id IN (${a.map(() => '?').join(',')})`, d.serial || '', ...a) : []; return `Máy ${d.name || d.serial || '#' + m[1]}: xoá ${rows.length} lượt quẹt — ` + listShort(rows.map(punchLabel), 5); }],
+  ['DELETE', /^\/devices\/(\d+)\/punch\/(\d+)$/, (r, m) => { const d = one('SELECT name, serial FROM push_devices WHERE id = ?', +m[1]) || {}; const p = one('SELECT pin, punch_at FROM device_punches WHERE id = ?', +m[2]); return `Máy ${d.name || d.serial || '#' + m[1]}: xoá lượt quẹt ${p ? punchLabel(p) : '#' + m[2]}`; }],
   ['POST', /^\/devices\/(\d+)\//, (r, m) => { const d = one('SELECT name, serial FROM push_devices WHERE id = ?', +m[1]) || {}; return `Máy ${d.name || d.serial || '#' + m[1]}${d.name && d.serial ? ' (' + d.serial + ')' : ''}`; }],
   ['DELETE', /^\/devices\/(\d+)$/, (r, m) => { const d = one('SELECT name, serial FROM push_devices WHERE id = ?', +m[1]) || {}; return `Máy ${d.name || d.serial || '#' + m[1]}`; }],
 ];

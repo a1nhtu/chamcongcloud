@@ -526,10 +526,13 @@ function unmatchedModal(m) {
   openModal('Mã chưa khớp · ' + (m.name || m.serial), [
     el('div', { class: 'map-hint' }, 'Các Số ID dưới đây có lượt quẹt trên máy nhưng chưa thuộc nhân viên nào trong phần mềm. Vào Nhân viên → sửa người đó → điền ô "Số ID máy chấm công" đúng số này, lượt quẹt cũ tự khớp và tính công lại.'),
     el('div', { class: 'table-wrap', style: 'margin-top:10px' }, el('table', { class: 'data' },
-      el('thead', {}, el('tr', {}, ...['Số ID', 'Tên trên máy', 'Số lượt quẹt', 'Lần đầu', 'Lần cuối'].map((h) => el('th', {}, h)))),
+      el('thead', {}, el('tr', {}, ...['Số ID', 'Tên trên máy', 'Số lượt quẹt', 'Lần đầu', 'Lần cuối', ''].map((h) => el('th', {}, h)))),
       el('tbody', {}, ...rows.map((x) => el('tr', {}, el('td', {}, el('b', {}, x.pin)), el('td', {}, x.name || el('span', { class: 'muted' }, '(máy không có tên / đã xoá trên máy)')),
-        el('td', {}, String(x.n)), el('td', {}, d(x.first)), el('td', {}, d(x.last))))))),
+        el('td', {}, String(x.n)), el('td', {}, d(x.first)), el('td', {}, d(x.last)),
+        // mở Xem quẹt lọc sẵn đúng Số ID này → xem / xoá lượt quẹt thử
+        el('td', {}, btnSm('Xem quẹt', () => devicePunchesModal(m, { q: x.pin, unmatched: true }), 'ghost'))))))),
   ], [el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
+  $('#modal').style.maxWidth = '760px';
 }
 
 // ẢNH KHUÔN MẶT từ máy tính: thu nhỏ ngay trên trình duyệt (cạnh dài ≤ 640 px) → JPG ≤ 150 KB (máy Hikvision nhận ≤ 200 KB). Trả base64.

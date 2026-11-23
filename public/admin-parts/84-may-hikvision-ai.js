@@ -454,32 +454,95 @@ async function deviceClockModal(m) {
   }
   if (!stop) show(el('div', { class: 'empty' }, 'Máy chưa trả lời sau 45 giây. Máy có thể đang offline, hoặc dòng máy này không hỗ trợ lệnh xem giờ từ xa.'));
 }
-function devicePunchesModal(m) {
+// XEM QUẸT của 1 máy: tìm theo Số ID / mã / tên NV, lọc "chỉ chưa khớp", bấm tiêu đề cột để sắp xếp (Số ID / NV / thời điểm),
+// tích chọn nhiều lượt rồi xoá 1 lần (Anh 23/11/2026: trước chỉ có 100 lượt mới nhất, không tìm được Số ID lạ để xoá).
+// opts: { q, unmatched } — mở sẵn bộ lọc (VD bấm từ hộp "Mã chưa khớp").
+function devicePunchesModal(m, opts = {}) {
+  const LIMIT = 500;
+  const st = { q: opts.q || '', unmatched: !!opts.unmatched, sort: 'time', dir: 'desc' };
+  const picked = new Set();
+  let rows = [], total = 0, seq = 0, timer = 0;
+  const vName = { 1: 'Vân tay', 15: 'Khuôn mặt', 4: 'Thẻ', 0: 'Mật mã' };
+  const when = (t) => isoToHMS(t) + ' ' + t.slice(8, 10) + '/' + t.slice(5, 7) + '/' + t.slice(0, 4);
+  const qI = el('input', { type: 'search', placeholder: 'Tìm Số ID, mã hoặc tên NV…', value: st.q, style: 'flex:1;min-width:180px' });
+  const unCb = el('input', { type: 'checkbox' }); unCb.checked = st.unmatched;
+  const info = el('span', { class: 'muted', style: 'font-size:13px' });
+  const bar = el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:30px;margin:8px 0' });
   const box = el('div', {}, loading());
-  api('/admin/devices/' + m.id + '/punches').then(({ rows }) => {
+  qI.oninput = () => { clearTimeout(timer); timer = setTimeout(() => { st.q = qI.value.trim(); load(); }, 300); };
+  unCb.onchange = () => { st.unmatched = unCb.checked; load(); };
+
+  const renderBar = () => {
+    bar.innerHTML = '';
+    if (!picked.size) { bar.append(el('span', { class: 'map-hint', style: 'margin:0' }, 'Tích ô đầu dòng để chọn nhiều lượt rồi xoá một lần.')); return; }
+    bar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.size + ' lượt'),
+      btnSm('🗑 Xóa ' + picked.size + ' lượt đã chọn', delPicked, 'danger'),
+      btnSm('Bỏ chọn', () => { picked.clear(); render(); }, 'ghost'));
+  };
+  async function delPicked() {
+    const ids = [...picked];
+    const pins = [...new Set(rows.filter((p) => picked.has(p.id)).map((p) => p.pin))];
+    if (!confirm(`Xoá ${ids.length} lượt quẹt đã chọn (Số ID: ${pins.slice(0, 8).join(', ')}${pins.length > 8 ? '…' : ''})?\n`
+      + 'Lượt quẹt xoá rồi không lấy lại được (trừ khi tải lại log từ máy).\nLưu ý: nếu bấm "Tính lại công" thì giờ tính từ các lượt quẹt còn lại.')) return;
+    try {
+      const r = await api('/admin/devices/' + m.id + '/punches/delete', { method: 'POST', body: { ids } });
+      toast('Đã xoá ' + r.deleted + ' lượt quẹt', 'ok'); picked.clear(); load();
+    } catch (e) { toast(e.message, 'err'); }
+  }
+  const sortTh = (key, label) => {
+    const on = st.sort === key;
+    return el('th', { class: 'sortable' + (on ? ' on' : ''), title: 'Bấm để sắp xếp',
+      onclick: () => { if (on) st.dir = st.dir === 'asc' ? 'desc' : 'asc'; else { st.sort = key; st.dir = key === 'time' ? 'desc' : 'asc'; } load(); } },
+    label, el('span', { class: 'sort-ic' }, on ? (st.dir === 'asc' ? ' ▲' : ' ▼') : ' ⇅'));
+  };
+  function render() {
     box.innerHTML = '';
-    if (!rows.length) { box.append(el('div', { class: 'empty' }, 'Chưa có lượt quẹt nào.')); return; }
-    const t = el('table', { class: 'data' });
-    t.innerHTML = '<thead><tr><th>Mã</th><th>Nhân viên</th><th>Thời điểm</th><th>Kiểu</th><th></th></tr></thead>';
+    info.textContent = total > rows.length ? `Hiện ${rows.length.toLocaleString('vi-VN')} / ${total.toLocaleString('vi-VN')} lượt — gõ Số ID để thu hẹp` : `${total.toLocaleString('vi-VN')} lượt`;
+    renderBar();
+    if (!rows.length) { box.append(el('div', { class: 'empty' }, st.q || st.unmatched ? 'Không có lượt quẹt nào khớp bộ lọc.' : 'Chưa có lượt quẹt nào.')); return; }
+    const allCb = el('input', { type: 'checkbox', title: 'Chọn tất cả lượt đang hiện' });
+    allCb.checked = rows.every((p) => picked.has(p.id));
+    allCb.onchange = () => { for (const p of rows) allCb.checked ? picked.add(p.id) : picked.delete(p.id); render(); };
     const tb = el('tbody');
-    const vName = { 1: 'Vân tay', 15: 'Khuôn mặt', 4: 'Thẻ', 0: 'Mật mã' };
     for (const p of rows) {
-      const tr = el('tr', {},
-        el('td', {}, p.pin),
+      const cb = el('input', { type: 'checkbox' }); cb.checked = picked.has(p.id);
+      cb.onchange = () => { cb.checked ? picked.add(p.id) : picked.delete(p.id); allCb.checked = rows.every((x) => picked.has(x.id)); renderBar(); };
+      tb.append(el('tr', {},
+        el('td', {}, cb),
+        el('td', {}, el('b', {}, p.pin)),
         el('td', {}, p.full_name || el('span', { class: 'pill warn' }, 'chưa khớp')),
-        el('td', {}, isoToHMS(p.punch_at) + ' ' + p.punch_at.slice(8, 10) + '/' + p.punch_at.slice(5, 7)),
+        el('td', { style: 'white-space:nowrap' }, when(p.punch_at)),
         el('td', {}, vName[p.verify] || ('#' + p.verify)),
         el('td', {}, btnSm('🗑', async () => {
           if (!confirm('Xoá lượt quẹt này (quẹt nhầm/nghịch)?\nLưu ý: nếu bấm "Tính lại công" thì giờ tính từ các lượt quẹt còn lại.')) return;
-          try { await api('/admin/devices/' + m.id + '/punch/' + p.id, { method: 'DELETE' }); tr.remove(); toast('Đã xoá lượt quẹt', 'ok'); }
+          try { await api('/admin/devices/' + m.id + '/punch/' + p.id, { method: 'DELETE' }); picked.delete(p.id); toast('Đã xoá lượt quẹt', 'ok'); load(); }
           catch (e) { toast(e.message, 'err'); }
-        }, 'ghost')));
-      tb.append(tr);
+        }, 'ghost'))));
     }
-    t.append(tb);
-    box.append(el('div', { class: 'tbl-scroll' }, t));
-  }).catch(e => { box.innerHTML = ''; box.append(el('div', { class: 'empty' }, e.message)); });
-  openModal('Lượt quẹt gần đây — ' + (m.name || m.serial), [box], [el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
+    box.append(el('div', { class: 'tbl-scroll', style: 'max-height:55vh;overflow:auto' }, el('table', { class: 'data' },
+      el('thead', {}, el('tr', {}, el('th', { style: 'width:30px' }, allCb), sortTh('pin', 'Số ID'), sortTh('name', 'Nhân viên'), sortTh('time', 'Thời điểm'), el('th', {}, 'Kiểu'), el('th'))),
+      tb)));
+  }
+  async function load() {
+    const my = ++seq;
+    const qs = new URLSearchParams({ sort: st.sort, dir: st.dir, limit: LIMIT });
+    if (st.q) qs.set('q', st.q);
+    if (st.unmatched) qs.set('unmatched', '1');
+    try {
+      const r = await api('/admin/devices/' + m.id + '/punches?' + qs);
+      if (my !== seq) return;   // gõ nhanh: bỏ kết quả của lần tìm cũ về sau
+      rows = r.rows || []; total = r.total ?? rows.length;
+      render();
+    } catch (e) { if (my === seq) { box.innerHTML = ''; box.append(el('div', { class: 'empty' }, e.message)); } }
+  }
+  openModal('Lượt quẹt — ' + (m.name || m.serial), [
+    el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, qI,
+      el('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap' }, unCb, 'Chỉ lượt chưa khớp NV'), info),
+    bar, box,
+  ], [el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
+  $('#modal').style.maxWidth = '820px';
+  load();
+  setTimeout(() => qI.focus(), 50);
 }
 
 const REPORT_TYPES = [
