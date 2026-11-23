@@ -56,9 +56,11 @@ test('mặc định: mới nhất trước, có tổng số, chỉ lượt của
   assert.equal(r2.total, 1);
 });
 
-test('tìm theo Số ID: đúng số và số có chứa; theo tên không dấu / mã NV', async () => {
+test('tìm theo Số ID: gõ số là đúng Số ID; theo tên không dấu / mã NV', async () => {
   assert.deepEqual(pins(await list(M1, '?q=9999')), ['9999', '9999']);
-  assert.deepEqual(pins(await list(M1, '?q=99')).sort(), ['199', '9999', '9999']);
+  assert.deepEqual(pins(await list(M1, '?q=99')), []);   // toàn chữ số = đúng Số ID (không tìm "có chứa" — máy lớn quét chậm)
+  assert.deepEqual(pins(await list(M1, '?q=199')), ['199']);
+  assert.deepEqual(pins(await list(M1, '?q=1')), []);   // gõ số không khớp mã NV "có chứa" (NV01 / NV12…)
   assert.deepEqual(pins(await list(M1, '?q=' + encodeURIComponent('hoang duc'))), ['12', '12']);
   assert.deepEqual(pins(await list(M1, '?q=' + encodeURIComponent('ÁNH'))), ['3']);
   assert.deepEqual(pins(await list(M1, '?q=nv02')), ['3']);

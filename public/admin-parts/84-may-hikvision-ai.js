@@ -456,11 +456,13 @@ async function deviceClockModal(m) {
 }
 // XEM QUẸT của 1 máy: tìm theo Số ID / mã / tên NV, lọc "chỉ chưa khớp", bấm tiêu đề cột để sắp xếp (Số ID / NV / thời điểm),
 // tích chọn nhiều lượt rồi xoá 1 lần (Anh 23/11/2026: trước chỉ có 100 lượt mới nhất, không tìm được Số ID lạ để xoá).
-// Lọc thêm Từ ngày – Đến ngày (ngày quẹt trên máy; bỏ trống = không giới hạn).
+// Lọc thêm Từ ngày – Đến ngày (ngày quẹt trên máy; bỏ trống = không giới hạn). Mở lên mặc định 7 ngày gần nhất để máy nhiều năm dữ liệu
+// vẫn mở nhanh (Anh 23/11/2026); mở từ "Mã chưa khớp" (có q) thì xem mọi ngày vì lượt của Số ID lạ có thể rất cũ.
 // opts: { q, unmatched } — mở sẵn bộ lọc (VD bấm từ hộp "Mã chưa khớp").
 function devicePunchesModal(m, opts = {}) {
   const LIMIT = 500;
-  const st = { q: opts.q || '', unmatched: !!opts.unmatched, from: '', to: '', sort: 'time', dir: 'desc' };
+  const vnDay = (ms) => new Date(ms).toLocaleDateString('sv', { timeZone: 'Asia/Ho_Chi_Minh' });
+  const st = { q: opts.q || '', unmatched: !!opts.unmatched, from: opts.q ? '' : vnDay(Date.now() - 6 * 86400000), to: opts.q ? '' : vnDay(Date.now()), sort: 'time', dir: 'desc' };
   const picked = new Set();
   let rows = [], total = 0, seq = 0, timer = 0;
   const vName = { 1: 'Vân tay', 15: 'Khuôn mặt', 4: 'Thẻ', 0: 'Mật mã' };
@@ -470,6 +472,7 @@ function devicePunchesModal(m, opts = {}) {
   const fromI = el('input', { type: 'date', style: 'width:130px' }), toI = el('input', { type: 'date', style: 'width:130px' });
   const clrD = btnSm('✕', () => { fromI.value = toI.value = ''; st.from = st.to = ''; load(); }, 'ghost');
   clrD.title = 'Bỏ lọc ngày (xem mọi ngày)';
+  fromI.value = st.from; toI.value = st.to;
   const info = el('span', { class: 'muted', style: 'font-size:13px' });
   const bar = el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:30px;margin:8px 0' });
   const box = el('div', {}, loading());
@@ -505,7 +508,7 @@ function devicePunchesModal(m, opts = {}) {
     box.innerHTML = '';
     info.textContent = total > rows.length ? `Hiện ${rows.length.toLocaleString('vi-VN')} / ${total.toLocaleString('vi-VN')} lượt — gõ Số ID để thu hẹp` : `${total.toLocaleString('vi-VN')} lượt`;
     renderBar();
-    if (!rows.length) { box.append(el('div', { class: 'empty' }, st.q || st.unmatched || st.from || st.to ? 'Không có lượt quẹt nào khớp bộ lọc.' : 'Chưa có lượt quẹt nào.')); return; }
+    if (!rows.length) { box.append(el('div', { class: 'empty' }, st.from || st.to ? 'Không có lượt quẹt nào trong khoảng ngày này — bấm ✕ cạnh ô ngày để xem mọi ngày.' : st.q || st.unmatched ? 'Không có lượt quẹt nào khớp bộ lọc.' : 'Chưa có lượt quẹt nào.')); return; }
     const allCb = el('input', { type: 'checkbox', title: 'Chọn tất cả lượt đang hiện' });
     allCb.checked = rows.every((p) => picked.has(p.id));
     allCb.onchange = () => { for (const p of rows) allCb.checked ? picked.add(p.id) : picked.delete(p.id); render(); };

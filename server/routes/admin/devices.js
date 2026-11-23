@@ -289,7 +289,7 @@ export function registerDeviceRoutes(r, { need }) {
     const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
     // Lọc / sắp xếp ngay trên máy chủ (máy có thể có hàng chục nghìn lượt, trình duyệt chỉ nhận tối đa `limit` dòng):
-    //  q: Số ID (đúng số, hoặc có chứa) / mã NV / tên NV · unmatched=1: chỉ lượt chưa khớp NV nào · from / to: khoảng ngày quẹt
+    //  q: Số ID (toàn chữ số = đúng số, có chữ = có chứa) / mã NV / tên NV · unmatched=1: chỉ lượt chưa khớp NV nào · from / to: khoảng ngày quẹt
     //  sort: time | pin | name · dir: asc | desc · limit: 1–1000 (mặc định 200)
     const q = String(req.query.q || '').trim().slice(0, 60);
     const where = ['p.serial=?'], args = [d.serial];
@@ -299,12 +299,15 @@ export function registerDeviceRoutes(r, { need }) {
     if (ymd(req.query.from)) { where.push('p.work_date >= ?'); args.push(ymd(req.query.from)); }
     if (ymd(req.query.to)) { where.push('p.work_date <= ?'); args.push(ymd(req.query.to)); }
     if (q) {
-      // Số ID: đúng số hoặc có chứa. Tên / mã NV: so không dấu, không phân biệt hoa thường (lower() của SQLite chỉ hiểu chữ không dấu → lọc bằng JS)
-      const k = normText(q);
+      // Gõ toàn chữ số = Số ID → so ĐÚNG số (đi index serial+pin: 3 triệu lượt 1,5 giây → tức thì); có chữ = Số ID có chứa.
+      // Tên / mã NV: so không dấu, không phân biệt hoa thường (lower() của SQLite chỉ hiểu chữ không dấu → lọc bằng JS)
+      const k = normText(q), num = /^\d+$/.test(q);
+      // gõ số: chỉ NV có mã đúng bằng số đó (gõ 12 không ra NV120, NV1200…); gõ chữ: tên / mã có chứa
       const empIds = db.prepare('SELECT id, code, full_name FROM employees').all()
-        .filter((e) => normText(e.full_name).includes(k) || normText(e.code).includes(k)).map((e) => e.id).slice(0, 900);
-      where.push(`(p.pin = ? OR p.pin LIKE ? ESCAPE '!'${empIds.length ? ` OR p.employee_id IN (${empIds.map(() => '?').join(',')})` : ''})`);
-      args.push(q, '%' + q.replace(/[!%_]/g, (c) => '!' + c) + '%', ...empIds);
+        .filter((e) => (num ? normText(e.code) === k : normText(e.full_name).includes(k) || normText(e.code).includes(k))).map((e) => e.id).slice(0, 900);
+      const pinCond = num ? 'p.pin = ?' : "p.pin LIKE ? ESCAPE '!'";
+      where.push(`(${pinCond}${empIds.length ? ` OR p.employee_id IN (${empIds.map(() => '?').join(',')})` : ''})`);
+      args.push(num ? q : '%' + q.replace(/[!%_]/g, (c) => '!' + c) + '%', ...empIds);
     }
     const dir = req.query.dir === 'asc' ? 'ASC' : 'DESC';
     const order = { pin: `CAST(p.pin AS INTEGER) ${dir}, p.pin ${dir}, p.punch_at DESC`,
