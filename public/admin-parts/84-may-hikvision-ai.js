@@ -456,21 +456,27 @@ async function deviceClockModal(m) {
 }
 // XEM QUẸT của 1 máy: tìm theo Số ID / mã / tên NV, lọc "chỉ chưa khớp", bấm tiêu đề cột để sắp xếp (Số ID / NV / thời điểm),
 // tích chọn nhiều lượt rồi xoá 1 lần (Anh 23/11/2026: trước chỉ có 100 lượt mới nhất, không tìm được Số ID lạ để xoá).
+// Lọc thêm Từ ngày – Đến ngày (ngày quẹt trên máy; bỏ trống = không giới hạn).
 // opts: { q, unmatched } — mở sẵn bộ lọc (VD bấm từ hộp "Mã chưa khớp").
 function devicePunchesModal(m, opts = {}) {
   const LIMIT = 500;
-  const st = { q: opts.q || '', unmatched: !!opts.unmatched, sort: 'time', dir: 'desc' };
+  const st = { q: opts.q || '', unmatched: !!opts.unmatched, from: '', to: '', sort: 'time', dir: 'desc' };
   const picked = new Set();
   let rows = [], total = 0, seq = 0, timer = 0;
   const vName = { 1: 'Vân tay', 15: 'Khuôn mặt', 4: 'Thẻ', 0: 'Mật mã' };
   const when = (t) => isoToHMS(t) + ' ' + t.slice(8, 10) + '/' + t.slice(5, 7) + '/' + t.slice(0, 4);
   const qI = el('input', { type: 'search', placeholder: 'Tìm Số ID, mã hoặc tên NV…', value: st.q, style: 'flex:1;min-width:180px' });
   const unCb = el('input', { type: 'checkbox' }); unCb.checked = st.unmatched;
+  const fromI = el('input', { type: 'date', style: 'width:130px' }), toI = el('input', { type: 'date', style: 'width:130px' });
+  const clrD = btnSm('✕', () => { fromI.value = toI.value = ''; st.from = st.to = ''; load(); }, 'ghost');
+  clrD.title = 'Bỏ lọc ngày (xem mọi ngày)';
   const info = el('span', { class: 'muted', style: 'font-size:13px' });
   const bar = el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;min-height:30px;margin:8px 0' });
   const box = el('div', {}, loading());
   qI.oninput = () => { clearTimeout(timer); timer = setTimeout(() => { st.q = qI.value.trim(); load(); }, 300); };
   unCb.onchange = () => { st.unmatched = unCb.checked; load(); };
+  fromI.onchange = () => { st.from = fromI.value; load(); };
+  toI.onchange = () => { st.to = toI.value; load(); };
 
   const renderBar = () => {
     bar.innerHTML = '';
@@ -499,7 +505,7 @@ function devicePunchesModal(m, opts = {}) {
     box.innerHTML = '';
     info.textContent = total > rows.length ? `Hiện ${rows.length.toLocaleString('vi-VN')} / ${total.toLocaleString('vi-VN')} lượt — gõ Số ID để thu hẹp` : `${total.toLocaleString('vi-VN')} lượt`;
     renderBar();
-    if (!rows.length) { box.append(el('div', { class: 'empty' }, st.q || st.unmatched ? 'Không có lượt quẹt nào khớp bộ lọc.' : 'Chưa có lượt quẹt nào.')); return; }
+    if (!rows.length) { box.append(el('div', { class: 'empty' }, st.q || st.unmatched || st.from || st.to ? 'Không có lượt quẹt nào khớp bộ lọc.' : 'Chưa có lượt quẹt nào.')); return; }
     const allCb = el('input', { type: 'checkbox', title: 'Chọn tất cả lượt đang hiện' });
     allCb.checked = rows.every((p) => picked.has(p.id));
     allCb.onchange = () => { for (const p of rows) allCb.checked ? picked.add(p.id) : picked.delete(p.id); render(); };
@@ -528,6 +534,8 @@ function devicePunchesModal(m, opts = {}) {
     const qs = new URLSearchParams({ sort: st.sort, dir: st.dir, limit: LIMIT });
     if (st.q) qs.set('q', st.q);
     if (st.unmatched) qs.set('unmatched', '1');
+    if (st.from) qs.set('from', st.from);
+    if (st.to) qs.set('to', st.to);
     try {
       const r = await api('/admin/devices/' + m.id + '/punches?' + qs);
       if (my !== seq) return;   // gõ nhanh: bỏ kết quả của lần tìm cũ về sau
@@ -538,6 +546,8 @@ function devicePunchesModal(m, opts = {}) {
   openModal('Lượt quẹt — ' + (m.name || m.serial), [
     el('div', { style: 'display:flex;gap:10px;align-items:center;flex-wrap:wrap' }, qI,
       el('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px;white-space:nowrap' }, unCb, 'Chỉ lượt chưa khớp NV'), info),
+    el('div', { style: 'display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-top:8px;font-size:13px' },
+      el('span', { class: 'muted' }, 'Từ ngày'), fromI, el('span', { class: 'muted' }, 'đến ngày'), toI, clrD),
     bar, box,
   ], [el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
   $('#modal').style.maxWidth = '820px';

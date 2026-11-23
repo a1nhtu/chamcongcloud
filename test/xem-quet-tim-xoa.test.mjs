@@ -1,5 +1,5 @@
 // XEM QUẸT (Máy chấm công → Xem quẹt) — Anh 23/11/2026: trước chỉ hiện 100 lượt mới nhất, không tìm được Số ID, không sắp xếp.
-//  - GET /devices/:id/punches: q (Số ID đúng/chứa · mã / tên NV không dấu), unmatched=1, sort time|pin|name + dir, limit, trả total
+//  - GET /devices/:id/punches: q (Số ID đúng/chứa · mã / tên NV không dấu), unmatched=1, from / to (ngày quẹt), sort time|pin|name + dir, limit, trả total
 //  - POST /devices/:id/punches/delete {ids}: xoá nhiều lượt, chỉ lượt của đúng máy đó
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -74,6 +74,14 @@ test('chỉ lượt chưa khớp + sắp xếp Số ID (theo số), tên, thời
   assert.deepEqual(pins(await list(M1, '?sort=time&dir=asc')), ['199', '12', '12', '3', '9999', '9999']);
   const lim = await list(M1, '?limit=2');
   assert.equal(lim.rows.length, 2); assert.equal(lim.total, 6);
+});
+
+test('lọc từ ngày – đến ngày (gồm 2 đầu), kết hợp tìm Số ID; ngày sai định dạng thì bỏ qua', async () => {
+  assert.deepEqual(pins(await list(M1, '?from=2026-11-20&to=2026-11-21&sort=time&dir=asc')), ['12', '12', '3']);
+  assert.deepEqual(pins(await list(M1, '?from=2026-11-21')), ['9999', '9999', '3']);
+  assert.deepEqual(pins(await list(M1, '?to=2026-11-19')), ['199']);
+  assert.equal((await list(M1, '?q=9999&to=2026-11-21')).total, 0);
+  assert.equal((await list(M1, '?from=20/11/2026')).total, 6);
 });
 
 test('xoá nhiều lượt: chỉ xoá lượt của đúng máy, nhật ký ghi Số ID + giờ', async () => {

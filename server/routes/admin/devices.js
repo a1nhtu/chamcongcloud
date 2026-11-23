@@ -289,11 +289,15 @@ export function registerDeviceRoutes(r, { need }) {
     const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
     // Lọc / sắp xếp ngay trên máy chủ (máy có thể có hàng chục nghìn lượt, trình duyệt chỉ nhận tối đa `limit` dòng):
-    //  q: Số ID (đúng số, hoặc có chứa) / mã NV / tên NV · unmatched=1: chỉ lượt chưa khớp NV nào
+    //  q: Số ID (đúng số, hoặc có chứa) / mã NV / tên NV · unmatched=1: chỉ lượt chưa khớp NV nào · from / to: khoảng ngày quẹt
     //  sort: time | pin | name · dir: asc | desc · limit: 1–1000 (mặc định 200)
     const q = String(req.query.q || '').trim().slice(0, 60);
     const where = ['p.serial=?'], args = [d.serial];
     if (req.query.unmatched === '1') where.push('p.employee_id IS NULL');
+    // from / to: YYYY-MM-DD theo NGÀY QUẸT trên máy (work_date của lượt máy = ngày giờ máy gửi, giờ VN); bỏ trống = không giới hạn
+    const ymd = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? String(v) : '');
+    if (ymd(req.query.from)) { where.push('p.work_date >= ?'); args.push(ymd(req.query.from)); }
+    if (ymd(req.query.to)) { where.push('p.work_date <= ?'); args.push(ymd(req.query.to)); }
     if (q) {
       // Số ID: đúng số hoặc có chứa. Tên / mã NV: so không dấu, không phân biệt hoa thường (lower() của SQLite chỉ hiểu chữ không dấu → lọc bằng JS)
       const k = normText(q);
