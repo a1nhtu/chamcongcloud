@@ -329,6 +329,9 @@ function loadRange(from, to, filter) {
   };
   const isScheduled = (empId, date) => {
     if (holidays.has(date)) return false;
+    // trước ngày vào làm / sau ngày nghỉ việc: không phải ngày phải đi làm (trước đây bị đếm VẮNG — NV vào làm 22/06 mà tháng 1 vắng 26 ngày)
+    const emp = empById.get(empId);
+    if (emp && !inJob(emp, date)) return false;
     const s = scheduledShift(empId, date);
     if (!s) return false;
     return swapWork.has(empId + '|' + date) || !isWeekendDay(date, weekend);   // ngày phải đi làm = không phải ngày cuối tuần (Cài đặt > Quy tắc tính công), hoặc ngày làm bù

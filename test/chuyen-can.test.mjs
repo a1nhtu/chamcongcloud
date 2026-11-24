@@ -41,3 +41,12 @@ test('chuyên cần: đếm trễ, sớm, quên quẹt (thiếu giờ + đã xá
   const r2 = rep.rows.find((x) => x.code === 'C2');
   assert.equal(r2.tong, 0);
 });
+
+test('ngày trước ngày vào làm / sau ngày nghỉ việc không tính vắng (Tổng hợp, Chuyên cần)', async () => {
+  const D = await import('../server/db.js');
+  D.db.prepare("INSERT INTO employees(code, full_name, role, username, password_hash, shift_id, start_date, leave_date, active) VALUES ('C3','NV C3','employee','c3','x',1,'2026-11-05','2026-11-05',0)").run();
+  const sum = report('summary').rows.find((x) => x.code === 'C3');
+  const cc = report('chuyencan').rows.find((x) => x.code === 'C3');
+  assert.equal(sum.vang, 1);   // chỉ ngày 05/11 (thứ 5) là ngày phải làm; 02–04 chưa vào làm, 06 đã nghỉ
+  assert.equal(cc.vang, 1);
+});
