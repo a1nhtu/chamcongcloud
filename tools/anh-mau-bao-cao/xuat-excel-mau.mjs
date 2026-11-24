@@ -62,6 +62,8 @@ ingestAttlog('MAU0001', lines.join('\n'), { ask: () => {} });
 db.prepare("INSERT INTO leave_requests(employee_id, type, from_date, to_date, status, reviewed_by) VALUES (?, 'Nghỉ phép', '2026-10-06', '2026-10-06', 'approved', ?)").run(ids[1], adm);
 const { rebuildDay } = await import('../../server/device-sync.js');
 for (const id of ids) for (const d of days) { try { rebuildDay(id, d); } catch {} }
+// báo cáo Chuyên cần: vài ngày nhân sự đã xác nhận QUÊN QUẸT (giờ đã bù đủ)
+for (const [i, j, k] of [[0, 3, 'quen_ra'], [2, 5, 'quen_vao'], [3, 8, 'quen_ra']]) if (ids[i] && days[j]) db.prepare('INSERT OR IGNORE INTO att_flags(employee_id, work_date, kind) VALUES (?,?,?)').run(ids[i], days[j], k);
 
 const tok = signToken({ id: adm, code: 'ADM', role: 'admin', full_name: 'Quản trị' });
 const app = express();
@@ -71,8 +73,8 @@ const root = `http://127.0.0.1:${server.address().port}`;
 
 // Mọi báo cáo trên màn thẻ (public/admin-parts/84-may-hikvision-ai.js REPORT_GROUPS) — theo ca + theo giờ (báo cáo nào có ở mẫu theo giờ)
 const TYPES = ['attendance', 'firstlast', 'detail', 'detaillist', 'empsheet', 'empsheetlate', 'detailmulti', 'daytime', 'workhours', 'track6', 'shiftcode',
-  'horizontal', 'hourstat', 'symbol', 'late', 'ot', 'summary', 'absence', 'leave', 'payroll', 'manualtime'];
-const HOURLY_HIDE = ['late', 'ot', 'symbol', 'horizontal', 'empsheetlate', 'audit3', 'audit3day'];
+  'horizontal', 'hourstat', 'symbol', 'late', 'ot', 'summary', 'chuyencan', 'absence', 'leave', 'payroll', 'manualtime'];
+const HOURLY_HIDE = ['late', 'ot', 'symbol', 'horizontal', 'empsheetlate', 'audit3', 'audit3day', 'chuyencan'];
 const done = [];
 for (const mode of ['shift', 'hourly']) {
   for (const type of TYPES) {

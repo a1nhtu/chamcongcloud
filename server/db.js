@@ -729,6 +729,17 @@ function migrateColumns() {
       PRIMARY KEY (employee_id, work_date)
     );
     CREATE INDEX IF NOT EXISTS idx_otlunch_date ON ot_lunch_reg(work_date);`);
+  // QUÊN QUẸT THẺ ĐÃ XÁC NHẬN (VD nhập từ danh sách "quên QT" của phần mềm cũ): ngày đó vẫn đủ giờ vào / ra như cũ,
+  // chỉ ghi lại để báo cáo Chuyên cần đếm số lần quên quẹt. kind 'quen_vao' | 'quen_ra'.
+  db.exec(`CREATE TABLE IF NOT EXISTS att_flags (
+      employee_id INTEGER NOT NULL REFERENCES employees(id) ON DELETE CASCADE,
+      work_date   TEXT NOT NULL,
+      kind        TEXT NOT NULL,
+      note        TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (employee_id, work_date, kind)
+    );
+    CREATE INDEX IF NOT EXISTS idx_attflags_date ON att_flags(work_date);`);
   // ĐƠN ĐĂNG KÝ LÀM THÊM do NV tự gửi trên app (công tắc ot_self_reg, mặc định tắt) → quản lý duyệt mới ghi vào đăng ký
   //   kind 'ot' = làm thêm ngoài ca (duyệt: CỘNG số phút vào ot_registrations) · 'lunch' = tăng ca trưa (duyệt: ghi khung giờ vào ot_lunch_reg)
   db.exec(`CREATE TABLE IF NOT EXISTS ot_requests (

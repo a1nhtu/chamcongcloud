@@ -895,6 +895,37 @@ function buildReportRaw(type, from, to, filter) {
       return { title: `Bảng công theo mã ca ${PERIOD}`, columns, rows };
     }
 
+    /* --- CHUYÊN CẦN: mỗi NV đếm đi trễ, về sớm, quên quẹt vào / ra, vắng — để xét thưởng chuyên cần ---
+     *  Quên quẹt = ngày có giờ ra mà thiếu giờ vào (quên vào) / có giờ vào mà thiếu giờ ra (quên ra),
+     *  CỘNG các ngày nhân sự đã xác nhận quên quẹt (bảng att_flags — giờ đã bù đủ nên không còn thiếu).
+     *  Chỉ đếm ngày có công trong bảng đang xem (công thật hoặc đúng mức công ảo). */
+    case 'chuyencan': {
+      const columns = [
+        { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 16 },
+        { key: 'lateN', label: 'Đi trễ (lần)', w: 10 }, { key: 'lateM', label: 'Đi trễ (phút)', w: 11 },
+        { key: 'earlyN', label: 'Về sớm (lần)', w: 10 }, { key: 'earlyM', label: 'Về sớm (phút)', w: 11 },
+        { key: 'quenVao', label: 'Quên quẹt vào (lần)', w: 12 }, { key: 'quenRa', label: 'Quên quẹt ra (lần)', w: 12 },
+        { key: 'tong', label: 'Tổng vi phạm (lần)', w: 12 }, { key: 'vang', label: 'Vắng (ngày)', w: 9 },
+      ];
+      const flags = new Set(db.prepare('SELECT employee_id, work_date, kind FROM att_flags WHERE work_date >= ? AND work_date <= ?').all(from, to)
+        .map((f) => f.employee_id + '|' + f.work_date + '|' + f.kind));
+      const rows = ctx.employees.map((e) => {
+        let lateN = 0, lateM = 0, earlyN = 0, earlyM = 0, quenVao = 0, quenRa = 0, vang = 0;
+        for (const d of days) {
+          const k = e.id + '|' + d, c = ctx.cell.get(k);
+          if (c) {
+            if (c.late_min > 0) { lateN++; lateM += c.late_min; }
+            if (c.early_min > 0) { earlyN++; earlyM += c.early_min; }
+            if (flags.has(k + '|quen_vao') || (!c.check_in_at && c.check_out_at)) quenVao++;
+            if (flags.has(k + '|quen_ra') || (c.check_in_at && !c.check_out_at && c.day_status !== 'mot_lan')) quenRa++;
+          }
+          if (symbolOf(ctx, e.id, d) === 'V') vang++;
+        }
+        return { code: e.code, name: e.full_name, dept: e.department || '', lateN, lateM, earlyN, earlyM, quenVao, quenRa, tong: lateN + earlyN + quenVao + quenRa, vang };
+      });
+      return { title: `Chuyên cần ${PERIOD}`, columns, rows };
+    }
+
     /* --- Vắng mặt / nghỉ phép — mẫu VangMatNghiPhep --- */
     case 'absence': {
       const columns = [

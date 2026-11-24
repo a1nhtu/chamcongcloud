@@ -9,7 +9,7 @@ import { parseFormula, evalFormula } from './pay-formula.js';
 // Báo cáo gốc dùng được: dạng bảng cột chung (xem + xuất Excel cùng một đường). Báo cáo ma trận có cách xuất Excel riêng,
 // bảng lương, công ảo, giờ sửa tay → không làm gốc.
 export const CR_BASES = [
-  ['summary', 'Tổng hợp nhân viên'], ['absence', 'Vắng mặt / nghỉ phép'], ['leave', 'Nghỉ phép / đơn từ'],
+  ['summary', 'Tổng hợp nhân viên'], ['chuyencan', 'Chuyên cần'], ['absence', 'Vắng mặt / nghỉ phép'], ['leave', 'Nghỉ phép / đơn từ'],
   ['horizontal', 'Bảng công ngang'], ['symbol', 'Bảng ký hiệu / Thống kê tháng'],
   ['detail', 'Chi tiết theo ngày'], ['detaillist', 'Chi tiết chấm công (danh sách)'], ['detailmulti', 'Chi tiết chấm công (nhiều lần vào/ra)'],
   ['attendance', 'Bản ghi chấm công'], ['late', 'Đi muộn / về sớm'], ['ot', 'Tăng ca'], ['firstlast', 'Giờ vào & ra đầu/cuối'],
