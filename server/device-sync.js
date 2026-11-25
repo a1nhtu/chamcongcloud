@@ -1465,8 +1465,9 @@ function rebuildDayCore(employeeId, workDate) {
   const machineMap = deviceMachineMap();
   // Ngưỡng ghép cặp: theo Lịch trình vào ra của NV (min / gap / max); chưa khai thì theo ô "Bỏ qua lần chấm trùng" ở Cài đặt
   const dup = ioParamsFor(employeeId, workDate) || pairDup();
+  let nextCut = null;   // (lịch nhiều ca) ngày đã đủ vào – ra trong chính ngày → không lấy lượt sau mốc này (sáng hôm sau)
   const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
-    .all(employeeId, winStart.toISOString(), winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
+    .all(employeeId, winStart.toISOString(), winEnd.toISOString()).filter((p) => (!usedTo || p.punch_at > usedTo) && (!nextCut || p.punch_at <= nextCut));
 
   const plan = hourly ? { off: false, shifts: [], mergeRule: null, isSchedule: false } : resolveDayShifts(employeeId, workDate);
   if (plan.off) return; // ngày nghỉ → không dựng
@@ -1485,6 +1486,18 @@ function rebuildDayCore(employeeId, workDate) {
     // Quy tắc BIẾT HƯỚNG (mọi ca của ngày): ghép cặp theo hướng trước rồi mỗi cặp / lượt lẻ mới tìm ca (pickDirShiftSet) — lượt RA lẻ
     // không thành giờ vào ca khác; hướng của máy / phím được ưu tiên hơn khung giờ của ca (không ép "Phân theo giờ").
     const dd = dayDirOf(plan);
+    // CA NGÀY KHAI "KẾT THÚC RA" SANG SÁNG HÔM SAU (mythuatlt: HC ra 15:00–06:30 để nhận tăng ca thâu đêm): khung ra đó trùng khung vào
+    // ca hôm sau (06:00) → lượt 06:12 sáng hôm sau bị lấy làm giờ ra hôm nay dù hôm nay đã có giờ ra (quẹt máy 17:32 hoặc thêm tay 17:30),
+    // hôm sau mất giờ vào. Lượt sau nửa đêm chỉ còn là giờ ra hôm nay khi các lượt TRONG ngày còn lẻ lượt VÀO chưa ra (như "Tự động -
+    // qua đêm"); đã đủ cặp → các lượt sáng hôm sau là của hôm sau. Ca đêm / quy tắc biết hướng / ca đêm vào trễ giữ cách cũ.
+    if (!lateNight && !dd && !plan.shifts.some(isNightShift)) {
+      const dayEnd = new Date(new Date(`${workDate}T23:59:00+07:00`).getTime() + 59999).toISOString();
+      const own = [...seen.keys()].filter((t) => t <= dayEnd);
+      if (own.length && own.length < seen.size && !openTailIn(own, dup)) {
+        nextCut = dayEnd;
+        for (const t of [...seen.keys()]) if (t > dayEnd) seen.delete(t);
+      }
+    }
     const outClaim = dd ? nextDayOutClaim(employeeId, workDate) : null;
     // (không biết hướng) chỉ chọn 1 ca ngày thì ca đó lấy lượt tới hết ngày → pickShiftSet cần biết các lượt đó (lượt sát giờ vào ca sau)
     const oneMemo = new Map();
