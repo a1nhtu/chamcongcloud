@@ -182,7 +182,7 @@ export function el(tag, attrs = {}, ...kids) {
     else if (v != null) n.setAttribute(k, v);
   }
   for (const kid of kids.flat()) if (kid != null) n.append(kid.nodeType ? kid : document.createTextNode(kid));
-  if (tag === 'input') viDate(n);
+  if (tag === 'input') { viDate(n); viTime(n); }
   return n;
 }
 
@@ -248,6 +248,53 @@ export function viDate(inp) {
     else if (e.key === 'ArrowDown' && e.altKey) vdOpen(inp);
   });
   inp.addEventListener('click', () => { if (!inp.disabled && !inp.readOnly) vdOpen(inp); });
+  return inp;
+}
+
+/* ---------- Ô GIỜ 24h trên MỌI máy (Anh 25/11/2026: "mọi loại giờ để 24h") ----------
+ * Ô gốc <input type="time"> theo ngôn ngữ máy: Chrome tiếng Việt hiện "11:30 SA / 01:00 CH" (12 giờ), khó đọc, khó điền.
+ * viTime() đổi thành ô chữ 24h: gõ 1130 / 11:30 / 11h30 / 930 / 9 → 11:30 / 09:30 / 09:00 (gõ đủ 4 số tự chèn ':').
+ * .value vẫn đọc / ghi "HH:MM" như ô time cũ ('' khi trống hoặc gõ sai — ô sai viền đỏ). Ô tạo bằng HTML cũng tự đổi. */
+export function vtParse(txt) {   // chữ gõ → 'HH:MM' ('' = trống, null = không hiểu)
+  const t = String(txt ?? '').trim();
+  if (!t) return '';
+  let h, m;
+  if (/\D/.test(t)) { const p = t.split(/\D+/).filter(Boolean).map(Number); if (!p.length) return null; [h, m = 0] = p; }
+  else if (t.length <= 2) { h = +t; m = 0; }
+  else if (t.length <= 4) { h = +t.slice(0, -2); m = +t.slice(-2); }
+  else return null;
+  return h >= 0 && h < 24 && m >= 0 && m < 60 ? `${pad2(h)}:${pad2(m)}` : null;
+}
+export function viTime(inp) {
+  if (!inp || inp._viTime || !(inp instanceof HTMLInputElement) || (inp.getAttribute('type') || '').toLowerCase() !== 'time') return inp;
+  const start = vtParse(VI_NATIVE.get.call(inp) || inp.getAttribute('value')) || '';
+  inp._viTime = true;
+  inp.type = 'text';
+  inp.classList.add('vi-time');
+  inp.autocomplete = 'off';
+  inp.inputMode = 'numeric';
+  if (!inp.getAttribute('maxlength')) inp.maxLength = 5;
+  if (!inp.getAttribute('size')) inp.size = 6;
+  if (!inp.placeholder) inp.placeholder = 'VD 13:30';
+  Object.defineProperty(inp, 'value', {
+    configurable: true,
+    get: () => vtParse(VI_NATIVE.get.call(inp)) || '',
+    set: (v) => { VI_NATIVE.set.call(inp, vtParse(v) || ''); inp.classList.remove('bad'); },
+  });
+  VI_NATIVE.set.call(inp, start);
+  inp.addEventListener('input', () => {
+    const raw = VI_NATIVE.get.call(inp);
+    if (/^\d{4}$/.test(raw)) VI_NATIVE.set.call(inp, raw.slice(0, 2) + ':' + raw.slice(2));
+    inp.classList.remove('bad');
+  });
+  // rời ô / Enter: chuẩn hoá chữ hiện thành HH:MM TRƯỚC mọi bộ nghe 'change' khác (pha capture chạy trước)
+  const take = () => {
+    const raw = VI_NATIVE.get.call(inp), v = vtParse(raw);
+    if (v) VI_NATIVE.set.call(inp, v);
+    inp.classList.toggle('bad', v === null);
+  };
+  inp.addEventListener('change', take, true);
+  inp.addEventListener('blur', take);
   return inp;
 }
 
@@ -322,7 +369,7 @@ if (typeof document !== 'undefined' && !window._viDateOn) {
   document.addEventListener('mousedown', (e) => { if (vdBox && !vdBox.contains(e.target) && e.target !== vdFor) vdClose(); }, true);
   addEventListener('scroll', (e) => { if (vdBox && !vdBox.contains(e.target)) vdClose(); }, true);
   addEventListener('resize', vdClose);
-  const scan = (root) => { if (root.querySelectorAll) for (const i of root.querySelectorAll('input[type=date],input[type=month]')) viDate(i); };
+  const scan = (root) => { if (root.querySelectorAll) for (const i of root.querySelectorAll('input[type=date],input[type=month],input[type=time]')) { viDate(i); viTime(i); } };
   const st = document.createElement('style');
   st.textContent = `.vd-pop{position:fixed;z-index:100000;background:#fff;border:1px solid #e4e7ec;border-radius:12px;box-shadow:0 12px 32px rgba(16,24,40,.18);padding:10px;width:264px;font:14px 'Segoe UI',system-ui,sans-serif;color:#1d2939}
 .vd-pop button{border:none;background:none;font:inherit;color:inherit;cursor:pointer;border-radius:8px;padding:0}
@@ -338,11 +385,12 @@ if (typeof document !== 'undefined' && !window._viDateOn) {
 .vd-sel{background:var(--brand,#f97316)!important;color:#fff!important;font-weight:700}
 .vd-mgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.vd-m{height:38px}
 .vd-foot{display:flex;justify-content:space-between;margin-top:8px;border-top:1px solid #f2f4f7;padding-top:6px}
-.vd-link{color:var(--brand,#f97316)!important;font-weight:700;padding:4px 8px!important}`;
+.vd-link{color:var(--brand,#f97316)!important;font-weight:700;padding:4px 8px!important}
+input.vi-time{font-variant-numeric:tabular-nums}input.vi-time.bad{border-color:#dc2626!important;box-shadow:0 0 0 2px #fee2e2}`;
   const boot = () => {
     document.head.append(st);
     scan(document);
-    new MutationObserver((ms) => { for (const mu of ms) for (const nd of mu.addedNodes) if (nd.nodeType === 1) { if (nd.matches('input[type=date],input[type=month]')) viDate(nd); else scan(nd); } })
+    new MutationObserver((ms) => { for (const mu of ms) for (const nd of mu.addedNodes) if (nd.nodeType === 1) { if (nd.matches('input[type=date],input[type=month],input[type=time]')) { viDate(nd); viTime(nd); } else scan(nd); } })
       .observe(document.documentElement, { childList: true, subtree: true });
   };
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();

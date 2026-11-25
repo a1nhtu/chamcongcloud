@@ -459,6 +459,9 @@ td.or-c.over { background: #fee2e2; } td.or-c.over small { color: #dc2626; font-
 td.or-c.under { background: #fef9c3; } td.or-c.under small { color: #a16207; }
 td.or-c.noreg small { color: #64748b; font-style: italic; }
 td.or-c i.or-sun { margin-left: 3px; font-style: normal; font-size: 11px; }
+td.or-c .or-lunch { display: block; line-height: 1.15; white-space: nowrap; }
+td.or-c .or-lunch i.or-sun { margin: 0; font-size: 13px; font-weight: 800; color: #b45309; }
+td.or-c .or-lunch small { display: block; margin: 0; font-size: 10px; color: #92400e; }
 td.or-c.lunch { box-shadow: inset 0 -3px 0 #f59e0b; }
 .or-req { border: 1px dashed #16a34a; }
 td.or-c:focus { outline: 2px solid #2563eb; outline-offset: -2px; }

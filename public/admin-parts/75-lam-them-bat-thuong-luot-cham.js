@@ -92,6 +92,8 @@ async function pageOtReg() {
   const reg = new Map(data.cells.map(([e, d, m]) => [e + '|' + d, m]));
   const act = new Map(data.actual.map(([e, d, m]) => [e + '|' + d, m]));
   const lunchReg = new Map((data.lunch || []).map(([e, d, f, t]) => [e + '|' + d, [f, t]]));   // tăng ca trưa theo giờ (công tắc bật)
+  const hmMin = (s) => { const [h, m] = String(s || '').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
+  const lunchSpan = ([f, t]) => (hmMin(t) - hmMin(f) + 1440) % 1440;   // số phút khung trưa đã đăng ký (11:30–13:00 = 90)
   const emps = data.emps;
 
   // ----- cây phòng ban (gồm bộ phận con) -----
@@ -212,7 +214,7 @@ async function pageOtReg() {
   const days = []; for (let d = _or.from; d <= _or.to; d = addDays(d, 1)) days.push(d);
   const allChk = el('input', { type: 'checkbox', style: 'width:auto;margin:0' });
   const thead = el('thead', {}, el('tr', {}, el('th', {}, allChk), el('th', {}, 'Mã NV'), el('th', {}, 'Họ tên'), el('th', {}, 'Bộ phận'),
-    ...days.map((d) => el('th', { class: 'al-h' + (wdOf(d) === 0 ? ' sun' : '') + (d === today ? ' today' : '') }, d.slice(8) + '/' + d.slice(5, 7), el('br'), el('small', {}, WDS[wdOf(d)]))), el('th', { title: 'Tổng số phút đăng ký trong khoảng đang xem' }, 'Tổng ĐK')));
+    ...days.map((d) => el('th', { class: 'al-h' + (wdOf(d) === 0 ? ' sun' : '') + (d === today ? ' today' : '') }, d.slice(8) + '/' + d.slice(5, 7), el('br'), el('small', {}, WDS[wdOf(d)]))), el('th', { title: 'Tổng số phút đăng ký trong khoảng đang xem (gồm cả tăng ca trưa ☀)' }, 'Tổng ĐK')));
   const tbody = el('tbody');
   const tbl = el('table', { class: 'data al-grid or-grid' }, thead, tbody);
   const total = el('span', { class: 'muted' });
@@ -227,12 +229,14 @@ async function pageOtReg() {
       else if (a < r && d < today) { cls += ' under'; tip = `Đăng ký ${r}' · thực tế ${a}' → tính ${a}'`; }
       else tip = `Đăng ký ${r}'` + (a ? ` · thực tế ${a}'` : '');
     } else if (a) { cls += ' noreg'; tip = `Chưa đăng ký · làm thêm thực tế ${a}'` + (data.required ? ' → KHÔNG được tính' : ' → tính thực tế'); }
-    const l = lunchReg.get(k);
-    if (l) { cls += ' lunch'; tip = (tip ? tip + '\n' : '') + `☀ Tăng ca trưa ${l[0]}–${l[1]}`; }
+    const l = lunchReg.get(k), lm = l ? lunchSpan(l) : 0;
+    if (l) { cls += ' lunch'; tip = (tip ? tip + '\n' : '') + `☀ Tăng ca trưa ${l[0]}–${l[1]} = ${lm}' (chỉ tính phần nằm trong giờ nghỉ giữa ca)`; }
     td.className = cls; td.title = tip;
-    td.replaceChildren(r != null ? el('b', {}, String(r)) : '', a ? el('small', {}, String(a)) : '', l ? el('i', { class: 'or-sun' }, '☀') : '');
+    // ô trưa: "☀ 90'" + khung giờ nhỏ bên dưới → nhìn là biết đăng ký bao nhiêu phút (Anh 25/11/2026)
+    td.replaceChildren(r != null ? el('b', {}, String(r)) : '', a ? el('small', {}, String(a)) : '',
+      l ? el('span', { class: 'or-lunch' }, el('i', { class: 'or-sun' }, `☀ ${lm}'`), el('small', {}, `${l[0]}–${l[1]}`)) : '');
   };
-  const sumOf = (e) => { let s = 0; for (const d of days) s += reg.get(e.id + '|' + d) || 0; return s; };
+  const sumOf = (e) => { let s = 0; for (const d of days) { const k = e.id + '|' + d, l = lunchReg.get(k); s += (reg.get(k) || 0) + (l ? lunchSpan(l) : 0); } return s; };
   const mkRow = (e) => {
     const cb = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(_or.picked.has(e.id) ? { checked: '' } : {}) });
     cb.onchange = () => { cb.checked ? _or.picked.add(e.id) : _or.picked.delete(e.id); updTotal(); };
@@ -254,8 +258,15 @@ async function pageOtReg() {
     const n = list.filter((e) => _or.picked.has(e.id)).length;
     allChk.checked = list.length > 0 && n === list.length;
     allChk.indeterminate = n > 0 && n < list.length;
-    let mins = 0, cells = 0; for (const e of list) for (const d of days) { const v = reg.get(e.id + '|' + d); if (v != null) { cells++; mins += v; } }
-    total.textContent = `${list.length.toLocaleString('vi')} nhân viên · ${n} đã tích` + (_or.picked.size > n ? ` (thêm ${_or.picked.size - n} ở bộ phận khác)` : '') + ` · đã đăng ký ${cells.toLocaleString('vi')} ô = ${(Math.round(mins / 6) / 10).toLocaleString('vi')} giờ`;
+    let mins = 0, cells = 0, lMins = 0, lCells = 0;
+    for (const e of list) for (const d of days) {
+      const k = e.id + '|' + d, v = reg.get(k), l = lunchReg.get(k);
+      if (v != null) { cells++; mins += v; }
+      if (l) { lCells++; lMins += lunchSpan(l); }
+    }
+    const hrs = (m) => (Math.round(m / 6) / 10).toLocaleString('vi');
+    total.textContent = `${list.length.toLocaleString('vi')} nhân viên · ${n} đã tích` + (_or.picked.size > n ? ` (thêm ${_or.picked.size - n} ở bộ phận khác)` : '') + ` · đã đăng ký ${cells.toLocaleString('vi')} ô = ${hrs(mins)} giờ`
+      + (lCells ? ` · ☀ tăng ca trưa ${lCells.toLocaleString('vi')} ô = ${hrs(lMins)} giờ` : '');
     bScope.value = _or.picked.size ? 'picked' : 'list';
   }
   allChk.onchange = () => { for (const e of list) allChk.checked ? _or.picked.add(e.id) : _or.picked.delete(e.id); draw(); };
