@@ -17,6 +17,7 @@ import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-
 import { currentTenant } from '../tenant.js';
 import { dataGen } from '../heavy.js';
 import { otherPunches, rawPunchDays, virtPunchDays } from '../lan-cham-khac.js';
+import { handMarker } from '../hand-mark.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
@@ -1952,9 +1953,11 @@ r.get('/attendance', (req, res) => {
     if (t === a.check_out_at && (phone || (dt && dt.serial === 'DT_RA'))) return outG(a);
     return null;
   };
+  const hand = handMarker();   // * cạnh đúng ô giờ sửa / thêm tay
   const rows = raw.map((a) => {
     const ts = dayTs(a);
-    return { ...a, manual: a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0,   // (*) cả ngày sửa lượt chấm
+    const man = a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0;   // (*) cả ngày sửa lượt chấm
+    return { ...a, manual: man, ...(man ? hand(a) : { man_in: 0, man_out: 0 }),
       check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: ts ? ts.map(isoToVnHM) : undefined, punch_photos: punchPhotos(a, ts),
       in_geo: geoAt(a, a.check_in_at), out_geo: geoAt(a, a.check_out_at), punch_geos: ts ? ts.map((t) => geoAt(a, t)) : undefined };
   });

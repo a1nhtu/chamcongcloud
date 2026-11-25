@@ -51,8 +51,25 @@ test('ca đêm: thêm tay giờ RA 07:00 sáng hôm sau (lượt nằm ở ngày
   assert.deepEqual([r.in, r.out, r.man_in, r.man_out], ['18:55', '07:00', 0, 1]);
 });
 
-test('sửa thẳng ô giờ (dòng manual) → không đánh dấu từng giờ, * cạnh giờ vào như cũ', async () => {
-  db.prepare('UPDATE attendance SET manual=1 WHERE employee_id=?').run(E);
-  const r = await row(E);
+test('nút SỬA trên dòng (PUT cả dòng, giây bị cắt): vào 06:43:27 quẹt máy + nhập ra 17:30 → * chỉ cạnh giờ ra', async () => {
+  const D = Number(db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active, device_pin, shift_id) VALUES ('SX813','sx813','x','NV 813','employee',1,'813',(SELECT shift_id FROM employees WHERE id=?))").run(E).lastInsertRowid);
+  ingestAttlog('SN1', '813\t2026-11-24 06:43:27\t0\t1', { ask: () => {} });
+  const r0 = await row(D);
+  assert.deepEqual([r0.in, r0.out, r0.manual], ['06:43', '', 0]);
+  await call('PUT', `/admin/attendance/${r0.att_id}`, { check_in: '06:43', check_out: '17:30' });   // modal Sửa gửi cả 2 ô
+  const r = await row(D);
+  assert.deepEqual([r.in, r.out, r.manual, r.man_in, r.man_out], ['06:43', '17:30', 1, 0, 1]);
+  // sửa cả giờ vào sang giờ không có lượt quẹt nào → * cả 2 ô
+  await call('PUT', `/admin/attendance/${r0.att_id}`, { check_in: '07:00', check_out: '17:30' });
+  const r2 = await row(D);
+  assert.deepEqual([r2.man_in, r2.man_out], [1, 1]);
+});
+
+test('dòng sửa tay mà cả 2 giờ đều trùng lượt quẹt thật (chỉ sửa ghi chú) → không rõ ô nào, * cạnh giờ vào như cũ', async () => {
+  const D = Number(db.prepare("INSERT INTO employees(code, username, password_hash, full_name, role, active, device_pin, shift_id) VALUES ('SX814','sx814','x','NV 814','employee',1,'814',(SELECT shift_id FROM employees WHERE id=?))").run(E).lastInsertRowid);
+  ingestAttlog('SN1', ['814\t2026-11-24 06:40:00\t0\t1', '814\t2026-11-24 17:35:00\t0\t1'].join('\n'), { ask: () => {} });
+  const r0 = await row(D);
+  await call('PUT', `/admin/attendance/${r0.att_id}`, { check_in: '06:40', check_out: '17:35', note: 'đã kiểm' });
+  const r = await row(D);
   assert.deepEqual([r.manual, r.man_in, r.man_out], [1, 0, 0]);
 });

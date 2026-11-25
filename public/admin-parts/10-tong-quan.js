@@ -153,20 +153,24 @@ function rowToday(r, np = 1) {
     : [[list.find(p => p.label === 'Vào'), list.find(p => p.label === 'Ra')]];
   const cell = (p, star) => el('td', {}, el('div', { style: 'white-space:nowrap' }, punchTime(p.t, p.photo), star || ''), geoBlock(p.geo, p.t));
   const inCell = (p, star) => (p ? cell(p, star) : el('td', {}, '—'));
-  const outCell = (p) => (p ? cell(p) : el('td', {}, el('span', { class: 'pill muted' }, 'chưa ra')));
+  const outCell = (p, star) => (p ? cell(p, star) : el('td', {}, el('span', { class: 'pill muted' }, 'chưa ra')));
   // ảnh đã hiện cạnh giờ thì cột Ảnh vào / Ảnh ra không hiện lặp lại
   const inline = new Set(list.map(p => p.photo).filter(Boolean));
   const sidePhoto = (src) => photoCell(src && !inline.has(src) ? src : null);
   const extra = [];
   for (let i = 1; i < np; i++) { const p = pairs[i]; extra.push(p ? inCell(p[0]) : el('td', {}, ''), p ? outCell(p[1]) : el('td', {}, '')); }
-  const star = r.manual && r.check_in_hm ? el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *') : null;
+  // * cạnh đúng giờ sửa / thêm tay (man_in / man_out); không rõ ô nào → cạnh giờ vào như cũ
+  const mkStar = () => el('span', { style: 'color:var(--brand);font-weight:700', title: 'Giờ sửa/thêm bằng tay' }, ' *');
+  const sides = r.man_in || r.man_out;
+  const star = r.manual && (sides ? r.man_in : r.check_in_hm) ? mkStar() : null;
+  const starOut = r.manual && sides && r.man_out && !multi ? mkStar() : null;   // nhiều cặp: ô Ra đầu không phải giờ ra của dòng
   return el('tr', {},
     el('td', {}, sidePhoto(r.check_in_photo)),
     el('td', {}, el('b', {}, r.full_name), el('div', { style: 'color:#999;font-size:12px' }, r.code)),
     el('td', {}, r.department || '—'),
     ...(hourlyMode() ? [] : [el('td', {}, r.late_min > 0 ? el('span', { class: 'pill warn' }, r.late_min + 'p') : '—')]),
     inCell(pairs[0][0], star),
-    outCell(pairs[0][1]),
+    outCell(pairs[0][1], starOut),
     ...extra,
     el('td', {}, sidePhoto(r.check_out_photo)),
     el('td', {}, humanMinutes(r.work_minutes)),
