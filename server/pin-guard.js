@@ -104,7 +104,11 @@ function parseBody(table, body, maxPin = 20) {
     } else if (kind === 'USERPIC' || kind === 'BIOPHOTO') {
       const content = (kv.content || '').trim();
       if (content.length >= 100) it.photo = { kind: kind === 'BIOPHOTO' ? 'face' : 'user', faceType: kind === 'BIOPHOTO' ? (parseInt(kv.type || '9', 10) || 9) : 0, content };
-    } else it.tmpl = true;
+    } else {
+      it.tmpl = true;
+      const t = (kv.tmp || '').trim();
+      if (t.length >= 32) (it.tmps ||= new Set()).add(t);   // mẫu sinh trắc máy gửi — để so với mẫu máy khác đang giữ
+    }
   }
   return { info, enrolled, deleted };
 }
@@ -121,12 +125,26 @@ function captureInto(id, it) {
   if (it.photo) db.prepare('UPDATE device_pin_conflicts SET dev_photo=?, dev_photo_kind=?, dev_face_type=? WHERE id=?').run(it.photo.content, it.photo.kind, it.photo.faceType, id);
 }
 
+// Mọi mẫu sinh trắc máy gửi đều trùng khớp mẫu một máy KHÁC đang giữ cho Số ID này?
+function sameTemplates(serial, pin, tmps) {
+  if (!tmps || !tmps.size) return false;
+  const q = db.prepare('SELECT 1 FROM device_bio_templates WHERE pin=? AND serial<>? AND tmp=? LIMIT 1');
+  for (const t of tmps) if (!q.get(pin, serial, t)) return false;
+  return true;
+}
+
 // Có nghi trùng không? → { reason, refName } | null
 function detect(dev, pin, it, enrolledNow, realtime, deletedNow = false) {
   const serial = dev.serial;
   const prior = db.prepare('SELECT name FROM device_users_serial WHERE serial=? AND pin=?').get(serial, pin);
   // máy này đã NHẬN Số ID này từ phần mềm (đồng bộ) và xác nhận OK → không phải tự đăng ký
-  const syncedIn = !!db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND pin=? AND mkind='user' AND TRIM(return_value)='0' LIMIT 1").get(serial, pin);
+  const syncedIn = !!db.prepare("SELECT 1 FROM push_device_commands WHERE serial=? AND pin=? AND mkind='user' AND TRIM(return_value)='0' LIMIT 1").get(serial, pin)
+    // phần mềm ĐÃ GỬI Số ID / vân tay này xuống máy nhưng chưa nhận được lời báo của máy (máy chủ khởi động lại / mạng chập giữa
+    // lúc đồng bộ) → máy gửi ngược lên chính dữ liệu vừa nhận, không phải tự đăng ký (thefifty 25/11/2026: 13 cảnh báo nhầm cùng 1 phút)
+    || !!db.prepare(`SELECT 1 FROM push_device_commands WHERE serial=? AND pin=? AND mkind IN ('user','bio','bio-alt')
+      AND trans_time IS NOT NULL AND response_at IS NULL AND trans_time > datetime('now','-1 day') LIMIT 1`).get(serial, pin)
+    // mẫu vân tay / khuôn mặt máy gửi Y HỆT mẫu máy khác đang giữ cho Số ID này → bản chép do đồng bộ, cùng 1 người
+    || sameTemplates(serial, pin, it.tmps);
   const accepted = db.prepare("SELECT dev_name FROM device_pin_conflicts WHERE serial=? AND pin=? AND status='same' ORDER BY id DESC LIMIT 1").get(serial, pin);
   const emp = db.prepare("SELECT full_name FROM employees WHERE device_pin=? AND device_pin<>''").get(pin);
   const others = db.prepare(`SELECT s.name FROM device_users_serial s JOIN push_devices d ON d.serial=s.serial

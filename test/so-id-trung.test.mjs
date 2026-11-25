@@ -244,3 +244,26 @@ test('máy XOÁ Số ID rồi đăng ký lại (không tên) trong khi máy khá
   post('L_N', 'OPERLOG', `OPLOG 9\t0\t${vn()}\t52\t0\t0\t0\n${finger('52', 0, 'q')}`);   // xoá + đăng ký lại cùng 1 lượt
   assert.equal(openOf('L_N', '52').length, 1, 'xoá + đăng ký lại cùng lượt');
 });
+
+// thefifty 25/11/2026: máy chủ khởi động lại giữa lúc đồng bộ → máy đã nhận lệnh (Số ID + vân tay) nhưng lời báo "đã nhận" bị mất,
+// máy gửi ngược lên chính vân tay vừa nhận → trước đây báo "đăng ký mới" nhầm (13 cảnh báo cùng 1 phút, 7 máy).
+test('máy nhận lệnh đồng bộ nhưng mất lời báo, rồi gửi ngược lên chính vân tay đó → KHÔNG báo trùng', () => {
+  for (const sn of ['T_A', 'T_B']) db.prepare("INSERT INTO push_devices(serial,name,active,sync_group,oper_stamp) VALUES(?,?,1,'T','100')").run(sn, sn);
+  post('T_A', 'OPERLOG', enroll('61', 'Pham Thi Nhi', 0, 'k'));
+  // T_B lấy hết lệnh (đã gửi) nhưng không báo kết quả — máy chủ sập đúng lúc đó
+  for (let i = 0; i < 50; i++) { const r = resObj(); H.handleGetRequest({ query: { SN: 'T_B' }, headers: {}, socket: {} }, r); if (r.out === 'OK') break; }
+  assert.ok(db.prepare("SELECT COUNT(*) c FROM push_device_commands WHERE serial='T_B' AND pin='61' AND trans_time IS NOT NULL AND response_at IS NULL").get().c > 0);
+  post('T_B', 'OPERLOG', finger('61', 0, 'k'));
+  assert.deepEqual(openOf('T_B', '61'), []);
+});
+
+test('mẫu vân tay máy gửi Y HỆT mẫu máy khác đang giữ → cùng người; mẫu khác → vẫn báo trùng', () => {
+  for (const sn of ['U_A', 'U_B', 'U_C']) db.prepare("INSERT INTO push_devices(serial,name,active,sync_group,oper_stamp) VALUES(?,?,1,'U','100')").run(sn, sn);
+  post('U_A', 'OPERLOG', enroll('71', 'Le Thi Vi', 0, 'm'));
+  db.prepare("DELETE FROM push_device_commands WHERE pin='71'").run();   // lệnh đồng bộ không còn dấu vết (VD chép bằng USB)
+  post('U_B', 'OPERLOG', finger('71', 0, 'm'));
+  assert.deepEqual(openOf('U_B', '71'), [], 'cùng mẫu');
+  post('U_C', 'OPERLOG', finger('71', 0, 'r'));
+  assert.equal(openOf('U_C', '71').length, 1, 'mẫu khác = người khác');
+  assert.equal(openOf('U_C', '71')[0].reason, 'enroll');
+});
