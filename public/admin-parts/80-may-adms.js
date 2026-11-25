@@ -205,6 +205,8 @@ async function pageDevices() {
     const keyItem = hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null;
     const doorItem = hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null;
     const pauseItem = m.active ? { group: 'Xóa / tạm dừng', label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null;
+    // Bộ phận mặc định: NV phần mềm tự tạo từ máy này vào luôn bộ phận đó (chuỗi cửa hàng: 1 máy = 1 cửa hàng)
+    const deptItem = hasPerm('devices') ? { group: 'Cài đặt máy', hint: 'NV mới phần mềm tự tạo từ máy này sẽ vào bộ phận này', label: '🏬 Bộ phận mặc định' + (m.default_dept ? ': ' + m.default_dept : ''), fn: () => deviceDeptModal(m) } : null;
     const schedItem = hasPerm('devices') ? { group: 'Cài đặt máy', hint: 'Máy dùng lâu dễ đơ — phần mềm tự khởi động lại máy theo giờ hẹn', label: '⏰ Hẹn giờ khởi động lại' + (m.reboot_sched ? ': ' + rebootSchedLabel(m.reboot_sched) : ''), fn: () => rebootSchedModal(m, d.rows) } : null;
     const removeItem = { danger: true, group: 'Xóa / tạm dừng', label: '❌ Xóa máy khỏi danh sách', fn: async () => { if (confirm('Xoá máy này khỏi danh sách? (Dữ liệu trên máy chấm công không bị ảnh hưởng)')) { await api('/admin/devices/' + m.id, { method: 'DELETE' }); pageDevices(); } } };
     const moreBtn = isHik ? rowMenu([   // máy Hikvision: phần mềm kết nối vào máy (giống TCP/IP)
@@ -280,6 +282,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
       { group: 'Cài đặt máy', hint: 'Bật: NV mới khai trên phần mềm tự đẩy xuống máy này (khi bật Tự động đẩy NV)', label: (m.recv_new ?? 1) ? '📥 Nhận NV mới từ phần mềm: BẬT' : '📥 Nhận NV mới từ phần mềm: TẮT', fn: async () => {
         try { await putDev({ recv_new: !(m.recv_new ?? 1) }); toast((m.recv_new ?? 1) ? 'Máy này sẽ KHÔNG nhận NV mới từ phần mềm' : 'Máy này sẽ nhận NV mới từ phần mềm', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
+      deptItem,
       { group: 'Cài đặt máy', hint: 'Máy này chỉ được đăng ký Số ID trong dải — ngoài dải sẽ cảnh báo (cần bật Cảnh báo trùng Số ID)', label: '🔢 Dải Số ID của máy', fn: async () => {
         const v = prompt('Dải Số ID cho máy "' + (m.name || m.serial) + '" (VD 1001-1999). Đăng ký số ngoài dải → cảnh báo; cấp số mới sẽ lấy trong dải.\nĐể trống = không giới hạn:', m.pin_range || '');
         if (v == null) return;
@@ -322,6 +325,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       direct && m.active && autoMin > 0 ? el('span', { class: 'chip' + (m.tcp_auto ? ' g' : ''), title: m.tcp_auto ? `Tự động tải ${autoMin} phút / lần` : 'Máy này đang TẮT tự động tải (bật ở ⋯ Thêm)' }, m.tcp_auto ? `⏱ tự tải ${autoMin}'` : '⏱ tắt tự tải') : '',
       m.sync_group ? el('span', { class: 'chip g', title: 'Nhóm đồng bộ' }, '🔁 ' + m.sync_group) : '',
       m.pin_range ? el('span', { class: 'chip', title: 'Dải Số ID của máy' }, '🔢 ' + m.pin_range) : '',
+      m.default_dept ? el('span', { class: 'chip', title: 'Bộ phận mặc định — NV tự tạo từ máy này vào bộ phận này' }, '🏬 ' + m.default_dept) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
       // Đời máy ADMS (máy tự khai lúc bắt tay): đời cũ không hiểu lệnh hỏi danh sách NV → phần mềm tải theo cách khác
       !direct && !isAi && !isUnion && m.push_ver ? el('span', { class: 'chip', title: (m.push_ver === '-' ? 'Máy đời cũ (không khai phiên bản giao thức đẩy)' : 'Máy đời mới — giao thức đẩy ' + m.push_ver) + (m.firmware ? ' · ' + m.firmware : '') }, m.push_ver === '-' ? '🕰 Đời cũ' : '✨ Đời mới') : '',
@@ -840,3 +844,20 @@ async function tcpAutoRun(kind = 'tcp') {
   }
 }
 
+
+// BỘ PHẬN MẶC ĐỊNH CỦA MÁY (v1.39.5): NV phần mềm tự tạo từ máy (máy gửi người mới lên) vào luôn bộ phận này
+async function deviceDeptModal(m) {
+  let depts = [];
+  try { depts = (await api('/admin/departments')).rows || []; } catch (e) { return toast(e.message, 'err'); }
+  const sel = el('select', {}, el('option', { value: '' }, '— Không gán (để trống) —'),
+    ...deptOrdered(depts).map((d) => el('option', { value: d.name, ...(d.name === m.default_dept ? { selected: '' } : {}) }, '  '.repeat(d.depth || 0) + d.name)));
+  const save = el('button', { class: 'btn' }, 'Lưu');
+  save.onclick = async () => {
+    try { await api('/admin/devices/' + m.id, { method: 'PUT', body: { default_dept: sel.value } }); toast(sel.value ? 'NV mới từ máy này sẽ vào bộ phận ' + sel.value : 'Đã bỏ bộ phận mặc định', 'ok'); closeModal(); pageDevices(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  openModal('Bộ phận mặc định · ' + (m.name || m.serial), [
+    el('div', { class: 'map-hint' }, 'Người mới đăng ký trên máy này mà phần mềm chưa có → phần mềm tự tạo nhân viên và xếp luôn vào bộ phận chọn dưới đây (không phải chuyển tay). Nhân viên đã có không bị đổi.'),
+    el('div', { style: 'margin-top:12px' }, sel),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Huỷ'), save]);
+}

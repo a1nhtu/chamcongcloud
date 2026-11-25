@@ -169,6 +169,12 @@ export function registerDeviceRoutes(r, { need }) {
       if (pr && !parseRange(pr)) return res.status(400).json({ error: 'Dải Số ID phải dạng "từ-đến", VD 1001-1999' });
       db.prepare('UPDATE push_devices SET pin_range=? WHERE id=?').run(pr.replace(/\s+/g, ''), d.id);
     }
+    // Bộ phận mặc định cho NV tự tạo từ máy (rỗng = không gán)
+    if (b.default_dept !== undefined) {
+      const dd = String(b.default_dept || '').trim();
+      if (dd && !db.prepare('SELECT 1 FROM departments WHERE name=?').get(dd)) return res.status(400).json({ error: `Không có bộ phận "${dd}"` });
+      db.prepare('UPDATE push_devices SET default_dept=? WHERE id=?').run(dd, d.id);
+    }
     db.prepare('UPDATE push_devices SET name=?, active=?, sync_group=?, machine_number=?, access_control=? WHERE id=?')
       .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active, newGroup,
            b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0),

@@ -278,7 +278,7 @@ export function resolveSame(id, by = '') {
     db.prepare("UPDATE device_pin_conflicts SET status='same', resolved_at=datetime('now'), resolved_by=?, note='Xác nhận cùng 1 người' WHERE id=?").run(by, c.id);
     db.exec('RELEASE pg_same');
   } catch (e) { db.exec('ROLLBACK TO pg_same'); db.exec('RELEASE pg_same'); throw e; }
-  const empId = upsertEmployeeFromDevice(c.pin, c.dev_name || '', true);
+  const empId = upsertEmployeeFromDevice(c.pin, c.dev_name || '', true, '', { serial: c.serial });
   const relinked = empId ? relinkPunchesForPin(empId, c.pin) : 0;
   try { syncPinsToGroup(c.serial, new Set([c.pin])); syncFillDevice(c.serial); } catch (e) { console.error('[pin-guard] đồng bộ lại lỗi:', e.message); }
   return { ok: true, emp_id: empId, relinked };
@@ -308,7 +308,7 @@ export function resolveOther(id, newPin, by = '') {
   let empId, moved = 0;
   db.exec('SAVEPOINT pg_other');
   try {
-    empId = createDraftEmployee(newPin, c.dev_name || '');
+    empId = createDraftEmployee(newPin, c.dev_name || '', '', c.serial);
     db.prepare('INSERT OR REPLACE INTO device_users(pin,name,card,passwd,privilege) VALUES(?,?,?,?,0)').run(newPin, c.dev_name || '', c.dev_card || '', c.dev_passwd || '');
     // sinh trắc người mới: chuyển từ Số ID cũ sang Số ID mới (vẫn thuộc máy này)
     db.prepare(`INSERT OR REPLACE INTO device_bio_templates(serial,pin,bio_type,idx,valid,duress,major_ver,minor_ver,tmp)

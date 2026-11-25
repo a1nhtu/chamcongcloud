@@ -83,7 +83,7 @@ export function upsertEmployeeFromDevice(pin, name, force = false, code = '', op
   // Tự tạo NV nháp (force=true khi nhập từ USB — luôn tạo dù tắt auto-create)
   if (opts.create === false) return null;
   if (!force && getSetting('device_autocreate', '1') !== '1') return null;
-  return createDraftEmployee(pin, name, code);
+  return createDraftEmployee(pin, name, code, opts.serial || '');
 }
 // MẪU SINH TRẮC / ẢNH KHÔNG KÈM TÊN của Số ID chưa có NV — có tạo NV nháp không?
 // Lỗi micayseoul 20/11/2026: máy có Nhóm đồng bộ, vừa DUYỆT → bắt tay → phần mềm hỏi máy toàn bộ vân tay / khuôn mặt để đồng bộ
@@ -107,18 +107,26 @@ function bioDraftRule(serial, force, track) {
 }
 // Tạo NV nháp "từ máy" cho Số ID (mã NV / tài khoản tự sinh, mật khẩu mặc định) + gán lượt quẹt sẵn có của Số ID đó
 // realCode: mã NV máy gửi kèm (nếu có) dùng làm mã NV thay cho Số ID
-export function createDraftEmployee(pin, name, realCode = '') {
+export function createDraftEmployee(pin, name, realCode = '', serial = '') {
   pin = String(pin || '').trim(); name = (name || '').trim();
+  const dept = deviceDefaultDept(serial);
   const base = pinCodeOk(pin, realCode) ? String(realCode).trim() : pin;
   const code = uniqueValue('code', base);
   const username = uniqueValue('username', `nv${base}`);
   const fullName = name || `NV ${pin}`;
   const info = db.prepare(`INSERT INTO employees
     (code, full_name, department, position, phone, role, username, password_hash, device_pin, from_device, active)
-    VALUES (?,?, '', '', '', 'employee', ?, ?, ?, 1, 1)`)
-    .run(code, fullName, username, defaultPasswordHash(), pin);
+    VALUES (?,?, ?, '', '', 'employee', ?, ?, ?, 1, 1)`)
+    .run(code, fullName, dept, username, defaultPasswordHash(), pin);
   relinkQuiet(Number(info.lastInsertRowid), pin);   // lượt quẹt có trước khi NV được tạo → gán luôn
   return Number(info.lastInsertRowid);
+}
+// BỘ PHẬN MẶC ĐỊNH CỦA MÁY (Anh 25/11/2026, thefifty: 1 máy = 1 cửa hàng): NV tự tạo từ máy vào luôn bộ phận đó, không thì
+// NV mới không có bộ phận → lọc theo cửa hàng / tài khoản "Chỉ quản lý bộ phận" không thấy. Bộ phận đã bị xoá → để trống như cũ.
+export function deviceDefaultDept(serial) {
+  if (!serial) return '';
+  const d = String(db.prepare('SELECT default_dept FROM push_devices WHERE serial=?').get(serial)?.default_dept || '').trim();
+  return d && db.prepare('SELECT 1 FROM departments WHERE name=?').get(d) ? d : '';
 }
 // Gán lượt quẹt cũ cho NV vừa có Số ID (lỗi chỉ ghi log, không làm hỏng việc nhận dữ liệu từ máy)
 function relinkQuiet(empId, pin) {
@@ -169,7 +177,7 @@ export function ingestUserData(serial, table, rawBody, track = null, opts = {}) 
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
     if (code) db.prepare('UPDATE device_users SET code=? WHERE pin=?').run(code, pin);
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
-    const id = upsertEmployeeFromDevice(pin, name, force, code);
+    const id = upsertEmployeeFromDevice(pin, name, force, code, { serial });
     if (id) seen.add(pin);
     if (id && track && (!pu || (!track.newOnly && ((name && name !== pu.name) || (card && card !== pu.card)
       || (passwd && passwd !== pu.passwd) || (pri != null && pri !== pu.privilege))))) track.changed.add(pin);
@@ -263,7 +271,7 @@ export function storeTemplates(serial, table, rawBody, track = null) {
     upsertDeviceUserSerial(serial, pin, '', '');   // ghi user theo máy (đếm NV)
     if (held.has(serial + '|' + pin)) continue;   // nghi trùng: giữ template theo máy, không tạo NV / không đồng bộ
     // mẫu không kèm tên: khớp NV đã có; NV mới chỉ tạo theo bioDraftRule (không còn NV tên tạm "NV <Số ID>" hàng loạt)
-    if (!upsertEmployeeFromDevice(pin, '', force, '', { create: draft.create(pin) })) draft.missed(pin);
+    if (!upsertEmployeeFromDevice(pin, '', force, '', { create: draft.create(pin), serial })) draft.missed(pin);
     pins.add(pin);
     if (track && (!pt || (!track.newOnly && pt.tmp !== tmp))) track.changed.add(pin);
   }
@@ -619,7 +627,7 @@ export function storeUserPhotos(serial, rawBody, track = null) {
     const pp = prevPhoto ? prevPhoto.get(pin) : null;
     try { up.run(pin, isFace ? 'face' : 'user', faceType, content); } catch {}
     markPhotoOn(serial, pin);   // máy gửi ảnh lên = máy đang có ảnh này
-    if (!upsertEmployeeFromDevice(pin, '', false, '', { create: draft.create(pin) })) draft.missed(pin);
+    if (!upsertEmployeeFromDevice(pin, '', false, '', { create: draft.create(pin), serial })) draft.missed(pin);
     pins.add(pin);
     if (track && (!pp || (!track.newOnly && pp.photo !== content))) track.changed.add(pin);
   }

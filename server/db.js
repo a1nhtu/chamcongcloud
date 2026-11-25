@@ -873,7 +873,8 @@ function migrateColumns() {
   // Hẹn giờ khởi động lại máy (server/reboot-schedule.js): 'HH:MM|<thứ>' (0 = CN … 6 = T7; đủ 7 = hằng ngày), '' = tắt
   add('push_devices', 'reboot_sched', "TEXT DEFAULT ''");
   add('push_devices', 'reboot_last',  "TEXT DEFAULT ''");   // ngày (giờ VN) đã khởi động lại theo lịch — mỗi ngày tối đa 1 lần
-  add('push_devices', 'reboot_note',  "TEXT DEFAULT ''");   // kết quả lần gần nhất (hiện ở giao diện)
+  add('push_devices', 'reboot_note',  "TEXT DEFAULT ''");
+  add('push_devices', 'default_dept', "TEXT DEFAULT ''");   // bộ phận gán cho NV phần mềm TỰ TẠO từ máy này (chuỗi cửa hàng: 1 máy = 1 cửa hàng)   // kết quả lần gần nhất (hiện ở giao diện)
   // Mẫu sinh trắc máy AI (định dạng riêng của hãng → bảng riêng, KHÔNG trộn với mẫu ZKTeco):
   // backupnum 0-9 vân tay · 20-27 khuôn mặt · 30-37 lòng bàn tay · 50 ảnh (base64)
   db.exec(`CREATE TABLE IF NOT EXISTS ai_templates (
