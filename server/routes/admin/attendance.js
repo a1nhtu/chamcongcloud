@@ -289,6 +289,11 @@ export function registerAttendanceRoutes(r, { need }) {
     const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
     const punchMap = new Map();
     for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : String(p.serial).startsWith('DT_') ? '📱' : '')); }   // ✎ = lượt thêm tay
+    // giờ (ISO) của các lượt THÊM TAY — để dấu * nằm đúng cạnh giờ vào / giờ ra được thêm tay, không mặc định cạnh giờ vào
+    // (mythuatlt 25/11/2026: thêm giờ ra 17:30 mà * hiện cạnh giờ vào 06:47 quẹt máy). Giờ ra sáng hôm sau nằm ở ngày khác → hỏi riêng.
+    const tayAt = vmap ? new Set() : new Set(punches.filter((p) => String(p.serial).startsWith('TAY_')).map((p) => p.punch_at));
+    const tayOne = db.prepare("SELECT 1 FROM device_punches WHERE employee_id=? AND punch_at=? AND serial LIKE 'TAY\\_%' ESCAPE '\\' LIMIT 1");
+    const isTay = (eid, iso) => !!iso && (tayAt.has(iso) || (!vmap && !!tayOne.get(eid, iso)));
 
     const marks = vmap ? new Set() : new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
     const rows = []; const seen = new Set();
@@ -310,6 +315,9 @@ export function registerAttendanceRoutes(r, { need }) {
         punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || ((a.check_in_photo || a.check_out_photo) ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean).map((t) => t + '📱') : [])),   // công ảo: chỉ giờ vào · ra ảo; 📱 = chấm bằng điện thoại
         late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
         cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: leaveOfRow(a, lv),
+        // dòng dựng từ lượt chấm (không sửa thẳng ô Vào / Ra): giờ nào là lượt thêm tay → * cạnh giờ đó
+        man_in: !a.manual && marks.has(key) && isTay(a.employee_id, a.check_in_at) ? 1 : 0,
+        man_out: !a.manual && marks.has(key) && isTay(a.employee_id, a.check_out_at) ? 1 : 0,
         status: a.check_out_at || a.day_status === 'mot_lan' ? (!a.check_in_at && a.day_status !== 'mot_lan' ? 'Thiếu vào' : a.late_min > 0 ? 'Đi muộn' : a.early_min > 0 ? 'Về sớm' : 'Đủ công') : (a.check_in_at ? 'Thiếu ra' : ''),
         att_id: a.id,
       });

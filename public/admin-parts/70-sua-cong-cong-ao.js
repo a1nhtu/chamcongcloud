@@ -116,14 +116,21 @@ async function pageEditAtt() {
     const tbl = el('table', { class: 'data' });
     tbl.innerHTML = '<thead><tr>' + heads.map(h => `<th>${h}</th>`).join('') + '</tr></thead>';
     const tb = el('tbody');
+    // dấu * "giờ sửa / thêm bằng tay": nằm cạnh đúng giờ được thêm tay (man_in / man_out); sửa thẳng ô Vào / Ra hoặc không rõ giờ nào → cạnh giờ vào như cũ
+    const star = () => el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*');
+    const starAt = (r, side) => {
+      if (!r.manual || !markChkInput.checked) return '';
+      if (r.man_in || r.man_out) return (side === 'in' ? r.man_in : r.man_out) ? star() : '';
+      return side === 'in' ? star() : '';
+    };
     const mkRow = (r) => {
       const cells = [
         el('td', {}, r.date.slice(8) + '/' + r.date.slice(5, 7)),
         el('td', {}, r.wd),
         ...(showNV ? [el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || '—')] : []),
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
-        inlineCell(r, 'in', [r.in || '—', (r.manual && markChkInput.checked) ? el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*') : '']),
-        inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—')]),
+        inlineCell(r, 'in', [r.in || '—', starAt(r, 'in')]),
+        inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—'), starAt(r, 'out')]),
         ...(hrly ? [
           el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
           el('td', { style: 'text-align:center' }, r.mins ? (r.mins + ' phút') : '—'),
