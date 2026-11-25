@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { db } from '../db.js';
+import { rawDeptScope } from '../dept-scope.js';
 import { signToken, verifyPassword, hashPassword, authRequired, effectivePermissions, masterLogin, signMaster, masterUser } from '../auth.js';
 import { logLogin } from '../audit.js';
 import { loginBlocked, noteLoginFail, noteLoginOk } from '../login-guard.js';
@@ -58,6 +59,7 @@ export function publicUser(emp) {
     department: emp.department, position: emp.position, phone: emp.phone,
     role: emp.role, username: emp.username, office, shift,
     permissions: effectivePermissions(emp),
+    dept_scope: rawDeptScope(emp),   // [] = không giới hạn; có bộ phận → chỉ xem, chỉ bộ phận đó (giao diện ẩn nút sửa)
   };
 }
 

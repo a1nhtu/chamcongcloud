@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { authRequired, roleRequired, permRequired, inspectorGuard } from '../auth.js';
 import { auditMiddleware } from '../audit.js';
+import { deptScopeGuard } from '../dept-scope.js';
 import { registerEmployeeRoutes } from './admin/employees.js';
 import { registerOrgRoutes } from './admin/org.js';
 import { registerSettingsRoutes } from './admin/settings.js';
@@ -32,6 +33,9 @@ r.use(authRequired, roleRequired('admin', 'manager'));
 r.use(inspectorGuard([/^\/settings$/, /^\/departments$/, /^\/positions$/, /^\/offices$/, /^\/shifts$/, /^\/schedules$/, /^\/inout-schedules$/,
   /^\/employees$/, /^\/shift-assignments$/, /^\/dept-shift-assignments$/, /^\/assignments$/, /^\/attendance\/grid$/, /^\/payroll$/,
   /^\/salary$/, /^\/holidays$/, /^\/perm-catalog$/]));
+// QUẢN LÝ BỘ PHẬN (dept_scope): chỉ xem, chỉ NV các bộ phận được tích — lọc ở server/dept-scope.js
+r.use(deptScopeGuard([/^\/settings$/, /^\/departments$/, /^\/positions$/, /^\/offices$/, /^\/shifts$/, /^\/schedules$/, /^\/inout-schedules$/,
+  /^\/employees$/, /^\/shift-assignments$/, /^\/dept-shift-assignments$/, /^\/assignments$/, /^\/attendance\/grid$/, /^\/abnormal(\.xlsx)?$/, /^\/holidays$/, /^\/perm-catalog$/]));
 r.use(auditMiddleware);   // ghi nhật ký mọi thao tác thay đổi (POST/PUT/DELETE) của admin/quản lý
 
 const adminOnly = roleRequired('admin');

@@ -8,10 +8,12 @@ import { vnDateStr } from '../util.js';
 import { otSelfOn, otLunchOn, normHm, hmSpan, OT_REQ_KIND } from '../ot-reg.js';
 import { resolveEffectiveShift } from '../shift-resolver.js';
 import { notifyPerm } from '../push.js';
+import { deptScopeGuard } from '../dept-scope.js';
 
 const r = Router();
 r.use(authRequired);
 r.use(inspectorGuard([]));   // tài khoản kiểm tra không gửi đơn
+r.use(deptScopeGuard([]));   // quản lý bộ phận: chỉ xem Tổng quan / Tính công / Báo cáo / NV bộ phận mình
 
 const ISO = /^\d{4}-\d{2}-\d{2}$/;
 const addDays = (d, n) => new Date(Date.parse(d + 'T12:00:00Z') + n * 86400000).toISOString().slice(0, 10);

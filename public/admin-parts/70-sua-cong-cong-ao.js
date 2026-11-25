@@ -61,7 +61,7 @@ async function pageEditAtt() {
   };
   const mkIso = (date, hm) => hm ? new Date(`${date}T${hm}:00+07:00`).toISOString() : null;
   const openEdit = (r) => attEditModal({ id: r.att_id, work_date: r.date, check_in_at: mkIso(r.date, r.in), check_out_at: mkIso(r.date, r.out), note: '' }, r.employee_id, load);
-  const canEdit = hasPerm('attendance_edit');
+  const canEdit = canWrite('attendance_edit');   // quản lý bộ phận: chỉ xem
   // SỬA NGAY TRÊN BẢNG: bấm ô Vào / Ra → gõ giờ (VD 0800) → Enter hoặc bấm ra ngoài = lưu, Esc = huỷ.
   // Dòng chưa có giờ (ngày chưa chấm / ngày nghỉ) gõ giờ vào là thêm mới cho đúng người, đúng ngày đó.
   const inlineCell = (r, field, content) => {
@@ -155,7 +155,7 @@ async function pageEditAtt() {
     wrap.innerHTML = '';
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
-      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Xem / sửa từng lượt quẹt: tab "🕘 Giờ nguồn". Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác.'),
+      el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, (isInspector() || isDeptScoped() ? '' : 'Bấm thẳng vào ô Vào / Ra để gõ giờ (VD 0800), Enter để lưu, Esc để huỷ. Xem / sửa từng lượt quẹt: tab "🕘 Giờ nguồn". Thêm giờ, thêm hàng loạt, xoá dữ liệu: menu "✏️ Thêm / sửa / xóa giờ chấm". ') + 'Ký hiệu Nghỉ: P = phép · R = nghỉ có lương · KL = không lương · CT = công tác · TS = thai sản · K = khác.'),
       floatHeadPanel(tbl, pager));
   };
   // Giữ trang đang xem khi tải lại sau khi sửa giờ; đổi phạm vi (ngày / phòng ban / NV / tab) thì về trang 1
@@ -262,7 +262,7 @@ async function pageEditAtt() {
     viewBar, deptCl.btn, empCl.btn,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'Từ'), fromI,
     el('span', { style: 'color:var(--muted);font-size:13px' }, 'đến'), toI, applyB,
-    allChk, isInspector() ? null : markChk, isInspector() ? null : recalcBtn, virtToggle(() => load()));
+    allChk, isInspector() ? null : markChk, isInspector() || isDeptScoped() ? null : recalcBtn, virtToggle(() => load()));
   bar.insertBefore(sortSel, allChk);
   setMain(head('Tính công'), bar, el('div', { style: 'height:10px' }), wrap);
   load();

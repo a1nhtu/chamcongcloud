@@ -143,10 +143,18 @@ const MANAGER_DEFAULT = ['reports', 'employees', 'shifts', 'assignments', 'shift
 export const INSPECTOR_PERMS = ['reports', 'employees', 'shifts', 'assignments', 'offices', 'departments', 'leaves', 'attendance_edit', 'salary', 'holidays'];
 export const isInspector = (u) => !!(u && !u.master && u.audit_only);
 
+// QUẢN LÝ BỘ PHẬN (dept_scope, xem server/dept-scope.js): quyền cố định, không theo ô "Cho phép dùng chức năng"
+export const DEPT_SCOPE_PERMS = ['reports', 'employees', 'attendance_edit'];   // attendance_edit chỉ để vào màn Tính công — mọi thao tác ghi bị deptScopeGuard chặn
+function isDeptScoped(emp) {
+  if (!emp || emp.master || emp.role !== 'manager' || !emp.dept_scope) return false;
+  try { const a = JSON.parse(emp.dept_scope); return Array.isArray(a) && a.some((x) => String(x || '').trim()); } catch { return false; }
+}
+
 export function effectivePermissions(emp) {
   if (!emp) return [];
   if (isInspector(emp)) return INSPECTOR_PERMS.slice();
   if (emp.master || emp.role === 'admin') return ALL_PERMS.slice();
+  if (isDeptScoped(emp)) return DEPT_SCOPE_PERMS.slice();   // quản lý bộ phận: chỉ xem Tổng quan, Tính công, Báo cáo, danh sách NV
   if (emp.permissions != null && emp.permissions !== '') {
     try { const p = JSON.parse(emp.permissions); if (Array.isArray(p)) return p.filter((k) => ALL_PERMS.includes(k)); } catch {}
   }

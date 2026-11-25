@@ -5,6 +5,7 @@ import { authRequired, permRequired, inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
 import { LEAVE_TYPES, leaveTypes, customLeaveTypes, leaveBalance, overQuotaMsg, leaveSettings, leaveHoursOn, HOURS_PER_DAY } from '../leave-quota.js';
 import { PRIV_KINDS } from '../privilege.js';
+import { deptScopeGuard } from '../dept-scope.js';
 const normHalf = (h, f, t) => (f === t && (h === 'sang' || h === 'chieu') ? h : '');
 // Số giờ nghỉ (công tắc leave_hours): chỉ đơn 1 ngày, 0,5 → 7,5 giờ, bước 0,5; không hợp lệ / công tắc tắt → 0 (nghỉ theo ngày như cũ)
 const normHours = (h, f, t) => { const n = parseFloat(h); return leaveHoursOn() && f === t && Number.isFinite(n) && n > 0 && n < HOURS_PER_DAY && Number.isInteger(n * 2) ? n : 0; };
@@ -12,6 +13,7 @@ const normHours = (h, f, t) => { const n = parseFloat(h); return leaveHoursOn() 
 const r = Router();
 r.use(authRequired);
 r.use(inspectorGuard([/^\/$/, /^\/types$/, /^\/balances$/, /^\/privileges$/]));   // tài khoản kiểm tra: chỉ xem
+r.use(deptScopeGuard([/^\/types$/, /^\/privileges$/]));   // quản lý bộ phận: chỉ xem Tổng quan / Tính công / Báo cáo / NV bộ phận mình
 
 // Nhân viên gửi đơn
 r.post('/', (req, res) => {

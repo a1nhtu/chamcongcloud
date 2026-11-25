@@ -639,6 +639,7 @@ function migrateColumns() {
   add('employees', 'leave_days_year', 'REAL');              // số ngày phép năm riêng (NULL = theo cài đặt chung)
   add('employees', 'pw_ver', 'INTEGER NOT NULL DEFAULT 0');   // tăng 1 mỗi lần đổi mật khẩu → phiên đăng nhập cấp trước đó hết hiệu lực (xem auth.js)
   add('employees', 'audit_only', 'INTEGER NOT NULL DEFAULT 0');   // 1/2/3 = TÀI KHOẢN KIỂM TRA: chỉ xem công ảo MỨC đó, không thấy công thật, không sửa gì
+  add('employees', 'dept_scope', 'TEXT');   // QUẢN LÝ BỘ PHẬN: JSON mảng tên bộ phận — chỉ xem, chỉ thấy NV các bộ phận đó (server/dept-scope.js)
   add('leave_requests', 'half',       "TEXT DEFAULT ''");   // '' cả ngày | 'sang' | 'chieu' (nửa ngày, chỉ khi từ ngày = đến ngày)
   add('leave_requests', 'hours',      'REAL DEFAULT 0');    // NGHỈ THEO GIỜ (công tắc leave_hours): số giờ nghỉ trong 1 ngày, 8 giờ = 1 ngày phép
   // CHẾ ĐỘ ƯU ĐÃI (thai sản, nuôi con nhỏ…): trong [from_date, to_date] NV được đến muộn / về sớm số phút này, không trừ công

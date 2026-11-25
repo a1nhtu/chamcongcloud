@@ -88,8 +88,8 @@ function empCompare({ key, dir }) {
   };
 }
 async function pageEmployees() {
-  const addBtn = hasPerm('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
-  const canEdit = hasPerm('employees');
+  const addBtn = canWrite('employees') ? el('button', { class: 'btn' }, '+ Thêm nhân viên') : null;
+  const canEdit = canWrite('employees');
   // Thanh nút GỌN: các việc Excel và máy chấm công gom vào 2 menu thả xuống
   const excelMenu = canEdit ? rowMenu([
     { label: '⬇ Xuất danh sách nhân viên', hint: 'Xuất bộ phận đang chọn bên trái (chọn "Tất cả nhân viên" = cả công ty) — cùng mẫu cột file nhập', fn: downloadEmpExport },
@@ -224,7 +224,7 @@ async function pageEmployees() {
           tb.append(el('tr', { class: 'grp' }, el('td', { colspan: NCOL }, (dk === NONE ? 'Chưa có bộ phận' : dk) + ' (' + n + ')')));
         }
         const delBtn = btnSm('🗑', () => delEmp(e), 'ghost'); delBtn.style.color = '#c0392b'; delBtn.title = 'Xóa nhân viên';
-        const actions = hasPerm('employees') ? el('div', { style: 'display:flex;gap:4px;justify-content:flex-end' },
+        const actions = canWrite('employees') ? el('div', { style: 'display:flex;gap:4px;justify-content:flex-end' },
           btnSm('Sửa', () => empModal(e)),
           e.active ? btnSm('Khoá', () => toggleEmp(e), 'ghost') : btnSm('Mở khoá', () => unlockEmp(e), 'ghost'),
           delBtn) : '';
@@ -243,7 +243,9 @@ async function pageEmployees() {
           el('td', {}, e.department || el('span', { class: 'muted' }, '—')),   // cột Bộ phận (Anh 11/11/2026)
           el('td', {}, e.position || '—'),
           el('td', {}, e.username),
-          el('td', {}, e.audit_only && !isInspector() ? el('span', { class: 'pill', style: 'background:#fef3c7;color:#92400e' }, '🔍 Kiểm tra · Ảo ' + (+e.audit_only || 1)) : roleLabel(e.role)),
+          el('td', {}, e.audit_only && !isInspector() ? el('span', { class: 'pill', style: 'background:#fef3c7;color:#92400e' }, '🔍 Kiểm tra · Ảo ' + (+e.audit_only || 1))
+            : e.role === 'manager' && e.dept_scope ? (() => { let a = []; try { a = JSON.parse(e.dept_scope) || []; } catch {} return el('span', { class: 'pill', title: 'Chỉ quản lý bộ phận: ' + a.join(', ') }, '👁 QL bộ phận · ' + (a.length === 1 ? a[0] : a.length + ' bộ phận')); })()
+            : roleLabel(e.role)),
           el('td', {}, e.active ? el('span', { class: 'pill ok' }, 'Hoạt động') : el('span', { class: 'pill bad' }, 'Khoá')),
           el('td', {}, actions),
         ));
@@ -549,12 +551,37 @@ function empModal(e) {
     updateToggle();
     permWrap.append(toggle, grid);
   };
+  // ----- CHỈ QUẢN LÝ BỘ PHẬN (server/dept-scope.js): tích → hiện danh sách bộ phận để tích; tài khoản chỉ XEM Tổng quan / Tính công /
+  // Báo cáo / danh sách NV của các bộ phận đó (gồm bộ phận con), không thêm / sửa / xoá gì. Chỉ Admin đặt được. -----
+  const scopeInit = (() => { try { const a = JSON.parse(e?.dept_scope || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } })();
+  const scopeChk = el('input', { type: 'checkbox', style: 'width:auto;margin:0', ...(scopeInit.length ? { checked: '' } : {}) });
+  const scopeList = el('div', { style: 'display:none;grid-template-columns:1fr 1fr;gap:6px 12px;margin-top:8px;padding:10px;border:1px solid var(--line,#eee);border-radius:10px;max-height:240px;overflow:auto' });
+  const scopeNames = [...new Set([...deptOrdered().map((d) => d.name), ...scopeInit])];
+  const scopeCbs = scopeNames.map((n) => {
+    const cb = el('input', { type: 'checkbox', value: n, style: 'width:auto;margin:0', ...(scopeInit.includes(n) ? { checked: '' } : {}) });
+    scopeList.append(el('label', { style: 'display:flex;align-items:center;gap:6px;font-weight:500;color:var(--ink)' }, cb, n));
+    return cb;
+  });
+  if (!scopeNames.length) scopeList.append(el('span', { class: 'map-hint' }, 'Chưa có bộ phận nào — khai ở Tổ chức › Bộ phận.'));
+  const scopeBox = el('div', { style: 'margin-top:8px;padding:10px;border:1px dashed var(--brand,#E8541E);border-radius:10px' },
+    el('label', { style: 'display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);margin:0' }, scopeChk, 'Chỉ quản lý bộ phận'),
+    el('div', { class: 'map-hint', style: 'margin-top:2px' }, 'Tích để chọn bộ phận: tài khoản này chỉ XEM Tổng quan, Tính công, Báo cáo / Xuất Excel và danh sách nhân viên của các bộ phận được chọn (gồm bộ phận con); không thêm / sửa / xoá giờ chấm hay dữ liệu nào.'),
+    scopeList);
+  const syncScope = () => {
+    scopeBox.style.display = isAdmin() && roleSel.value === 'manager' ? '' : 'none';
+    scopeList.style.display = scopeChk.checked ? 'grid' : 'none';
+    // quản lý bộ phận có quyền cố định (Báo cáo + Nhân viên, chỉ xem) → ẩn ô "Cho phép dùng chức năng" cho khỏi nhầm
+    permWrap.style.display = roleSel.value === 'manager' && scopeChk.checked && scopeBox.style.display !== 'none' ? 'none' : '';
+  };
+  scopeChk.onchange = syncScope;
   roleSel.addEventListener('change', () => {
     // Đổi vai trò → gợi ý bộ quyền mặc định của vai trò đó
     permState = new Set(roleSel.value === 'manager' ? MANAGER_DEFAULT : (roleSel.value === 'admin' ? [] : []));
     renderPerms(roleSel.value);
+    syncScope();
   });
   renderPerms(e?.role || 'employee');
+  syncScope();
 
   // Số ID máy chấm công: chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
   const pinLocked = !!(e && (e.device_pin || '').trim());
@@ -625,7 +652,7 @@ function empModal(e) {
     return `${u} · ${ROLE_TXT[roleSel.value] || ''} · ${pw}`;
   }, [
     el('div', { class: 'two-col' }, field('Tài khoản', userI), field(e ? 'Mật khẩu mới' : 'Mật khẩu', pwI)),
-    field('Vai trò', roleSel), permWrap,
+    field('Vai trò', roleSel), permWrap, scopeBox,
   ]);
   const advSec = formSection('⚙️ Nâng cao', () => {
     const parts = [attSel.value ? '⚠ chấm ' + (ATT_MODE_LABEL[attSel.value] || attSel.value).toLowerCase() : 'Chấm công theo cài đặt chung'];
@@ -676,6 +703,11 @@ function empModal(e) {
       audit_only: auditSel ? +auditSel.value : undefined,
     };
     if (body.audit_only && body.role === 'admin') body.role = 'manager';   // tài khoản kiểm tra luôn là Quản lý
+    if (isAdmin()) {
+      const picked = body.role === 'manager' && scopeChk.checked ? scopeCbs.filter((c) => c.checked).map((c) => c.value) : [];
+      if (body.role === 'manager' && scopeChk.checked && !picked.length) { accSec.setOpen(true); toast('Chọn ít nhất 1 bộ phận được quản lý, hoặc bỏ tích "Chỉ quản lý bộ phận"', 'err'); return; }
+      body.dept_scope = picked;
+    }
     // Số ID chỉ gửi khi CHƯA khóa (tạo mới, hoặc NV cũ chưa có ID); backend cũng chặn đổi ID đã có
     if (!pinLocked) body.device_pin = f.device_pin.value.trim();
     // Không gửi shift_id/work_schedule_id/office_ids → giữ nguyên phân ca & định vị đã gán ở màn riêng

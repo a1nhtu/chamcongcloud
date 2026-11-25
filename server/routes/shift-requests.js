@@ -6,10 +6,12 @@ import { authRequired, permRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { nowIso } from '../util.js';
 import { recomputeAttendance } from './admin/attendance.js';
+import { deptScopeGuard } from '../dept-scope.js';
 
 const r = Router();
 r.use(authRequired);
 r.use(inspectorGuard([]));   // tài khoản kiểm tra không dùng app chấm công / chọn ca
+r.use(deptScopeGuard([]));   // quản lý bộ phận: chỉ xem Tổng quan / Tính công / Báo cáo / NV bộ phận mình
 
 const enabled = () => getSetting('self_shift_enabled', '0') === '1';
 const needApprove = () => getSetting('self_shift_approve', '1') === '1';

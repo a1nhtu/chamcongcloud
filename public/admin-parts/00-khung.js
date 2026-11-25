@@ -85,6 +85,9 @@ function navFoldSync() {
 const isMaster = () => ME?.role === 'master';                 // tài khoản tổng (Anh)
 const isAdmin = () => ME?.role === 'admin' || isMaster();     // master có mọi quyền admin
 const hasPerm = (key) => isAdmin() || (ME?.permissions || []).includes(key);
+// QUẢN LÝ BỘ PHẬN (dept_scope): chỉ xem Tổng quan / Tính công / Báo cáo / NV của bộ phận mình — ẩn nút thêm / sửa / xoá (máy chủ cũng chặn)
+const isDeptScoped = () => !isAdmin() && !!(ME?.dept_scope && ME.dept_scope.length);
+const canWrite = (key) => hasPerm(key) && !isDeptScoped();
 const hourlyMode = () => (SETTINGS.any_shift != null ? !SETTINGS.any_shift : SETTINGS.attendance_mode === 'hourly');
 // Công ty có CẢ nhân viên chấm theo ca lẫn theo giờ
 const mixedMode = () => !!(SETTINGS.any_shift && SETTINGS.any_hourly);
@@ -178,7 +181,10 @@ async function afterLogin() {
   }
   // tài khoản kiểm tra: chỉ các màn XEM (không Sửa giờ chấm công, Máy chấm công, Nhật ký, Cài đặt…)
   const INSPECTOR_NAV = ['dashboard', 'employees', 'org', 'positions', 'shifts', 'assignments', 'editatt', 'offices', 'leaves', 'salary', 'report'];
+  // quản lý bộ phận (dept_scope): chỉ XEM Tổng quan, Nhân viên, Tính công, Chấm công bất thường, Báo cáo của bộ phận mình
+  const DEPT_NAV = ['dashboard', 'employees', 'editatt', 'abnormal', 'report'];
   const visible = NAV.filter(([key, , , perm]) => (perm == null || hasPerm(perm)) && (!isInspector() || INSPECTOR_NAV.includes(key))
+    && (!isDeptScoped() || DEPT_NAV.includes(key))
     && !(hourlyMode() && (key === 'shifts' || key === 'assignments' || key === 'shiftreq' || key === 'otreg' || key === 'swap' || key === 'abnormal'))
     && !(key === 'devices' && !deviceEnabled())
     && !(key === 'devreq' && !deviceLockEnabled())

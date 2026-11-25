@@ -8,6 +8,7 @@ import {
   myMealPlan, setMyOrder, setMySignup, kitchenScope, kitchenFeed, empKitchenId, listKitchens,
 } from '../meal.js';
 import { vnNow, addDaysIso, isIsoDate } from '../meal-rules.js';
+import { deptScopeGuard } from '../dept-scope.js';
 
 const r = Router();
 // Chặn dò mã màn hình bếp: mỗi IP sai quá 10 lần trong 5 phút thì bị từ chối (429) tới hết 5 phút
@@ -37,6 +38,7 @@ r.get('/kitchen/feed', mealGate, wrap('GET /meal/kitchen/feed', (req, res) => {
 }));
 
 r.use(authRequired);
+r.use(deptScopeGuard([]));   // quản lý bộ phận: chỉ xem Tổng quan / Tính công / Báo cáo / NV bộ phận mình
 // App hỏi xem phân hệ có bật không (tắt → ẩn tab Suất ăn). self_order TẮT → tab chỉ hiện cho trưởng bộ phận (head).
 // dish_choice TẮT = chế độ chỉ đăng ký ăn (tab đổi tên "Đăng ký ăn"); dept_head TẮT = không ai là trưởng bộ phận nhập số.
 r.get('/config', (req, res) => {

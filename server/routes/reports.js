@@ -18,10 +18,12 @@ import { currentTenant } from '../tenant.js';
 import { dataGen } from '../heavy.js';
 import { otherPunches, rawPunchDays, virtPunchDays } from '../lan-cham-khac.js';
 import { handMarker } from '../hand-mark.js';
+import { deptScopeGuard, scopeEmpSql } from '../dept-scope.js';
 
 const r = Router();
 r.use(authRequired, permRequired('reports'));
 r.use(inspectorGuard([/^\/(dashboard|attendance|departments|data|progress|export\.xlsx|custom)$/]));   // tài khoản kiểm tra: chỉ xem, ép công ảo
+r.use(deptScopeGuard([/^\/(dashboard|attendance|departments|data|progress|export\.xlsx|custom)$/]));   // quản lý bộ phận: chỉ NV bộ phận mình
 
 /* ================= Helpers ================= */
 function isoToVnHM(iso) {
@@ -1875,17 +1877,19 @@ async function exportDaytimeXlsx(res, from, to, filter, company, address) {
 r.get('/dashboard', (req, res) => {
   const q = String(req.query.date || '').slice(0, 10);
   const today = /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : vnDateStr();  // xem lại ngày bất kỳ
-  const totalEmp = db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1" + adminAttWhere()).get().c;
+  // quản lý bộ phận: mọi con số chỉ đếm NV các bộ phận được quản lý ('' = cả công ty)
+  const sE = scopeEmpSql(req, 'id'), sA = scopeEmpSql(req, 'employee_id'), sJ = scopeEmpSql(req, 'a.employee_id');
+  const totalEmp = db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1" + adminAttWhere() + sE.where).get(...sE.args).c;
   // Đếm SỐ NGƯỜI distinct đã chấm (1 NV chấm nhiều phiên/ngày vẫn tính 1), cùng bộ lọc vai trò với totalEmp
   const checkedIn = db.prepare(
     "SELECT COUNT(DISTINCT a.employee_id) c FROM attendance a JOIN employees e ON e.id = a.employee_id" +
-    " WHERE a.work_date = ? AND (a.check_in_at IS NOT NULL OR a.check_out_at IS NOT NULL) AND e.active = 1" + adminAttWhere('e.role')
-  ).get(today).c;
-  const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0').get(today).c;
+    " WHERE a.work_date = ? AND (a.check_in_at IS NOT NULL OR a.check_out_at IS NOT NULL) AND e.active = 1" + adminAttWhere('e.role') + sJ.where
+  ).get(today, ...sJ.args).c;
+  const late = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND late_min > 0' + sA.where).get(today, ...sA.args).c;
   // Chấm ngoài VP: giờ VÀO hoặc giờ RA nằm ngoài định vị (lượt ra bản cũ chưa có cờ → tính bù trước khi đếm)
   fillCheckoutGeo(today);
-  const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND (check_in_outside = 1 OR check_out_outside = 1)').get(today).c;
-  const pendingLeaves = db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'").get().c;
+  const outside = db.prepare('SELECT COUNT(*) c FROM attendance WHERE work_date = ? AND (check_in_outside = 1 OR check_out_outside = 1)' + sA.where).get(today, ...sA.args).c;
+  const pendingLeaves = db.prepare("SELECT COUNT(*) c FROM leave_requests WHERE status = 'pending'" + sA.where).get(...sA.args).c;
   // includeAdmin: popup "Chưa chấm" phải dùng CÙNG bộ lọc vai trò với totalEmp (bật "Tính công cho cả Admin" thì kể cả admin)
   res.json({ today, totalEmp, checkedIn, notYet: Math.max(0, totalEmp - checkedIn), late, outside, pendingLeaves, includeAdmin: getSetting('payroll_include_admin', '0') === '1' });
 });

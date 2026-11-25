@@ -63,6 +63,14 @@ function saveLeaveFields(id, b) {
 
 // Đánh dấu / bỏ TÀI KHOẢN KIỂM TRA (chỉ xem công ảo). Chỉ admin / tài khoản tổng làm được.
 // Đánh dấu thì vai trò thành "Quản lý" (để vào được trang quản lý), quyền thực tế bị giới hạn ở INSPECTOR_PERMS.
+// "CHỈ QUẢN LÝ BỘ PHẬN" (server/dept-scope.js): dept_scope = mảng tên bộ phận ([] / null = bỏ giới hạn). Chỉ admin / tài khoản tổng đặt.
+// Có bộ phận thì vai trò thành "Quản lý" (vào được trang quản lý); tài khoản chỉ xem, chỉ thấy NV các bộ phận đó.
+function saveDeptScope(caller, id, b) {
+  if (b.dept_scope === undefined || !(caller.master || caller.role === 'admin')) return;
+  const list = Array.isArray(b.dept_scope) ? [...new Set(b.dept_scope.map((s) => String(s || '').trim()).filter(Boolean))] : [];
+  db.prepare('UPDATE employees SET dept_scope = ? WHERE id = ?').run(list.length ? JSON.stringify(list) : null, id);
+  if (list.length) db.prepare("UPDATE employees SET role = 'manager' WHERE id = ? AND role <> 'manager'").run(id);
+}
 function saveAuditOnly(caller, id, b) {
   if (b.audit_only === undefined || !(caller.master || caller.role === 'admin') || isInspector(caller)) return;
   const on = [1, 2, 3].includes(+b.audit_only) ? +b.audit_only : b.audit_only ? 1 : 0;   // 1/2/3 = chỉ xem công ảo mức đó
@@ -99,7 +107,7 @@ export function registerEmployeeRoutes(r, { need }) {
   r.get('/employees', (req, res) => {
     const rows = db.prepare(`
       SELECT e.id,e.code,e.full_name,e.department,e.position,e.phone,e.role,e.username,
-             e.active,e.office_id,e.shift_id,e.work_schedule_id,e.permissions,e.device_pin,e.from_device,e.audit_only,
+             e.active,e.office_id,e.shift_id,e.work_schedule_id,e.permissions,e.device_pin,e.from_device,e.audit_only,e.dept_scope,
              e.device_id,e.pending_device,e.device_label,e.att_mode,
              o.name AS office_name, s.name AS shift_name, ws.name AS schedule_name
       FROM employees e
@@ -169,6 +177,7 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), info.lastInsertRowid);
       saveLeaveFields(info.lastInsertRowid, b);
       saveAuditOnly(req.user, info.lastInsertRowid, b);
+      saveDeptScope(req.user, info.lastInsertRowid, b);
       const relinked = relinkSafe(info.lastInsertRowid, b.device_pin);
       pushNameSafe(b.device_pin, true);
       res.json({ ok: true, id: info.lastInsertRowid, relinked });
@@ -435,6 +444,7 @@ export function registerEmployeeRoutes(r, { need }) {
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
       saveLeaveFields(emp.id, b);
       saveAuditOnly(req.user, emp.id, b);
+      saveDeptScope(req.user, emp.id, b);
       if (b.full_name != null || b.device_pin !== undefined) pushNameSafe(db.prepare('SELECT device_pin FROM employees WHERE id=?').get(emp.id)?.device_pin, pinNew);
       res.json({ ok: true, relinked });
     } catch (e) {
