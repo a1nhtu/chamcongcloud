@@ -70,6 +70,14 @@ export function upsertEmployeeFromDevice(pin, name, force = false, code = '', op
       relinkQuiet(byReal.id, pin);
       return byReal.id;
     }
+    // Mã thật trùng NV ĐÃ KHOÁ (nghỉ việc) mà người đó vẫn còn trên máy → gán Số ID cho chính NV đó, KHÔNG tạo NV nháp "mã_1"
+    // (Hualida 26/11/2026: tải NV máy Hik đầu tiên ra 232 NV nháp TBxxxxxx_1 trùng người đã nghỉ). NV vẫn khoá; người đó quẹt lại
+    // thì lượt quẹt hiện "chưa khớp" ở máy → nhân sự mở khoá NV nếu họ đi làm lại.
+    const byLocked = db.prepare('SELECT id, device_pin FROM employees WHERE code=? AND active=0').get(code);
+    if (byLocked) {
+      if (!byLocked.device_pin) db.prepare('UPDATE employees SET device_pin=? WHERE id=?').run(pin, byLocked.id);
+      return byLocked.id;
+    }
   }
 
   // NV cũ trùng mã (code) nhưng chưa gán Số ID → gán liên kết
