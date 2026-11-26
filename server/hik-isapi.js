@@ -548,6 +548,8 @@ export const HIK_AUTO_CHOICES = [0, 5, 10, 15, 30, 60, 120, 240];
 // Lần ĐẦU tự tải 1 máy (chưa tải lượt chấm bao giờ): chỉ lấy từ ngày này (trống = toàn bộ lịch sử trên máy).
 // Máy lâu năm có hàng trăm nghìn sự kiện → đọc hết mất hàng giờ; khách chỉ cần từ đầu kỳ công.
 export const hikFirstFrom = () => { const v = String(getSetting('hik_first_from', '') || '').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ''; };
+// Số máy Hikvision tự tải CÙNG LÚC (cài đặt hik_parallel, mặc định 4, tối đa 8). 1 = tuần tự như trước.
+export const hikParallel = () => Math.min(8, Math.max(1, parseInt(getSetting('hik_parallel', '4'), 10) || 4));
 export const hikAutoMinutes = () => { const n = parseInt(getSetting('hik_auto_min', '0'), 10) || 0; return n > 0 ? Math.max(1, n) : 0; };
 const autoBusy = busyFlag();
 async function autoOne(d, prog = () => {}, flags = {}) {
@@ -583,13 +585,24 @@ export async function hikAutoCycle(force = false, prog = () => {}) {
   if (!autoBusy.take()) return null;
   try {
     const every = hikAutoMinutes() * 60000, out = [], groups = new Set();
-    for (const d of db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND active=1 AND tcp_auto=1 ORDER BY id").all()) {
-      if (!force && d.tcp_auto_at && Date.now() - Date.parse(d.tcp_auto_at) < every - 5000) continue;
-      if (!hikEnabled()) break;
-      const flags = {};
-      out.push({ device: d.name || d.serial, msg: await autoOne(d, prog, flags) });
-      if (flags.users && d.sync_group) groups.add(d.sync_group);   // số người trên máy đổi (vừa đăng ký / xoá) → đồng bộ nhóm
-    }
+    const due = db.prepare("SELECT * FROM push_devices WHERE conn_type='hik' AND active=1 AND tcp_auto=1 ORDER BY id").all()
+      .filter((d) => force || !d.tcp_auto_at || Date.now() - Date.parse(d.tcp_auto_at) >= every - 5000);
+    // TẢI SONG SONG tối đa HIK_PARALLEL máy (mỗi máy vẫn chỉ 1 việc 1 lúc). Hualida 26/11: 15 máy × ~48.000 sự kiện, 1 máy ~30 phút
+    // → tuần tự mất ~7 giờ. Tiến độ: mỗi máy đang tải 1 đoạn, ghép lại "CC1: … · CC2: …".
+    const st = new Map(), res = new Array(due.length);
+    const progOf = (name) => (m) => { st.set(name, String(m).startsWith(name + ': ') ? String(m).slice(name.length + 2) : String(m)); prog([...st].map(([k, v]) => `${k}: ${v}`).join(' · ')); };
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= due.length || !hikEnabled()) return;
+        const d = due[i], name = d.name || d.serial, flags = {};
+        try { res[i] = { device: name, msg: await autoOne(d, progOf(name), flags) }; } finally { st.delete(name); }
+        if (flags.users && d.sync_group) groups.add(d.sync_group);   // số người trên máy đổi (vừa đăng ký / xoá) → đồng bộ nhóm
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(hikParallel(), due.length) }, worker));
+    out.push(...res.filter(Boolean));
     if (groups.size && hikEnabled()) {
       const { hikSyncGroup, hikGroupDevices } = await import('./hik-sync.js');
       for (const g of groups) {

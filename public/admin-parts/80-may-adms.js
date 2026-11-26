@@ -438,7 +438,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
     return el('div', { class: 'panel', style: 'padding:10px 14px;margin-bottom:10px;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap' },
       el('b', {}, '⏱ Tự động tải ' + label), sel, firstFrom, runAll,
       el('span', { class: 'map-hint', style: 'margin:0;flex:1;min-width:260px' }, minutes
-        ? (kind === 'hik' ? 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về. Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
+        ? (kind === 'hik' ? 'Đến giờ phần mềm tự hỏi từng máy (tải cùng lúc tối đa 4 máy); máy có lượt chấm mới mới tải về. Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
           : 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về (lúc tải máy tạm khoá vài giây). Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.')
         : 'Đang tắt: dữ liệu chỉ về khi bấm "⬇ Tải chấm công". Chọn chu kỳ để phần mềm tự tải.'));
   };
