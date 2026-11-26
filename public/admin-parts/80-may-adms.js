@@ -413,6 +413,8 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
   if (tcpBtn) tcpBtn.onclick = () => tcpAddModal(null);
   const hikBtn = d.hik_enabled ? el('button', { class: 'btn' }, '＋ Thêm máy Hikvision') : null;
   if (hikBtn) hikBtn.onclick = () => hikAddModal(null);
+  const hikBulkBtn = d.hik_enabled ? el('button', { class: 'btn', title: 'Dán danh sách tên + IP, nhập mật khẩu chung 1 lần' }, '＋ Thêm nhiều máy Hikvision') : null;
+  if (hikBulkBtn) hikBulkBtn.onclick = () => hikBulkModal(d.key_required);
   const lanBtn = d.lan_scan ? el('button', { class: 'btn', title: 'Dò máy chấm công trong mạng LAN và tự trỏ Cloud Server về tên miền phần mềm này' }, '🔍 Tìm máy trong LAN') : null;
   if (lanBtn) lanBtn.onclick = lanScanModal;
   // Thanh TỰ ĐỘNG TẢI máy TCP/IP (kind 'tcp') / Hikvision (kind 'hik'): chọn chu kỳ (lưu ngay) + nút tải ngay tất cả
@@ -443,7 +445,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
   foldPanel(guide, 'dev_guide', '🔧 Cách kết nối máy chấm công', () => d.multi
     ? '— Tên miền ' + (domain || '(chưa có)') + ' · Port 443 (máy không có HTTPS: 80)'
     : '— IP ' + ipVal.textContent + ' · Port ' + portVal.textContent + (domain ? ' · ' + domain : ''), true);
-  setMain(head('Máy chấm công', lanBtn, tcpBtn, hikBtn, usbBtn, legacyBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Máy chấm công', lanBtn, tcpBtn, hikBtn, hikBulkBtn, usbBtn, legacyBtn, resyncBtn, d.rows.length ? delAllBtn : null), pinConflictBar(d.pin_conflicts, pageDevices), togglePanel, guide, autoBar, hikAutoBar, el('div', { class: 'panel tbl-scroll' }, tbl));
 }
 
 // Thanh vàng "Số ID nghi trùng" (null nếu không có)

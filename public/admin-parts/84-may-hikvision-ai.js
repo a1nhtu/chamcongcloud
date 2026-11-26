@@ -97,6 +97,71 @@ function hikAddModal(m, pre = {}) {
   setTimeout(() => (m ? ipI : nameI).focus(), 50);
 }
 
+// Đọc danh sách dán vào ô "Thêm nhiều máy": mỗi dòng 1 máy = tên + IP (+ :cổng), thứ tự / dấu ngăn tuỳ ý
+// VD "Máy CC1 - May V1   10.30.21.80" · "10.30.21.80:8080; Máy CC1" · dòng dán từ Excel (Tab). Dòng không có IP bỏ qua.
+function hikBulkParse(text) {
+  const out = [];
+  for (const raw of String(text || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const mt = line.match(/(?:^|[^\d.])((?:\d{1,3}\.){3}\d{1,3})(?::(\d{1,5}))?(?![\d.])/);
+    if (!mt) { out.push({ line, error: 'Không thấy địa chỉ IP' }); continue; }
+    const name = line.replace(mt[0], mt[0].startsWith(mt[1]) ? ' ' : mt[0][0] + ' ').replace(/[\t;|,]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/^[-–:]\s*|\s*[-–:]$/g, '');
+    out.push({ line, name, ip: mt[1], port: mt[2] ? parseInt(mt[2], 10) : 80 });
+  }
+  return out;
+}
+// Thêm NHIỀU máy Hikvision 1 lần (VD nhà máy 15 cửa): dán danh sách tên + IP, nhập tài khoản / mật khẩu chung 1 lần.
+// Mỗi máy vẫn đi đúng đường thêm 1 máy (POST /admin/devices/hik: đăng nhập thử, đọc Serial) rồi tuỳ chọn duyệt luôn.
+function hikBulkModal(keyRequired) {
+  const listT = el('textarea', { rows: 9, style: 'font-family:monospace;width:100%', placeholder: 'Máy CC1 - May V1\t10.30.21.80\nMáy CC2 - May V1\t10.30.21.81\n…' });
+  const userI = el('input', { value: 'admin', style: 'width:140px' });
+  const passI = el('input', { type: 'password', placeholder: 'Mật khẩu chung của các máy', style: 'width:220px', autocomplete: 'new-password' });
+  const apprChk = el('input', { type: 'checkbox', style: 'width:auto', ...(keyRequired ? {} : { checked: '' }) });
+  const out = el('div', { style: 'margin-top:10px' });
+  const go = el('button', { class: 'btn' }, '🔌 Kết nối & thêm các máy');
+  let done = false;
+  go.onclick = async () => {
+    if (done) { closeModal(); return pageDevices(); }
+    const rows = hikBulkParse(listT.value);
+    if (!rows.some((x) => x.ip)) return toast('Dán danh sách máy: mỗi dòng tên máy + địa chỉ IP', 'err');
+    if (!passI.value) return toast('Nhập mật khẩu đăng nhập máy', 'err');
+    go.disabled = true; listT.disabled = true; passI.disabled = true;
+    const tb = el('tbody');
+    out.innerHTML = '';
+    out.append(el('table', { class: 'tbl', style: 'font-size:13px' }, el('thead', {}, el('tr', {}, el('th', {}, 'Máy'), el('th', {}, 'IP'), el('th', {}, 'Kết quả'))), tb));
+    let ok = 0, bad = 0;
+    for (const x of rows) {
+      const res = el('td', {}, x.error ? '' : '⏳ Đang kết nối…');
+      tb.append(el('tr', {}, el('td', {}, x.name || (x.error ? x.line : '')), el('td', { style: 'font-family:monospace' }, x.ip ? x.ip + (x.port !== 80 ? ':' + x.port : '') : ''), res));
+      if (x.error) { res.append(el('span', { class: 'dv-warn' }, '⚠️ ' + x.error)); bad++; continue; }
+      go.textContent = `Đang thêm ${ok + bad + 1}/${rows.length}…`;
+      try {
+        const r = await api('/admin/devices/hik', { method: 'POST', body: { ip: x.ip, port: x.port, user: userI.value.trim(), pass: passI.value, name: x.name } });
+        let msg = `✅ ${r.existed ? 'Đã có, cập nhật kết nối' : 'Đã thêm'} · Serial ${r.serial}` + (r.info?.users != null ? ` · ${r.info.users} người trên máy` : '');
+        if (!r.active && apprChk.checked) {
+          try { await api('/admin/devices/' + r.id, { method: 'PUT', body: { active: true } }); msg += ' · đã duyệt'; }
+          catch (e) { msg += ' · chưa duyệt: ' + e.message; }
+        } else if (!r.active) msg += ' · chờ duyệt';
+        res.textContent = msg; ok++;
+      } catch (e) { res.textContent = ''; res.append(el('span', { class: 'dv-warn' }, '❌ ' + e.message)); bad++; }
+    }
+    toast(`Xong: ${ok} máy thêm được` + (bad ? `, ${bad} dòng lỗi — sửa lại rồi dán riêng các dòng đó` : ''), bad ? 'err' : 'ok');
+    done = true; go.disabled = false; go.textContent = 'Đóng';
+  };
+  openModal('Thêm nhiều máy Hikvision', [
+    el('div', { class: 'map-hint' }, 'Mỗi dòng 1 máy: tên máy và địa chỉ IP (cổng khác 80 thì ghi IP:cổng). Dán thẳng 2 cột từ Excel cũng được. Các máy dùng chung 1 tài khoản / mật khẩu (máy nào khác mật khẩu thì thêm riêng bằng nút "＋ Thêm máy Hikvision").'),
+    el('label', { style: 'margin-top:10px' }, 'Danh sách máy'), listT,
+    el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;margin-top:10px' },
+      el('div', {}, el('label', {}, 'Tài khoản'), userI),
+      el('div', {}, el('label', {}, 'Mật khẩu'), passI)),
+    el('label', { style: 'display:flex;gap:6px;align-items:center;margin-top:10px;font-weight:normal' }, apprChk, 'Duyệt luôn các máy thêm được' + (keyRequired ? ' (máy cần KEY bản quyền thì vẫn phải dán key)' : '')),
+    el('div', { class: 'map-hint', style: 'margin-top:8px' }, '⚠️ Sai mật khẩu nhiều lần, máy Hikvision tạm khoá đăng nhập khoảng 30 phút — thấy máy đầu tiên báo sai mật khẩu thì dừng lại kiểm tra.'),
+    out,
+  ], [el('button', { class: 'btn ghost', onclick: () => { closeModal(); if (done) pageDevices(); } }, 'Huỷ'), go]);
+  setTimeout(() => listT.focus(), 50);
+}
+
 /* ---------- MÁY AI (tự nối về qua WebSocket): thao tác = gửi lệnh, máy làm khi đang kết nối ---------- */
 async function aiCall(m, action, body, confirmMsg) {
   if (confirmMsg && !confirm(confirmMsg)) return;
