@@ -425,8 +425,18 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       catch (e) { toast(e.message, 'err'); sel.value = minutes; }
     };
     const runAll = btnSm('⬇ Tải ngay tất cả máy', () => tcpAutoRun(kind), 'ghost');
+    // Hikvision: lần đầu tải 1 máy chỉ lấy lượt chấm từ ngày này (máy lâu năm đọc hết lịch sử mất hàng giờ)
+    let firstFrom = null;
+    if (kind === 'hik') {
+      const fi = el('input', { type: 'date', value: d.hik_first_from || '', style: 'width:auto;margin:0', title: 'Máy mới duyệt, lần đầu tự tải chỉ lấy lượt chấm từ ngày này. Để trống = tải toàn bộ lịch sử trên máy.' });
+      fi.onchange = async () => {
+        try { await api('/admin/hik-devices/first-from', { method: 'PUT', body: { date: fi.value } }); toast(fi.value ? 'Lần đầu tải máy mới: chỉ lấy lượt chấm từ ngày đã chọn' : 'Lần đầu tải máy mới: lấy toàn bộ lịch sử trên máy', 'ok'); d.hik_first_from = fi.value; }
+        catch (e) { toast(e.message, 'err'); fi.value = d.hik_first_from || ''; }
+      };
+      firstFrom = el('label', { style: 'display:flex;gap:6px;align-items:center;margin:0;font-weight:400' }, 'Lần đầu tải từ ngày', fi);
+    }
     return el('div', { class: 'panel', style: 'padding:10px 14px;margin-bottom:10px;display:flex;gap:10px 14px;align-items:center;flex-wrap:wrap' },
-      el('b', {}, '⏱ Tự động tải ' + label), sel, runAll,
+      el('b', {}, '⏱ Tự động tải ' + label), sel, firstFrom, runAll,
       el('span', { class: 'map-hint', style: 'margin:0;flex:1;min-width:260px' }, minutes
         ? (kind === 'hik' ? 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về. Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.'
           : 'Đến giờ phần mềm tự hỏi từng máy; máy có lượt chấm mới mới tải về (lúc tải máy tạm khoá vài giây). Máy tắt / mất mạng thì lượt sau thử lại. Phần mềm phải đang chạy.')

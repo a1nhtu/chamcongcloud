@@ -19,7 +19,7 @@ import { listConflicts, countConflicts, resolveSame, resolveOther, retryMove, dr
 import { aiEnabled, aiAction, aiDeleteUsers, aiFillDevice, AI_ACTIONS, isFp, isFace } from '../../ai-device.js';
 import { aiOnline, aiPoke, aiKick } from '../../ai-ws.js';
 import { HIK_MAX_PIN, hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPushUsers, hikDeleteUsers, hikRestart, hikOpenDoor, hikSetTime,
-  hikAutoMinutes, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush, hikKnock } from '../../hik-isapi.js';
+  hikAutoMinutes, hikFirstFrom, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush, hikKnock } from '../../hik-isapi.js';
 import { hikSyncGroup } from '../../hik-sync.js';
 import { unionEnabled, unionPort, unionStatus, unionOnline, unionInfo, unionUsers, unionLogs, unionSimple, unionDeleteUsers, unionClearUsers, syncUnion } from '../../union.js';
 
@@ -119,7 +119,7 @@ export function registerDeviceRoutes(r, { need }) {
       if (d.conn_type === 'union') d.online = unionOnline(d.serial);   // máy Union: đang giữ kết nối về cổng nhận máy
     }
     res.json({ rows, tcp_auto_min: autoMinutes(), tcp_auto_choices: AUTO_CHOICES, tcp_enabled: tcpEnabled(), tcp_supported: process.platform === 'win32', lan_scan: !lanScanBlocked(), multi: MULTI,
-      ai_enabled: aiEnabled(), union_enabled: unionEnabled(), union_port: unionPort(), union_status: unionStatus(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: MULTI ? [] : lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
+      ai_enabled: aiEnabled(), union_enabled: unionEnabled(), union_port: unionPort(), union_status: unionStatus(), hik_enabled: hikEnabled(), hik_auto_min: hikAutoMinutes(), hik_auto_choices: HIK_AUTO_CHOICES, hik_first_from: hikFirstFrom(), enabled: getSetting('device_enabled', '0') === '1', autocreate: getSetting('device_autocreate', '1') === '1', key_required: getSetting('device_key_required', '0') === '1', pin_guard: guardOn(), auto_push: autoPushOn(), name_ascii: getSetting('device_name_ascii', '1') === '1', pin_conflicts: countConflicts(), server_ips: MULTI ? [] : lanIPs(), port: Number(process.env.PORT || 8080), domain: tunnelDomain() });
   });
   // Công tắc VẬN HÀNH máy chấm công — admin có quyền "Máy chấm công" tự bật/tắt được (kể cả máy TCP/IP, máy Union).
   // (Dùng máy chấm công / Bắt buộc key / máy AI / Hikvision vẫn CHỈ tài khoản tổng — đổi ở PUT /settings.)
@@ -912,6 +912,13 @@ export function registerDeviceRoutes(r, { need }) {
     setSetting('hik_auto_min', String(n));
     res.json({ ok: true, minutes: n });
   });
+  // Lần đầu tự tải chỉ lấy lượt chấm từ ngày này (trống = toàn bộ lịch sử trên máy)
+  r.put('/hik-devices/first-from', need('devices'), hikOn, (req, res) => {
+    const v = String(req.body?.date || '').trim().slice(0, 10);
+    if (v && !ISO.test(v)) return res.status(400).json({ error: 'Ngày không hợp lệ' });
+    setSetting('hik_first_from', v);
+    res.json({ ok: true, date: v });
+  });
   r.put('/hik-devices/:id/auto', need('devices'), hikOn, (req, res) => {
     const d = db.prepare("SELECT id FROM push_devices WHERE id=? AND conn_type='hik'").get(req.params.id);
     if (!d) return res.status(404).json({ error: 'Không tìm thấy máy Hikvision' });
@@ -959,9 +966,10 @@ export function registerDeviceRoutes(r, { need }) {
       if (action === 'users') { prog('Đang đọc nhân viên từ máy…'); return await hikUsers(d, prog); }
       if (action === 'logs') {
         prog('Đang đọc nhân viên từ máy…');
-        const u = await hikUsers(d, prog);   // tải NV trước để lượt chấm khớp được người
+        const u = await hikUsers(d, prog, { photosLater: false });   // tải NV trước để lượt chấm khớp được người
         prog('Đang đọc dữ liệu chấm công từ máy…');
-        return { ...(await hikLogs(d, from, to, prog)), users: u.read, long: u.long || 0, from, to };
+        try { return { ...(await hikLogs(d, from, to, prog)), users: u.read, long: u.long || 0, from, to }; }
+        finally { if (u.facePins.length) (await import('../../hik-sync.js')).hikFetchPhotosLater(d, u.facePins); }   // ảnh mặt: SAU lượt chấm
       }
       if (action === 'set-time') { await hikSetTime(d); return { note: ['Đã đặt giờ máy theo máy chủ (múi giờ Việt Nam)'] }; }
       if (action === 'restart') { await hikRestart(d); return { note: ['Máy đang khởi động lại'] }; }

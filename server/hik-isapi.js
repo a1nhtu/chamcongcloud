@@ -85,6 +85,19 @@ export async function isapi(dev, method, path, body = null, { timeoutMs = 20000,
   }
   return { status: r.status, text: r.text, json, buf: r.buf, type: r.headers['content-type'] || '' };   // buf: dữ liệu gốc (ảnh mặt)
 }
+// Lệnh đọc theo TRANG (người / lượt chấm): máy đang bận (nền tảng Hik cũng đang hỏi, đang tải ảnh…) có lúc 1 trang quá 30 giây
+// → thử lại trang đó 2 lần (chờ 5 / 15 giây) thay vì bỏ cả lượt tải (Hualida 26/11/2026: tải toàn bộ lịch sử ~20 phút rồi hỏng ở 1 trang = mất hết).
+// Sai mật khẩu KHÔNG thử lại (máy khoá đăng nhập nếu sai nhiều lần).
+export const HIK_RETRY_WAIT = [5000, 15000];
+export async function isapiRetry(dev, method, path, body, opt) {
+  for (let i = 0; ; i++) {
+    try { return await isapi(dev, method, path, body, opt); }
+    catch (e) {
+      if (!(e.code === 'TIMEOUT' || e.code === 'CONN') || i >= HIK_RETRY_WAIT.length) throw e;
+      await new Promise((ok) => setTimeout(ok, HIK_RETRY_WAIT[i]));
+    }
+  }
+}
 const tag = (xml, t) => ((new RegExp(`<${t}>([^<]*)</${t}>`).exec(xml) || [])[1] || '').trim();
 
 /* ---------- đọc thông tin + dung lượng ---------- */
@@ -129,12 +142,14 @@ function userLine(u) {
   const code = hikExtCode(u, pin);
   return `USER PIN=${pin}\tName=${String(u.name || '').replace(/[\t\r\n]/g, ' ').trim()}${code ? '\tCode=' + code : ''}`;
 }
-export async function hikUsers(dev, prog = () => {}) {
+// opt.photosLater = false: KHÔNG tải ảnh mặt nền ngay (trả facePins để gọi hikFetchPhotosLater SAU khi tải xong lượt chấm —
+// tải ảnh song song với đọc lượt chấm trên CÙNG 1 máy làm máy quá tải: quá thời gian chờ, rồi báo nhầm "sai mật khẩu").
+export async function hikUsers(dev, prog = () => {}, { photosLater = true } = {}) {
   const lines = [], searchID = randomUUID();
   const faceOf = new Set();   // Số ID có ảnh mặt trên máy
   let pos = 0, fp = 0, face = 0, card = 0, long = 0;   // đếm theo TOÀN BỘ người trên máy (kể cả người phần mềm bỏ qua)
   for (let page = 0; page < 5000; page++) {
-    const r = await isapi(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Search?format=json',
+    const r = await isapiRetry(dev, 'POST', '/ISAPI/AccessControl/UserInfo/Search?format=json',
       { UserInfoSearchCond: { searchID, searchResultPosition: pos, maxResults: 30 } }, { timeoutMs: 30000 });
     const s = r.json?.UserInfoSearch || {};
     const list = Array.isArray(s.UserInfo) ? s.UserInfo : [];
@@ -166,9 +181,9 @@ export async function hikUsers(dev, prog = () => {}) {
   if (facePins.length) {
     const m = await import('./hik-sync.js');
     photos = m.hikPhotoMissing(facePins).length;
-    if (photos) m.hikFetchPhotosLater(dev, facePins);
+    if (photos && photosLater) m.hikFetchPhotosLater(dev, facePins);
   }
-  return { read: lines.length, saved: seen.size, onDevice: pos, long, photos };
+  return { read: lines.length, saved: seen.size, onDevice: pos, long, photos, facePins: photos && !photosLater ? facePins : [] };
 }
 
 /* ---------- tải LƯỢT CHẤM ---------- */
@@ -194,7 +209,7 @@ async function searchEvents(dev, cond, onPage) {
   const searchID = randomUUID();
   let pos = 0;
   for (let page = 0; page < 20000; page++) {
-    const r = await isapi(dev, 'POST', '/ISAPI/AccessControl/AcsEvent?format=json',
+    const r = await isapiRetry(dev, 'POST', '/ISAPI/AccessControl/AcsEvent?format=json',
       { AcsEventCond: { searchID, searchResultPosition: pos, maxResults: 30, major: 5, minor: 0, picEnable: false, ...cond } }, { timeoutMs: 30000 });
     const s = r.json?.AcsEvent || {};
     const list = Array.isArray(s.InfoList) ? s.InfoList : [];
@@ -530,6 +545,9 @@ export async function hikSetupPush(dev, { host, port } = {}) {
  * Cài đặt hik_auto_min = cứ N phút tải 1 lần (0 = tắt). Mỗi lượt, từng máy Hikvision đã duyệt + bật tự tải (tuần tự):
  * đọc số lượt chấm trên máy → không đổi thì bỏ qua; đổi thì tải NV (khi số NV đổi) + tải lượt chấm từ hôm trước lần tải gần nhất. */
 export const HIK_AUTO_CHOICES = [0, 5, 10, 15, 30, 60, 120, 240];
+// Lần ĐẦU tự tải 1 máy (chưa tải lượt chấm bao giờ): chỉ lấy từ ngày này (trống = toàn bộ lịch sử trên máy).
+// Máy lâu năm có hàng trăm nghìn sự kiện → đọc hết mất hàng giờ; khách chỉ cần từ đầu kỳ công.
+export const hikFirstFrom = () => { const v = String(getSetting('hik_first_from', '') || '').trim(); return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : ''; };
 export const hikAutoMinutes = () => { const n = parseInt(getSetting('hik_auto_min', '0'), 10) || 0; return n > 0 ? Math.max(1, n) : 0; };
 const autoBusy = busyFlag();
 async function autoOne(d, prog = () => {}, flags = {}) {
@@ -545,12 +563,18 @@ async function autoOne(d, prog = () => {}, flags = {}) {
     saveHikInfo(d.id, { ...(JSON.parse(d.tcp_info || '{}')), ...info });
     const logsNow = Number.isFinite(info.logs) ? info.logs : null, usersNow = Number.isFinite(info.users) ? info.users : null;
     if (logsNow != null && logsNow === d.tcp_auto_logs && (usersNow == null || usersNow === d.tcp_auto_users)) return mark(true, 'Không có lượt chấm mới');
-    if (usersNow == null || usersNow !== d.tcp_auto_users) { prog(`${d.name || d.serial}: tải nhân viên…`); await hikUsers(d); flags.users = true; }
+    let facePins = [];
+    if (usersNow == null || usersNow !== d.tcp_auto_users) { prog(`${d.name || d.serial}: tải nhân viên…`); facePins = (await hikUsers(d, prog, { photosLater: false })).facePins; flags.users = true; }
     let added = 0;
-    if (logsNow == null || logsNow !== d.tcp_auto_logs) {
-      const today = vnDateStr(), last = d.tcp_sync_at ? vnDateStr(new Date(d.tcp_sync_at)) : '';
-      prog(`${d.name || d.serial}: tải lượt chấm…`);
-      added = (last ? await hikLogs(d, shiftDay(last, -1), today) : await hikLogs(d, '', '')).added;
+    try {
+      if (logsNow == null || logsNow !== d.tcp_auto_logs) {
+        const today = vnDateStr(), last = d.tcp_sync_at ? vnDateStr(new Date(d.tcp_sync_at)) : '', first = hikFirstFrom();
+        prog(`${d.name || d.serial}: tải lượt chấm…`);
+        added = (last ? await hikLogs(d, shiftDay(last, -1), today, prog)
+          : first ? await hikLogs(d, first < today ? first : today, today, prog) : await hikLogs(d, '', '', prog)).added;
+      }
+    } finally {
+      if (facePins.length) { const m = await import('./hik-sync.js'); m.hikFetchPhotosLater(d, facePins); }   // ảnh mặt: SAU lượt chấm
     }
     return mark(true, added ? `Thêm ${added} lượt chấm mới` : 'Không có lượt chấm mới', { logs: logsNow, users: usersNow });
   } catch (e) { return mark(false, e.message || String(e)); }
