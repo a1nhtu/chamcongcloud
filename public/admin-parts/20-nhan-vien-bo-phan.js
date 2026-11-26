@@ -140,7 +140,7 @@ async function pageEmployees() {
     const listBox = el('div', { class: 'panel tbl-scroll' });
     const searchI = el('input', { type: 'search', placeholder: '🔍 Tìm mã, tên, tài khoản…', value: empSearch, style: 'max-width:280px' });
     const countLbl = el('span', { style: 'font-size:12.5px;color:var(--muted)' });
-    const bulkBar = el('span', { style: 'display:flex;gap:6px;align-items:center;margin-left:auto' });
+    const bulkBar = el('span', { class: 'emp-bulk' });   // điện thoại: tự xuống dòng, không tràn mất nút Xóa (Anh 26/11/2026)
     let allCb = null, visList = [];
     // Thanh "Đã chọn N" + nút Xoá hàng loạt; ô tích tiêu đề: tích hết / một phần / chưa tích
     const renderBulk = () => {
@@ -233,7 +233,9 @@ async function pageEmployees() {
           cb = el('input', { type: 'checkbox' }); cb.checked = empPicked.has(e.id);
           cb.onchange = () => { cb.checked ? empPicked.add(e.id) : empPicked.delete(e.id); renderBulk(); };
         }
-        tb.append(el('tr', {},
+        // ĐIỆN THOẠI: chạm vào dòng NV (trừ ô tích / nút) → hộp Sửa · Khoá · Xóa trượt từ đáy; máy tính không đổi
+        const onTap = canEdit ? (ev) => { if (isPhoneNav() && !ev.target.closest('input,button,a,select,label')) empActSheet(e); } : null;
+        tb.append(el('tr', onTap ? { class: 'emp-tap', onclick: onTap } : {},
           canEdit ? el('td', {}, cb) : '',
           el('td', {}, e.code),
           showPin ? el('td', {}, e.device_pin ? el('b', { style: 'color:#0a7' }, e.device_pin) : el('span', { class: 'muted' }, '—')) : '',
@@ -276,7 +278,8 @@ async function pageEmployees() {
     setMain(head(...headArgs2), pinConflictBar(pcCount, pageEmployees),
       el('div', { class: 'emp-wrap' },
         el('div', { class: 'panel emp-side' }, el('div', { class: 'emp-side-h' }, 'Bộ phận'), tree),
-        el('div', { class: 'emp-main' }, el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap' }, searchI, countLbl, bulkBar), listBox)));
+        el('div', { class: 'emp-main' }, el('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap' }, searchI, countLbl, bulkBar),
+          canEdit ? el('div', { class: 'emp-tap-hint' }, '👆 Chạm vào nhân viên để Sửa / Khoá / Xóa') : '', listBox)));
   } catch (e) { setMain(head('Nhân viên'), el('div', { class: 'empty' }, e.message)); }
 }
 // Xuất danh sách nhân viên ra Excel (cùng mẫu cột với file nhập) — theo bộ phận đang chọn trên cây (gồm bộ phận con)
@@ -909,6 +912,21 @@ async function empDeviceRoles(e) {
   };
   if (hasPerm('devices')) wrap.append(el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' }, allAdm, allEmp, save));
   return wrap;
+}
+// ĐIỆN THOẠI (Anh 26/11/2026): bảng NV rộng, nút Sửa / Khoá / Xóa nằm tít cột cuối → chạm vào dòng NV mở hộp thao tác này
+function empActSheet(e) {
+  const go = (fn) => () => { closeModal(); fn(); };
+  const info = [e.code && 'Mã ' + e.code, e.device_pin && 'Số ID ' + e.device_pin, e.department, e.username && 'TK ' + e.username].filter(Boolean).join(' · ');
+  openModal(e.full_name, [
+    el('div', { style: 'color:var(--muted);font-size:13.5px;margin-bottom:14px' }, info,
+      e.active ? '' : el('span', { class: 'pill bad', style: 'margin-left:6px' }, 'Đang khoá'),
+      e.from_device ? el('span', { class: 'pill warn', style: 'margin-left:6px' }, 'nháp từ máy') : ''),
+    el('div', { style: 'display:flex;flex-direction:column;gap:10px' },
+      el('button', { class: 'btn block', onclick: go(() => empModal(e)) }, '✎ Sửa thông tin'),
+      e.active ? el('button', { class: 'btn ghost block', onclick: go(() => toggleEmp(e)) }, '🔒 Khoá (nghỉ việc, giữ lịch sử)')
+        : el('button', { class: 'btn ghost block', onclick: go(() => unlockEmp(e)) }, '🔓 Mở khoá'),
+      el('button', { class: 'btn danger block', onclick: go(() => delEmp(e)) }, '🗑 Xóa nhân viên')),
+  ], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
 }
 async function toggleEmp(e) {
   if (!confirm(`Khoá nhân viên ${e.full_name}?`)) return;
