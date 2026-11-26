@@ -146,7 +146,10 @@ function detect(dev, pin, it, enrolledNow, realtime, deletedNow = false) {
     // mẫu vân tay / khuôn mặt máy gửi Y HỆT mẫu máy khác đang giữ cho Số ID này → bản chép do đồng bộ, cùng 1 người
     || sameTemplates(serial, pin, it.tmps);
   const accepted = db.prepare("SELECT dev_name FROM device_pin_conflicts WHERE serial=? AND pin=? AND status='same' ORDER BY id DESC LIMIT 1").get(serial, pin);
-  const emp = db.prepare("SELECT full_name FROM employees WHERE device_pin=? AND device_pin<>''").get(pin);
+  const emp = db.prepare("SELECT full_name, code FROM employees WHERE device_pin=? AND device_pin<>''").get(pin);
+  // Tên trên máy chính là MÃ NV (máy Hikvision Hualida 26/11/2026: tên "TB058914", Số ID dạng chuỗi dài) → máy không có tên thật,
+  // không đủ căn cứ báo trùng (trước đây 2 NV × 13 máy = 26 cảnh báo nhầm)
+  const isCode = (n) => !!(emp && emp.code && normName(n) && normName(n) === normName(emp.code));
   const others = db.prepare(`SELECT s.name FROM device_users_serial s JOIN push_devices d ON d.serial=s.serial
     WHERE s.pin=? AND s.serial<>? AND d.active=1`).all(pin, serial);
   // Máy khác đã có SINH TRẮC của Số ID này (chỉ có tên do phần mềm đẩy xuống thì không tính — đó là quy trình
@@ -154,8 +157,8 @@ function detect(dev, pin, it, enrolledNow, realtime, deletedNow = false) {
   const othersBio = db.prepare(`SELECT COUNT(*) c FROM device_bio_templates b JOIN push_devices d ON d.serial=b.serial
     WHERE b.pin=? AND b.serial<>? AND d.active=1`).get(pin, serial).c;
   const refName = (emp && !placeholder(emp.full_name, pin)) ? emp.full_name
-    : (others.map((o) => o.name).find((n) => !placeholder(n, pin)) || '');
-  const incName = placeholder(it.name, pin) ? '' : it.name;
+    : (others.map((o) => o.name).find((n) => !placeholder(n, pin) && !isCode(n)) || '');
+  const incName = (placeholder(it.name, pin) || isCode(it.name)) ? '' : it.name;
   // Máy này ĐANG GIỮ Số ID này từ trước (chưa báo xoá) → đăng ký thêm vân tay / khuôn mặt / thẻ là cho CHÍNH người đang có trên
   // máy, không phải người mới mang Số ID cũ. Trước đây vẫn báo trùng: người đăng ký gốc ở máy A (đã đồng bộ sang máy khác) quay
   // lại máy A đăng ký thêm khuôn mặt → "Số ID nghi trùng" (khách lienminh 04/11/2026, 9 Số ID). Chỉ coi là đăng ký MỚI khi máy

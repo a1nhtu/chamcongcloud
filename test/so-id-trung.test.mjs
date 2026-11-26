@@ -267,3 +267,14 @@ test('mẫu vân tay máy gửi Y HỆT mẫu máy khác đang giữ → cùng n
   assert.equal(openOf('U_C', '71').length, 1, 'mẫu khác = người khác');
   assert.equal(openOf('U_C', '71')[0].reason, 'enroll');
 });
+
+test('tên trên máy là chính MÃ NV (máy Hik Hualida) → KHÔNG báo trùng; tên khác hẳn vẫn báo', () => {
+  db.prepare("INSERT INTO employees(code, full_name, username, password_hash, device_pin, active) VALUES('TB058914','Trần Thị Luyến','tb058914','x','2acb8586',1)").run();
+  const before = conflicts().length;
+  G.guardIncoming('SN_B', 'USER', 'USER PIN=2acb8586	Name=TB058914', { realtime: false });
+  G.guardIncoming('SN_C', 'USER', 'USER PIN=2acb8586	Name=tb058914', { realtime: false });
+  assert.equal(conflicts().length, before, 'tên = mã NV không phải người khác');
+  G.guardIncoming('SN_B', 'USER', 'USER PIN=2acb8586	Name=Le Van Tam', { realtime: false });
+  assert.equal(conflicts().length, before + 1);
+  assert.equal(conflicts().at(-1).reason, 'name');
+});
