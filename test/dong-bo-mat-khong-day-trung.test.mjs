@@ -139,3 +139,37 @@ test('tiến trình lệnh: đếm đúng lệnh trong mốc, máy báo nhận d
   assert.deepEqual([p.total, p.done, p.ahead], [3, 3, 0]);
   assert.equal(S.cmdProgress(from, 0, ['M5']).devices[0].total, 4, 'theo dõi mở (đồng bộ) tính cả lệnh xếp thêm');
 });
+
+// BBQ DC 27/11/2026: "chờ 52 lệnh xếp trước". Lệnh đã gửi mà máy không báo lại quá 5 phút (lạc) không chặn hàng → không đếm là
+// "xếp trước". Huỷ lệnh chờ: bỏ lệnh chưa gửi + lệnh lạc, giữ lệnh vừa gửi và lệnh máy bếp; up_to chỉ huỷ lệnh trước mốc.
+test('lệnh chờ: lệnh lạc không tính "xếp trước"; huỷ lệnh xếp trước giữ lệnh vừa bấm, lệnh đang gửi, lệnh máy bếp', () => {
+  addDev('M6');
+  const ids = (sn) => db.prepare('SELECT id FROM push_device_commands WHERE serial=? ORDER BY id').all(sn).map((r) => r.id);
+  const setSent = (id, ago) => db.prepare(`UPDATE push_device_commands SET trans_time=datetime('now','-${ago} minutes') WHERE id=?`).run(id);
+  S.queueCmd('M6', 'DATA UPDATE USERINFO PIN=71\tName=Lac', { pin: '71', mkind: 'user' });   // gửi 2 ngày trước, máy không báo
+  S.queueCmd('M6', 'DATA UPDATE USERINFO PIN=72\tName=DangGui', { pin: '72', mkind: 'user' }); // vừa gửi 1 phút
+  S.queueCmd('M6', 'DATA UPDATE USERINFO PIN=73\tName=Bep', { pin: '73', mkind: 'mguard' });  // lệnh máy bếp
+  S.queueCmd('M6', 'DATA UPDATE USERINFO PIN=74\tName=Cho', { pin: '74', mkind: 'user' });    // chưa gửi
+  S.queueCmd('M6', 'DATA DELETE USERINFO\tPIN=75');                                           // chưa gửi
+  const [lost, sending] = ids('M6');
+  setSent(lost, 2 * 24 * 60); setSent(sending, 1);
+  db.prepare("INSERT INTO device_pin_conflicts(serial,pin,since,status,new_pin) VALUES('M6','5',datetime('now'),'moving','74')").run();
+  const from = S.cmdMark();
+  S.queueCmd('M6', 'DATA QUERY USERINFO');   // lệnh vừa bấm
+  const to = S.cmdMark();
+  let p = S.cmdProgress(from, to, ['M6']).devices[0];
+  assert.equal(p.ahead, 4, 'đang gửi + máy bếp + 2 chưa gửi; lệnh lạc không tính');
+  const q = S.cmdQueue('M6');
+  assert.deepEqual([q.total, q.wait, q.sending, q.lost, q.kitchen, q.cancellable], [6, 4, 1, 1, 1, 4]);
+  assert.equal(q.groups[0].state, 'wait');
+  assert.ok(q.groups.some((g) => g.state === 'lost' && g.what === 'Đẩy NV' && g.pins.includes('71')));
+  assert.equal(S.cancelCmds('M6', from), 3, 'huỷ lạc + 2 chưa gửi');
+  const left = db.prepare('SELECT pin, content FROM push_device_commands WHERE serial=? ORDER BY id').all('M6');
+  assert.deepEqual(left.map((r) => r.pin || r.content), ['72', '73', 'DATA QUERY USERINFO'], 'giữ lệnh đang gửi, máy bếp, lệnh vừa bấm');
+  const c = db.prepare("SELECT status FROM device_pin_conflicts WHERE serial='M6' AND new_pin='74'").get();
+  assert.equal(c.status, 'failed', 'đổi Số ID mất lệnh tạo số mới → chờ "Gửi lại"');
+  p = S.cmdProgress(from, to, ['M6']).devices[0];
+  assert.equal(p.ahead, 2);
+  assert.equal(S.cancelCmds('M6'), 1, 'huỷ hết: còn lệnh vừa bấm (chưa gửi)');
+  assert.equal(S.cmdQueue('M6').cancellable, 0);
+});

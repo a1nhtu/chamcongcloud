@@ -277,6 +277,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       m.active ? { group: 'Dữ liệu từ máy', label: '🕒 Xem giờ trên máy', fn: () => deviceClockModal(m) } : null,
       { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: async () => { if (!confirm(`Tải danh sách nhân viên + vân tay TỪ máy "${m.name || m.serial}" về phần mềm?\nMáy sẽ đẩy lên khi có kết nối; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/query-users', { method: 'POST' }); toast(r.msg || 'Đã gửi lệnh tải nhân viên', 'ok'); cmdTrack('Tải NV từ máy ' + (m.name || m.serial), r.track, { counts: true, after: pageDevices }); } catch (e) { toast(e.message, 'err'); } } },
       { group: 'Dữ liệu từ máy', label: '⬇ Tải lại log chấm công', fn: () => deviceAttlogModal(m) },
+      hasPerm('devices') ? { group: 'Dữ liệu từ máy', hint: 'Xem lệnh phần mềm đang xếp chờ gửi xuống máy này, huỷ khi xếp quá nhiều', label: '📋 Lệnh chờ gửi xuống máy' + (m.queue_cmds ? ` (${m.queue_cmds})` : ''), fn: () => cmdQueueModal(m) } : null,
       { group: 'Dữ liệu từ máy', label: '🧹 Đọc lại thông tin từ máy', fn: async () => { if (!confirm(`Xóa số hiển thị (NV/vân tay/thẻ) của máy "${m.name || m.serial}" rồi ĐỌC LẠI thực tế từ máy?\n\nDùng khi số hiển thị KHÔNG đúng thực tế (VD đồng bộ lỗi). Máy phải đang ONLINE; chờ chút rồi bấm Làm mới.`)) return; try { const r = await api('/admin/devices/' + m.id + '/relearn', { method: 'POST' }); toast('Đã xóa số cũ + yêu cầu máy đẩy lại.', 'ok'); pageDevices(); cmdTrack('Đọc lại máy ' + (m.name || m.serial), r.track, { counts: true, after: pageDevices }); } catch (e) { toast(e.message, 'err'); } } },
       { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } },
       { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
@@ -356,7 +357,9 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
         direct && m.tcp_auto_at && m.tcp_auto && autoMin > 0 ? el('div', { class: m.tcp_auto_ok ? 'dv-sub' : 'dv-warn', title: 'Kết quả lần tự động tải gần nhất' }, `⏱ ${isoToHMS(m.tcp_auto_at).slice(0, 5)} · ${m.tcp_auto_msg || ''}`) : ''),
       el('td', { class: 'num b' + (m.punch_count ? '' : ' zero') }, String(m.punch_count),
         m.unmatched ? el('div', { class: 'dv-warn', style: 'cursor:pointer;text-decoration:underline dotted', title: 'Bấm để xem Số ID nào chưa khớp nhân viên', onclick: () => unmatchedModal(m) }, m.unmatched + ' mã chưa khớp') : '',
-        m.pending_del ? el('div', { class: 'dv-warn', title: 'Máy đang tắt khi xoá nhân viên. Máy bật lại là phần mềm tự xoá.' }, `⏳ Chờ xoá ${m.pending_del} NV`) : ''),
+        m.pending_del ? el('div', { class: 'dv-warn', title: 'Máy đang tắt khi xoá nhân viên. Máy bật lại là phần mềm tự xoá.' }, `⏳ Chờ xoá ${m.pending_del} NV`) : '',
+        // nhiều lệnh xếp chờ (máy tắt lâu / đẩy hàng loạt) → bấm xem là lệnh gì, huỷ được
+        m.queue_cmds >= 10 && hasPerm('devices') ? el('div', { class: 'dv-warn', style: 'cursor:pointer;text-decoration:underline dotted', title: 'Bấm để xem lệnh đang chờ gửi xuống máy / huỷ lệnh', onclick: () => cmdQueueModal(m) }, `⏳ ${m.queue_cmds} lệnh chờ gửi`) : ''),
       el('td', {}, el('div', { class: 'dv-act' }, approveInline, keyBtn, ...(isTcp ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m)) : null] : isHik || isUnion ? [m.active ? btnSm('⬇ Tải chấm công', () => tcpLogsModal(m, m.conn_type)) : null, doorBtn] : [doorBtn, timeBtn]), logBtn, moreBtn)),
     );
     tb.append(tr);
@@ -532,6 +535,44 @@ async function pinConflictModal(after) {
     if (!r.enabled) box.append(el('div', { class: 'map-hint' }, 'Công tắc "Cảnh báo trùng Số ID" đang TẮT: không phát hiện thêm, nhưng các cảnh báo cũ vẫn cần xử lý.'));
   };
   openModal('Số ID nghi trùng giữa các máy', [box], [el('button', { class: 'btn ghost', onclick: () => { closeModal(); after && after(); } }, 'Đóng')]);
+  load();
+}
+
+// LỆNH CHỜ GỬI XUỐNG MÁY (BBQ DC 27/11/2026 "chờ 52 lệnh xếp trước"): gộp theo loại lệnh + trạng thái, huỷ hết được.
+// Máy hỏi lệnh ~10 giây/lần: lệnh điều khiển / hỏi dữ liệu đi từng lệnh, lệnh ghi NV / vân tay đi tối đa 10 lệnh một lượt.
+async function cmdQueueModal(m) {
+  const name = m.name || m.serial;
+  const ST = { wait: '⏳ Chờ gửi', sending: '📡 Đang gửi, chờ máy báo', lost: '⚠ Đã gửi, máy không báo lại' };
+  // created_at lưu giờ UTC 'YYYY-MM-DD HH:MM:SS' → hiện giờ VN "HH:MM dd/mm"
+  const t = (s) => { if (!s) return ''; const d = new Date(/[TZ]/.test(s) ? s : s.replace(' ', 'T') + 'Z'); if (isNaN(d)) return s; const v = new Date(d.getTime() + 7 * 3600e3).toISOString(); return `${v.slice(11, 16)} ${v.slice(8, 10)}/${v.slice(5, 7)}`; };
+  const body = el('div', {}, el('div', { class: 'muted' }, 'Đang đọc…'));
+  const cancelBtn = el('button', { class: 'btn danger', style: 'display:none' });
+  const load = async () => {
+    let q;
+    try { q = await api('/admin/devices/' + m.id + '/cmd-queue'); } catch (e) { body.replaceChildren(el('div', { class: 'dv-warn' }, e.message)); return; }
+    cancelBtn.style.display = q.cancellable ? '' : 'none';
+    cancelBtn.textContent = `🗑 Huỷ ${q.cancellable} lệnh`;
+    cancelBtn.onclick = async () => {
+      if (!confirm(`Huỷ ${q.cancellable} lệnh đang chờ của máy "${name}"?
+
+Lệnh đã huỷ không gửi xuống máy nữa. Số NV / vân tay hiển thị không bị sai (chỉ cộng khi máy báo nhận). Máy còn thiếu NV / vân tay thì sau đó bấm "Đẩy NV xuống máy" cho đúng người cần.`)) return;
+      try { const r = await api('/admin/devices/cmd-queue/cancel', { method: 'POST', body: { serials: [m.serial] } }); toast(`Đã huỷ ${r.cancelled} lệnh của máy ${name}`, 'ok'); load(); pageDevices(); }
+      catch (e) { toast(e.message, 'err'); }
+    };
+    if (!q.total) { body.replaceChildren(el('div', { class: 'map-hint' }, '✅ Không còn lệnh nào chờ gửi xuống máy này.')); return; }
+    body.replaceChildren(
+      el('div', { class: 'map-hint' }, `Máy hỏi lệnh khoảng 10 giây/lần; lệnh hỏi dữ liệu / điều khiển đi từng lệnh, lệnh ghi NV / vân tay đi tối đa 10 lệnh một lượt. `
+        + `"Đã gửi, máy không báo lại" quá ${q.lost_min} phút là lệnh lạc (mạng chập / máy khởi động lại giữa chừng): không chặn các lệnh sau, huỷ cho gọn.`),
+      el('div', { style: 'margin:10px 0 6px;font-weight:600' }, `Chờ gửi: ${q.wait} · Đang gửi: ${q.sending} · Lạc: ${q.lost}` + (q.kitchen ? ` · Máy bếp: ${q.kitchen} (giữ lại, không huỷ)` : '')),
+      el('div', { class: 'table-wrap' }, el('table', { class: 'data' },
+        el('thead', {}, el('tr', {}, ...['Trạng thái', 'Lệnh', 'Số lệnh', 'Số ID', 'Xếp lúc'].map((h) => el('th', {}, h)))),
+        el('tbody', {}, ...q.groups.map((g) => el('tr', {},
+          el('td', { class: g.state === 'lost' ? 'dv-warn' : '' }, ST[g.state] || g.state), el('td', {}, g.what), el('td', { class: 'num b' }, String(g.n)),
+          el('td', {}, g.pins.join(', ') + (g.n > g.pins.length && g.pins.length ? '…' : '')),
+          el('td', {}, g.first === g.last ? t(g.first) : `${t(g.first)} → ${t(g.last)}`)))))));
+  };
+  openModal('Lệnh chờ gửi xuống máy · ' + name, [body], [cancelBtn, el('button', { class: 'btn ghost', onclick: load }, '↻ Làm mới'), el('button', { class: 'btn', onclick: closeModal }, 'Đóng')]);
+  $('#modal').style.maxWidth = '820px';
   load();
 }
 

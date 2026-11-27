@@ -921,12 +921,13 @@ export function cmdProgress(from, to, serials = []) {
     e.n++;
     if (pin && e.pins.length < 5) e.pins.push(pin);
   }
-  const dev = db.prepare('SELECT name, last_seen FROM push_devices WHERE serial=?');
-  const ahead = db.prepare('SELECT COUNT(*) c FROM push_device_commands WHERE serial=? AND id<=? AND response_at IS NULL');
+  const dev = db.prepare('SELECT id, name, last_seen FROM push_devices WHERE serial=?');
+  // lệnh xếp trước = chưa gửi + vừa gửi đang chờ máy báo; lệnh LẠC (gửi quá LOST_MIN phút không báo lại) không chặn hàng → không đếm
+  const ahead = db.prepare(`SELECT COUNT(*) c FROM push_device_commands WHERE serial=? AND id<=? AND response_at IS NULL AND (trans_time IS NULL OR trans_time > ${LOST_AT})`);
   const cnt = (sql, sn) => db.prepare(sql).get(sn).c;
   const devices = [...new Set([...serials, ...bySn.keys()])].map((sn) => {
     const r = bySn.get(sn) || { total: 0, done: 0, failed: 0 }, d = dev.get(sn) || {}, skipped = skips.get(sn) || [];
-    return { serial: sn, name: d.name || sn, online: !!d.last_seen && Date.now() - Date.parse(d.last_seen) < 3 * 60000,
+    return { serial: sn, id: d.id || 0, name: d.name || sn, online: !!d.last_seen && Date.now() - Date.parse(d.last_seen) < 3 * 60000,
       total: r.total, done: r.done, failed: r.failed - skipped.length, errors: [...(errs.get(sn) || new Map()).values()].slice(0, 6), skipped,
       ahead: ahead.get(sn, from).c,
       users: cnt('SELECT COUNT(*) c FROM device_users_serial WHERE serial=?', sn),
@@ -934,6 +935,49 @@ export function cmdProgress(from, to, serials = []) {
       face: cnt('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)', sn) };
   });
   return { devices };
+}
+
+/* ---------- LỆNH CHỜ CỦA 1 MÁY: xem + huỷ (BBQ DC 27/11/2026: "chờ 52 lệnh xếp trước") ----------
+ * Máy chỉ lấy lệnh CHƯA gửi (nextCommand). Lệnh đã gửi mà quá LOST_MIN phút máy không báo lại = LẠC (mạng chập, máy khởi động lại
+ * giữa lượt): không bao giờ gửi lại (trừ tải log / xoá NV — resendLostAttlogQueries), không chặn hàng, nhưng trước đây vẫn bị đếm
+ * vào "chờ N lệnh xếp trước" mãi. Huỷ: bỏ lệnh chưa gửi + lệnh lạc. KHÔNG đụng lệnh vừa gửi (máy đang chạy, huỷ cũng không dừng được)
+ * và lệnh máy bếp (mguard — khoá / mở người vừa ăn, phân hệ suất ăn tự quản). Số NV / vân tay hiển thị chỉ cộng khi máy báo OK nên
+ * huỷ không làm sai số; máy còn thiếu gì thì lần đồng bộ / bắt tay sau tự xếp lại, hoặc bấm "Đẩy NV xuống máy". */
+const LOST_MIN = 5;
+const LOST_AT = `datetime('now','-${LOST_MIN} minutes')`;
+const CANCEL_WHERE = `response_at IS NULL AND (trans_time IS NULL OR trans_time <= ${LOST_AT}) AND COALESCE(mkind,'')<>'mguard'`;
+export function cmdQueue(serial) {
+  const rows = db.prepare(`SELECT substr(content,1,200) c, mkind, created_at, trans_time,
+      (trans_time IS NOT NULL AND trans_time <= ${LOST_AT}) lost
+    FROM push_device_commands WHERE serial=? AND response_at IS NULL ORDER BY id`).all(serial);
+  const sum = { wait: 0, sending: 0, lost: 0, kitchen: 0 }, groups = new Map();
+  for (const r of rows) {
+    const state = !r.trans_time ? 'wait' : r.lost ? 'lost' : 'sending';
+    sum[state]++;
+    if (r.mkind === 'mguard') sum.kitchen++;
+    const { what, pin } = cmdLabel(r.c);
+    const k = state + '|' + what;
+    if (!groups.has(k)) groups.set(k, { state, what, n: 0, first: r.created_at, last: r.created_at, pins: [] });
+    const g = groups.get(k);
+    g.n++; g.last = r.created_at;
+    if (pin && g.pins.length < 8 && !g.pins.includes(pin)) g.pins.push(pin);
+  }
+  const cancellable = db.prepare(`SELECT COUNT(*) c FROM push_device_commands WHERE serial=? AND ${CANCEL_WHERE}`).get(serial).c;
+  const order = { wait: 0, sending: 1, lost: 2 };
+  return { ...sum, total: rows.length, cancellable, lost_min: LOST_MIN,
+    groups: [...groups.values()].sort((a, b) => order[a.state] - order[b.state] || b.n - a.n) };
+}
+// upTo > 0: chỉ huỷ lệnh id ≤ upTo ("Huỷ lệnh xếp trước" ở thanh tiến trình — giữ lại lệnh vừa bấm). Trả số lệnh đã huỷ.
+// Đổi Số ID (cảnh báo trùng → "Người khác") đang chờ máy xác nhận mà lệnh tạo số mới bị huỷ → chuyển "lỗi" để bấm "Gửi lại".
+export function cancelCmds(serial, upTo = 0) {
+  const where = `serial=? AND ${CANCEL_WHERE}` + (upTo > 0 ? ' AND id<=?' : '');
+  const args = upTo > 0 ? [serial, upTo] : [serial];
+  const userPins = db.prepare(`SELECT DISTINCT pin FROM push_device_commands WHERE ${where} AND mkind='user' AND pin<>''`).all(...args).map((r) => r.pin);
+  const n = db.prepare(`DELETE FROM push_device_commands WHERE ${where}`).run(...args).changes;
+  const fail = db.prepare("UPDATE device_pin_conflicts SET status='failed', note=? WHERE serial=? AND new_pin=? AND status='moving'");
+  for (const p of userPins) fail.run(`Đã huỷ lệnh tạo Số ID ${p} trên máy — bấm "Gửi lại" để gửi lại`, serial, p);
+  if (n) console.log(`[device] ${serial}: huỷ ${n} lệnh chờ` + (upTo > 0 ? ` (id ≤ ${upTo})` : ''));
+  return n;
 }
 
 // /getrequest: lấy lệnh kế tiếp cho máy (đánh dấu đã gửi). Trả 'C:<id>:<content>' hoặc ''.

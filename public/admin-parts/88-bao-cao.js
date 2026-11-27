@@ -390,7 +390,19 @@ function cmdTrack(title, t, opt = {}) {
   const bar = el('div', { class: 'xp-bar' }, el('i', {}));
   const pctEl = el('b', {}, '0%'), msgEl = el('div', { class: 'xp-msg' }, 'Đang chờ máy nhận lệnh…'), list = el('div', { class: 'xp-list' });
   const x = el('button', { class: 'xp-x', title: 'Ẩn (máy vẫn chạy tiếp)' }, '×');
-  const box = el('div', { class: 'xp-box' }, el('div', { class: 'xp-top' }, el('span', {}, '📡 ' + title), el('span', { class: 'xp-r' }, pctEl, x)), bar, msgEl, list);
+  // Máy còn nhiều lệnh xếp TRƯỚC lệnh vừa bấm (máy tắt lâu, đẩy hàng loạt…) → huỷ các lệnh đó cho lệnh này chạy ngay (BBQ DC 27/11/2026: chờ 52 lệnh).
+  // Nút tạo 1 lần, mỗi lượt hỏi chỉ đổi chữ / ẩn hiện (danh sách bên trên vẽ lại 1,5 giây/lần — nút nằm trong đó dễ bấm trượt).
+  const cancelBtn = el('button', { class: 'btn sm danger xp-cancel', style: 'display:none' });
+  let aheadSns = [];
+  cancelBtn.onclick = async () => {
+    const n = cancelBtn.dataset.n;
+    if (!aheadSns.length || !confirm(`Huỷ ${n} lệnh đang xếp trước (phần mềm xếp từ trước, máy chưa nhận)?
+
+Lệnh vừa bấm vẫn giữ và chạy ngay sau đó. Số NV / vân tay hiển thị không bị sai; máy còn thiếu NV / vân tay thì sau đó bấm "Đẩy NV xuống máy" cho đúng người cần.`)) return;
+    try { const r = await api('/admin/devices/cmd-queue/cancel', { method: 'POST', body: { serials: aheadSns, up_to: t.from } }); toast(`Đã huỷ ${r.cancelled} lệnh xếp trước`, 'ok'); cancelBtn.style.display = 'none'; }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  const box = el('div', { class: 'xp-box' }, el('div', { class: 'xp-top' }, el('span', {}, '📡 ' + title), el('span', { class: 'xp-r' }, pctEl, x)), bar, msgEl, list, cancelBtn);
   stack.append(box);
   let stop = false;
   x.onclick = () => { stop = true; box.remove(); };
@@ -415,6 +427,11 @@ function cmdTrack(title, t, opt = {}) {
         ...(d.errors || []).map((g) => el('div', { class: 'xp-err' }, `⚠ ${g.what}: máy báo ${g.code} (${g.msg})`
           + (g.n > 1 ? ` — ${g.n} lệnh` : '') + (g.pins.length ? ` · Số ID ${g.pins.join(', ')}${g.n > g.pins.length ? '…' : ''}` : ''))),
         ...(d.skipped || []).map((s) => el('div', { class: 'xp-note' }, `ℹ ${s.what}: máy không dùng bảng này (mã ${s.code}) — bình thường, dữ liệu đã về qua bảng còn lại`))]));
+      const blocked = r.devices.filter((d) => d.ahead && d.done < d.total);
+      aheadSns = blocked.map((d) => d.serial);
+      const nAhead = sum(blocked, 'ahead');
+      cancelBtn.style.display = nAhead && hasPerm('devices') ? '' : 'none';
+      cancelBtn.dataset.n = nAhead; cancelBtn.textContent = `🗑 Huỷ ${nAhead} lệnh xếp trước`;
       // xong = máy đang kết nối đã báo nhận hết + 1 lượt hỏi không đổi gì (máy gửi dữ liệu / phần mềm xếp thêm lệnh sau báo nhận)
       const sig = JSON.stringify(r.devices.map((d) => [d.total, d.done, d.users, d.fp, d.face]));
       const settled = on.every((d) => d.done >= d.total) && sig === prev;

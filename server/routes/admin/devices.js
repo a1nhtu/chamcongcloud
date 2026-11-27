@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { db, getSetting } from '../../db.js';
-import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress, movePunchesToEmployee } from '../../device-sync.js';
+import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress, cmdQueue, cancelCmds, movePunchesToEmployee } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { normText } from '../../hr-import.js';
 import { installDomain, MULTI, ROOT } from '../../tenant.js';
@@ -102,6 +102,8 @@ export function registerDeviceRoutes(r, { need }) {
       d.face_count = db.prepare('SELECT COUNT(*) c FROM device_bio_templates WHERE serial=? AND bio_type IN (2,9)').get(d.serial).c;
       d.card_count = db.prepare("SELECT COUNT(*) c FROM device_users_serial WHERE serial=? AND card<>''").get(d.serial).c;
       d.pending_del = db.prepare('SELECT COUNT(*) c FROM device_pending_deletes WHERE serial=?').get(d.serial).c;
+      // lệnh còn chờ gửi xuống máy (chưa gửi + vừa gửi chưa báo) — nhiều thì hiện nhãn bấm xem / huỷ
+      d.queue_cmds = db.prepare("SELECT COUNT(*) c FROM push_device_commands WHERE serial=? AND response_at IS NULL AND (trans_time IS NULL OR trans_time > datetime('now','-5 minutes'))").get(d.serial).c;
       d.key_ok = deviceKeyOk(d);          // đã có key hợp lệ chưa
       delete d.dev_key;                    // KHÔNG lộ chuỗi key ra client
       d.tcp_has_key = !!d.tcp_key; delete d.tcp_key;   // không lộ mật mã kết nối
@@ -150,6 +152,23 @@ export function registerDeviceRoutes(r, { need }) {
     const serials = String(req.query.serials || '').split(',').map((x) => x.trim()).filter(Boolean).slice(0, 200);
     if (!from && !to) return res.status(400).json({ error: 'Thiếu mốc lệnh' });
     res.json(cmdProgress(from, to, serials));
+  });
+  // Lệnh đang chờ gửi xuống 1 máy (gộp theo loại) — xem vì sao máy "chờ N lệnh xếp trước"
+  r.get('/devices/:id/cmd-queue', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    res.json(cmdQueue(d.serial));
+  });
+  // Huỷ lệnh chờ: { serials: [...], up_to } — up_to > 0 chỉ huỷ lệnh xếp TRƯỚC mốc (thanh tiến trình), bỏ trống = huỷ hết
+  r.post('/devices/cmd-queue/cancel', need('devices'), (req, res) => {
+    const b = req.body || {};
+    const serials = [...new Set((Array.isArray(b.serials) ? b.serials : [b.serial]).map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+    if (!serials.length) return res.status(400).json({ error: 'Chưa chọn máy' });
+    const known = db.prepare('SELECT 1 FROM push_devices WHERE serial=?');
+    const upTo = parseInt(b.up_to, 10) || 0;
+    let cancelled = 0;
+    for (const sn of serials) if (known.get(sn)) cancelled += cancelCmds(sn, upTo);
+    res.json({ ok: true, cancelled });
   });
   r.put('/devices/:id', need('devices'), (req, res) => {
     const b = req.body || {};
