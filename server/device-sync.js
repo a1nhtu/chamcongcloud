@@ -1335,6 +1335,27 @@ function lateSplitTail(employeeId, workDate, shifts, seen, punchesInWin) {
   return extra.size ? { shifts: ext, at, punches: [...extra.values()] } : null;
 }
 
+// Lịch NHIỀU ca: ngày đã có dòng SỬA TAY (manual=1) → ca khác TRÙNG GIỜ với ca đã sửa không dựng thêm dòng từ lượt quẹt (1 người không
+// làm 2 ca chồng giờ). mythuatlt 27/11/2026: sửa tay HC 06:15–20:00 → dựng lại ngày, lượt thật 06:13 thành dòng ma "Ca sáng 06:13 thiếu
+// ra" (Sáng 07–11 nằm trong HC 07–17:30); sửa tay Ca sáng 06:51–11:00 → thêm dòng ma HC 06:51. Trước chỉ bỏ qua ĐÚNG ca đã sửa tay.
+// Ca KHÔNG trùng giờ (sửa tay ca Sáng, chiều quẹt ca Chiều) vẫn dựng như cũ. Trùng = khoảng giờ ca (giờ bắt đầu → kết thúc) giao nhau;
+// dòng sửa tay không có ca → theo giờ vào – ra của dòng. Trả hàm (shift) => true khi phải bỏ qua ca đó.
+function manualBlocked(employeeId, workDate, shifts) {
+  const rows = db.prepare('SELECT shift_id, check_in_at, check_out_at FROM attendance WHERE employee_id=? AND work_date=? AND manual=1').all(employeeId, workDate);
+  if (!rows.length) return () => false;
+  const span = (s) => { const w = ruleWindow(workDate, s); return [w.start.getTime(), w.end.getTime()]; };
+  const spans = rows.map((r) => {
+    const s = r.shift_id ? (shifts.find((x) => x.id === r.shift_id) || db.prepare('SELECT * FROM shifts WHERE id=?').get(r.shift_id)) : null;
+    if (s) return { id: s.id, ab: span(s) };
+    const a = Date.parse(r.check_in_at || r.check_out_at || ''), b = Date.parse(r.check_out_at || r.check_in_at || '');
+    return { id: null, ab: Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null };
+  });
+  return (shift) => {
+    const [a, b] = span(shift);
+    return spans.some((m) => m.id === shift.id || (m.ab && m.ab[0] < b && a < m.ab[1]));
+  };
+}
+
 // Lịch NHIỀU ca + "Tự động - qua đêm": ghép các lượt của ngày theo thứ tự giờ (seqPairUnits — lượt VÀO / quẹt lặp cuối ngày đóng bằng
 // lượt sáng hôm sau), mỗi cặp tìm ca (pickSeqShifts), cặp cùng ca gộp 1 dòng: giờ vào = VÀO đầu, giờ ra = RA của cặp đủ cuối, giờ công
 // theo từng cặp. Ngày hôm sau tự bỏ các lượt đã dùng ở đây (consumedByPrevDay: tới giờ ra muộn nhất của ngày này).
@@ -1348,8 +1369,9 @@ function rebuildSeqDay(employeeId, workDate, prov, shifts, dup) {
   // cặp cuối ngày thuộc ca đêm → ra ngoài rồi vào lại sau nửa đêm (ca còn đang chạy) vẫn là của ca đêm này (seqNightTail)
   const lg = all.length ? groups.find((g) => g.units.includes(all[all.length - 1])) : null;
   if (lg && isNightShift(lg.shift)) lg.units.push(...seqNightTail(all, next, lg.shift, workDate, opt));
+  const blocked = manualBlocked(employeeId, workDate, shifts);
   for (const { shift, units } of groups) {
-    if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
+    if (blocked(shift)) continue;   // ca đã sửa tay / trùng giờ ca đã sửa tay
     const full = units.filter((u) => u.out);
     const inIso = units[0].in.punch_at, outIso = full.length ? full[full.length - 1].out.punch_at : null;
     let pairs = full.length ? full.map((u) => [u.in.punch_at, u.out.punch_at]) : null;
@@ -1530,6 +1552,7 @@ function rebuildDayCore(employeeId, workDate) {
       const last = p2.length >= 2 ? p2[p2.length - 1].shift : null;
       if (last && late.shifts.has(last) && picked.every((x) => p2.some((y) => y.shift === x.shift))) { picked = p2; lateShift = last; }
     }
+    const blocked = manualBlocked(employeeId, workDate, plan.shifts);
     for (const { shift, punches } of picked) {
       // Tách nhiều ca cần cửa sổ giờ để không lẫn punch giữa các ca → ưu tiên TĐ-HC khi có cửa sổ
       const rule = dd ? dd.ruleOf(shift) : (shift.check_in_start && shift.check_out_start) ? 'tdhc' : (plan.mergeRule || effectiveMergeRule(shift, null) || 'filo');
@@ -1544,7 +1567,7 @@ function rebuildDayCore(employeeId, workDate) {
       const own = one && !lateNight && !(dd && isNightShift(shift));
       const { inIso, outIso, pairs } = mergeDayPunches(own ? punchesInWin(w.winStart, w.winEnd) : punches, shift, rule, machineMap, workDate, wopts);
       if (!inIso && !(outIso && ruleKnowsDir(rule, shift))) continue;   // quên chấm vào (Theo ID máy / Chọn từ máy) → dòng chỉ có giờ ra
-      if (db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND shift_id=? AND manual=1').get(employeeId, workDate, shift.id)) continue;
+      if (blocked(shift)) continue;   // ca đã sửa tay / trùng giờ ca đã sửa tay
       upsertRow(employeeId, workDate, shift.id, inIso, outIso, metrics(employeeId, workDate, inIso, outIso, shift, pairs));
     }
     return;
