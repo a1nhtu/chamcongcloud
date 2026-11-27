@@ -1,6 +1,6 @@
 // Nhóm route CẤU HÌNH LƯƠNG + bảng lương + ngày lễ.
 import { db, getSetting, adminAttWhere } from '../../db.js';
-import { computePayrollTable, companyOtRates, bulkSetSalary } from '../../payroll-calc.js';
+import { computePayrollTable, companyOtRates, bulkSetSalary, payExtraOn, cleanExtraFields, saveExtraFields, setDeduct } from '../../payroll-calc.js';
 import { auditAllowed, virtLevel } from '../../virtual-att.js';
 import { sendCaughtError } from '../../util.js';
 
@@ -11,11 +11,12 @@ export function registerPayrollRoutes(r, { need }) {
       SELECT e.id AS employee_id, e.code, e.full_name, e.department,
              c.basic_salary, c.daily_rate, c.working_days_per_month,
              COALESCE(c.ot_rate_weekday, ?) AS ot_rate_weekday, COALESCE(c.ot_rate_weekend, ?) AS ot_rate_weekend,
-             COALESCE(c.ot_rate_holiday, ?) AS ot_rate_holiday, c.allowance, c.hourly_rate
+             COALESCE(c.ot_rate_holiday, ?) AS ot_rate_holiday, c.allowance, c.hourly_rate,
+             c.food_allowance, c.food_mode, c.ot_pay1, c.ot_pay2, c.ot_pay3, c.ot_pay_weekend, c.ot_pay_holiday
       FROM employees e LEFT JOIN salary_configs c ON c.employee_id = e.id
       WHERE e.active = 1${adminAttWhere('e.role')}
       ORDER BY e.department, e.full_name`).all(...Object.values(companyOtRates()));
-    res.json({ rows });
+    res.json({ rows, extra: payExtraOn() });
   });
   r.put('/salary/:empId', need('salary'), (req, res) => {
     const b = req.body || {};
@@ -23,6 +24,8 @@ export function registerPayrollRoutes(r, { need }) {
     const def = companyOtRates();
     const emp = db.prepare('SELECT id FROM employees WHERE id = ?').get(eid);
     if (!emp) return res.status(404).json({ error: 'Không tìm thấy nhân viên' });
+    let extra;   // Bảng lương mở rộng: tiền ăn + đơn giá tăng ca theo mốc — chỉ ghi ô có gửi lên, ô không gửi giữ nguyên
+    try { extra = cleanExtraFields(b); } catch (e) { return res.status(400).json({ error: e.message }); }
     db.prepare(`INSERT INTO salary_configs
         (employee_id, basic_salary, daily_rate, working_days_per_month, ot_rate_weekday, ot_rate_weekend, ot_rate_holiday, allowance, hourly_rate, updated_at)
       VALUES (?,?,?,?,?,?,?,?,?, datetime('now'))
@@ -34,6 +37,7 @@ export function registerPayrollRoutes(r, { need }) {
         hourly_rate=excluded.hourly_rate, updated_at=datetime('now')`)
       .run(eid, +b.basic_salary || 0, b.daily_rate ? +b.daily_rate : null, +b.working_days_per_month || 26,
         +b.ot_rate_weekday || def.ot_rate_weekday, +b.ot_rate_weekend || def.ot_rate_weekend, +b.ot_rate_holiday || def.ot_rate_holiday, +b.allowance || 0, +b.hourly_rate || 0);
+    saveExtraFields(eid, extra);
     res.json({ ok: true });
   });
   // Sửa lương hàng loạt theo bộ phận (rỗng = tất cả NV) — chỉ ghi đè các ô gửi lên
@@ -57,7 +61,14 @@ export function registerPayrollRoutes(r, { need }) {
     const virt = virtLevel(req.query, req);   // 1|2|3 = lương ảo mức đó; tài khoản kiểm tra: luôn lương ảo
     if (virt && !req.forceVirt && !auditAllowed(req.user)) return res.status(403).json({ error: 'Không có quyền dùng chức năng này' });
     const data = computePayrollTable(+m[1], +m[2], { dept, virt, force: !!req.forceVirt, ...(custom ? { from, to } : {}) });
-    res.json({ ...data, month, custom, mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
+    res.json({ ...data, month, custom, extra: payExtraOn(), mode: getSetting('attendance_mode', 'shift'), company: getSetting('company_name', 'Digiplus') });
+  });
+  // TRỪ KHÁC (Bảng lương mở rộng): số tiền + lý do cho 1 NV trong đúng kỳ from → to đang xem. 0 và không lý do = xoá
+  r.put('/payroll/deduct', need('salary'), (req, res) => {
+    if (!payExtraOn()) return res.status(400).json({ error: 'Chưa bật Bảng lương mở rộng (Cài đặt › Quy tắc tính công)' });
+    const b = req.body || {};
+    try { res.json({ ok: true, ...setDeduct(+b.employee_id, String(b.from || '').slice(0, 10), String(b.to || '').slice(0, 10), b.amount, b.note) }); }
+    catch (e) { res.status(400).json({ error: e.message }); }
   });
 
   /* ----------------------------- NGÀY LỄ ----------------------------- */

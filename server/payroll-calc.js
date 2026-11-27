@@ -32,7 +32,66 @@ export function reportPayRange(from, to, startDay) {
 const DEFAULT_CFG = {
   basic_salary: 0, daily_rate: null, working_days_per_month: 26,
   ot_rate_weekday: 1.5, ot_rate_weekend: 2.0, ot_rate_holiday: 3.0, allowance: 0, hourly_rate: 0,
+  food_allowance: 0, food_mode: 'day', ot_pay1: 0, ot_pay2: 0, ot_pay3: 0, ot_pay_weekend: 0, ot_pay_holiday: 0,
 };
+
+// BẢNG LƯƠNG MỞ RỘNG (công tắc pay_extra, Cài đặt › Quy tắc tính công, mặc định TẮT = bảng lương y như cũ, không đọc các ô dưới đây):
+//   · Tiền ăn từng người: food_allowance × số ngày đi làm (day) / × số công (unit) / cố định cả kỳ (month)
+//   · Đơn giá tăng ca VNĐ/giờ từng người theo mốc TC1 / TC2 / TC3 (TC4 theo mốc 3) + ngày nghỉ + ngày lễ; ô để 0 = theo hệ số như cũ
+//     (mốc giờ do ca chia: tab Tăng ca của ca — VD tăng ca từ 18:00, TC1 180' / TC2 180' → 18–21h / 21–0h / từ 0h)
+//   · Trừ khác: nhập tay trên bảng lương cho từng người × từng kỳ (bảng payroll_extra) → Thực lĩnh = Tổng thu nhập − Trừ khác
+export const payExtraOn = () => getSetting('pay_extra', '0') === '1';
+export const FOOD_MODES = ['day', 'unit', 'month'];
+export const EXTRA_KEYS = ['food_allowance', 'food_mode', 'ot_pay1', 'ot_pay2', 'ot_pay3', 'ot_pay_weekend', 'ot_pay_holiday'];
+const MAX_MONEY = 1e10;
+// Tiền gõ "30.000" / "30,000 đ" → 30000 (bỏ mọi ký tự không phải số). Rỗng → 0. Số âm / quá lớn → NaN
+function moneyIn(v) {
+  if (v == null || v === '') return 0;
+  if (typeof v !== 'number' && /^\s*-/.test(String(v))) return NaN;
+  const x = typeof v === 'number' ? Math.round(v) : (() => { const d = String(v).replace(/\D/g, ''); return d ? +d : 0; })();
+  return Number.isFinite(x) && x >= 0 && x <= MAX_MONEY ? x : NaN;
+}
+// Đọc các ô mở rộng từ body (chỉ ô có gửi lên). Sai → ném lỗi.
+export function cleanExtraFields(b = {}) {
+  const o = {};
+  for (const k of EXTRA_KEYS) {
+    if (!(k in b) || b[k] == null) continue;
+    if (k === 'food_mode') { o[k] = FOOD_MODES.includes(b[k]) ? b[k] : 'day'; continue; }
+    const v = moneyIn(b[k]);
+    if (Number.isNaN(v)) throw new Error('Số tiền không hợp lệ: ' + k);
+    o[k] = v;
+  }
+  return o;
+}
+export function saveExtraFields(employeeId, fields) {
+  const keys = Object.keys(fields || {}).filter((k) => EXTRA_KEYS.includes(k));
+  if (!keys.length) return;
+  db.prepare(`UPDATE salary_configs SET ${keys.map((k) => k + ' = ?').join(', ')}, updated_at = datetime('now') WHERE employee_id = ?`)
+    .run(...keys.map((k) => fields[k]), employeeId);
+}
+function foodAmount(cfg, days, units) {
+  const a = +cfg.food_allowance || 0;
+  if (!a) return 0;
+  const mode = FOOD_MODES.includes(cfg.food_mode) ? cfg.food_mode : 'day';
+  return mode === 'month' ? a : mode === 'unit' ? a * units : a * days;
+}
+// Trừ khác của 1 NV trong đúng kỳ [from, to]
+export function getDeduct(employeeId, from, to) {
+  return db.prepare('SELECT deduct_other, note FROM payroll_extra WHERE employee_id = ? AND period_from = ? AND period_to = ?').get(employeeId, from, to) || { deduct_other: 0, note: '' };
+}
+export function setDeduct(employeeId, from, to, amount, note = '') {
+  const isDay = (d) => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && !Number.isNaN(Date.parse(d));
+  if (!isDay(from) || !isDay(to) || to < from) throw new Error('Kỳ lương không hợp lệ');
+  if (!db.prepare('SELECT 1 FROM employees WHERE id = ?').get(employeeId)) throw new Error('Không tìm thấy nhân viên');
+  const v = moneyIn(amount);
+  if (Number.isNaN(v)) throw new Error('Số tiền trừ không hợp lệ');
+  const n = String(note || '').trim().slice(0, 200);
+  if (!v && !n) db.prepare('DELETE FROM payroll_extra WHERE employee_id = ? AND period_from = ? AND period_to = ?').run(employeeId, from, to);
+  else db.prepare(`INSERT INTO payroll_extra(employee_id, period_from, period_to, deduct_other, note, updated_at) VALUES (?,?,?,?,?, datetime('now'))
+      ON CONFLICT(employee_id, period_from, period_to) DO UPDATE SET deduct_other = excluded.deduct_other, note = excluded.note, updated_at = datetime('now')`)
+    .run(employeeId, from, to, v, n);
+  return { deduct_other: v, note: n };
+}
 
 // Số giờ chuẩn của 1 ngày công (Cài đặt > Quy tắc tính công) — đơn giá giờ = đơn giá ngày ÷ số này. Mặc định 8 = như trước đây.
 export function hoursPerDay() { const v = parseFloat(getSetting('pay_hours_per_day', '8')); return Number.isFinite(v) && v >= 1 && v <= 24 ? v : 8; }
@@ -75,8 +134,10 @@ export function getSalaryConfig(employeeId) {
 // Chỉ ghi đè ô có trong `fields`; ô khác giữ nguyên cấu hình cũ (NV chưa có cấu hình → mặc định như getSalaryConfig).
 // daily_rate = null nghĩa là "tự tính" (lương CB ÷ ngày công chuẩn). Trả về số NV đã cập nhật.
 const BULK_KEYS = ['basic_salary', 'daily_rate', 'working_days_per_month', 'ot_rate_weekday', 'ot_rate_weekend', 'ot_rate_holiday', 'allowance', 'hourly_rate'];
+// + các ô Bảng lương mở rộng (EXTRA_KEYS): tiền ăn, cách tính tiền ăn, đơn giá tăng ca theo mốc
 export function bulkSetSalary({ dept = '', fields = {} } = {}) {
   const set = {};
+  const extra = cleanExtraFields(fields);
   for (const k of BULK_KEYS) {
     if (!(k in fields)) continue;
     const v = fields[k];
@@ -87,7 +148,7 @@ export function bulkSetSalary({ dept = '', fields = {} } = {}) {
     if (k.startsWith('ot_rate_') && !(n > 0)) throw new Error('Hệ số tăng ca phải lớn hơn 0');
     set[k] = n;
   }
-  if (!Object.keys(set).length) throw new Error('Chưa chọn ô nào để sửa');
+  if (!Object.keys(set).length && !Object.keys(extra).length) throw new Error('Chưa chọn ô nào để sửa');
   const depts = deptWithChildren(dept ? [dept] : []);
   const emps = db.prepare(`SELECT id FROM employees WHERE active = 1${adminAttWhere('role')}` + (depts.length ? ` AND department IN (${depts.map(() => '?').join(',')})` : '')).all(...depts);
   const up = db.prepare(`INSERT INTO salary_configs
@@ -103,6 +164,7 @@ export function bulkSetSalary({ dept = '', fields = {} } = {}) {
       const c = { ...getSalaryConfig(id), ...set };
       up.run(id, c.basic_salary || 0, c.daily_rate || null, c.working_days_per_month || 26,
         c.ot_rate_weekday, c.ot_rate_weekend, c.ot_rate_holiday, c.allowance || 0, c.hourly_rate || 0);
+      saveExtraFields(id, extra);
     }
     db.exec('COMMIT');
   } catch (e) { db.exec('ROLLBACK'); throw e; }
@@ -138,15 +200,17 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
     const N = nightPayCfg();
     const nightMin = N.on ? rows.reduce((s, r) => s + Math.min(r.work_minutes || 0, r.check_in_at && r.check_out_at ? nightMinutes(r.check_in_at, r.check_out_at) : 0), 0) : 0;
     const nightPay = nightMin / 60 * rate * N.pct / 100;
-    const gross = workSalary + nightPay + (cfg.allowance || 0);
+    const X = payExtraOn() ? extraOf(employeeId, from, to, cfg, daysWorked, daysWorked) : null;
+    const gross = workSalary + nightPay + (cfg.allowance || 0) + (X ? X.food : 0);
     return {
       ...(N.on ? { nightHours: round2(nightMin / 60), nightOtHours: 0, nightPay: round0(nightPay) } : {}),
+      ...(X ? X.out : {}),
       hourly: true, totalHours: round2(hrs), daysWorked, hourlyRate: round0(rate),
       workUnits: round2(daysWorked), paidLeaveDays: 0,
       otHoursWeekday: 0, otHoursWeekend: 0, otHoursHoliday: 0, otHoursTotal: 0,
       basicSalary: 0, dailyRate: 0,
       workSalary: round0(workSalary), paidLeaveSalary: 0, otSalary: 0,
-      allowance: round0(cfg.allowance || 0), gross: round0(gross), net: round0(gross),
+      allowance: round0(cfg.allowance || 0), gross: round0(gross), net: round0(gross - (X ? X.deduct : 0)),
     };
   }
 
@@ -157,7 +221,16 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
   // (TC1 dùng hệ số OT ngày thường của NV; TC2–TC4 dùng hệ số đặt ở ca, để 0 = cũng theo hệ số ngày thường)
   const tierMin = [0, 0, 0, 0];
   let otPayWeekdayUnits = 0;   // Σ (phút × hệ số)
+  // Bảng lương mở rộng: mốc nào có đơn giá VNĐ/giờ riêng của NV thì tính theo đơn giá đó, mốc để 0 vẫn theo hệ số
+  const EX = payExtraOn();
+  const vnd = (v) => (EX && +v > 0 ? +v : 0);
+  const tierPay = [vnd(cfg.ot_pay1), vnd(cfg.ot_pay2), vnd(cfg.ot_pay3), vnd(cfg.ot_pay3)];
+  const payWe = vnd(cfg.ot_pay_weekend), payHo = vnd(cfg.ot_pay_holiday);
+  let otMoney = 0;                       // Σ tiền tăng ca ngày thường tính theo đơn giá VNĐ/giờ
+  const tierAmt = [0, 0, 0, 0];          // tiền từng mốc (để in phiếu lương)
+  const workDays = new Set();            // ngày có đi làm (có công hoặc có tăng ca) — tiền ăn theo ngày
   for (const r of rows) {
+    if (EX && ((r.work_unit || 0) > 0 || (r.ot_min || 0) > 0 || (r.work_minutes || 0) > 0)) workDays.add(r.work_date);
     if (N.on) {
       const n = nightSplit(r);
       const dayRate = r.ot_type === 'cuoi_tuan' ? cfg.ot_rate_weekend : r.ot_type === 'le' ? cfg.ot_rate_holiday : 1;
@@ -171,7 +244,11 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
       otMinW += r.ot_min || 0;
       const t = splitOtTiers(r.ot_min || 0, r);
       const rates = [cfg.ot_rate_weekday, r.ot_tier2_rate || cfg.ot_rate_weekday, r.ot_tier3_rate || cfg.ot_rate_weekday, r.ot_tier4_rate || cfg.ot_rate_weekday];
-      t.forEach((m, i) => { tierMin[i] += m; otPayWeekdayUnits += m * rates[i]; });
+      t.forEach((m, i) => {
+        tierMin[i] += m;
+        if (tierPay[i]) { otMoney += m / 60 * tierPay[i]; tierAmt[i] += m / 60 * tierPay[i]; }
+        else { otPayWeekdayUnits += m * rates[i]; tierAmt[i] += m / 60 * hourlyRate * rates[i]; }
+      });
     }
   }
   const otH_w = otMinW / 60, otH_e = otMinE / 60, otH_h = otMinH / 60;
@@ -188,13 +265,23 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
 
   const workSalary = workUnits * dailyRate;
   const paidLeaveSalary = paidLeaveDays * dailyRate;
-  const otSalary = (otPayWeekdayUnits / 60) * hourlyRate
-                 + otH_e * hourlyRate * cfg.ot_rate_weekend
-                 + otH_h * hourlyRate * cfg.ot_rate_holiday;
-  const gross = workSalary + paidLeaveSalary + otSalary + nightPay + (cfg.allowance || 0);
+  const weAmt = payWe ? otH_e * payWe : otH_e * hourlyRate * cfg.ot_rate_weekend;
+  const hoAmt = payHo ? otH_h * payHo : otH_h * hourlyRate * cfg.ot_rate_holiday;
+  const otSalary = (otPayWeekdayUnits / 60) * hourlyRate + weAmt + hoAmt + otMoney;   // tắt pay_extra: otMoney = 0 → y như cũ
+  const X = EX ? extraOf(employeeId, from, to, cfg, workDays.size, workUnits) : null;
+  const gross = workSalary + paidLeaveSalary + otSalary + nightPay + (cfg.allowance || 0) + (X ? X.food : 0);
+  if (X) {   // chi tiết tăng ca từng mốc cho phiếu lương: giờ · đơn giá 1 giờ · thành tiền · đơn giá riêng (own) hay theo hệ số
+    const line = (label, min, amt, own) => ({ label, hours: round2(min / 60), rate: min ? round0(amt / (min / 60)) : 0, amount: round0(amt), own: own ? 1 : 0 });
+    X.out.otLines = [
+      line('Tăng ca mốc 1', tierMin[0], tierAmt[0], tierPay[0]), line('Tăng ca mốc 2', tierMin[1], tierAmt[1], tierPay[1]),
+      line('Tăng ca mốc 3', tierMin[2] + tierMin[3], tierAmt[2] + tierAmt[3], tierPay[2]),
+      line('Tăng ca ngày nghỉ', otMinE, weAmt, payWe), line('Tăng ca ngày lễ', otMinH, hoAmt, payHo),
+    ].filter((l) => l.hours > 0);
+  }
 
   return {
     ...(N.on ? { nightHours: round2(nightReg / 60), nightOtHours: round2(nightOt / 60), nightPay: round0(nightPay) } : {}),
+    ...(X ? X.out : {}),
     workUnits: round2(workUnits), paidLeaveDays: round2(paidLeaveDays),
     otHoursWeekday: round2(otH_w), otHoursWeekend: round2(otH_e), otHoursHoliday: round2(otH_h),
     otHoursTotal: round2(otH_w + otH_e + otH_h),
@@ -202,7 +289,22 @@ export function computePayrollForEmployee(employeeId, from, to, opts = {}) {
     basicSalary: round0(cfg.basic_salary), dailyRate: round0(dailyRate),
     workSalary: round0(workSalary), paidLeaveSalary: round0(paidLeaveSalary),
     otSalary: round0(otSalary), allowance: round0(cfg.allowance || 0),
-    gross: round0(gross), net: round0(gross),
+    gross: round0(gross), net: round0(gross - (X ? X.deduct : 0)),
+  };
+}
+
+// Tiền ăn + trừ khác của 1 NV (chỉ gọi khi bật pay_extra). days = số ngày đi làm, units = số công
+function extraOf(employeeId, from, to, cfg, days, units) {
+  const food = foodAmount(cfg, days, units);
+  const d = getDeduct(employeeId, from, to);
+  const deduct = +d.deduct_other || 0;
+  return {
+    food, deduct,
+    out: {
+      extra: true, foodAllowance: round0(food), foodRate: round0(cfg.food_allowance || 0),
+      foodMode: FOOD_MODES.includes(cfg.food_mode) ? cfg.food_mode : 'day', foodDays: days,
+      deductOther: round0(deduct), deductNote: d.note || '',
+    },
   };
 }
 

@@ -559,6 +559,22 @@ function migrateColumns() {
   add('attendance', 'check_out_outside', 'INTEGER');
   // Lương theo giờ (dùng cho chế độ chấm công 'hourly')
   add('salary_configs', 'hourly_rate', 'REAL NOT NULL DEFAULT 0');
+  // BẢNG LƯƠNG MỞ RỘNG (công tắc pay_extra, mặc định TẮT = không đọc các cột / bảng dưới đây, bảng lương y như cũ)
+  add('salary_configs', 'food_allowance', 'REAL NOT NULL DEFAULT 0');      // tiền ăn (VNĐ)
+  add('salary_configs', 'food_mode', "TEXT NOT NULL DEFAULT 'day'");      // day = × số ngày đi làm · unit = × số công · month = cố định / kỳ
+  add('salary_configs', 'ot_pay1', 'REAL NOT NULL DEFAULT 0');             // đơn giá tăng ca mốc 1 (TC1), VNĐ/giờ · 0 = theo hệ số như cũ
+  add('salary_configs', 'ot_pay2', 'REAL NOT NULL DEFAULT 0');             // mốc 2 (TC2)
+  add('salary_configs', 'ot_pay3', 'REAL NOT NULL DEFAULT 0');             // mốc 3 (TC3, kể cả TC4)
+  add('salary_configs', 'ot_pay_weekend', 'REAL NOT NULL DEFAULT 0');      // tăng ca ngày nghỉ (VNĐ/giờ)
+  add('salary_configs', 'ot_pay_holiday', 'REAL NOT NULL DEFAULT 0');      // tăng ca ngày lễ (VNĐ/giờ)
+  db.exec(`CREATE TABLE IF NOT EXISTS payroll_extra (   -- TRỪ KHÁC nhập tay cho 1 NV × 1 kỳ lương (khoá theo đúng Từ ngày – Đến ngày)
+      employee_id  INTEGER NOT NULL,
+      period_from  TEXT NOT NULL,
+      period_to    TEXT NOT NULL,
+      deduct_other REAL NOT NULL DEFAULT 0,
+      note         TEXT NOT NULL DEFAULT '',
+      updated_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (employee_id, period_from, period_to));`);
   // Đánh dấu bản ghi chấm công do admin thêm/sửa tay + ghi chú lý do
   add('attendance', 'manual', 'INTEGER NOT NULL DEFAULT 0');   // 1 = sửa/thêm bằng tay
   add('attendance', 'note',   "TEXT DEFAULT ''");               // lý do (quên chấm, công tác…)

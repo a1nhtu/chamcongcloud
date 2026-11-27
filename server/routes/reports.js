@@ -1246,6 +1246,10 @@ function buildReportRaw(type, from, to, filter) {
       // Phụ cấp làm đêm (công tắc night_pay): thêm 2 cột trước Phụ cấp; tắt = bảng y như cũ
       const NIGHT = pr.some(({ pay }) => pay.nightPay !== undefined);
       const NIGHT_COLS = [{ key: 'nightgio', label: 'Giờ đêm', w: 9 }, { key: 'nightpay', label: 'Phụ cấp đêm', w: 12 }];
+      // Bảng lương mở rộng (công tắc pay_extra): thêm Tiền ăn + Trừ khác ngay trước Thực lĩnh; tắt = bảng y như cũ
+      const EXTRA = pr.some(({ pay }) => pay.extra);
+      const EXTRA_COLS = [{ key: 'food', label: 'Tiền ăn', w: 11 }, { key: 'deduct', label: 'Trừ khác', w: 11 }, { key: 'deductnote', label: 'Lý do trừ', w: 18 }];
+      const extraVals = (pay) => (EXTRA ? { food: money(pay.foodAllowance), deduct: money(pay.deductOther), deductnote: pay.deductNote || '' } : {});
       if (HOURLY) {   // theo giờ: lương = tổng giờ × đơn giá giờ + phụ cấp
         const columns = [
           { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 14 },
@@ -1257,8 +1261,10 @@ function buildReportRaw(type, from, to, filter) {
           days: pay.daysWorked ?? pay.workUnits, gio: pay.totalHours ?? 0, rate: money(pay.hourlyRate),
           workpay: money(pay.workSalary), allow: money(pay.allowance), net: money(pay.net),
           ...(NIGHT ? { nightgio: pay.nightHours ?? 0, nightpay: money(pay.nightPay) } : {}),
+          ...extraVals(pay),
         }));
         if (NIGHT) columns.splice(columns.length - 2, 0, ...NIGHT_COLS);
+        if (EXTRA) columns.splice(columns.length - 1, 0, ...EXTRA_COLS);
         return { title: `Bảng lương theo giờ ${payTitle}`, columns, rows };
       }
       const columns = [
@@ -1274,8 +1280,10 @@ function buildReportRaw(type, from, to, filter) {
         dayrate: money(pay.dailyRate), workpay: money(pay.workSalary), leavepay: money(pay.paidLeaveSalary),
         otpay: money(pay.otSalary), allow: money(pay.allowance), net: money(pay.net),
         ...(NIGHT ? { nightgio: Math.round(((pay.nightHours || 0) + (pay.nightOtHours || 0)) * 100) / 100, nightpay: money(pay.nightPay) } : {}),
+        ...extraVals(pay),
       }));
       if (NIGHT) columns.splice(columns.length - 2, 0, ...NIGHT_COLS);
+      if (EXTRA) columns.splice(columns.length - 1, 0, ...EXTRA_COLS);
       return { title: `Bảng lương ${payTitle}`, columns, rows };
     }
 

@@ -33,6 +33,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       pay_period_start_day: getSetting('pay_period_start_day', '1'),
       pay_hours_per_day: getSetting('pay_hours_per_day', '8'),
       night_pay: getSetting('night_pay', '0'), night_pct: getSetting('night_pct', '30'), night_ot_pct: getSetting('night_ot_pct', '20'),
+      pay_extra: getSetting('pay_extra', '0'),   // Bảng lương mở rộng: tiền ăn + đơn giá tăng ca theo mốc từng người + trừ khác (mặc định TẮT)
       ot_rate_weekday: getSetting('ot_rate_weekday', '1.5'), ot_rate_weekend: getSetting('ot_rate_weekend', '2'), ot_rate_holiday: getSetting('ot_rate_holiday', '3'),
       geofence_enforce: getSetting('geofence_enforce', '0'),
       attendance_mode: getSetting('attendance_mode', 'shift'),   // shift | hourly
@@ -148,6 +149,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       setSetting(k, String(v));
     }
     if (b.night_pay != null) setSetting('night_pay', b.night_pay && b.night_pay !== '0' ? '1' : '0');
+    if (b.pay_extra != null) setSetting('pay_extra', b.pay_extra && b.pay_extra !== '0' ? '1' : '0');
     for (const k of ['night_pct', 'night_ot_pct']) {
       if (b[k] == null) continue;
       const v = parseFloat(b[k]);
