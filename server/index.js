@@ -38,6 +38,7 @@ import { startUnion } from './union.js';
 import { startHrScheduler } from './hr.js';
 import { startHrRemindScheduler } from './hr-remind.js';
 import { startRebootScheduler } from './reboot-schedule.js';
+import { startMealGuard } from './meal-guard.js';
 import { moveGuard, moveDownload } from './chuyen-may.js';
 import { adminBundle } from './admin-bundle.js';
 import { shareDownload, cleanupShares } from './share-file.js';
@@ -60,6 +61,7 @@ if (!H) ensureSeed();   // máy chủ nhiều công ty: đã tạo lúc mở t�
 startHrScheduler();   // nhân sự: tới ngày hiệu lực thì tự áp dụng quyết định thuyên chuyển / nghỉ việc
 startHrRemindScheduler();   // nhân sự: nhắc HĐ sắp hết hạn / hết thử việc qua thông báo đẩy (công tắc hr_remind_push)
 startRebootScheduler();   // máy chấm công: tự khởi động lại theo giờ hẹn của từng máy (chưa hẹn máy nào = không làm gì)
+startMealGuard();   // máy bếp tự từ chối (khung giờ bữa ăn + 1 lần / bữa) — công tắc mặc định tắt = không làm gì
 
 // Tự động sao lưu dữ liệu: kiểm tra mỗi 5 phút, chạy khi tới giờ đã đặt (1 lần/ngày)
 const backupTick = () => eachTenant(maybeAutoBackup);

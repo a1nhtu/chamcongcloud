@@ -301,6 +301,18 @@ export function queueCmd(serial, content, meta = {}) {
 // Quyền ghi xuống = quyền của user TRÊN MÁY ĐÍCH (targetSerial), mặc định nhân viên (0) — không mang quyền
 // quản trị của máy nguồn sang máy khác. pri truyền vào thì dùng đúng giá trị đó.
 // forceName / bật "đẩy tên NV xuống máy": tên lấy từ NV phần mềm (thay vì tên gõ trên máy).
+// MÓC GẮN TỪ NGOÀI (file này không phụ thuộc phân hệ nào): "máy bếp tự từ chối" của phân hệ suất ăn đăng ký lúc khởi động
+//   · setUserTzResolver(fn(serial, pin, pri)) — TZ riêng cho (máy, Số ID): người đã ăn bữa này bị khoá, quản trị máy luôn quét được
+//   · setPollDelayResolver(fn(serial))        — số giây máy hỏi lệnh (máy bếp hỏi nhanh hơn)
+//   · setPunchListener(fn(serial, list))      — nghe lượt quẹt MỚI vừa lưu (xem ingestAttlog)
+// Chưa đăng ký / hàm trả null → USER_TZ, 10 giây — y như cũ.
+let userTzOf = null, pollDelayOf = null;
+export const setUserTzResolver = (fn) => { userTzOf = typeof fn === 'function' ? fn : null; };
+export const setPollDelayResolver = (fn) => { pollDelayOf = typeof fn === 'function' ? fn : null; };
+export function pollDelay(serial) {
+  if (pollDelayOf) { try { const s = pollDelayOf(serial); if (s > 0) return s; } catch (e) { console.error('[máy bếp] chọn Delay lỗi:', e.message); } }
+  return 10;
+}
 export function buildUserCommand(pin, targetSerial, pri, forceName = false) {
   const u = db.prepare('SELECT * FROM device_users WHERE pin=?').get(pin) || {};
   const name = pmNameFor(pin, forceName) || u.name || pin;
@@ -310,7 +322,9 @@ export function buildUserCommand(pin, targetSerial, pri, forceName = false) {
   }
   const card = u.card && u.card !== '0' ? `\tCard=${u.card}` : '';
   // TZ: đủ 16 chữ số theo tài liệu hãng (xem USER_TZ ở db.js) — "TZ=1" làm máy SenseFace 4B báo "Khoảng thời gian không hợp lệ"
-  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=${USER_TZ}\tVerify=0`;
+  let tz = USER_TZ;
+  if (userTzOf && targetSerial) { try { tz = userTzOf(targetSerial, String(pin), Number(pri) || 0) || USER_TZ; } catch (e) { console.error('[máy bếp] chọn TZ lỗi:', e.message); } }
+  return `DATA UPDATE USERINFO PIN=${pin}\tName=${name}\tPasswd=${u.passwd || ''}${card}\tPri=${pri}\tGrp=1\tTZ=${tz}\tVerify=0`;
 }
 
 // Máy ADMS gọi về ~10 giây/lần; im quá 2,5 phút = mất kết nối. Luôn tính bằng GIỜ MÁY CHỦ rồi gửi kết quả cho trang:
@@ -471,8 +485,8 @@ export function deleteDeviceUsers(serial, pins) {
   let n = 0;
   for (const pin of (pins || [])) {
     const p = String(pin).trim(); if (!p) continue;
-    // bỏ các lệnh đồng bộ CHƯA gửi của người này (khỏi ghi lại lên máy rồi mới xoá)
-    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo')").run(serial, p);
+    // bỏ các lệnh đồng bộ CHƯA gửi của người này (khỏi ghi lại lên máy rồi mới xoá) — kể cả lệnh khoá / mở của máy bếp ('mguard')
+    db.prepare("DELETE FROM push_device_commands WHERE serial=? AND pin=? AND trans_time IS NULL AND mkind IN ('user','bio','bio-alt','photo','mguard')").run(serial, p);
     queueCmd(serial, `DATA DELETE USERINFO\tPIN=${p}`);
     db.prepare('DELETE FROM device_bio_templates WHERE serial=? AND pin=?').run(serial, p);
     db.prepare('DELETE FROM device_users_serial WHERE serial=? AND pin=?').run(serial, p);
@@ -933,7 +947,9 @@ export function nextCommand(serial) {
   // response_at IS NULL: lệnh chờ gửi lại mà máy báo kết quả muộn (đã chạy) thì thôi không gửi nữa
   const d = db.prepare('SELECT push_ver FROM push_devices WHERE serial=?').get(serial) || {};
   const max = d.push_ver && d.push_ver !== '-' ? BATCH_MAX : 1;
-  const rows = db.prepare('SELECT id,content,resend FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL ORDER BY id LIMIT ?').all(serial, max);
+  // Lệnh máy bếp (mkind 'mguard': khoá người vừa ăn / khung giờ bữa ăn) đi TRƯỚC mọi lệnh khác — chỉ có khi bật công tắc máy bếp
+  const rows = db.prepare(`SELECT id,content,resend FROM push_device_commands WHERE serial=? AND trans_time IS NULL AND response_at IS NULL
+    ORDER BY CASE WHEN mkind='mguard' THEN 0 ELSE 1 END, id LIMIT ?`).all(serial, max);
   if (!rows.length) return '';
   const pick = [rows[0]];
   let bytes = rows[0].content.length;
@@ -1700,6 +1716,10 @@ export function dayPairsFor(employeeId, workDate, shift) {
   return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), ioParamsFor(employeeId, workDate) || pairDup()) : null;
 }
 
+// Móc nghe lượt quẹt MỚI vừa lưu: fn(serial, [{ pin, punchIso, empId }]) — máy bếp tự từ chối dùng để khoá người đó ở các máy bếp
+let punchListener = null;
+export const setPunchListener = (fn) => { punchListener = typeof fn === 'function' ? fn : null; };
+
 // Nạp khối ATTLOG (nhiều dòng), mỗi dòng: PIN \t Time \t Status \t Verify \t WorkCode
 // opts.ask(serial, pin): gặp Số ID chưa khớp NV thì làm gì (mặc định: xếp lệnh ADMS hỏi máy ZKTeco thông tin người đó).
 // Trả số dòng hợp lệ đã nhận.
@@ -1710,6 +1730,7 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
   const lines = String(rawBody || '').split('\n').map((l) => l.trim()).filter(Boolean);
   const touched = new Set();
   const notifyNow = new Map();   // empId → lượt quẹt mới nhất cần báo
+  const fresh = [];              // lượt MỚI lưu (cho máy bếp tự từ chối)
   let n = 0;
   const dedupMs = (parseInt(getSetting('punch_dedup_min', '15'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
@@ -1744,6 +1765,7 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
     const empId = emp?.id ?? null;
     let isNew = false;
     try { isNew = ins.run(serial, pin, punchIso, workDate, status, verify, empId).changes > 0; } catch {}
+    if (isNew && punchListener) fresh.push({ pin, punchIso, empId });
     // Báo cho CHÍNH nhân viên: chỉ lượt quẹt MỚI và vừa xảy ra (≤ 15 phút) — máy gửi bù log cũ thì không báo dồn
     if (isNew && empId && Math.abs(Date.now() - d.getTime()) <= 15 * 60000) {
       const prevN = notifyNow.get(empId);
@@ -1753,6 +1775,8 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
     n++;
     if (empId) touched.add(empId + '|' + workDate);
   }
+  // Khoá người vừa ăn ở các máy bếp TRƯỚC khi dựng lại công (dựng công có thể lâu) để lệnh xuống máy sớm nhất
+  if (fresh.length && punchListener) { try { punchListener(serial, fresh); } catch (e) { console.error('[máy bếp] khoá lỗi:', e.message); } }
   // Dựng lại ngày có punch + NGÀY HÔM TRƯỚC (punch sáng sớm có thể là giờ RA của ca đêm hôm trước), theo thứ tự ngày
   const toRebuild = new Set();
   for (const key of touched) {

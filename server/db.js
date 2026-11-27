@@ -1155,6 +1155,26 @@ function migrateColumns() {
       sent_by    TEXT NOT NULL DEFAULT '',
       PRIMARY KEY (work_date, shift)
     );`);
+  // MÁY BẾP TỰ TỪ CHỐI (server/meal-guard.js) — công tắc meal_guard_window / meal_guard_once mặc định TẮT (thiếu = '0').
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meal_guard_locks (     -- người ĐÃ ĂN bữa này: bị khoá (không có khung giờ) trên 1 máy bếp tới hết bữa
+      id          INTEGER PRIMARY KEY AUTOINCREMENT,
+      serial      TEXT NOT NULL,                      -- máy bếp bị đổi
+      pin         TEXT NOT NULL,
+      work_date   TEXT NOT NULL,
+      shift       TEXT NOT NULL,
+      until_at    TEXT NOT NULL,                      -- ISO UTC: hết khung giờ bữa → mở lại
+      src_serial  TEXT NOT NULL DEFAULT '',           -- máy người đó vừa quét thành công
+      punch_at    TEXT NOT NULL DEFAULT '',
+      created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      released_at TEXT                                -- NULL = đang khoá
+    );
+    CREATE INDEX IF NOT EXISTS idx_meal_guard_locks_open ON meal_guard_locks(serial, pin, released_at);
+    CREATE TABLE IF NOT EXISTS meal_guard_state (     -- khung giờ đã xếp lệnh xuống từng máy bếp (để chỉ gửi khi đổi)
+      serial     TEXT PRIMARY KEY,
+      state      TEXT NOT NULL DEFAULT '',            -- JSON { window, slots: [...] }
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );`);
   // ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (server/meal-inv.js) — bảng RIÊNG; công tắc `meal_ingredient` mặc định TẮT (thiếu = '0').
   // Chỉ ĐỌC số suất của phân hệ suất ăn, không ghi vào bảng suất ăn / chấm công.
   db.exec(`

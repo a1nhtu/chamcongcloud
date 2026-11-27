@@ -701,6 +701,59 @@ export async function pageMealCfg(ctx) {
   devBox.append(saveDev, el('div', { class: 'sa-hint', style: 'margin-top:6px' }, 'Không chọn máy nào = tính mọi máy chấm công thật. Lượt thêm tay và lượt chấm bằng điện thoại không bao giờ tính suất ăn.'));
   main.append(devBox);
 
+  /* --- máy bếp tự từ chối (máy ZKTeco ADMS có kiểm soát ra vào): khung giờ + 1 lần / bữa — server/meal-guard.js --- */
+  main.append(sec('Máy bếp tự từ chối (máy ZKTeco có kiểm soát ra vào)'));
+  const gBox = el('div', { class: 'sa-card' }, C.loading());
+  main.append(gBox);
+  const drawGuard = (g) => {
+    gBox.innerHTML = '';
+    gBox.append(el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, 'Phần mềm ghi thẳng xuống máy chấm ăn để chính máy báo thất bại. Cần máy ZKTeco nối kiểu ADMS (máy tự đẩy dữ liệu), dòng có chức năng kiểm soát ra vào (VD SenseFace 4B). Máy chỉ chấm công (VD dòng NF24HA) không xét khung giờ nên vẫn báo thành công. Mặc định TẮT — không bật thì máy chạy y như cũ.'));
+    if (!g.base_ok) gBox.append(el('div', { class: 'sa-hint', style: 'color:var(--sa-red);font-weight:600;margin-bottom:8px' }, '⚠ Chưa bật "Dùng máy chấm công" (Cài đặt) — bật xong mới gửi lệnh xuống máy được.'));
+    const chk = (on, title, note) => {
+      const c = el('input', { type: 'checkbox', style: 'width:auto;margin-top:3px', ...(on ? { checked: '' } : {}) });
+      gBox.append(el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin:6px 0;color:inherit;font-size:14px' }, c,
+        el('span', {}, el('b', {}, title), el('div', { class: 'sa-hint' }, note))));
+      return c;
+    };
+    const cWin = chk(g.window, '⏰ Quét ngoài giờ ăn → máy báo thất bại',
+      `Máy chỉ nhận quét trong giờ các bữa đang bật (mục 1)${g.segments.length ? ': ' + g.segments.join(', ') : ''}. Ngoài giờ máy báo "Khoảng thời gian không hợp lệ", không lưu lượt.` +
+      (g.rotating ? ` Có ${g.segments.length} khung giờ mà máy chỉ giữ được 3 → phần mềm tự đổi sang các bữa sắp tới (máy chủ phần mềm phải luôn bật).` : ''));
+    const cOnce = chk(g.once, '🔁 Mỗi bữa chỉ quét thành công 1 lần trên tất cả máy bếp',
+      `Quét được ở 1 máy → phần mềm khoá người đó trên mọi máy bếp đã chọn tới hết bữa, hết bữa tự mở. Máy bếp hỏi lệnh ${g.delay} giây/lần nên có thể hở vài giây; máy mất mạng thì chưa nhận được lệnh khoá (báo cáo vẫn đánh dấu quẹt lần 2).`);
+    gBox.append(el('div', { style: 'font-weight:700;margin:10px 0 4px' }, 'Máy bếp:'));
+    const pick = new Set(g.serials);
+    if (!g.devices.length) gBox.append(el('div', { class: 'sa-empty' }, 'Chưa có máy ZKTeco nào được duyệt.'));
+    for (const d of g.devices) {
+      const c = el('input', { type: 'checkbox', style: 'width:auto;margin-top:3px', ...(pick.has(d.serial) ? { checked: '' } : {}), ...(d.adms ? {} : { disabled: '' }) });
+      c.onchange = () => { c.checked ? pick.add(d.serial) : pick.delete(d.serial); };
+      const info = [];
+      if (!d.adms) info.push(el('div', { class: 'sa-hint' }, 'Máy kết nối TCP/IP — không nhận được lệnh này (cần nối kiểu ADMS).'));
+      if (d.live) {
+        const bits = [d.slots.length ? 'khung giờ trên máy: ' + d.slots.join(', ') : null, g.once ? `đang khoá ${d.locked} người` : null, d.pending ? `còn ${d.pending} lệnh chờ máy nhận` : 'máy đã nhận hết lệnh'].filter(Boolean);
+        info.push(el('div', { class: 'sa-hint' }, bits.join(' · ')));
+      }
+      if (d.error) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-red)' }, `⚠ Máy từ chối lệnh ${d.error.cmd} (mã ${d.error.code}) — có thể dòng máy này không có chức năng kiểm soát ra vào.`));
+      if (d.not_counted) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-warn)' }, '⚠ Máy này không nằm trong "máy dùng để đếm suất ăn" ở trên → lượt quét không được tính suất.'));
+      if (d.signup_conflict) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-warn)' }, '⚠ Máy này cũng dùng để báo cơm bằng quẹt máy — bật khung giờ thì ngoài giờ ăn máy sẽ từ chối, không báo cơm được.'));
+      gBox.append(el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin:6px 0;color:inherit;font-size:14px' }, c,
+        el('span', {}, `${d.name} (${d.serial}) `, el('span', { style: `font-size:12px;color:${d.online ? 'var(--sa-ok)' : 'var(--sa-mut)'}` }, d.online ? '● đang nối' : '○ mất kết nối'), ...info)));
+    }
+    const save = el('button', { class: 'sa-btn', type: 'button', style: 'margin-top:8px' }, '💾 Lưu');
+    save.onclick = async () => {
+      if ((cWin.checked || cOnce.checked) && !pick.size) return toast('Chọn ít nhất 1 máy bếp', 'err');
+      try {
+        const r = await api('/admin/meal/guard', { method: 'PUT', body: { window: cWin.checked, once: cOnce.checked, serials: [...pick] } });
+        toast(cOnce.checked && !g.once ? 'Đã lưu — khởi động lại máy bếp 1 lần để máy hỏi lệnh nhanh hơn' : 'Đã lưu', 'ok');
+        drawGuard(r);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    const resend = el('button', { class: 'sa-btn ghost', type: 'button', style: 'margin:8px 0 0 8px' }, '🔄 Gửi lại khung giờ xuống máy');
+    resend.onclick = async () => { try { drawGuard(await api('/admin/meal/guard/resend', { method: 'POST', body: {} })); toast('Đã xếp lệnh gửi lại', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+    gBox.append(save, ...(g.window ? [resend] : []),
+      el('div', { class: 'sa-hint', style: 'margin-top:6px' }, `Người là QUẢN TRỊ trên máy luôn quét được (để vào menu máy) và không bị khoá. Bật "1 lần / bữa" xong nên khởi động lại máy bếp 1 lần để máy hỏi lệnh ${g.delay} giây/lần. Thay máy / khôi phục cài đặt gốc thì bấm "Gửi lại khung giờ".`));
+  };
+  api('/admin/meal/guard').then(drawGuard).catch((e) => { gBox.innerHTML = ''; gBox.append(el('div', { class: 'sa-empty' }, e.message)); });
+
   /* --- báo cơm bằng quẹt máy chấm công (chỉ khi tài khoản tổng chọn "quẹt máy" / "cả app lẫn quẹt máy") --- */
   if (opt.machine_signup) {
     main.append(sec('Báo cơm bằng quẹt máy chấm công'));

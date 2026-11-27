@@ -12,6 +12,7 @@ import {
 import { writeMealReportXlsx, writeMealRptXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
 import { registerMealInvRoutes } from './meal-inv.js';
+import { guardStatus, saveGuard, resendGuard } from '../../meal-guard.js';
 
 const who = (req) => req.user.full_name || req.user.username || '';
 // Chạy 1 handler, lỗi nghiệp vụ (userError) trả nguyên văn, lỗi khác che lại
@@ -114,6 +115,18 @@ export function registerMealRoutes(r) {
     const signup = req.body?.kind === 'signup';
     setSetting(signup ? 'meal_signup_serials' : 'meal_serials', list.join(','));
     res.json({ ok: true, [signup ? 'signup_serials' : 'serials']: list });
+  }));
+
+  // ---------- MÁY BẾP TỰ TỪ CHỐI (máy ZKTeco ADMS có kiểm soát ra vào): khung giờ bữa ăn + 1 lần / bữa trên mọi máy bếp ----------
+  r.get('/meal/guard', wrap('GET /admin/meal/guard', (req, res) => res.json(guardStatus())));
+  r.put('/meal/guard', wrap('PUT /admin/meal/guard', (req, res) => {
+    const b = req.body || {};
+    res.json({ ok: true, ...saveGuard({ window: !!b.window, once: !!b.once, serials: b.serials }) });
+  }));
+  // Gửi lại khung giờ xuống máy (máy vừa khôi phục cài đặt gốc / thay máy mới cùng số serial)
+  r.post('/meal/guard/resend', wrap('POST /admin/meal/guard/resend', (req, res) => {
+    resendGuard(req.body?.serial ? String(req.body.serial) : null);
+    res.json({ ok: true, ...guardStatus() });
   }));
 
   // ---------- BÁO CÁO suất ăn + HR chỉnh tay (lưu vết ở meal_adjust_log) ----------

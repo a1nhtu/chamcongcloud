@@ -4,7 +4,7 @@
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
 import { guardIncoming } from '../pin-guard.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd, askDraftNames } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd, askDraftNames, pollDelay } from '../device-sync.js';
 import { vnDateStr } from '../util.js';
 
 const r = Router();
@@ -41,7 +41,7 @@ function initInfo(serial) {
     `ATTLOGStamp=${d?.att_stamp || '0'}\n` +
     `OPERLOGStamp=${d?.oper_stamp || '0'}\n` +
     `ErrorDelay=30\n` +
-    `Delay=10\n` +
+    `Delay=${pollDelay(serial)}\n` +   // mặc định 10 giây; máy bếp bật "một lần / bữa" hỏi nhanh hơn (móc ở device-sync.js)
     `TimeZone=7\n` +
     `TransTimes=00:00;14:05\n` +
     `TransInterval=1\n` +
