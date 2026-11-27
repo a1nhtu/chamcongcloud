@@ -6,7 +6,7 @@
 //   · người đã nghỉ việc / bị khoá, Số ID chưa khớp NV → trạng thái riêng để HR xem
 import { db, getSetting, deptWithChildren } from './db.js';
 import { listShifts, needRange } from './meal.js';
-import { shiftForPunch, addDaysIso, NON_MACHINE_SERIALS, SCAN_STATUS, mergeAttRows, pickAttDay, otMealStatus } from './meal-rules.js';
+import { windowBoundsUtc, addDaysIso, NON_MACHINE_SERIALS, SCAN_STATUS, mergeAttRows, pickAttDay, otMealStatus } from './meal-rules.js';
 
 const VN_MS = 7 * 3600000;
 const VERIFY = { 0: 'Mật mã', 1: 'Vân tay', 2: 'Thẻ', 3: 'Mật mã', 4: 'Thẻ', 15: 'Khuôn mặt', 25: 'Lòng bàn tay' };
@@ -16,6 +16,25 @@ const mealSerials = () => String(getSetting('meal_serials', '')).split(',').map(
 
 // Nhóm lọc trạng thái: '' = tất cả; 'ok' = đủ điều kiện; còn lại theo đúng mã trạng thái
 const STATUS_KEYS = Object.keys(SCAN_STATUS);
+
+// Khung giờ các bữa theo NGÀY QUẸT (giờ VN), tính 1 lần / ngày thay vì mỗi lượt: tháng 5.000 NV ≈ 180.000 lượt × 5 bữa × 2 ngày
+// gọi windowBoundsUtc hàng triệu lần (≈ 9 giây). Chọn bữa y hệt meal-rules › shiftForPunch: khung chứa lượt quẹt, bắt đầu muộn nhất,
+// duyệt cùng thứ tự (bữa → hôm nay / hôm trước), bằng nhau thì giữ khung gặp trước.
+function dayWindows(shifts) {
+  const cache = new Map();
+  return (vnDay) => {
+    let w = cache.get(vnDay);
+    if (!w) {
+      const prev = addDaysIso(vnDay, -1), wins = [];
+      for (const sh of shifts) {
+        if (!sh.enabled) continue;
+        for (const d of [vnDay, prev]) { const [a, b] = windowBoundsUtc(d, sh); wins.push({ workDate: d, shift: sh, a, b, startMs: Date.parse(a) }); }
+      }
+      cache.set(vnDay, (w = { prev, wins }));
+    }
+    return w;
+  };
+}
 
 export function mealScans({ from, to, dept = '', shift = '', status = '', q = '', now = new Date() } = {}) {
   needRange(from, to, 31);
@@ -57,11 +76,14 @@ export function mealScans({ from, to, dept = '', shift = '', status = '', q = ''
     for (const [k, rows] of g) att.set(k, mergeAttRows(rows));
   }
 
-  const rows = [], seen = new Map();
+  const rows = [], seen = new Map(), winOf = dayWindows(shifts);
   let outside = 0;
   for (const p of punches) {
-    const hit = shiftForPunch(p.punch_at, shifts);
-    const vnDay = new Date(Date.parse(p.punch_at) + VN_MS).toISOString().slice(0, 10);
+    const t = Date.parse(p.punch_at);
+    if (Number.isNaN(t)) continue;
+    const vnDay = new Date(t + VN_MS).toISOString().slice(0, 10), day = winOf(vnDay);
+    let hit = null;
+    for (const w of day.wins) if (p.punch_at >= w.a && p.punch_at <= w.b && (!hit || w.startMs > hit.startMs)) hit = w;
     if (!hit) { if (vnDay >= from && vnDay <= to) outside++; continue; }
     if (hit.workDate < from || hit.workDate > to) continue;
     const e = empOf(p), sh = hit.shift;
@@ -74,9 +96,8 @@ export function mealScans({ from, to, dept = '', shift = '', status = '', q = ''
     else if (!e.active || (e.leave_date && e.leave_date <= hit.workDate)) {
       st = 'nghi'; note = e.leave_date && e.leave_date <= hit.workDate ? `Nghỉ việc từ ${e.leave_date.slice(8, 10)}/${e.leave_date.slice(5, 7)}/${e.leave_date.slice(0, 4)}` : 'Nhân viên đang bị khoá';
     } else if (sh.ot_need_min > 0) {
-      const d0 = addDaysIso(vnDay, -1);
-      const day = pickAttDay([att.get(e.id + '|' + d0), att.get(e.id + '|' + vnDay)], p.punch_at);
-      ({ st, ot, note } = otMealStatus(sh.ot_need_min, day, p.punch_at, nowIso));
+      const ad = pickAttDay([att.get(e.id + '|' + day.prev), att.get(e.id + '|' + vnDay)], p.punch_at);
+      ({ st, ot, note } = otMealStatus(sh.ot_need_min, ad, p.punch_at, nowIso));
     } else st = 'du';
     const d = devs.get(p.serial);
     rows.push({

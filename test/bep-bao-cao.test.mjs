@@ -239,3 +239,31 @@ test('D — Excel chi tiết lượt ăn: đủ dòng + dòng tổng + sheet T�
   const sum = wb.getWorksheet('Tổng hợp');
   assert.ok(sum.getRow(4).getCell(1).value);
 });
+
+test('D — xếp bữa theo bộ nhớ khung từng ngày cho kết quả y hệt shiftForPunch (lượt quẹt ngẫu nhiên, có bữa qua đêm)', () => {
+  db.prepare("DELETE FROM device_punches WHERE serial IN ('K1','K2')").run();
+  db.prepare("INSERT INTO meal_shifts(code, name, from_time, to_time, mode, enabled, sort_order, ot_need_min) VALUES ('khuya','Khuya','00:30','02:00','punch',1,9,0)").run();
+  const p = db.prepare('INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES (?,?,?,?,0,15,NULL)');
+  let seed = 7;
+  const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648;
+  const base = Date.parse('2026-11-23T17:00:00Z');   // 00:00 giờ VN ngày 24/11
+  for (let i = 0; i < 600; i++) {
+    const at = new Date(base + Math.floor(rnd() * 3 * 86400) * 1000).toISOString();
+    p.run(i % 2 ? 'K1' : 'K2', String(9000 + i), at, at.slice(0, 10));   // Số ID khác nhau → không có quẹt lặp
+  }
+  const shifts = db.prepare('SELECT * FROM meal_shifts ORDER BY sort_order').all();
+  const r = M.mealScans({ from: '2026-11-24', to: '2026-11-25', now: VN('2026-11-27 09:00') });
+  const want = new Map();
+  let outside = 0;
+  for (const x of db.prepare("SELECT pin, punch_at FROM device_punches WHERE serial IN ('K1','K2')").all()) {
+    const h = R.shiftForPunch(x.punch_at, shifts);
+    const vnDay = new Date(Date.parse(x.punch_at) + 7 * 3600000).toISOString().slice(0, 10);
+    if (!h) { if (vnDay >= '2026-11-24' && vnDay <= '2026-11-25') outside++; continue; }
+    if (h.workDate >= '2026-11-24' && h.workDate <= '2026-11-25') want.set(x.pin, h.workDate + '|' + h.shift.code);
+  }
+  assert.ok(want.size > 100);
+  assert.deepEqual(new Map(r.rows.map((x) => [x.code, x.date + '|' + x.shift])), want);
+  assert.equal(r.outside, outside);
+  assert.ok(r.rows.some((x) => x.shift === 'dem' && x.at.slice(0, 10) !== x.date || x.shift === 'khuya'), 'có lượt qua đêm');
+  db.prepare("DELETE FROM meal_shifts WHERE code='khuya'").run();
+});
