@@ -546,13 +546,44 @@ function devicePunchesModal(m, opts = {}) {
   fromI.onchange = () => { st.from = fromI.value; load(); };
   toI.onchange = () => { st.to = toI.value; load(); };
 
-  const renderBar = () => {
+  // CHUYỂN lượt đã chọn sang NV khác (Anh 27/11/2026, BBQ: 2 chi nhánh cùng Số ID → lượt của người này cộng nhầm cho người kia)
+  let emps = null, moveOpen = false, moveVal = '';
+  const empLabel = (e) => `${e.code} — ${e.full_name}` + (e.device_pin && String(e.device_pin) !== String(e.code) ? ` (Số ID ${e.device_pin})` : '');
+  const moveBox = (focus) => {
+    const dl = el('datalist', { id: 'dp-move-emps' });
+    const inp = el('input', { type: 'search', list: 'dp-move-emps', placeholder: 'Gõ mã hoặc tên NV nhận các lượt này…', style: 'flex:1;min-width:220px' });
+    inp.value = moveVal; inp.oninput = () => { moveVal = inp.value; };
+    inp.onkeydown = (ev) => { if (ev.key === 'Enter') movePicked(); };
+    (async () => {
+      if (!emps) { try { emps = ((await api('/admin/employees')).rows || []).filter((e) => e.active !== 0); } catch (e) { emps = null; return toast(e.message, 'err'); } }
+      for (const e of emps) dl.append(el('option', { value: empLabel(e) }));
+    })();
+    if (focus) setTimeout(() => inp.focus(), 30);
+    return el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;width:100%' }, el('span', { class: 'muted', style: 'font-size:13px' }, 'Chuyển sang'), inp, dl,
+      btnSm('Chuyển ' + picked.size + ' lượt', movePicked, 'green'));
+  };
+  const renderBar = (focusMove) => {
     bar.innerHTML = '';
-    if (!picked.size) { bar.append(el('span', { class: 'map-hint', style: 'margin:0' }, 'Tích ô đầu dòng để chọn nhiều lượt rồi xoá một lần.')); return; }
+    if (!picked.size) { moveOpen = false; bar.append(el('span', { class: 'map-hint', style: 'margin:0' }, 'Tích ô đầu dòng để chọn nhiều lượt rồi xoá, hoặc chuyển sang nhân viên khác (lượt bị cộng nhầm vì trùng Số ID).')); return; }
     bar.append(el('b', { style: 'font-size:13px' }, 'Đã chọn ' + picked.size + ' lượt'),
       btnSm('🗑 Xóa ' + picked.size + ' lượt đã chọn', delPicked, 'danger'),
+      btnSm('👤 Chuyển sang NV khác', () => { moveOpen = !moveOpen; renderBar(moveOpen); }),
       btnSm('Bỏ chọn', () => { picked.clear(); render(); }, 'ghost'));
+    if (moveOpen) bar.append(moveBox(focusMove));
   };
+  async function movePicked() {
+    const e = (emps || []).find((x) => empLabel(x) === moveVal.trim());
+    if (!e) return toast('Chọn nhân viên trong danh sách gợi ý', 'err');
+    const ids = [...picked];
+    const pins = [...new Set(rows.filter((p) => picked.has(p.id)).map((p) => p.pin))];
+    if (!confirm(`Chuyển ${ids.length} lượt quẹt đã chọn (Số ID: ${pins.slice(0, 8).join(', ')}${pins.length > 8 ? '…' : ''}) sang ${e.full_name} — Số ID ${e.device_pin || e.code}?\n`
+      + `Công những ngày này của người đang nhận các lượt và của ${e.full_name} sẽ được tính lại. Máy gửi lại các lượt này sau này cũng về ${e.full_name}.`)) return;
+    try {
+      const r = await api('/admin/devices/' + m.id + '/punches/move', { method: 'POST', body: { ids, employee_id: e.id } });
+      toast(`Đã chuyển ${r.moved} lượt quẹt sang ${e.full_name}` + (r.merged ? ` (bỏ ${r.merged} lượt trùng giờ đã có)` : ''), 'ok');
+      picked.clear(); moveOpen = false; moveVal = ''; load();
+    } catch (err) { toast(err.message, 'err'); }
+  }
   async function delPicked() {
     const ids = [...picked];
     const pins = [...new Set(rows.filter((p) => picked.has(p.id)).map((p) => p.pin))];

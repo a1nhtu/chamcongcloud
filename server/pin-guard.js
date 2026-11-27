@@ -52,7 +52,8 @@ const openConflict = (serial, pin) => db.prepare(`SELECT id FROM device_pin_conf
 
 // Đổi Số ID lượt quẹt theo quy tắc (giữ lại / chuyển sang Số ID mới). null = máy này không có quy tắc nào.
 export function remapLoader(serial) {
-  const rules = db.prepare('SELECT pin, from_at, to_at, new_pin FROM device_pin_remaps WHERE serial=?').all(serial);
+  // quy tắc MỚI NHẤT thắng: chuyển lượt quẹt bằng tay (movePunchesToEmployee) đè lên quy tắc cũ cùng khoảng
+  const rules = db.prepare('SELECT pin, from_at, to_at, new_pin FROM device_pin_remaps WHERE serial=? ORDER BY id DESC').all(serial);
   if (!rules.length) return null;
   return (pin, iso) => {
     for (const r of rules) if (r.pin === pin && iso >= r.from_at && (!r.to_at || iso < r.to_at)) return r.new_pin;

@@ -1049,6 +1049,59 @@ export function relinkPunchesForPin(employeeId, pin) {
   } catch (e) { db.exec('ROLLBACK TO relink'); db.exec('RELEASE relink'); throw e; }
 }
 
+// CHUYỂN lượt quẹt của 1 máy sang NV khác (Anh 27/11/2026, khách BBQ: 2 chi nhánh cùng dùng Số ID 3 → lượt của người ở máy
+// Manor cộng nhầm cho NV ở Green Star từ tháng 9; nút "Người khác" của Cảnh báo trùng chỉ chuyển lượt từ lúc phát hiện).
+//  - Lượt đổi luôn sang Số ID của NV đích (Số ID máy, không có thì mã NV) → gán lại theo Số ID sau này không trả về người cũ.
+//  - NV đích đã có lượt đúng giờ đó ở máy này → bỏ bản trùng.
+//  - Ghi quy tắc đổi số (device_pin_remaps) cho từng khoảng thời gian đã chuyển của Số ID cũ ở máy này → máy gửi lại log cũ
+//    vẫn về đúng người. Khoảng bị ngắt ở chỗ còn lượt của Số ID cũ KHÔNG chuyển (lượt đó vẫn là của người cũ).
+//  - Dựng lại công các ngày đụng tới của cả NV cũ lẫn NV đích.
+// Trả { moved, merged, pin }: moved = số lượt đã chuyển, merged = số lượt trùng giờ đã bỏ.
+export function movePunchesToEmployee(serial, ids, employeeId) {
+  const bad = (m) => Object.assign(new Error(m), { status: 400, userFacing: true });
+  const emp = db.prepare('SELECT id, code, device_pin FROM employees WHERE id=?').get(+employeeId || 0);
+  if (!emp) throw bad('Không tìm thấy nhân viên cần chuyển tới');
+  const newPin = String(emp.device_pin || '').trim() || String(emp.code || '').trim();
+  if (!newPin) throw bad('Nhân viên này chưa có Số ID máy chấm công');
+  const get = db.prepare('SELECT id, pin, punch_at, work_date, employee_id FROM device_punches WHERE id=? AND serial=?');
+  const rows = ids.map((id) => get.get(id, serial)).filter((p) => p && !(p.pin === newPin && p.employee_id === emp.id));
+  const keys = new Set(), oldKeys = new Set(), byPin = new Map();
+  let moved = 0, merged = 0;
+  db.exec('SAVEPOINT move_punch');
+  try {
+    const upd = db.prepare('UPDATE OR IGNORE device_punches SET pin=?, employee_id=? WHERE id=?');
+    const del = db.prepare('DELETE FROM device_punches WHERE id=?');
+    for (const p of rows) {
+      if (p.employee_id) { keys.add(p.employee_id + '|' + p.work_date); if (p.employee_id !== emp.id) oldKeys.add(p.employee_id + '|' + p.work_date); }
+      keys.add(emp.id + '|' + p.work_date);
+      if (upd.run(newPin, emp.id, p.id).changes) moved++; else { del.run(p.id); merged++; }
+      // Số ID đang giữ dạng "3#15" (Cảnh báo trùng) đã có quy tắc đổi số riêng
+      if (p.pin !== newPin && !p.pin.includes('#')) { if (!byPin.has(p.pin)) byPin.set(p.pin, []); byPin.get(p.pin).push(p.punch_at); }
+    }
+    const left = db.prepare('SELECT punch_at FROM device_punches WHERE serial=? AND pin=? ORDER BY punch_at');
+    const addRule = db.prepare('INSERT INTO device_pin_remaps(serial,pin,from_at,to_at,new_pin,conflict_id) VALUES(?,?,?,?,?,NULL)');
+    const plus1s = (iso) => new Date(Date.parse(iso) + 1000).toISOString();
+    for (const [oldPin, times] of byPin) {
+      const ts = times.sort(), rem = left.all(serial, oldPin).map((r) => r.punch_at);
+      let start = ts[0], end = ts[0], i = 0;
+      for (const t of ts.slice(1)) {
+        while (i < rem.length && rem[i] <= end) i++;
+        if (i < rem.length && rem[i] < t) { addRule.run(serial, oldPin, start, plus1s(end), newPin); start = t; }
+        end = t;
+      }
+      addRule.run(serial, oldPin, start, plus1s(end), newPin);
+    }
+    // người cũ hết lượt quẹt trong ngày: dựng lại không xoá dòng công cũ (ngày không có lượt thì giữ nguyên) → bỏ dòng dựng từ máy,
+    // giữ dòng sửa tay / chấm điện thoại. Ca đêm lấy lượt của ngày bên cạnh sẽ được rebuildDays dựng lại.
+    const hasPunch = db.prepare('SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? LIMIT 1');
+    const dropRow = db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND shift_source='device'");
+    for (const k of oldKeys) { const [eid, d] = k.split('|'); if (!hasPunch.get(+eid, d)) dropRow.run(+eid, d); }
+    db.exec('RELEASE move_punch');
+  } catch (e) { db.exec('ROLLBACK TO move_punch'); db.exec('RELEASE move_punch'); throw e; }
+  if (keys.size) rebuildDays(keys);
+  return { moved, merged, pin: newPin };
+}
+
 // Dựng lại 1 ngày công của 1 NV từ các punch của máy (KHÔNG đè bản ghi admin sửa tay).
 // Nếu gán LỊCH TRÌNH nhiều ca → tách punch theo cửa sổ từng ca thành nhiều dòng công/ngày.
 // Lượt quẹt sáng sớm đã được dùng làm giờ RA của ca qua đêm NGÀY HÔM TRƯỚC → không tính lại cho ngày này.

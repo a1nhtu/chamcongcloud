@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { db, getSetting } from '../../db.js';
-import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress } from '../../device-sync.js';
+import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress, movePunchesToEmployee } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { normText } from '../../hr-import.js';
 import { installDomain, MULTI, ROOT } from '../../tenant.js';
@@ -337,6 +337,17 @@ export function registerDeviceRoutes(r, { need }) {
     try { for (const id of ids) n += del.run(id, d.serial).changes; db.exec('COMMIT'); }
     catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/devices/:id/punches/delete', e); }
     res.json({ ok: true, deleted: n });
+  });
+  // CHUYỂN NHIỀU lượt quẹt đã chọn của máy này sang 1 NV khác (lượt bị cộng nhầm vì 2 người ở 2 máy dùng cùng Số ID).
+  // Lượt đổi sang Số ID của NV đích, công của cả 2 người được dựng lại, máy gửi lại log cũ vẫn về đúng người.
+  r.post('/devices/:id/punches/move', need('devices'), (req, res) => {
+    const d = db.prepare('SELECT serial FROM push_devices WHERE id=?').get(req.params.id);
+    if (!d) return res.status(404).json({ error: 'Không tìm thấy máy' });
+    const ids = [...new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0))];
+    if (!ids.length) return res.status(400).json({ error: 'Chưa chọn lượt quẹt nào' });
+    if (ids.length > 1000) return res.status(400).json({ error: 'Mỗi lần chuyển tối đa 1.000 lượt quẹt' });
+    try { res.json({ ok: true, ...movePunchesToEmployee(d.serial, ids, req.body?.employee_id) }); }
+    catch (e) { sendCaughtError(res, 'POST /admin/devices/:id/punches/move', e); }
   });
   // Xoá 1 LƯỢT QUẸT lẻ trên máy (quẹt nhầm / nghịch). Không đụng bản ghi công đã tính.
   r.delete('/devices/:id/punch/:pid', need('devices'), (req, res) => {
