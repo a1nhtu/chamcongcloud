@@ -1154,7 +1154,7 @@ export function movePunchesToEmployee(serial, ids, employeeId) {
     }
     // người cũ hết lượt quẹt trong ngày: dựng lại không xoá dòng công cũ (ngày không có lượt thì giữ nguyên) → bỏ dòng dựng từ máy,
     // giữ dòng sửa tay / chấm điện thoại. Ca đêm lấy lượt của ngày bên cạnh sẽ được rebuildDays dựng lại.
-    const hasPunch = db.prepare('SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? LIMIT 1');
+    const hasPunch = db.prepare('SELECT 1 FROM att_punches WHERE employee_id=? AND work_date=? LIMIT 1');
     const dropRow = db.prepare("DELETE FROM attendance WHERE employee_id=? AND work_date=? AND (manual IS NULL OR manual=0) AND shift_source='device'");
     for (const k of oldKeys) { const [eid, d] = k.split('|'); if (!hasPunch.get(+eid, d)) dropRow.run(+eid, d); }
     db.exec('RELEASE move_punch');
@@ -1202,7 +1202,7 @@ function nightOutOnlyPunches(employeeId, workDate, usedTo = null) {
     const np = resolveDayShifts(employeeId, nx.toISOString().slice(0, 10));
     if (!np.off && np.shifts.length && !np.shifts.some(isNightShift)) return [];
     const { co } = fitWindows(workDate, shift);
-    const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+    const rows = db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
       .all(employeeId, new Date(co[0]).toISOString(), new Date(co[1]).toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
     const out = rows.length ? [rows[rows.length - 1]] : [];
     out.outOnly = true;
@@ -1211,7 +1211,7 @@ function nightOutOnlyPunches(employeeId, workDate, usedTo = null) {
   if (multi ? !dd || !plan.shifts.some(isNightShift) : !isNightShift(shift) || !ruleKnowsDir(plan.mergeRule, shift)) return [];
   // ngày đã có dòng công không dựng từ máy (chấm điện thoại / nhập tay) → giữ nguyên, không đè
   if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return [];
-  const inWin = (w) => db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const inWin = (w) => db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, w.winStart.toISOString(), w.winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
   if (multi) {
     const seen = new Map();
@@ -1276,7 +1276,7 @@ function lateNightInPunches(employeeId, workDate, usedTo) {
   // ngày đã có dòng công không dựng từ máy (chấm điện thoại / nhập tay) → giữ nguyên, không đè
   if (db.prepare("SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND COALESCE(shift_source,'')<>'device' LIMIT 1").get(employeeId, workDate)) return null;
   const midnight = new Date(workDate + 'T00:00:00+07:00').getTime() + 24 * 3600000;   // 00:00 hôm sau
-  const rowsTo = (winEnd) => db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const rowsTo = (winEnd) => db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, new Date(midnight).toISOString(), winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
   const nd = vnDayOf(midnight);
   const np = resolveDayShifts(employeeId, nd);
@@ -1342,7 +1342,7 @@ function prevEveningInPunches(employeeId, workDate) {
   const w = ruleWindow(workDate, plan.shifts[0]);
   const dayStart = new Date(workDate + 'T00:00:00+07:00');
   if (!(w.winStart < dayStart)) return [];
-  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<? ORDER BY punch_at')
+  const rows = db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<? ORDER BY punch_at')
     .all(employeeId, w.winStart.toISOString(), dayStart.toISOString());
   if (!rows.length) return [];
   const pd = vnDayOf(dayStart.getTime() - 12 * 3600000);
@@ -1386,7 +1386,7 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
   if (!dir && rule !== 'tdqd') return null;
   const idm = !!dir;
   const w = ruleWindow(workDate, shift, wopts);
-  const rows = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const rows = db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, w.winStart.toISOString(), w.winEnd.toISOString()).filter((p) => !usedTo || p.punch_at > usedTo);
   const open = idm ? dirOpenIn(rows, dir, wopts.dupMin) : openTailIn(rows.map((p) => p.punch_at), wopts.dupMin);
   if (!open) return null;
@@ -1401,7 +1401,7 @@ function overnightTail(employeeId, workDate, shift, rule, wopts, hourly, usedTo)
   }
   if (limit <= w.winEnd) return null;
   const claim = nextDayClaim(employeeId, workDate, limit, hourly);
-  const next = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
+  const next = db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, w.winEnd.toISOString(), limit.toISOString());
   const gapMs = Math.max(1, Number(d.gap ?? d.min) || 5) * 60000;
   if (idm) {
@@ -1475,7 +1475,7 @@ function manualBlocked(employeeId, workDate, shifts) {
 // theo từng cặp. Ngày hôm sau tự bỏ các lượt đã dùng ở đây (consumedByPrevDay: tới giờ ra muộn nhất của ngày này).
 function rebuildSeqDay(employeeId, workDate, prov, shifts, dup) {
   const nx = new Date(workDate + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
-  const next = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, nx.toISOString().slice(0, 10));
+  const next = db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, nx.toISOString().slice(0, 10));
   const opt = dup && typeof dup === 'object' ? dup : { min: dup, gap: dup };
   const fixedBreak = pairsFixedBreakOn();
   const all = seqPairUnits(prov, next, opt);
@@ -1500,7 +1500,7 @@ function rebuildSeqDay(employeeId, workDate, prov, shifts, dup) {
 // lượt quẹt sáng sớm nào đã là giờ ra ca đêm. keys: Set/mảng 'empId|YYYY-MM-DD'. Tự thêm ngày kế tiếp (ca đêm lấn sang).
 export function rebuildDays(keys) {
   const all = new Set();
-  const hasPunch = db.prepare('SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? LIMIT 1');
+  const hasPunch = db.prepare('SELECT 1 FROM att_punches WHERE employee_id=? AND work_date=? LIMIT 1');
   const hasFullRow = db.prepare('SELECT 1 FROM attendance WHERE employee_id=? AND work_date=? AND check_in_at IS NOT NULL AND check_out_at IS NOT NULL LIMIT 1');
   for (const key of keys) {
     const [eid, date] = String(key).split('|');
@@ -1552,7 +1552,7 @@ export function recordPhonePunch(employeeId, kind, iso, photo, geo) {
   if (pin && iso) insPhonePunch(pin, employeeId, kind, iso, photo, geo);
 }
 function seedPhonePunches(employeeId, workDate) {
-  if (!db.prepare(`SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ${VIRT_SERIALS} LIMIT 1`).get(employeeId, workDate)) return;
+  if (!db.prepare(`SELECT 1 FROM att_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ${VIRT_SERIALS} LIMIT 1`).get(employeeId, workDate)) return;
   const rows = db.prepare(`SELECT check_in_at, check_out_at, check_in_photo, check_out_photo, shift_source,
     check_in_lat, check_in_lng, check_in_office_id, check_in_distance_m, check_in_outside,
     check_out_lat, check_out_lng, check_out_office_id, check_out_distance_m, check_out_outside FROM attendance
@@ -1586,7 +1586,7 @@ export function rebuildDay(employeeId, workDate) {
 function rebuildDayCore(employeeId, workDate) {
   // "+punch_at": ép dùng chỉ mục (NV, ngày) rồi mới sắp xếp — không thì SQLite có thể duyệt hết lượt quẹt của NV theo chỉ mục (NV, giờ)
   seedPhonePunches(employeeId, workDate);
-  let prov = db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
+  let prov = db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
   let nightTo = null;   // ngày dựng từ lượt trong khung ca đêm (nightOutOnlyPunches): chỉ ghép tới lượt cuối hàm đó trả về
   let lateNight = null; // ca đêm vào trễ sau nửa đêm của lịch nhiều ca / không gán ca (lateNightInPunches): dựng thẳng ca đó từ đúng các lượt đó
   let outOnly = false;  // ca đêm Anh đã phân cho ngày này, quên chấm vào (nightOutOnlyPunches) → dòng chỉ có giờ ra
@@ -1618,7 +1618,7 @@ function rebuildDayCore(employeeId, workDate) {
   // Ngưỡng ghép cặp: theo Lịch trình vào ra của NV (min / gap / max); chưa khai thì theo ô "Bỏ qua lần chấm trùng" ở Cài đặt
   const dup = ioParamsFor(employeeId, workDate) || pairDup();
   let nextCut = null;   // (lịch nhiều ca) ngày đã đủ vào – ra trong chính ngày → không lấy lượt sau mốc này (sáng hôm sau)
-  const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial, status FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, winStart.toISOString(), winEnd.toISOString()).filter((p) => (!usedTo || p.punch_at > usedTo) && (!nextCut || p.punch_at <= nextCut));
 
   const plan = hourly ? { off: false, shifts: [], mergeRule: null, isSchedule: false } : resolveDayShifts(employeeId, workDate);
@@ -1751,11 +1751,11 @@ function rebuildDayCore(employeeId, workDate) {
 // có ca → lượt quẹt trong cửa sổ ca; không ca (chế độ theo giờ) → mọi lượt quẹt của ngày.
 export function dayPairsFor(employeeId, workDate, shift) {
   if (!shift) {
-    const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
+    const rows = db.prepare('SELECT punch_at FROM att_punches WHERE employee_id=? AND work_date=? ORDER BY +punch_at').all(employeeId, workDate);
     return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), ioParamsFor(employeeId, workDate) || pairDup()) : null;
   }
   const { winStart, winEnd } = ruleWindow(workDate, shift, { toDayEnd: !isNightShift(shift) });
-  const rows = db.prepare('SELECT punch_at FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
+  const rows = db.prepare('SELECT punch_at FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
     .all(employeeId, winStart.toISOString(), winEnd.toISOString());
   if (pairsFixedBreakOn() && shift.break_start && rows.length % 2 === 1) return null;   // số lần quẹt lẻ: lấy đầu → cuối (giống lúc dựng công từ máy)
   return rows.length >= 4 ? punchPairs(rows.map((r) => r.punch_at), ioParamsFor(employeeId, workDate) || pairDup()) : null;
@@ -1780,6 +1780,11 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
   const dedupMs = (parseInt(getSetting('punch_dedup_min', '15'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
   const remap = remapLoader(serial);   // Số ID nghi trùng (giữ lại) / đã chuyển sang Số ID mới ở máy này
+  // Máy KHÔNG DÙNG TÍNH CÔNG (push_devices.no_att): lượt vẫn lưu nhưng không dựng lại công, không báo "chấm công thành công";
+  // chống trùng chỉ so với lượt của các máy cùng loại (lượt máy này không xoá lượt chấm công thật và ngược lại).
+  const noAtt = !!db.prepare('SELECT no_att FROM push_devices WHERE serial=?').get(serial)?.no_att;
+  const nearQ = db.prepare(`SELECT id, punch_at FROM device_punches WHERE pin=? AND work_date=?
+    AND serial ${noAtt ? '' : 'NOT '}IN (SELECT serial FROM push_devices WHERE no_att = 1)`);
   for (const line of lines) {
     const p = line.split('\t');
     if (p.length < 2) continue;
@@ -1796,7 +1801,7 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
     // Chống trùng: cụm lượt quẹt cách nhau dưới N phút chỉ giữ lượt ĐẦU (dùng làm giờ VÀO) và lượt CUỐI (dùng làm giờ RA).
     // VD quẹt ra 17:59 rồi 18:00 → giữ cả 2, giờ ra = 18:00 (trước đây chỉ giữ 17:59 → thành "về sớm 1 phút").
     if (dedupMs > 0) {
-      const near = db.prepare('SELECT id, punch_at FROM device_punches WHERE pin=? AND work_date=?').all(pin, workDate)
+      const near = nearQ.all(pin, workDate)
         .filter((r) => Math.abs(new Date(r.punch_at) - d) < dedupMs).sort((a, b) => (a.punch_at < b.punch_at ? -1 : 1));
       if (near.length) {
         const first = near[0].punch_at, last = near[near.length - 1].punch_at;
@@ -1812,13 +1817,13 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
     try { isNew = ins.run(serial, pin, punchIso, workDate, status, verify, empId).changes > 0; } catch {}
     if (isNew && punchListener) fresh.push({ pin, punchIso, empId });
     // Báo cho CHÍNH nhân viên: chỉ lượt quẹt MỚI và vừa xảy ra (≤ 15 phút) — máy gửi bù log cũ thì không báo dồn
-    if (isNew && empId && Math.abs(Date.now() - d.getTime()) <= 15 * 60000) {
+    if (isNew && empId && !noAtt && Math.abs(Date.now() - d.getTime()) <= 15 * 60000) {
       const prevN = notifyNow.get(empId);
       if (!prevN || prevN.d < d) notifyNow.set(empId, { d, timeStr });
     }
     if (!empId && !pin.includes('#')) ask(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
     n++;
-    if (empId) touched.add(empId + '|' + workDate);
+    if (empId && !noAtt) touched.add(empId + '|' + workDate);
   }
   // Khoá người vừa ăn ở các máy bếp TRƯỚC khi dựng lại công (dựng công có thể lâu) để lệnh xuống máy sớm nhất
   if (fresh.length && punchListener) { try { punchListener(serial, fresh); } catch (e) { console.error('[máy bếp] khoá lỗi:', e.message); } }

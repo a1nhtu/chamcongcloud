@@ -318,5 +318,60 @@ export function checkShiftConfig(b) {
     if (o && !isHHMM(o)) return { ok: false, error: 'Giờ mở đăng ký phải dạng HH:MM (VD 15:00) hoặc để trống = luôn mở' };
     value.open_at = o;
   }
+  // Bữa tăng ca: cần tăng ca thực tế ≥ N giờ (lẻ được, VD 1.5) mới đủ điều kiện; 0 / trống = bữa thường. Không gửi = không đụng.
+  if (b.ot_need_hours != null) {
+    const raw = String(b.ot_need_hours).trim().replace(',', '.');
+    const h = raw === '' ? 0 : Number(raw);
+    if (!Number.isFinite(h) || h < 0 || h > 24) return { ok: false, error: 'Số giờ tăng ca tối thiểu phải từ 0 đến 24 (VD 2 hoặc 1.5; 0 = bữa thường)' };
+    value.ot_need_min = Math.round(h * 60);
+  }
   return { ok: true, value };
+}
+
+/* ---------------------------- BÁO CÁO CHI TIẾT LƯỢT ĂN: trạng thái từng lượt ---------------------------- */
+export const SCAN_STATUS = {
+  du: 'Đủ điều kiện',
+  thieu: 'Không đủ điều kiện',
+  cho: 'Chờ xác minh',
+  lap: 'Quẹt lặp (không tính)',
+  nghi: 'NV nghỉ việc / bị khoá',
+  la: 'Chưa khớp nhân viên',
+};
+const hm = (min) => `${Math.floor(min / 60)}:${String(min % 60).padStart(2, '0')}`;
+// Gộp các dòng công của 1 NV trong 1 ngày công (ca gãy / nhiều phiên = nhiều dòng): vào sớm nhất, RA của dòng muộn nhất, tăng ca THỰC TẾ cộng dồn
+export function mergeAttRows(rows) {
+  if (!rows || !rows.length) return null;
+  const s = [...rows].sort((a, b) => String(a.check_in_at || a.check_out_at || '').localeCompare(String(b.check_in_at || b.check_out_at || '')));
+  const last = s[s.length - 1];
+  return {
+    work_date: s[0].work_date,
+    check_in_at: s.find((r) => r.check_in_at)?.check_in_at || null,
+    check_out_at: last.check_out_at || null,
+    ot: s.reduce((t, r) => t + (Number(r.ot_raw_min ?? r.ot_min) || 0), 0),
+  };
+}
+// Ngày công chứa giờ ăn: trong 2 ngày (hôm trước + hôm nay của lượt quét), lấy ngày VÀO muộn nhất mà vẫn trước giờ ăn (≤ 20 tiếng) —
+// bữa tăng ca đêm 04:00 thuộc ca đêm vào từ tối hôm trước. Không có giờ vào thì lấy ngày có giờ RA sau giờ ăn.
+export function pickAttDay(days, punchIso) {
+  const t = Date.parse(punchIso);
+  let best = null;
+  for (const d of days || []) {
+    if (!d || !d.check_in_at) continue;
+    const a = Date.parse(d.check_in_at);
+    if (a > t || t - a > 20 * 3600000) continue;
+    if (!best || a > Date.parse(best.check_in_at)) best = d;
+  }
+  return best || (days || []).find((d) => d && !d.check_in_at && d.check_out_at && d.check_out_at >= punchIso) || null;
+}
+// Bữa TĂNG CA (needMin > 0): đủ điều kiện khi tăng ca thực tế của ngày công ≥ needMin. Chưa có dữ liệu / chưa chấm ra → CHỜ XÁC MINH
+// (không tự xác nhận đủ). Có giờ ra sau bữa ăn mà tăng ca chưa đủ → không đủ. Giờ ra trước bữa ăn (lượt giữa giờ) → chờ tới 12 tiếng sau bữa.
+export function otMealStatus(needMin, att, punchIso, nowIso) {
+  const need = `${hm(needMin)} giờ`;
+  if (!att) return { st: 'cho', ot: null, note: 'Chưa có dữ liệu chấm công của ngày này' };
+  const ot = Math.max(0, Math.round(att.ot || 0));
+  if (ot >= needMin) return { st: 'du', ot, note: `Tăng ca ${hm(ot)} (cần ${need})` };
+  if (!att.check_out_at) return { st: 'cho', ot, note: `Chưa chấm ra — tăng ca hiện ${hm(ot)} (cần ${need})` };
+  if (att.check_out_at > punchIso || nowIso > new Date(Date.parse(punchIso) + 12 * 3600000).toISOString())
+    return { st: 'thieu', ot, note: `Tăng ca ${hm(ot)} — dưới ${need}` };
+  return { st: 'cho', ot, note: `Chờ lượt chấm ra sau bữa ăn (cần tăng ca ${need})` };
 }

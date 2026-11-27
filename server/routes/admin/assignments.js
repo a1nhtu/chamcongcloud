@@ -13,7 +13,7 @@ import { xlText } from './emp-extra.js';
 // Đổi phân ca theo NGÀY xong → tính lại công ngay các ngày đó (ngày đã có giờ chấm từ máy), khỏi phải bấm "Tính lại công".
 // keys: tập 'empId|YYYY-MM-DD'. Ngày kế tiếp cũng được tính lại (ca đêm lấy giờ ra sáng hôm sau).
 function recalcDays(keys) {
-  const has = db.prepare('SELECT 1 FROM device_punches WHERE employee_id = ? AND work_date IN (?, ?) LIMIT 1');
+  const has = db.prepare('SELECT 1 FROM att_punches WHERE employee_id = ? AND work_date IN (?, ?) LIMIT 1');
   const list = [...keys].filter((k) => {
     const [e, d] = k.split('|'); const nx = new Date(d + 'T12:00:00Z'); nx.setUTCDate(nx.getUTCDate() + 1);
     return has.get(+e, d, nx.toISOString().slice(0, 10));

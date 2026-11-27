@@ -6,6 +6,8 @@
 //   meal_guard_once   — MỘT LẦN / BỮA: quét thành công ở 1 máy bếp → mọi máy bếp đổi người đó sang "khung giờ riêng, để trống"
 //                       (TZ 0001000000000000 — đúng trạng thái làm máy 4B báo "Khoảng thời gian không hợp lệ" ở aac 11/11/2026)
 //                       tới hết khung giờ bữa đó; hết bữa trả về USER_TZ như cũ. Máy bếp hỏi lệnh 3 giây / lần → hở vài giây.
+//   meal_guard_off    — NGHỈ VIỆC / BỊ KHOÁ: người bị khoá trên phần mềm (active = 0) hoặc đã tới ngày nghỉ việc (leave_date) cũng bị
+//                       đổi sang LOCK_TZ trên mọi máy bếp (không xoá khỏi máy, giữ khuôn mặt); mở khoá / đi làm lại thì trả như cũ.
 // Máy nào là máy bếp: meal_guard_serials (chỉ máy ADMS conn_type 'push' — máy TCP/IP không nhận các lệnh này).
 // Người là QUẢN TRỊ trên máy: không bị khoá, luôn quét được (khung riêng số 45 = cả ngày) để còn vào menu máy.
 // Tài liệu hãng: Attendance PUSH Protocol 2021 §12.1.1.14–15 (trang 91–92), trường TZ của USERINFO (trang 40–41).
@@ -26,8 +28,9 @@ const MK = 'mguard';
 const flag = (k) => getSetting(k, '0') === '1';
 export const guardWindowOn = () => flag('meal_guard_window');
 export const guardOnceOn = () => flag('meal_guard_once');
+export const guardOffOn = () => flag('meal_guard_off');
 const baseOn = () => getSetting('device_enabled', '0') === '1' && mealEnabled();
-export const guardOn = () => (guardWindowOn() || guardOnceOn()) && baseOn();
+export const guardOn = () => (guardWindowOn() || guardOnceOn() || guardOffOn()) && baseOn();
 const savedSerials = () => String(getSetting('meal_guard_serials', '')).split(',').map((s) => s.trim()).filter(Boolean);
 const isAdms = (serial) => !!db.prepare("SELECT 1 FROM push_devices WHERE serial=? AND active=1 AND conn_type='push'").get(serial);
 // Máy bếp đang được điều khiển: đã chọn + đang hoạt động + máy ADMS
@@ -83,6 +86,7 @@ export const GROUP_RESTORE = groupCommand([1]);   // mặc định của máy: n
 export function userTzFor(serial, pin, pri, nowMs = Date.now()) {
   if (!savedSerials().includes(serial) || !guardOn() || !isAdms(serial)) return null;
   if (pri > 0) return guardWindowOn() ? ADMIN_TZ : null;
+  if (guardOffOn() && db.prepare('SELECT 1 FROM meal_guard_off WHERE serial=? AND pin=?').get(serial, pin)) return LOCK_TZ;
   if (guardOnceOn() && db.prepare('SELECT 1 FROM meal_guard_locks WHERE serial=? AND pin=? AND released_at IS NULL AND until_at > ?')
     .get(serial, pin, new Date(nowMs).toISOString())) return LOCK_TZ;
   return null;
@@ -137,6 +141,45 @@ export function releaseLocks(nowIso, { all = false, keep = null } = {}) {
   return n;
 }
 
+/* ---------------------------- người nghỉ việc / bị khoá ---------------------------- */
+// Số ID (trên máy) của người KHÔNG còn được ăn: NV bị khoá (active = 0) hoặc đã tới ngày nghỉ việc (leave_date ≤ hôm nay).
+// Số ID khớp theo device_pin, mã NV, và mã máy gửi kèm (device_users.code) — như findEmpByPin; Số ID đang thuộc 1 NV còn làm thì bỏ.
+export function offPins(today) {
+  const rows = db.prepare(`WITH off AS (SELECT code, device_pin FROM employees WHERE active = 0 OR (IFNULL(leave_date, '') <> '' AND leave_date <= ?)),
+      live AS (SELECT code, device_pin FROM employees WHERE active = 1 AND (IFNULL(leave_date, '') = '' OR leave_date > ?))
+    SELECT pin FROM (
+      SELECT device_pin pin FROM off WHERE IFNULL(device_pin, '') <> ''
+      UNION SELECT code FROM off WHERE IFNULL(code, '') <> ''
+      UNION SELECT u.pin FROM device_users u JOIN off ON off.code = u.code WHERE u.code <> '')
+    WHERE pin NOT IN (SELECT device_pin FROM live WHERE IFNULL(device_pin, '') <> '' UNION SELECT code FROM live)`).all(today, today);
+  return new Set(rows.map((r) => String(r.pin)));
+}
+// Đưa danh sách chặn trên máy bếp về đúng: người mới nghỉ / bị khoá → khoá; người mở khoá / đi làm lại → trả như cũ.
+// want = null → bỏ chặn hết (tắt công tắc / máy không còn là máy bếp).
+function syncOff(serials, want, held) {
+  let n = 0;
+  const keep = new Set(serials);
+  for (const r of db.prepare('SELECT serial, pin FROM meal_guard_off').all()) {
+    if (want && keep.has(r.serial) && want.has(r.pin)) continue;
+    db.prepare('DELETE FROM meal_guard_off WHERE serial=? AND pin=?').run(r.serial, r.pin);
+    if (db.prepare('SELECT 1 FROM device_users_serial WHERE serial=? AND pin=?').get(r.serial, r.pin))
+      queueCmd(r.serial, buildUserCommand(r.pin, r.serial), { pin: r.pin, mkind: MK });
+    n++;
+  }
+  if (!want || !want.size) return n;
+  for (const s of serials) {
+    for (const u of db.prepare('SELECT pin, privilege FROM device_users_serial WHERE serial=?').all(s)) {
+      const pin = String(u.pin);
+      if (!want.has(pin) || u.privilege > 0 || held.has(s + '|' + pin)) continue;   // quản trị máy: không chặn (còn vào menu)
+      if (db.prepare('SELECT 1 FROM meal_guard_off WHERE serial=? AND pin=?').get(s, pin)) continue;
+      db.prepare('INSERT INTO meal_guard_off(serial, pin) VALUES (?,?)').run(s, pin);
+      queueCmd(s, buildUserCommand(pin, s), { pin, mkind: MK });
+      n++;
+    }
+  }
+  return n;
+}
+
 /* ---------------------------- khung giờ từng máy ---------------------------- */
 const readState = (serial) => { try { return JSON.parse(db.prepare('SELECT state FROM meal_guard_state WHERE serial=?').get(serial)?.state || 'null'); } catch { return null; } };
 const writeState = (serial, st) => db.prepare(`INSERT INTO meal_guard_state(serial, state, updated_at) VALUES (?,?,datetime('now'))
@@ -182,7 +225,8 @@ export function guardTick(nowMs = Date.now()) {
   const serials = guardSerials();
   const states = db.prepare('SELECT serial, state FROM meal_guard_state').all();
   const open = db.prepare('SELECT COUNT(*) n FROM meal_guard_locks WHERE released_at IS NULL').get().n;
-  if (!serials.length && !states.length && !open) return { released: 0, tz: 0 };   // chưa dùng máy bếp → không làm gì
+  const offN = db.prepare('SELECT COUNT(*) n FROM meal_guard_off').get().n;
+  if (!serials.length && !states.length && !open && !offN) return { released: 0, tz: 0, off: 0 };   // chưa dùng máy bếp → không làm gì
   const keep = new Set(serials);
   for (const st of states) {
     if (keep.has(st.serial)) continue;
@@ -195,6 +239,8 @@ export function guardTick(nowMs = Date.now()) {
     const segs = guardWindowOn() ? pickSegments(mealSegments(listShifts({ onlyEnabled: true })), vnNow(new Date(nowMs)).min) : [];
     for (const s of serials) tz += syncDevice(s, segs);
   }
+  const offOn = guardOffOn() && serials.length > 0;
+  const off = offOn || offN ? syncOff(serials, offOn ? offPins(vnNow(new Date(nowMs)).date) : null, heldSet()) : 0;
   // dọn lịch sử: khoá đã mở + lệnh máy bếp đã chạy quá 7 ngày
   const key = tenantKey();
   if (nowMs - (lastClean.get(key) || 0) > 3600000) {
@@ -203,7 +249,7 @@ export function guardTick(nowMs = Date.now()) {
     db.prepare("DELETE FROM meal_guard_locks WHERE released_at IS NOT NULL AND released_at < datetime(?, '-7 days')").run(cut);
     db.prepare("DELETE FROM push_device_commands WHERE mkind=? AND response_at IS NOT NULL AND response_at < datetime(?, '-7 days')").run(MK, cut);
   }
-  return { released, tz };
+  return { released, tz, off };
 }
 // Gửi lại toàn bộ khung giờ xuống máy (máy vừa khôi phục cài đặt gốc / thay máy)
 export function resendGuard(serial = null) {
@@ -211,11 +257,12 @@ export function resendGuard(serial = null) {
   else db.prepare('DELETE FROM meal_guard_state').run();
   return guardTick();
 }
-export function saveGuard({ window, once, serials } = {}) {
+export function saveGuard({ window, once, off, serials } = {}) {
   const known = new Set(db.prepare('SELECT serial FROM push_devices').all().map((d) => d.serial));
   const list = [...new Set((Array.isArray(serials) ? serials : []).map((x) => String(x).trim()).filter((x) => known.has(x)))];
   setSetting('meal_guard_window', window ? '1' : '0');
   setSetting('meal_guard_once', once ? '1' : '0');
+  if (off !== undefined) setSetting('meal_guard_off', off ? '1' : '0');
   setSetting('meal_guard_serials', list.join(','));
   guardTick();
   return guardStatus();
@@ -229,7 +276,7 @@ export function guardStatus(nowMs = Date.now()) {
   const live = new Set(guardSerials());
   const counted = String(getSetting('meal_serials', '')).split(',').map((s) => s.trim()).filter(Boolean);
   const signup = machineSignupOn() ? new Set(mealSignupSerials()) : new Set();
-  const devices = db.prepare("SELECT serial, name, conn_type, last_seen FROM push_devices WHERE active=1 AND conn_type IN ('push','tcp') ORDER BY name, serial").all().map((d) => {
+  const devices = db.prepare("SELECT serial, name, conn_type, last_seen, no_att FROM push_devices WHERE active=1 AND conn_type IN ('push','tcp') ORDER BY name, serial").all().map((d) => {
     const st = readState(d.serial);
     const err = db.prepare(`SELECT content, return_value FROM push_device_commands WHERE serial=? AND mkind=? AND response_at IS NOT NULL
       AND CAST(return_value AS INTEGER) < 0 ORDER BY id DESC LIMIT 1`).get(d.serial, MK);
@@ -238,6 +285,8 @@ export function guardStatus(nowMs = Date.now()) {
       picked: saved.has(d.serial), live: live.has(d.serial),
       pending: db.prepare('SELECT COUNT(*) n FROM push_device_commands WHERE serial=? AND mkind=? AND trans_time IS NULL').get(d.serial, MK).n,
       locked: db.prepare('SELECT COUNT(*) n FROM meal_guard_locks WHERE serial=? AND released_at IS NULL AND until_at > ?').get(d.serial, nowIso).n,
+      blocked: db.prepare('SELECT COUNT(*) n FROM meal_guard_off WHERE serial=?').get(d.serial).n,
+      counts_att: !d.no_att,   // máy bếp mà vẫn tính công → lượt quẹt ăn thành lượt chấm công (cảnh báo ở giao diện)
       slots: st && st.window ? st.slots.map(segText) : [],
       error: err ? { cmd: err.content.split(/\s|\t/).slice(0, 3).join(' '), code: err.return_value } : null,
       not_counted: live.has(d.serial) && counted.length > 0 && !counted.includes(d.serial),
@@ -245,7 +294,8 @@ export function guardStatus(nowMs = Date.now()) {
     };
   });
   return {
-    window: guardWindowOn(), once: guardOnceOn(), base_ok: baseOn(), serials: [...saved],
+    window: guardWindowOn(), once: guardOnceOn(), off: guardOffOn(), base_ok: baseOn(), serials: [...saved],
+    off_people: db.prepare('SELECT COUNT(DISTINCT pin) n FROM meal_guard_off').get().n,
     segments: segs.map(segText), rotating: segs.length > SLOT_UIDS.length, delay: GUARD_DELAY, devices,
     locked_people: db.prepare('SELECT COUNT(DISTINCT pin) n FROM meal_guard_locks WHERE released_at IS NULL AND until_at > ?').get(nowIso).n,
   };

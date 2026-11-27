@@ -888,6 +888,11 @@ function migrateColumns() {
   add('push_devices', 'hik_push_at',    "TEXT DEFAULT ''");   // lần gần nhất máy tự gửi sự kiện về
   // Hẹn giờ khởi động lại máy (server/reboot-schedule.js): 'HH:MM|<thứ>' (0 = CN … 6 = T7; đủ 7 = hằng ngày), '' = tắt
   add('push_devices', 'reboot_sched', "TEXT DEFAULT ''");
+  // MÁY KHÔNG DÙNG TÍNH CÔNG (VD máy đặt ở nhà ăn): 1 = lượt quẹt vẫn lưu (Xem quẹt, báo cáo riêng) nhưng KHÔNG vào bảng công.
+  // Mặc định 0 = như cũ. Mọi chỗ ĐỌC lượt quẹt để tính công dùng view att_punches (bỏ lượt của các máy này).
+  add('push_devices', 'no_att', 'INTEGER NOT NULL DEFAULT 0');
+  db.exec(`CREATE VIEW IF NOT EXISTS att_punches AS
+    SELECT * FROM device_punches WHERE serial NOT IN (SELECT serial FROM push_devices WHERE no_att = 1)`);
   add('push_devices', 'reboot_last',  "TEXT DEFAULT ''");   // ngày (giờ VN) đã khởi động lại theo lịch — mỗi ngày tối đa 1 lần
   add('push_devices', 'reboot_note',  "TEXT DEFAULT ''");
   add('push_devices', 'default_dept', "TEXT DEFAULT ''");   // bộ phận gán cho NV phần mềm TỰ TẠO từ máy này (chuỗi cửa hàng: 1 máy = 1 cửa hàng)   // kết quả lần gần nhất (hiện ở giao diện)
@@ -1174,7 +1179,15 @@ function migrateColumns() {
       serial     TEXT PRIMARY KEY,
       state      TEXT NOT NULL DEFAULT '',            -- JSON { window, slots: [...] }
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE IF NOT EXISTS meal_guard_off (       -- người ĐÃ NGHỈ VIỆC / BỊ KHOÁ đang bị chặn trên máy bếp (công tắc meal_guard_off)
+      serial     TEXT NOT NULL,
+      pin        TEXT NOT NULL,
+      since      TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (serial, pin)
     );`);
+  // Bữa TĂNG CA: chỉ "đủ điều kiện" khi tăng ca thực tế trong ngày công chứa giờ ăn ≥ N phút (0 = bữa thường, không xét)
+  add('meal_shifts', 'ot_need_min', 'INTEGER NOT NULL DEFAULT 0');
   // ĐỊNH LƯỢNG NGUYÊN LIỆU + KHO BẾP (server/meal-inv.js) — bảng RIÊNG; công tắc `meal_ingredient` mặc định TẮT (thiếu = '0').
   // Chỉ ĐỌC số suất của phân hệ suất ăn, không ghi vào bảng suất ăn / chấm công.
   db.exec(`

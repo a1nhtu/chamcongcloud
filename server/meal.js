@@ -78,8 +78,8 @@ export function createShift(v) {
   let n = 1; while (used.has('b' + n)) n++;
   const code = 'b' + n;
   const so = (db.prepare('SELECT MAX(sort_order) m FROM meal_shifts').get().m || 0) + 1;
-  db.prepare(`INSERT INTO meal_shifts(code, name, from_time, to_time, mode, enabled, sort_order, lock_before_min, lock_at, open_at, custom)
-    VALUES (?,?,?,?,?,?,?,?,?,?,1)`).run(code, v.name, v.from_time, v.to_time, v.mode, v.enabled, so, v.lock_before_min ?? 0, v.lock_at ?? '', v.open_at ?? '');
+  db.prepare(`INSERT INTO meal_shifts(code, name, from_time, to_time, mode, enabled, sort_order, lock_before_min, lock_at, open_at, custom, ot_need_min)
+    VALUES (?,?,?,?,?,?,?,?,?,?,1,?)`).run(code, v.name, v.from_time, v.to_time, v.mode, v.enabled, so, v.lock_before_min ?? 0, v.lock_at ?? '', v.open_at ?? '', v.ot_need_min ?? 0);
   return getMealShift(code);
 }
 // Xoá bữa HR tự thêm — chỉ khi chưa có dữ liệu (có rồi thì bỏ tích "Bật" để ẩn, giữ lịch sử)

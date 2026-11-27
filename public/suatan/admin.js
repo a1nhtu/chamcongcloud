@@ -512,6 +512,13 @@ export async function pageMealCfg(ctx) {
   g1.append(addCard);
   main.append(offBtn, g1);
   drawOff();
+  // Đơn giá 1 suất (đồng) — ghi ở báo cáo Chi tiết lượt ăn (Thành tiền = số suất × đơn giá)
+  const priceI = el('input', { type: 'text', inputmode: 'numeric', style: 'width:140px', placeholder: 'VD 25000' });
+  const priceSave = el('button', { class: 'sa-btn ghost', type: 'button' }, '💾 Lưu đơn giá');
+  priceSave.onclick = async () => { try { const r = await api('/admin/meal/price', { method: 'PUT', body: { price: priceI.value } }); priceI.value = r.price ? r.price.toLocaleString('vi-VN') : ''; toast('Đã lưu đơn giá', 'ok'); } catch (e) { toast(e.message, 'err'); } };
+  api('/admin/meal/price').then((r) => { priceI.value = r.price ? r.price.toLocaleString('vi-VN') : ''; }).catch(() => {});
+  main.append(el('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 4px' }, el('b', {}, 'Đơn giá 1 suất:'), priceI, el('span', {}, 'đồng'), priceSave,
+    el('span', { class: 'sa-hint' }, 'Dùng ở báo cáo Chi tiết lượt ăn (thành tiền = số suất × đơn giá). Để trống = không ghi giá.')));
 
   function shiftCard(s0) {
     const isNew = !s0;
@@ -522,6 +529,8 @@ export async function pageMealCfg(ctx) {
     const modeS = el('select', {}, el('option', { value: 'punch' }, 'Đếm lượt chấm công'), el('option', { value: 'ot' }, 'Đối chiếu đăng ký làm thêm (không đếm chấm công)'));
     modeS.value = s.mode;
     const enI = el('input', { type: 'checkbox', style: 'width:auto', ...(s.enabled ? { checked: '' } : {}) });
+    // bữa TĂNG CA: chỉ đủ điều kiện khi tăng ca thực tế của ngày công ≥ N giờ (báo cáo Chi tiết lượt ăn); 0 = bữa thường
+    const otI = el('input', { type: 'number', min: '0', max: '24', step: '0.5', value: s.ot_need_min ? String(s.ot_need_min / 60) : '0', style: 'width:90px' });
     // giờ mở + hạn khoá (server/meal-rules.js orderOpenMs / orderDeadlineMs)
     const openI = time24(s.open_at, { style: 'flex:1', placeholder: 'trống = luôn mở' });
     const openClr = el('button', { class: 'sa-btn ghost', type: 'button', style: 'padding:6px 10px;white-space:nowrap' }, 'Luôn mở');
@@ -556,7 +565,7 @@ export async function pageMealCfg(ctx) {
     save.onclick = async () => {
       if ([fromI, toI, openI, lockAt].some((x) => x.classList.contains('bad'))) return toast('Giờ nhập chưa đúng — gõ dạng 24 giờ, VD 10:30 hoặc 23:00', 'err');
       const body = { name: nameI.value, from_time: fromI.value, to_time: toI.value, mode: opt.dept_head ? modeS.value : s.mode, enabled: enI.checked,
-        lock_mode: lockS.value, lock_hours: lockH.value, lock_at: lockAt.value, open_at: openI.value };
+        lock_mode: lockS.value, lock_hours: lockH.value, lock_at: lockAt.value, open_at: openI.value, ot_need_hours: otI.value };
       try {
         if (isNew) { await api('/admin/meal/shifts', { method: 'POST', body }); toast('Đã thêm ' + nameI.value, 'ok'); pageMealCfg(C); }
         else {
@@ -578,6 +587,8 @@ export async function pageMealCfg(ctx) {
       el('div', { class: 'sa-row2' }, el('div', {}, el('label', {}, 'Giờ ăn từ'), fromI), el('div', {}, el('label', {}, 'đến (giờ chốt)'), toI)),
       el('label', {}, `Mở ${W} lúc (để trống = luôn mở)`), el('div', { style: 'display:flex;gap:8px;align-items:center' }, openI, openClr),
       el('label', {}, `Khoá ${W}`), lockS, lockBox, lockHint,
+      el('label', {}, 'Bữa tăng ca — chỉ đủ điều kiện khi tăng ca thực tế từ'),
+      el('div', { style: 'display:flex;gap:8px;align-items:center' }, otI, el('span', { class: 'sa-hint' }, 'giờ (0 = bữa thường, không xét)')),
       opt.dept_head ? el('label', {}, 'Cách đối chiếu (trang Đối chiếu & chốt)') : null, opt.dept_head ? modeS : null,
       el('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:10px;color:inherit' }, enI, 'Bật bữa này'),
       el('div', { class: 'sa-actions', style: 'margin-top:10px' }, save, s.custom || isNew ? del : null)].filter(Boolean));   // append gốc in null thành chữ
@@ -720,6 +731,8 @@ export async function pageMealCfg(ctx) {
       (g.rotating ? ` Có ${g.segments.length} khung giờ mà máy chỉ giữ được 3 → phần mềm tự đổi sang các bữa sắp tới (máy chủ phần mềm phải luôn bật).` : ''));
     const cOnce = chk(g.once, '🔁 Mỗi bữa chỉ quét thành công 1 lần trên tất cả máy bếp',
       `Quét được ở 1 máy → phần mềm khoá người đó trên mọi máy bếp đã chọn tới hết bữa, hết bữa tự mở. Máy bếp hỏi lệnh ${g.delay} giây/lần nên có thể hở vài giây; máy mất mạng thì chưa nhận được lệnh khoá (báo cáo vẫn đánh dấu quẹt lần 2).`);
+    const cOff = chk(g.off, '🚫 Nhân viên nghỉ việc / đã khoá → máy bếp báo thất bại',
+      `Người bị khoá trên phần mềm hoặc đã tới ngày nghỉ việc (phân hệ Nhân sự) bị chặn trên mọi máy bếp đã chọn — không xoá khỏi máy, vẫn giữ khuôn mặt; mở khoá / đi làm lại thì tự quét được.${g.off ? ` Đang chặn ${g.off_people} người.` : ''}`);
     gBox.append(el('div', { style: 'font-weight:700;margin:10px 0 4px' }, 'Máy bếp:'));
     const pick = new Set(g.serials);
     if (!g.devices.length) gBox.append(el('div', { class: 'sa-empty' }, 'Chưa có máy ZKTeco nào được duyệt.'));
@@ -729,10 +742,11 @@ export async function pageMealCfg(ctx) {
       const info = [];
       if (!d.adms) info.push(el('div', { class: 'sa-hint' }, 'Máy kết nối TCP/IP — không nhận được lệnh này (cần nối kiểu ADMS).'));
       if (d.live) {
-        const bits = [d.slots.length ? 'khung giờ trên máy: ' + d.slots.join(', ') : null, g.once ? `đang khoá ${d.locked} người` : null, d.pending ? `còn ${d.pending} lệnh chờ máy nhận` : 'máy đã nhận hết lệnh'].filter(Boolean);
+        const bits = [d.slots.length ? 'khung giờ trên máy: ' + d.slots.join(', ') : null, g.once ? `đang khoá ${d.locked} người` : null, g.off ? `chặn ${d.blocked} người nghỉ / khoá` : null, d.pending ? `còn ${d.pending} lệnh chờ máy nhận` : 'máy đã nhận hết lệnh'].filter(Boolean);
         info.push(el('div', { class: 'sa-hint' }, bits.join(' · ')));
       }
       if (d.error) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-red)' }, `⚠ Máy từ chối lệnh ${d.error.cmd} (mã ${d.error.code}) — có thể dòng máy này không có chức năng kiểm soát ra vào.`));
+      if (d.live && d.counts_att) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-warn)' }, '⚠ Máy này vẫn đang tính công → lượt quét ăn thành lượt chấm công. Vào Thiết bị › máy này › ⋯ Thêm › "Không dùng máy này để tính công".'));
       if (d.not_counted) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-warn)' }, '⚠ Máy này không nằm trong "máy dùng để đếm suất ăn" ở trên → lượt quét không được tính suất.'));
       if (d.signup_conflict) info.push(el('div', { class: 'sa-hint', style: 'color:var(--sa-warn)' }, '⚠ Máy này cũng dùng để báo cơm bằng quẹt máy — bật khung giờ thì ngoài giờ ăn máy sẽ từ chối, không báo cơm được.'));
       gBox.append(el('label', { style: 'display:flex;gap:8px;align-items:flex-start;margin:6px 0;color:inherit;font-size:14px' }, c,
@@ -740,9 +754,9 @@ export async function pageMealCfg(ctx) {
     }
     const save = el('button', { class: 'sa-btn', type: 'button', style: 'margin-top:8px' }, '💾 Lưu');
     save.onclick = async () => {
-      if ((cWin.checked || cOnce.checked) && !pick.size) return toast('Chọn ít nhất 1 máy bếp', 'err');
+      if ((cWin.checked || cOnce.checked || cOff.checked) && !pick.size) return toast('Chọn ít nhất 1 máy bếp', 'err');
       try {
-        const r = await api('/admin/meal/guard', { method: 'PUT', body: { window: cWin.checked, once: cOnce.checked, serials: [...pick] } });
+        const r = await api('/admin/meal/guard', { method: 'PUT', body: { window: cWin.checked, once: cOnce.checked, off: cOff.checked, serials: [...pick] } });
         toast(cOnce.checked && !g.once ? 'Đã lưu — khởi động lại máy bếp 1 lần để máy hỏi lệnh nhanh hơn' : 'Đã lưu', 'ok');
         drawGuard(r);
       } catch (e) { toast(e.message, 'err'); }
@@ -1039,7 +1053,19 @@ async function downloadRpt(type, query) {
     toast('Đã xuất Excel', 'ok');
   } catch { toast('Không xuất được báo cáo', 'err'); }
 }
-const RPT = { tab: 'summary', from: '', to: '', month: '', mode: 'signup', day: '', shift: '', kitchen: '' };
+// Excel chi tiết lượt ăn (bộ ghi luồng phía máy chủ — tháng đông người có thể vài trăm nghìn dòng)
+async function downloadScans(query) {
+  try {
+    toast('Đang xuất Excel…', 'ok');
+    const res = await api(`/admin/meal/rpt/scans.xlsx?${query}`, { raw: true });
+    if (!res.ok) { let m = 'Không xuất được báo cáo'; try { m = (await res.json()).error || m; } catch {} return toast(m, 'err'); }
+    const name = (/filename="([^"]+)"/.exec(res.headers.get('content-disposition') || '') || [])[1] || 'chi_tiet_luot_an.xlsx';
+    saveFile(await res.blob(), name);
+    toast('Đã xuất Excel', 'ok');
+  } catch { toast('Không xuất được báo cáo', 'err'); }
+}
+let depts = null;   // danh sách bộ phận cho ô lọc báo cáo Chi tiết lượt ăn (tải 1 lần)
+const RPT = { tab: 'summary', from: '', to: '', month: '', mode: 'signup', day: '', shift: '', kitchen: '', sDept: '', sShift: '', sStatus: '', sQ: '', sOff: 0 };
 const PLACE_LS = 'sa_rpt_place';   // "nơi ăn" in trên tiêu đề mẫu báo cơm (VD NHÀ CÔNG VỤ) — nhớ trên máy này
 const lsGet = (k) => { try { return localStorage.getItem(k) || ''; } catch { return ''; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* trình duyệt chặn lưu trữ */ } };
@@ -1060,7 +1086,7 @@ export async function pageMealRpt(ctx) {
   if (!shifts.some((s) => s.code === RPT.shift)) RPT.shift = shifts[0]?.code || '';
   if (RPT.kitchen && !kitchens.some((k) => String(k.id) === RPT.kitchen)) RPT.kitchen = '';
   const TABS = [['summary', '1. Tổng số suất ăn & giờ đăng ký'], ['month', '2. Bảng tổng hợp báo cơm (tháng)'], ['daylist', '3. Danh sách báo cơm theo ngày'],
-    ['compare', '4. Đối chiếu báo ↔ ăn (ai ăn mà không báo, báo mà không ăn)']];
+    ['compare', '4. Đối chiếu báo ↔ ăn (ai ăn mà không báo, báo mà không ăn)'], ['scans', '5. Chi tiết lượt ăn (quét máy, đơn giá, đủ / không đủ điều kiện)']];
   if (!TABS.some(([k]) => k === RPT.tab)) RPT.tab = 'summary';
   const tabs = el('div', { class: 'sa-seg', style: 'margin-bottom:10px;flex-wrap:wrap' });
   const bar = el('div', { class: 'sa-bar' });
@@ -1070,9 +1096,10 @@ export async function pageMealRpt(ctx) {
     const kq = RPT.kitchen ? `&kitchen=${RPT.kitchen}` : '';
     if (RPT.tab === 'month') return `from=${RPT.month}-01&to=${monthEnd(RPT.month)}&mode=${RPT.mode}${kq}`;
     if (RPT.tab === 'daylist') return `from=${RPT.day}&shift=${encodeURIComponent(RPT.shift)}${kq}`;
+    if (RPT.tab === 'scans') return `from=${RPT.from}&to=${RPT.to}&dept=${encodeURIComponent(RPT.sDept)}&shift=${encodeURIComponent(RPT.sShift)}&status=${RPT.sStatus}&q=${encodeURIComponent(RPT.sQ)}`;
     return `from=${RPT.from}&to=${RPT.to}${RPT.tab === 'compare' ? kq : ''}`;
   };
-  const xlsx = () => downloadRpt(RPT.tab, qs() + (['month', 'daylist'].includes(RPT.tab) && lsGet(PLACE_LS) ? `&place=${encodeURIComponent(lsGet(PLACE_LS))}` : ''));
+  const xlsx = () => (RPT.tab === 'scans' ? downloadScans(qs()) : downloadRpt(RPT.tab, qs() + (['month', 'daylist'].includes(RPT.tab) && lsGet(PLACE_LS) ? `&place=${encodeURIComponent(lsGet(PLACE_LS))}` : '')));
   const drawTabs = () => {
     tabs.innerHTML = '';
     for (const [k, label] of TABS) { const b = el('button', { type: 'button', class: k === RPT.tab ? 'on' : '' }, label); b.onclick = () => { RPT.tab = k; drawTabs(); drawBar(); load(); }; tabs.append(b); }
@@ -1110,6 +1137,7 @@ export async function pageMealRpt(ctx) {
       put(el('span', {}, 'Ngày'), step(-1, '‹'), dI, step(1, '›'), el('span', {}, 'Bữa'), sh, kitchenSel(), placeIn(), xlsBtn());
       return;
     }
+    if (RPT.tab === 'scans') { drawScanBar(); return; }
     const fI = el('input', { type: 'date', value: RPT.from }), tI = el('input', { type: 'date', value: RPT.to });
     const quick = (label, fn) => { const b = el('button', { class: 'sa-btn ghost', type: 'button' }, label); b.onclick = () => { fn(); fI.value = RPT.from; tI.value = RPT.to; load(); }; return b; };
     const view = el('button', { class: 'sa-btn', type: 'button' }, 'Xem');
@@ -1129,10 +1157,10 @@ export async function pageMealRpt(ctx) {
     body.innerHTML = ''; body.append(C.loading());
     if (RPT.tab === 'daylist' && !RPT.shift) { body.innerHTML = ''; body.append(el('div', { class: 'sa-empty' }, 'Chưa có bữa ăn nào đang bật (Cấu hình suất ăn).')); return; }
     let r;
-    try { r = await api(`/admin/meal/rpt/${RPT.tab}?${qs()}`); } catch (e) { if (my === seq) { body.innerHTML = ''; body.append(el('div', { class: 'empty' }, e.message)); } return; }
+    try { r = await api(`/admin/meal/rpt/${RPT.tab}?${qs()}${RPT.tab === 'scans' ? `&offset=${RPT.sOff}&limit=500` : ''}`); } catch (e) { if (my === seq) { body.innerHTML = ''; body.append(el('div', { class: 'empty' }, e.message)); } return; }
     if (my !== seq) return;   // đã đổi lựa chọn khi đang tải
     body.innerHTML = '';
-    ({ summary: drawSummary, month: drawMonth, daylist: drawDayList, compare: drawCompare })[RPT.tab](r);
+    ({ summary: drawSummary, month: drawMonth, daylist: drawDayList, compare: drawCompare, scans: drawScans })[RPT.tab](r);
   }
 
   // 1. tổng số suất ăn & giờ đăng ký: mỗi ngày × bữa 1 dòng cộng + từng bếp (khi có nhiều bếp)
@@ -1237,6 +1265,60 @@ export async function pageMealRpt(ctx) {
     body.append(el('div', { style: 'font-weight:800;font-size:16px;text-align:center;margin:6px 0 10px' }, `DANH SÁCH BÁO CƠM ${r.shift_name.toUpperCase()} NGÀY ${dmy(r.date)}`),
       el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-pgrid', style: 'width:100%' }, el('thead', {}, el('tr', {}, ...th(), ...th(), ...th())), tb)),
       el('div', { class: 'sa-hint', style: 'margin-top:8px' }, 'Người tự báo xếp trước (theo bộ phận, mã NV), người HR báo hộ xếp cuối và ghi chú "HR báo hộ". File Excel in đúng mẫu: 90 người / trang, ngang A4.'));
+  }
+
+  // 5. CHI TIẾT LƯỢT ĂN — thanh lọc: khoảng ngày (≤ 31 ngày), bộ phận, bữa, trạng thái, tìm mã / tên
+  function drawScanBar() {
+    const fI = el('input', { type: 'date', value: RPT.from }), tI = el('input', { type: 'date', value: RPT.to });
+    const go = () => { RPT.from = fI.value; RPT.to = tI.value; RPT.sOff = 0; load(); };
+    const quick = (label, fn) => { const b = el('button', { class: 'sa-btn ghost', type: 'button' }, label); b.onclick = () => { fn(); fI.value = RPT.from; tI.value = RPT.to; RPT.sOff = 0; load(); }; return b; };
+    const dS = el('select', { style: 'width:auto;max-width:220px' }, el('option', { value: '' }, 'Tất cả bộ phận'));
+    const fillDepts = () => { for (const d of depts || []) dS.append(el('option', { value: d.name }, d.name)); dS.value = RPT.sDept; };
+    if (depts) fillDepts(); else api('/admin/departments').then((x) => { depts = x.rows || []; fillDepts(); }).catch(() => { depts = []; });
+    dS.onchange = () => { RPT.sDept = dS.value; RPT.sOff = 0; load(); };
+    const sS = el('select', { style: 'width:auto' }, el('option', { value: '' }, 'Tất cả bữa'), ...shifts.map((x) => el('option', { value: x.code }, x.name)));
+    sS.value = RPT.sShift; sS.onchange = () => { RPT.sShift = sS.value; RPT.sOff = 0; load(); };
+    const STS = [['', 'Mọi trạng thái'], ['du', 'Đủ điều kiện'], ['thieu', 'Không đủ điều kiện'], ['cho', 'Chờ xác minh'], ['lap', 'Quẹt lặp (không tính)'], ['nghi', 'NV nghỉ việc / bị khoá'], ['la', 'Chưa khớp nhân viên']];
+    const tS = el('select', { style: 'width:auto' }, ...STS.map(([v, t]) => el('option', { value: v }, t)));
+    tS.value = RPT.sStatus; tS.onchange = () => { RPT.sStatus = tS.value; RPT.sOff = 0; load(); };
+    const qI = el('input', { type: 'search', placeholder: 'Tìm mã / tên NV…', style: 'width:170px', value: RPT.sQ });
+    let tm = 0; qI.oninput = () => { clearTimeout(tm); tm = setTimeout(() => { RPT.sQ = qI.value.trim(); RPT.sOff = 0; load(); }, 350); };
+    const view = el('button', { class: 'sa-btn', type: 'button' }, 'Xem'); view.onclick = go;
+    const xls = el('button', { class: 'sa-btn ghost', type: 'button' }, '⬇ Xuất Excel'); xls.onclick = () => { RPT.from = fI.value; RPT.to = tI.value; xlsx(); };
+    put(el('span', {}, 'Từ'), fI, el('span', {}, 'đến'), tI, view,
+      quick('Hôm nay', () => { RPT.from = RPT.to = vnToday(); }), quick('7 ngày', () => { RPT.to = vnToday(); RPT.from = addDays(RPT.to, -6); }),
+      quick('Tháng này', () => { const d = vnToday(); RPT.from = d.slice(0, 8) + '01'; RPT.to = d; }), dS, sS, tS, qI, xls);
+  }
+  function drawScans(r) {
+    const t = r.totals, by = t.by;
+    const kpi = (k, v, color) => el('div', { class: 'sa-kpi' }, el('div', { class: 'k' }, k), el('div', { class: 'v', ...(color ? { style: `color:${color}` } : {}) }, v));
+    body.append(el('div', { class: 'sa-kpis' },
+      kpi('Số suất (không tính quẹt lặp)', nf(t.meals)),
+      kpi(`Thành tiền${r.price ? ` (${nf(r.price)} đ/suất)` : ''}`, r.price ? nf(t.amount) + ' đ' : 'chưa đặt đơn giá'),
+      kpi('Đủ điều kiện', nf(by.du), 'var(--sa-ok)'),
+      kpi('Không đủ điều kiện', nf(by.thieu), 'var(--sa-red)'),
+      kpi('Chờ xác minh', nf(by.cho), 'var(--sa-warn)'),
+      kpi('Quẹt lặp / NV nghỉ / chưa khớp', `${nf(by.lap)} / ${nf(by.nghi)} / ${nf(by.la)}`)));
+    if (t.by_shift.length > 1) body.append(el('div', { class: 'sa-hint', style: 'margin:-4px 0 8px' }, 'Theo bữa: ' + t.by_shift.map((b) => `${b.shift_name} ${nf(b.meals)} suất`).join(' · ')));
+    if (r.outside) body.append(el('div', { class: 'sa-hint', style: 'margin-bottom:8px' }, `${nf(r.outside)} lượt quét ngoài giờ ăn không đưa vào bảng (không tính suất).`));
+    if (!r.rows.length) { body.append(el('div', { class: 'sa-empty' }, 'Không có lượt quét máy chấm ăn nào khớp bộ lọc.')); return; }
+    const stColor = { du: 'var(--sa-ok)', thieu: 'var(--sa-red)', cho: 'var(--sa-warn)', nghi: 'var(--sa-red)', la: 'var(--sa-red)', lap: 'var(--sa-mut)' };
+    const hmOt = (m) => (m == null ? '' : `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}`);
+    const cols = [['TT', (x, i) => String(r.offset + i + 1), 1], ['Ngày ăn', (x) => dmy(x.date)], ['Giờ', (x) => hhmm(x.at)], ['Bữa', (x) => x.shift_name], ['Mã NV', (x) => x.code],
+      ['Họ tên', (x) => x.full_name || el('span', { class: 'sa-hint' }, '—')], ['Bộ phận', (x) => x.department], ['Máy', (x) => x.device + (x.machine_number ? ` (${x.machine_number})` : '')],
+      ['Hình thức', (x) => x.verify], ['Đơn giá', (x) => (x.counted && r.price ? nf(x.price) : ''), 1], ['Tăng ca', (x) => (x.ot_meal ? hmOt(x.ot) : ''), 1],
+      ['Trạng thái', (x) => el('b', { style: `color:${stColor[x.status] || 'inherit'}` }, x.status_text)], ['Ghi chú', (x) => el('span', { class: 'sa-hint' }, x.note)],
+      ['Ngày vào làm', (x) => dmy(x.start_date)], ['Ngày nghỉ', (x) => dmy(x.leave_date)], ['Quốc tịch', (x) => x.nationality], ['Loại NV', (x) => x.emp_type]];
+    body.append(el('div', { class: 'sa-wrap' }, el('table', { class: 'sa-tbl' },
+      el('thead', {}, el('tr', {}, ...cols.map(([h, , num]) => el('th', { class: num ? 'num' : '' }, h)))),
+      el('tbody', {}, ...r.rows.map((x, i) => el('tr', {}, ...cols.map(([, f, num]) => el('td', { class: num ? 'num' : '' }, f(x, i)))))))));
+    const pages = Math.max(1, Math.ceil(t.rows / r.limit)), page = Math.floor(r.offset / r.limit) + 1;
+    if (pages > 1) {
+      const nav = (label, off, dis) => { const b = el('button', { class: 'sa-btn ghost', type: 'button', ...(dis ? { disabled: '' } : {}) }, label); b.onclick = () => { RPT.sOff = off; load(); }; return b; };
+      body.append(el('div', { class: 'sa-bar', style: 'margin-top:8px' }, nav('‹ Trang trước', Math.max(0, r.offset - r.limit), page <= 1),
+        el('span', {}, `Trang ${page}/${pages} · ${nf(t.rows)} lượt`), nav('Trang sau ›', r.offset + r.limit, page >= pages)));
+    }
+    body.append(el('div', { class: 'sa-hint', style: 'margin-top:8px' }, 'Mỗi người 1 suất/bữa: lượt quẹt sau trong cùng bữa ghi "Quẹt lặp", không tính tiền. Bữa tăng ca (Cấu hình › ô "Bữa tăng ca") xét tăng ca thực tế của ngày công chứa giờ ăn: chưa chấm ra / chưa có dữ liệu chấm công → Chờ xác minh, tính công xong tự chuyển. Tối đa 31 ngày mỗi lần. File Excel có đủ mọi dòng + sheet Tổng hợp.'));
   }
 
   // 4. ĐỐI CHIẾU BÁO ↔ ĂN: tổng hợp theo ngày, theo nhân viên + chi tiết báo mà không ăn / ăn mà không báo

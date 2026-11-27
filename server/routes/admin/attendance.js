@@ -106,7 +106,7 @@ export function recomputeAttendance({ month = '', from = '', to = '', ids = [], 
         || db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
       if (emp) db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(emp.id, pin);
     }
-    const devDays = db.prepare(`SELECT DISTINCT p.employee_id, p.work_date FROM device_punches p${dJoin} WHERE p.employee_id IS NOT NULL${dWhere.length ? ' AND ' + dWhere.join(' AND ') : ''}`)
+    const devDays = db.prepare(`SELECT DISTINCT p.employee_id, p.work_date FROM att_punches p${dJoin} WHERE p.employee_id IS NOT NULL${dWhere.length ? ' AND ' + dWhere.join(' AND ') : ''}`)
       .all(...dArgs).map((r) => r.employee_id + '|' + r.work_date);
     const devSet = new Set(devDays);
     db.exec('BEGIN');
@@ -155,7 +155,7 @@ export function recomputeAttendance({ month = '', from = '', to = '', ids = [], 
 // Ngày NV chấm bằng ĐIỆN THOẠI (dòng công có ảnh chấm) và chưa có lượt quẹt nào từ máy: giờ chấm chỉ nằm ở bảng công,
 // không có lượt chấm gốc → dựng lại ngày từ lượt chấm thêm tay sẽ GHI ĐÈ / làm mất các lần chấm điện thoại. Chặn thêm lượt ở các ngày này.
 const phoneDay = (eid, date) => !!db.prepare("SELECT 1 FROM attendance WHERE employee_id = ? AND work_date = ? AND (COALESCE(check_in_photo,'') <> '' OR COALESCE(check_out_photo,'') <> '') LIMIT 1").get(eid, date)
-  && !db.prepare("SELECT 1 FROM device_punches WHERE employee_id = ? AND work_date = ? AND serial NOT IN ('TAY_VAO','TAY_RA') LIMIT 1").get(eid, date);
+  && !db.prepare("SELECT 1 FROM att_punches WHERE employee_id = ? AND work_date = ? AND serial NOT IN ('TAY_VAO','TAY_RA') LIMIT 1").get(eid, date);
 
 /* TÍNH LẠI NỐI TIẾP sau khi quản lý BÙ TAY một ngày.
  * Công ngày N+1 phụ thuộc ngày N: lượt chấm sáng sớm đã là giờ RA ca đêm hôm trước thì ngày N+1 không dùng lại (consumedByPrevDay, device-sync.js).
@@ -287,7 +287,7 @@ export function registerAttendanceRoutes(r, { need }) {
     let att = db.prepare(`SELECT a.*, s.name shift_name, s.code shift_code FROM attendance a LEFT JOIN shifts s ON s.id=a.shift_id
       WHERE a.employee_id IN (${ph}) AND a.work_date>=? AND a.work_date<=?`).all(...empIds, from, to);
     if (vmap) att = applyVirtual(att, vmap).map((a) => ({ ...a, manual: 0 }));
-    const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
+    const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM att_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
     const punchMap = new Map();
     for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : String(p.serial).startsWith('DT_') ? '📱' : '')); }   // ✎ = lượt thêm tay
     const handSides = vmap ? () => ({ man_in: 0, man_out: 0 }) : handMarker();   // * cạnh đúng ô giờ sửa / thêm tay (server/hand-mark.js)
@@ -460,7 +460,7 @@ export function registerAttendanceRoutes(r, { need }) {
   // NV tính công THEO GIỜ chỉ chấm điện thoại (chưa từng quẹt máy), ngày chưa có lượt chấm nào: thêm giờ tay cũng thành PHIÊN vào–ra
   // riêng như chấm điện thoại (2 phiên sáng + chiều = 2 dòng, cộng giờ từng phiên), không gộp đầu–cuối.
   const hourlySessionDay = (eid, date) => payrollCtx(getSetting, db).isHourly(eid)
-    && !db.prepare("SELECT 1 FROM device_punches WHERE employee_id = ? AND (work_date = ? OR serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA')) LIMIT 1").get(eid, date);
+    && !db.prepare("SELECT 1 FROM att_punches WHERE employee_id = ? AND (work_date = ? OR serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA')) LIMIT 1").get(eid, date);
   const sessionDay = (eid, date) => phoneDay(eid, date) || hourlySessionDay(eid, date);
 
   const dm = (d) => d.slice(8) + '/' + d.slice(5, 7);
@@ -506,7 +506,7 @@ export function registerAttendanceRoutes(r, { need }) {
     const from = String(req.query.from || req.query.date || '').slice(0, 10), to = String(req.query.to || from).slice(0, 10);
     if (!eid || !/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) return res.status(400).json({ error: 'Thiếu nhân viên hoặc ngày' });
     const dn = devName();
-    const rows = db.prepare('SELECT id, serial, punch_at, work_date, status FROM device_punches WHERE employee_id = ? AND work_date >= ? AND work_date <= ? ORDER BY punch_at')
+    const rows = db.prepare('SELECT id, serial, punch_at, work_date, status FROM att_punches WHERE employee_id = ? AND work_date >= ? AND work_date <= ? ORDER BY punch_at')
       .all(eid, from, to).map((p) => {
         const manual = p.serial.startsWith('TAY_'), dv = p.serial.startsWith('DT_') ? { name: '📱 Điện thoại' } : dn.get(p.serial);
         return { id: p.id, date: p.work_date, time: vnHM(p.punch_at), punch_at: p.punch_at, manual,
@@ -552,7 +552,7 @@ export function registerAttendanceRoutes(r, { need }) {
           row.check_out_office_id ?? null, row.check_out_outside ? 1 : 0,
           m2.late, m2.early_min, m2.ot_min, m2.ot_raw, m2.work_minutes, m2.work_unit, m2.day_status, m2.ot_type, m2.shiftId ?? null, row.shift_source || 'hourly');
       // ngày sau có quẹt máy → dựng lại ngày đó (gộp lượt điện thoại với lượt máy)
-      if (db.prepare("SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA') LIMIT 1").get(row.employee_id, nd))
+      if (db.prepare("SELECT 1 FROM att_punches WHERE employee_id=? AND work_date=? AND serial NOT IN ('TAY_VAO','TAY_RA','DT_VAO','DT_RA') LIMIT 1").get(row.employee_id, nd))
         rebuildDays([row.employee_id + '|' + nd]);
       return true;
     });
@@ -637,7 +637,7 @@ export function registerAttendanceRoutes(r, { need }) {
     if (!tIn && !tOut) return res.status(400).json({ error: 'Tích "Giờ vào" và/hoặc "Giờ ra" và nhập giờ' });
     if (tIn && tOut && tOut <= tIn && ids.some(hourlyNoOvernight)) return res.status(400).json({ error: OVERNIGHT_MSG });
     if (ids.length * dates.length > 40000) return res.status(400).json({ error: 'Quá nhiều (tối đa 40.000 lượt người × ngày mỗi lần)' });
-    const has = db.prepare('SELECT 1 FROM device_punches WHERE employee_id = ? AND work_date = ? LIMIT 1');
+    const has = db.prepare('SELECT 1 FROM att_punches WHERE employee_id = ? AND work_date = ? LIMIT 1');
     const rnd = (j) => Math.floor(Math.random() * (j * 60 + 1));   // giây lệch
     const shift = (t, s) => { const [h, m] = t.split(':').map(Number); const tot = h * 3600 + m * 60 + s; return [String(Math.floor(tot / 3600) % 24).padStart(2, '0') + ':' + String(Math.floor(tot / 60) % 60).padStart(2, '0'), tot % 60]; };
     const keys = new Set();

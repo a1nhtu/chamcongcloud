@@ -204,6 +204,16 @@ async function pageDevices() {
     const renameItem = { group: 'Cài đặt máy', label: '✏️ Đổi tên máy', fn: async () => { const name = prompt('Tên máy:', m.name || ''); if (name != null) { await putDev({ name }); pageDevices(); } } };
     const keyItem = hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null;
     const doorItem = hasPerm('devices') ? { group: 'Cài đặt máy', label: m.access_control ? '🚪 Tắt kiểm soát cửa' : '🚪 Bật kiểm soát cửa', fn: async () => { await putDev({ access_control: !m.access_control }); toast(m.access_control ? 'Đã tắt kiểm soát cửa' : 'Đã bật kiểm soát cửa', 'ok'); pageDevices(); } } : null;
+    // Máy KHÔNG DÙNG TÍNH CÔNG (VD máy ở nhà ăn): lượt quẹt vẫn lưu (Xem quẹt, báo cáo suất ăn) nhưng không vào bảng công
+    const noAttItem = hasPerm('devices') ? { group: 'Cài đặt máy', hint: m.no_att ? 'Lượt quẹt máy này đang KHÔNG tính công — bấm để tính công lại như máy chấm công thường' : 'Máy đặt ở nhà ăn / cổng phụ: lượt quẹt vẫn lưu nhưng không vào bảng công (không làm sai giờ vào – ra)',
+      label: m.no_att ? '⏱ Dùng lại máy này để tính công' : '🍽 Không dùng máy này để tính công', fn: async () => {
+        const on = !m.no_att;
+        if (!confirm(on ? `Máy "${m.name || m.serial}" KHÔNG dùng để tính công nữa?
+
+Lượt quẹt vẫn lưu (Xem quẹt, báo cáo suất ăn) nhưng không vào bảng công. Ngày cũ đã có lượt máy này: bấm "Tính lại công" để bỏ ra.` : `Dùng lại máy "${m.name || m.serial}" để tính công?
+
+Ngày cũ: bấm "Tính lại công" để cộng lượt máy này vào.`)) return;
+        try { await putDev({ no_att: on }); toast(on ? 'Đã tắt tính công ở máy này — nhớ bấm Tính lại công cho các ngày cũ' : 'Máy này tính công lại như cũ — bấm Tính lại công cho các ngày cũ', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null;
     const pauseItem = m.active ? { group: 'Xóa / tạm dừng', label: '⏸ Tạm dừng máy', fn: async () => { await putDev({ active: false }); pageDevices(); } } : null;
     // Bộ phận mặc định: NV phần mềm tự tạo từ máy này vào luôn bộ phận đó (chuỗi cửa hàng: 1 máy = 1 cửa hàng)
     const deptItem = hasPerm('devices') ? { group: 'Cài đặt máy', hint: 'NV mới phần mềm tự tạo từ máy này sẽ vào bộ phận này', label: '🏬 Bộ phận mặc định' + (m.default_dept ? ': ' + m.default_dept : ''), fn: () => deviceDeptModal(m) } : null;
@@ -228,7 +238,7 @@ async function pageDevices() {
       m.active ? { group: 'Cài đặt máy', hint: 'Mỗi lần chấm, máy gửi ngay lượt chấm về phần mềm (HTTP Listening)', label: m.hik_push_url ? '📡 Máy tự gửi lượt chấm: ĐÃ CÀI (xem / cài lại)' : '📡 Cài máy tự gửi lượt chấm về phần mềm', fn: () => hikPushModal(m, d) } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy chủ', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ máy chủ (múi giờ Việt Nam)?\nKiểm tra đồng hồ máy tính cài phần mềm đúng trước.`)) tcpJob(m, 'set-time', {}, null, 'hik'); } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}, null, 'hik'); } } : null,
-      schedItem, doorItem, keyItem, pauseItem, removeItem,
+      schedItem, doorItem, noAttItem, keyItem, pauseItem, removeItem,
     ]) : isUnion ? rowMenu([   // máy Union: máy tự kết nối về, phần mềm ra lệnh khi máy đang kết nối
       { group: 'Dữ liệu từ máy', label: '📊 Thông tin & dung lượng máy', fn: () => tcpJob(m, 'info', {}, pageDevices, 'union') },
       m.active ? { group: 'Dữ liệu từ máy', label: '⬇ Tải nhân viên từ máy', fn: () => { if (confirm(`Tải danh sách nhân viên TỪ máy "${m.name || m.serial}" về phần mềm?`)) tcpJob(m, 'users', {}, pageDevices, 'union'); } } : null,
@@ -236,7 +246,7 @@ async function pageDevices() {
       m.active ? { group: 'Dữ liệu từ máy', hint: 'Các lượt chấm máy chưa gửi về (VD lúc máy tính tắt)', label: '⬇ Tải lượt chấm mới', fn: () => tcpJob(m, 'new-logs', {}, pageDevices, 'union') } : null,
       renameItem,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}, null, 'union'); } } : null,
-      schedItem, doorItem, keyItem,
+      schedItem, doorItem, noAttItem, keyItem,
       m.active ? { group: 'Xóa / tạm dừng', label: '🗑 Xóa toàn bộ nhân viên trên máy', fn: () => {
         if (!confirm(`Xóa TOÀN BỘ nhân viên + vân tay / thẻ trên máy "${m.name || m.serial}"?
 
@@ -254,7 +264,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       { group: 'Cài đặt máy', hint: 'Bật: NV mới khai trên phần mềm tự đẩy xuống máy này (khi bật Tự động đẩy NV)', label: (m.recv_new ?? 1) ? '📥 Nhận NV mới từ phần mềm: BẬT' : '📥 Nhận NV mới từ phần mềm: TẮT', fn: async () => {
         try { await putDev({ recv_new: !(m.recv_new ?? 1) }); toast((m.recv_new ?? 1) ? 'Máy này sẽ KHÔNG nhận NV mới từ phần mềm' : 'Máy này sẽ nhận NV mới từ phần mềm', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => aiCall(m, 'restart', {}, `Khởi động lại máy "${m.name || m.serial}"?`) } : null,
-      schedItem, doorItem, keyItem,
+      schedItem, doorItem, noAttItem, keyItem,
       m.active ? { group: 'Bản quyền & quản trị', label: '👤 Xóa quyền quản trị', fn: () => aiCall(m, 'clear-admins', {}, `Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy).`) } : null,
       m.active ? { group: 'Xóa / tạm dừng', label: '🗑 Xóa dữ liệu trên máy', fn: () => aiClearModal(m) } : null,
       pauseItem, removeItem,
@@ -267,7 +277,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       m.active ? { group: 'Cài đặt máy', label: m.tcp_auto ? '⏱ Tắt tự động tải máy này' : '⏱ Bật tự động tải máy này', fn: async () => { try { await api(`/admin/tcp-devices/${m.id}/auto`, { method: 'PUT', body: { on: !m.tcp_auto } }); toast(m.tcp_auto ? 'Đã tắt tự động tải cho máy này' : 'Đã bật tự động tải cho máy này', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🕒 Đặt giờ máy theo máy tính', fn: () => { if (confirm(`Đặt giờ máy "${m.name || m.serial}" theo đồng hồ của máy tính cài phần mềm?\nKiểm tra đồng hồ máy tính đúng trước.`)) tcpJob(m, 'set-time', {}); } } : null,
       m.active ? { group: 'Cài đặt máy', label: '🔄 Khởi động lại máy', fn: () => { if (confirm(`Khởi động lại máy "${m.name || m.serial}"?`)) tcpJob(m, 'restart', {}); } } : null,
-      schedItem,
+      schedItem, noAttItem,
       hasPerm('devices') ? { group: 'Bản quyền & quản trị', label: m.key_ok ? '🔑 Đổi key bản quyền máy' : '🔑 Dán key bản quyền máy', fn: () => pasteDeviceKey(m) } : null,
       m.active ? { group: 'Bản quyền & quản trị', label: '👤 Xóa quyền quản trị', fn: () => { if (confirm(`Hạ TẤT CẢ quản trị trên máy "${m.name || m.serial}" về nhân viên thường?\n\nSau đó ai cũng vào được menu máy (cho tới khi đặt quản trị mới trên máy).`)) tcpJob(m, 'clear-admins', {}, pageDevices); } } : null,
       m.active ? { group: 'Xóa / tạm dừng', label: '🗑 Xóa dữ liệu trên máy', fn: () => tcpClearModal(m) } : null,
@@ -283,7 +293,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       { group: 'Cài đặt máy', label: '🔁 Nhóm đồng bộ', fn: async () => { const g = prompt('Nhóm đồng bộ (các máy CÙNG nhóm sẽ tự đồng bộ NV/vân tay/thẻ/mật mã/khuôn mặt cho nhau).\nĐể trống = không đồng bộ:', m.sync_group || ''); if (g != null) { const r = await putDev({ sync_group: g }); toast(r && r.synced ? `Đã đặt nhóm + tự đồng bộ ${r.synced} máy. Chờ ít giây rồi Làm mới.` : 'Đã đặt nhóm đồng bộ', 'ok'); pageDevices(); } } },
       { group: 'Cài đặt máy', hint: 'Bật: NV mới khai trên phần mềm tự đẩy xuống máy này (khi bật Tự động đẩy NV)', label: (m.recv_new ?? 1) ? '📥 Nhận NV mới từ phần mềm: BẬT' : '📥 Nhận NV mới từ phần mềm: TẮT', fn: async () => {
         try { await putDev({ recv_new: !(m.recv_new ?? 1) }); toast((m.recv_new ?? 1) ? 'Máy này sẽ KHÔNG nhận NV mới từ phần mềm' : 'Máy này sẽ nhận NV mới từ phần mềm', 'ok'); pageDevices(); } catch (e) { toast(e.message, 'err'); } } },
-      deptItem,
+      deptItem, noAttItem,
       { group: 'Cài đặt máy', hint: 'Máy này chỉ được đăng ký Số ID trong dải — ngoài dải sẽ cảnh báo (cần bật Cảnh báo trùng Số ID)', label: '🔢 Dải Số ID của máy', fn: async () => {
         const v = prompt('Dải Số ID cho máy "' + (m.name || m.serial) + '" (VD 1001-1999). Đăng ký số ngoài dải → cảnh báo; cấp số mới sẽ lấy trong dải.\nĐể trống = không giới hạn:', m.pin_range || '');
         if (v == null) return;
@@ -328,6 +338,7 @@ Máy không còn ai chấm được cho tới khi đăng ký lại. Lượt ch�
       m.pin_range ? el('span', { class: 'chip', title: 'Dải Số ID của máy' }, '🔢 ' + m.pin_range) : '',
       m.default_dept ? el('span', { class: 'chip', title: 'Bộ phận mặc định — NV tự tạo từ máy này vào bộ phận này' }, '🏬 ' + m.default_dept) : '',
       m.access_control ? el('span', { class: 'chip o' }, '🚪 Kiểm soát cửa') : '',
+      m.no_att ? el('span', { class: 'chip o', title: 'Lượt quẹt máy này không vào bảng công (máy nhà ăn / cổng phụ) — đổi ở ⋯ Thêm' }, '🍽 Không tính công') : '',
       // Đời máy ADMS (máy tự khai lúc bắt tay): đời cũ không hiểu lệnh hỏi danh sách NV → phần mềm tải theo cách khác
       !direct && !isAi && !isUnion && m.push_ver ? el('span', { class: 'chip', title: (m.push_ver === '-' ? 'Máy đời cũ (không khai phiên bản giao thức đẩy)' : 'Máy đời mới — giao thức đẩy ' + m.push_ver) + (m.firmware ? ' · ' + m.firmware : '') }, m.push_ver === '-' ? '🕰 Đời cũ' : '✨ Đời mới') : '',
       // Chưa bắt tay lại từ khi phần mềm biết phân biệt đời máy (máy nối liên tục từ trước khi cập nhật)

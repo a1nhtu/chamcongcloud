@@ -198,6 +198,8 @@ export function registerDeviceRoutes(r, { need }) {
       .run(b.name ?? d.name, b.active != null ? (b.active ? 1 : 0) : d.active, newGroup,
            b.machine_number != null ? (parseInt(b.machine_number, 10) || 0) : (d.machine_number || 0),
            b.access_control != null ? (b.access_control ? 1 : 0) : (d.access_control || 0), d.id);
+    // Máy không dùng tính công (máy nhà ăn): lượt quẹt vẫn lưu, bảng công bỏ qua (view att_punches). Ngày cũ: HR bấm Tính lại công.
+    if (b.no_att != null) db.prepare('UPDATE push_devices SET no_att=? WHERE id=?').run(b.no_att ? 1 : 0, d.id);
     // Tự kích hoạt đồng bộ NGAY cho CẢ NHÓM (khỏi phải bấm nút / khởi động lại máy) khi:
     //  - Vừa ĐẶT/ĐỔI Nhóm ĐB, HOẶC
     //  - Vừa DUYỆT máy (active 0→1) mà máy đã có nhóm → máy mới tự nhận vân tay/mặt/thẻ/mật mã/NV của nhóm.

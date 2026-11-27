@@ -82,7 +82,7 @@ test('mặc định TẮT: quẹt ở máy bếp không sinh lệnh nào, đẩy
   assert.equal(fields(S.buildUserCommand('901', 'K1')).TZ, D.USER_TZ);
   assert.equal(G.guardDelay('K1'), null);
   assert.equal(S.pollDelay('K1'), 10);
-  assert.deepEqual(G.guardTick(), { released: 0, tz: 0 });
+  assert.deepEqual(G.guardTick(), { released: 0, tz: 0, off: 0 });
   assert.equal(db.prepare('SELECT COUNT(*) n FROM meal_guard_state').get().n, 0);
   // chọn máy nhưng chưa bật công tắc nào → vẫn như cũ
   G.saveGuard({ window: false, once: false, serials: ['K1', 'K2'] });
@@ -195,7 +195,7 @@ test('KHUNG GIỜ: nhóm 1 chỉ quét được trong giờ ăn, quản trị lu
   assert.equal(fields(c4.find((c) => c.includes('PIN=901'))).TZ, D.USER_TZ);
   assert.equal(db.prepare('SELECT COUNT(*) n FROM meal_guard_state').get().n, 0);
   assert.equal(fields(S.buildUserCommand('901', 'K1')).TZ, D.USER_TZ);
-  assert.deepEqual(G.guardTick(), { released: 0, tz: 0 });
+  assert.deepEqual(G.guardTick(), { released: 0, tz: 0, off: 0 });
 });
 
 test('bỏ máy khỏi danh sách máy bếp khi đang bật khung giờ → máy đó trả về như cũ', (t) => {

@@ -10,8 +10,8 @@ import { db } from './db.js';
 // Ngày không có lượt quẹt thật nào (chỉ chấm điện thoại / chỉ nhập tay) hoặc cả 2 giờ đều trùng lượt thật → không rõ ô nào → 0/0
 // (giao diện để * cạnh giờ vào như cũ).
 export function handMarker() {
-  const realMin = db.prepare("SELECT 1 FROM device_punches WHERE employee_id=? AND punch_at>=? AND punch_at<? AND serial NOT LIKE 'TAY\\_%' ESCAPE '\\' LIMIT 1");
-  const dayReal = db.prepare("SELECT 1 FROM device_punches WHERE employee_id=? AND work_date=? AND serial NOT LIKE 'TAY\\_%' ESCAPE '\\' LIMIT 1");
+  const realMin = db.prepare("SELECT 1 FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<? AND serial NOT LIKE 'TAY\\_%' ESCAPE '\\' LIMIT 1");
+  const dayReal = db.prepare("SELECT 1 FROM att_punches WHERE employee_id=? AND work_date=? AND serial NOT LIKE 'TAY\\_%' ESCAPE '\\' LIMIT 1");
   const isHand = (eid, iso) => {
     if (!iso) return false;
     const m0 = Math.floor(Date.parse(iso) / 60000) * 60000;

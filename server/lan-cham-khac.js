@@ -20,7 +20,7 @@ export function rawPunchDays(empIds, from, to) {
   const put = (eid, d, t, src) => { const k = eid + '|' + d; if (!groups.has(k)) groups.set(k, { eid, date: d, times: [], srcs: [] }); const g = groups.get(k); g.times.push(t); g.srcs.push(src); };
   const dn = new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
   const srcOf = (sr) => { sr = String(sr || ''); if (sr.startsWith('TAY_')) return 'Thêm tay'; if (sr.startsWith('DT_')) return 'Điện thoại'; const d = dn.get(sr); return d ? (d.name || sr) + (d.machine_number ? ` (máy ${d.machine_number})` : '') : sr; };
-  for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to))
+  for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM att_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to))
     put(p.employee_id, p.work_date, vnHM(p.punch_at) + punchMark(p.serial), srcOf(p.serial));
   const has = new Set(groups.keys());
   for (const a of db.prepare(`SELECT employee_id, work_date, check_in_at, check_out_at, check_in_photo, check_out_photo FROM attendance WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY check_in_at`).all(...empIds, from, to)) {
@@ -62,7 +62,7 @@ export function otherPunches(empIds, from, to) {
     rowsOf.get(r.employee_id).push(r);
     for (const x of [r.check_in_at, r.check_out_at]) if (x) used.get(r.employee_id).add(minOf(x));
   }
-  for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM device_punches
+  for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM att_punches
     WHERE employee_id IN (${ph}) AND work_date >= ? AND work_date <= ? ORDER BY punch_at`).all(...empIds, lo, hi)) {
     const rs = rowsOf.get(p.employee_id);
     if (!rs) continue;

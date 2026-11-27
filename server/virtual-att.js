@@ -271,7 +271,7 @@ function kRange(out, ids, from, to, S, lv, lockedDay) {
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500), ph = chunk.map(() => '?').join(',');
     const punches = new Map();   // 'NV|ngày' → [mốc ms]
-    for (const p of db.prepare(`SELECT employee_id, work_date, punch_at FROM device_punches WHERE employee_id IN (${ph}) AND work_date >= ? AND work_date <= ? ORDER BY punch_at`).all(...chunk, from, to)) {
+    for (const p of db.prepare(`SELECT employee_id, work_date, punch_at FROM att_punches WHERE employee_id IN (${ph}) AND work_date >= ? AND work_date <= ? ORDER BY punch_at`).all(...chunk, from, to)) {
       const k = p.employee_id + '|' + p.work_date; if (!punches.has(k)) punches.set(k, []); punches.get(k).push(Date.parse(p.punch_at));
     }
     for (const r of db.prepare(`SELECT a.id, a.employee_id, a.work_date, a.check_in_at, a.check_out_at, a.late_min, a.work_minutes, a.work_unit, a.ot_min,

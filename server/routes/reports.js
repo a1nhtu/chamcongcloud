@@ -157,7 +157,7 @@ function dayTimesLoader(from, to, empIds) {
   const push = (m, k, v) => { if (!m.has(k)) m.set(k, []); m.get(k).push(v); };
   const to1 = new Date(to + 'T12:00:00Z'); to1.setUTCDate(to1.getUTCDate() + 1);   // + ngày sau: giờ ra ca đêm / qua đêm
   const serialOf = new Map();   // empId|giờ quẹt → lượt quẹt (máy, phím) cho quy tắc Theo ID máy / Chọn từ máy
-  for (const p of db.prepare('SELECT employee_id, work_date, punch_at, serial, status FROM device_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to1.toISOString().slice(0, 10)))
+  for (const p of db.prepare('SELECT employee_id, work_date, punch_at, serial, status FROM att_punches WHERE employee_id IS NOT NULL AND work_date >= ? AND work_date <= ? ORDER BY punch_at').all(from, to1.toISOString().slice(0, 10)))
     if (empIds.has(p.employee_id)) {
       push(byEmp, p.employee_id, p.punch_at); serialOf.set(p.employee_id + '|' + p.punch_at, p);
       if (p.work_date <= to) push(punches, p.employee_id + '|' + p.work_date, p.punch_at);
@@ -1200,7 +1200,7 @@ function buildReportRaw(type, from, to, filter) {
       ];
       // Số lần chấm: ưu tiên đếm từ máy (device_punches); NV chấm điện thoại thì đếm vào/ra
       const pcMap = new Map();
-      if (!ctx.virt) for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM device_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
+      if (!ctx.virt) for (const p of db.prepare('SELECT employee_id, work_date, COUNT(*) c FROM att_punches WHERE work_date >= ? AND work_date <= ? GROUP BY employee_id, work_date').all(from, to))
         pcMap.set(p.employee_id + '|' + p.work_date, p.c);
       const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().filter(hasPunch).map((c) => ({ c }));
       const rows = list.map(({ e, d, c }) => {

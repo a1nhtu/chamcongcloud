@@ -13,6 +13,8 @@ import { writeMealReportXlsx, writeMealRptXlsx } from '../../meal-xlsx.js';
 import { checkShiftConfig } from '../../meal-rules.js';
 import { registerMealInvRoutes } from './meal-inv.js';
 import { guardStatus, saveGuard, resendGuard } from '../../meal-guard.js';
+import { mealScans, unitPrice } from '../../meal-scans.js';
+import { writeMealScansXlsx } from '../../meal-scans-xlsx.js';
 
 const who = (req) => req.user.full_name || req.user.username || '';
 // Chạy 1 handler, lỗi nghiệp vụ (userError) trả nguyên văn, lỗi khác che lại
@@ -35,6 +37,7 @@ export function registerMealRoutes(r) {
     db.prepare('UPDATE meal_shifts SET name = ?, from_time = ?, to_time = ?, mode = ?, enabled = ? WHERE code = ?').run(v.name, v.from_time, v.to_time, v.mode, v.enabled, req.params.code);
     if (v.lock_before_min != null) db.prepare('UPDATE meal_shifts SET lock_before_min = ?, lock_at = ? WHERE code = ?').run(v.lock_before_min, v.lock_at, req.params.code);
     if (v.open_at != null) db.prepare('UPDATE meal_shifts SET open_at = ? WHERE code = ?').run(v.open_at, req.params.code);
+    if (v.ot_need_min != null) db.prepare('UPDATE meal_shifts SET ot_need_min = ? WHERE code = ?').run(v.ot_need_min, req.params.code);
     res.json({ ok: true, shifts: listShifts() });
   }));
   // Thêm bữa ăn mới (VD bữa sáng / bữa phụ) — cùng các ô như sửa bữa
@@ -121,7 +124,7 @@ export function registerMealRoutes(r) {
   r.get('/meal/guard', wrap('GET /admin/meal/guard', (req, res) => res.json(guardStatus())));
   r.put('/meal/guard', wrap('PUT /admin/meal/guard', (req, res) => {
     const b = req.body || {};
-    res.json({ ok: true, ...saveGuard({ window: !!b.window, once: !!b.once, serials: b.serials }) });
+    res.json({ ok: true, ...saveGuard({ window: !!b.window, once: !!b.once, off: b.off === undefined ? undefined : !!b.off, serials: b.serials }) });
   }));
   // Gửi lại khung giờ xuống máy (máy vừa khôi phục cài đặt gốc / thay máy mới cùng số serial)
   r.post('/meal/guard/resend', wrap('POST /admin/meal/guard/resend', (req, res) => {
@@ -199,6 +202,25 @@ export function registerMealRoutes(r) {
   r.get('/meal/rpt/month', wrap('GET /admin/meal/rpt/month', (req, res) => res.json(mealMonthGrid(needDate(req.query.from), needDate(req.query.to || req.query.from), { mode: req.query.mode, kitchenId: req.query.kitchen }))));
   r.get('/meal/rpt/daylist', wrap('GET /admin/meal/rpt/daylist', (req, res) => res.json(mealDayList(needDate(req.query.from), req.query.shift, { kitchenId: req.query.kitchen }))));
   r.get('/meal/rpt/compare', wrap('GET /admin/meal/rpt/compare', (req, res) => res.json(mealCompare(needDate(req.query.from), needDate(req.query.to || req.query.from), { kitchenId: req.query.kitchen }))));
+  // 5. CHI TIẾT LƯỢT ĂN: mỗi lượt quét máy chấm ăn 1 dòng + trạng thái (đủ / không đủ / chờ xác minh tăng ca…). Màn hình nhận từng trang 500 dòng.
+  const scanArgs = (q) => ({ from: needDate(q.from), to: needDate(q.to || q.from), dept: String(q.dept || ''), shift: String(q.shift || ''), status: String(q.status || ''), q: String(q.q || '') });
+  r.get('/meal/rpt/scans', wrap('GET /admin/meal/rpt/scans', (req, res) => {
+    const out = mealScans(scanArgs(req.query));
+    const off = Math.max(0, parseInt(req.query.offset, 10) || 0), lim = Math.min(2000, Math.max(1, parseInt(req.query.limit, 10) || 500));
+    res.json({ ...out, rows: out.rows.slice(off, off + lim), offset: off, limit: lim });
+  }));
+  r.get('/meal/rpt/scans.xlsx', async (req, res) => {
+    try { await writeMealScansXlsx(res, mealScans(scanArgs(req.query))); }
+    catch (e) { if (!res.headersSent) sendCaughtError(res, 'GET /admin/meal/rpt/scans.xlsx', e); else res.end(); }
+  });
+  // Đơn giá 1 suất (đồng) — in ở báo cáo chi tiết lượt ăn; 0 = không ghi giá
+  r.get('/meal/price', wrap('GET /admin/meal/price', (req, res) => res.json({ price: unitPrice() })));
+  r.put('/meal/price', wrap('PUT /admin/meal/price', (req, res) => {
+    const v = Number(String(req.body?.price ?? '').replace(/[.,\s]/g, ''));
+    if (!Number.isInteger(v) || v < 0 || v > 100000000) return res.status(400).json({ error: 'Đơn giá phải là số đồng (VD 25000)' });
+    setSetting('meal_unit_price', String(v));
+    res.json({ ok: true, price: v });
+  }));
   r.get('/meal/rpt.xlsx', async (req, res) => {
     const q = req.query;
     try { await writeMealRptXlsx(res, String(q.type || ''), needDate(q.from), needDate(q.to || q.from), new Date(), { mode: q.mode, kitchenId: q.kitchen, shift: q.shift, place: q.place }); }
