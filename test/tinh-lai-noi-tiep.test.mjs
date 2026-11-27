@@ -127,7 +127,11 @@ test('ca ngày bình thường: bù tay 1 ngày (thiếu giờ ra) KHÔNG làm �
   const cung = (d) => truoc.filter((r) => r.work_date === d);
   assert.equal((await call('POST', '/attendance/punches', { employee_ids: [id], date: '2026-11-03', out: '17:00' })).status, 200);
   const sau = full(id);
-  for (const d of ['2026-11-02', '2026-11-04', '2026-11-05', '2026-11-06']) assert.deepEqual(sau.filter((r) => r.work_date === d), cung(d), 'ngày ' + d + ' đổi');
+  for (const d of ['2026-11-02', '2026-11-05', '2026-11-06']) assert.deepEqual(sau.filter((r) => r.work_date === d), cung(d), 'ngày ' + d + ' đổi');
+  // ngày 04 = ngày kế ngày bù: được dựng lại để kiểm (không đổi thì dừng nối tiếp) → dòng ghi lại y nguyên số liệu, chỉ created_at
+  // mang giờ ghi mới (lệch 1 giây khi việc ghi rơi qua mốc giây — CI 27/11 v1.40.10 báo đỏ vì vậy) → so mọi cột trừ created_at
+  const bo = (rs) => rs.map(({ created_at: _c, ...r }) => r);
+  assert.deepEqual(bo(sau.filter((r) => r.work_date === '2026-11-04')), bo(cung('2026-11-04')), 'ngày 2026-11-04 đổi');
   assert.deepEqual(rows(id, '2026-11-03', '2026-11-03'), ['03[HC] 08:00→17:00 1c']);   // chỉ ngày bù là có thêm giờ ra
 });
 
