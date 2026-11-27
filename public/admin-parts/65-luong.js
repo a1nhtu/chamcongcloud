@@ -67,7 +67,26 @@ async function pageSalary() {
   const xHint = X ? el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, hourlyMode()
     ? 'Đang bật Bảng lương mở rộng: tiền ăn cộng vào lương; Trừ khác nhập ở thẻ Bảng lương.'
     : 'Đang bật Bảng lương mở rộng: mốc tăng ca nào có đơn giá VNĐ / giờ riêng thì Lương OT = số giờ mốc đó × đơn giá; mốc để trống (—) vẫn tính theo hệ số × đơn giá giờ. Mốc giờ do ca chia (tab Tăng ca của ca). Trừ khác nhập ở thẻ Bảng lương.') : null;
-  setMain(head('Lương', bulkBtn), tabs, howTo, hint, xHint, el('div', { class: 'panel tbl-scroll' }, tbl));
+  setMain(head('Lương', bulkBtn), tabs, howTo, hint, xHint, payScroll(tbl));
+}
+
+// Bảng Cấu hình lương / Bảng lương nhiều cột (Bảng lương mở rộng thêm Tiền ăn, Đơn giá TC, Trừ khác…): khung tự cuộn như báo cáo —
+// thanh kéo ngang luôn thấy ở đáy màn hình, dòng tiêu đề + 2 cột Mã NV / Họ tên đứng yên, chữ không xuống dòng. Trước: danh sách dài,
+// thanh kéo ngang nằm tận cuối bảng → cột cuối + nút Phiếu lương bị che, tên bẻ 3 dòng (mythuatlt 27/11/2026).
+function payScroll(tbl) {
+  const box = el('div', { class: 'rep-scroll pay-scroll' }, tbl);
+  setTimeout(() => {
+    if (!box.isConnected) return;
+    box.style.maxHeight = Math.max(300, innerHeight - box.getBoundingClientRect().top - 16) + 'px';
+    if (innerWidth <= 820 || tbl.querySelector('td[colspan]')) return;   // điện thoại: chỉ kéo ngang (2 cột ghim chiếm gần hết màn)
+    let left = 0;
+    [...tbl.querySelectorAll('thead th')].slice(0, 2).forEach((th, i) => {
+      th.classList.add('pin'); th.style.left = left + 'px';
+      tbl.querySelectorAll(`tbody tr > td:nth-child(${i + 1})`).forEach((td) => { td.classList.add('pin'); td.style.left = left + 'px'; });
+      left += th.getBoundingClientRect().width;
+    });
+  });
+  return el('div', { class: 'panel', style: 'overflow:hidden' }, box);
 }
 
 // BẢNG LƯƠNG MỞ RỘNG — chữ hiển thị
@@ -193,7 +212,7 @@ async function salaryPayrollView(tabs) {
       el('div', { style: 'font-weight:800;font-size:16px;color:var(--ink);margin-bottom:4px' }, data.custom ? `Bảng lương từ ${dmyFull(data.from)} đến ${dmyFull(data.to)}` : `Bảng lương tháng ${data.month}`),
       el('div', { class: 'map-hint', style: 'margin-bottom:10px' }, `Kỳ lương: ${data.from} → ${data.to} · Tổng thực lĩnh: `, totSpan, data.custom ? ' · Phụ cấp cố định tính đủ 1 lần cho kỳ đang chọn' : '',
         X ? ' · Trừ khác: gõ số tiền rồi Enter (lưu cho đúng kỳ đang xem), ✎ để ghi lý do' : ''),
-      el('div', { class: 'panel tbl-scroll' }, tbl));
+      payScroll(tbl));
   };
   monthI.onchange = () => { custom = false; load(); };
   deptSel.onchange = load;

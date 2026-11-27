@@ -161,6 +161,7 @@ table.dev-tbl td.num.zero { color: #cbd0d6; font-weight: 400; }
 .rep-scroll table.data td.pin { position: sticky; z-index: 1; background: #fff; }
 .rep-scroll table.data th.pin { z-index: 4; }
 .rep-scroll table.data tr:hover td.pin { background: #fcfbfa; }
+.pay-scroll table.data td { white-space: nowrap; }   /* Lương: tên / số không bẻ dòng — khung tự kéo ngang (payScroll) */
 .rep-scroll table.data tr.rp-off td { background: #f1f5f9; }   /* ngày không đi làm (ô "Hiện cả ngày không đi làm") */
 /* thứ 7 / chủ nhật — tô cả dòng, kể cả ngày không đi làm; T7 nhạt hơn CN (Anh 04/11/2026) */
 .rep-scroll table.data tr.rp-t7 td { background: #fff3e3; }
