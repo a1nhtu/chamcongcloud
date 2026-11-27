@@ -945,12 +945,18 @@ async function lockEmpBulk(list, lock) {
     const r = await api('/admin/employees/lock-bulk', { method: 'POST', body: { ids: todo.map((e) => e.id), lock } });
     const skip = [r.self ? 'bỏ qua tài khoản đang đăng nhập' : '', r.admins ? `bỏ qua ${r.admins} tài khoản Admin` : '',
       r.overLimit ? `${r.overLimit} người chưa mở được vì bản quyền giới hạn ${r.max} nhân viên` : ''].filter(Boolean).join(', ');
-    toast(`Đã ${lock ? 'khoá' : 'mở khoá'} ${r.changed} nhân viên` + (skip ? ' (' + skip + ')' : ''), 'ok');
+    toast(`Đã ${lock ? 'khoá' : 'mở khoá'} ${r.changed} nhân viên` + (skip ? ' (' + skip + ')' : '')
+      + (r.relinked ? ` — gán ${r.relinked} lượt quẹt lúc còn khoá và tính lại công` : ''), 'ok');
     empPicked.clear();
   } catch (err) { toast(err.message, 'err'); }
   pageEmployees();
 }
-async function unlockEmp(e) { try { await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } }); toast('Đã mở khoá', 'ok'); pageEmployees(); } catch (err) { toast(err.message, 'err'); } }
+async function unlockEmp(e) {
+  try {
+    const r = await api('/admin/employees/' + e.id, { method: 'PUT', body: { active: true } });
+    toast(r && r.relinked ? `Đã mở khoá — gán ${r.relinked} lượt quẹt lúc còn khoá và tính lại công` : 'Đã mở khoá', 'ok'); pageEmployees();
+  } catch (err) { toast(err.message, 'err'); }
+}
 // Xoá HẲN nhiều NV đã tích chọn. Từ 5 người trở lên phải gõ đúng số người để xác nhận; server tự sao lưu trước khi xoá.
 // Chuyển bộ phận cho các NV đã tích chọn (1 lần cho cả lô)
 function moveDeptBulk(list) {

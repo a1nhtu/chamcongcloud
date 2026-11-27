@@ -17,6 +17,20 @@ import { who as hrWho } from './hr.js';
 function relinkSafe(empId, pin) {
   try { return relinkPunchesForPin(empId, pin); } catch (e) { console.error('[relink punches]', e.message); return 0; }
 }
+// MỞ KHOÁ NV: lượt quẹt về lúc NV còn khoá không gắn NV nào (máy chỉ khớp NV đang làm) → gán lại cho NV + tính lại công những ngày đó.
+// Lỗi trankimxuyen 27/11/2026: mở khoá 3 bảo vệ (khoá nhầm khi chuyển dữ liệu Ronald Jack), ~110 lượt quẹt 01/09–25/10 của mỗi người
+// vẫn "chưa khớp" ở máy → không lên ngày công nào, phải bấm Tính lại mới có.
+// Số ID máy trống thì dùng mã NV (giống lúc nhận quẹt), nhưng chỉ khi không NV nào khác mang Số ID máy bằng mã đó.
+function relinkUnlocked(empId) {
+  const e = db.prepare('SELECT id, code, device_pin FROM employees WHERE id=? AND active=1').get(empId);
+  if (!e) return 0;
+  let pin = String(e.device_pin || '').trim();
+  if (!pin) {
+    pin = String(e.code || '').trim();
+    if (!pin || db.prepare('SELECT 1 FROM employees WHERE device_pin=? AND id<>?').get(pin, e.id)) return 0;
+  }
+  return relinkSafe(e.id, pin);
+}
 
 const PERM_KEYS = PERMISSIONS.map(([k]) => k);
 // Chuẩn hoá quyền để lưu: admin = null (toàn quyền); còn lại = JSON mảng key hợp lệ.
@@ -439,6 +453,7 @@ export function registerEmployeeRoutes(r, { need }) {
         b.work_schedule_id !== undefined ? (b.work_schedule_id || null) : emp.work_schedule_id,
         newPerms,
         b.active != null ? (b.active ? 1 : 0) : emp.active, emp.id);
+      if (!emp.active && b.active != null && b.active) relinked += relinkUnlocked(emp.id);   // vừa mở khoá
       if (b.office_ids !== undefined) setEmpOffices(emp.id, b.office_ids);
       if (b.password) db.prepare('UPDATE employees SET password_hash=?, pw_ver=IFNULL(pw_ver,0)+1 WHERE id=?').run(hashPassword(b.password), emp.id);
       if (b.att_mode !== undefined) db.prepare('UPDATE employees SET att_mode=? WHERE id=?').run(normAttMode(b.att_mode), emp.id);
@@ -481,7 +496,7 @@ export function registerEmployeeRoutes(r, { need }) {
     const lock = req.body?.lock !== false;
     const q = db.prepare('SELECT id, role, active FROM employees WHERE id=?');
     const upd = db.prepare('UPDATE employees SET active=? WHERE id=?');
-    let changed = 0, same = 0, admins = 0, self = false, overLimit = 0;
+    let changed = 0, same = 0, admins = 0, self = false, overLimit = 0, relinked = 0;
     // Mở khoá hàng loạt không được vượt số NV của bản quyền (giống Thêm nhân viên)
     const max = lock ? 0 : licenseState().maxEmp || 0;
     let active = max ? db.prepare("SELECT COUNT(*) c FROM employees WHERE active = 1 AND role != 'admin'").get().c : 0;
@@ -494,10 +509,11 @@ export function registerEmployeeRoutes(r, { need }) {
         if (!!emp.active === !lock) { same++; continue; }
         if (max && emp.role !== 'admin') { if (active >= max) { overLimit++; continue; } active++; }
         upd.run(lock ? 0 : 1, emp.id); changed++;
+        if (!lock) relinked += relinkUnlocked(emp.id);   // mở khoá → gán lượt quẹt về lúc còn khoá
       }
       db.exec('COMMIT');
     } catch (e) { db.exec('ROLLBACK'); return sendCaughtError(res, 'POST /admin/employees/lock-bulk', e, { status: 400 }); }
-    res.json({ ok: true, changed, same, admins, self, overLimit, max });
+    res.json({ ok: true, changed, same, admins, self, overLimit, max, relinked });
   });
   // XÓA CỨNG nhân viên + toàn bộ dữ liệu liên quan (khác Khoá). Lượt quẹt máy thô được GỠ KHỚP
   // (employee_id=NULL) chứ không xoá, để không mất log; NV nếu được tải lại từ máy sẽ tạo mới.

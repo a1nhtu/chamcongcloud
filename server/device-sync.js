@@ -1103,7 +1103,8 @@ export function relinkPunchesForPin(employeeId, pin) {
   db.exec('SAVEPOINT relink');
   try {
     const n = db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(employeeId, pin).changes;
-    for (const d of days) rebuildDay(employeeId, d.work_date);
+    // dựng như Tính lại: theo thứ tự ngày + cả ngày kề (ca đêm lấy giờ ra sáng hôm sau)
+    rebuildDays(days.map((d) => employeeId + '|' + d.work_date));
     db.exec('RELEASE relink');
     return n;
   } catch (e) { db.exec('ROLLBACK TO relink'); db.exec('RELEASE relink'); throw e; }
