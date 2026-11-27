@@ -25,6 +25,13 @@ export function standardMinutesFrom(getSetting) {
   const v = parseFloat(getSetting('pay_hours_per_day', '8'));
   return Math.round((Number.isFinite(v) && v >= 1 && v <= 24 ? v : 8) * 60);
 }
+// Theo giờ: làm tròn XUỐNG giờ làm của TỪNG CẶP vào/ra theo khối phút (Cài đặt › Kiểu chấm công, hourly_round_block).
+// 0 (mặc định) = không làm tròn — tính đúng từng phút như cũ. Chỉ nhận các khối có trong HOURLY_ROUND_BLOCKS.
+export const HOURLY_ROUND_BLOCKS = [0, 5, 10, 15, 30, 60];
+export function hourlyRoundBlockFrom(getSetting) {
+  const v = parseInt(getSetting('hourly_round_block', '0'), 10) || 0;
+  return HOURLY_ROUND_BLOCKS.includes(v) ? v : 0;
+}
 export function payrollCtx(getSetting, db) {
   const rules = dayRules(db);   // ngày lễ / nghỉ bù lễ / ngày làm bù
   return {
@@ -55,6 +62,7 @@ export function payrollCtx(getSetting, db) {
     privOf: privilegeLookup(db),   // chế độ ưu đãi (thai sản…) của NV theo ngày — nạp 1 lần cho cả mẻ
     halfOf: halfLeaveLookup(db),   // đơn nghỉ phép NỬA NGÀY đã duyệt ('sang' | 'chieu')
     hourly: getSetting('attendance_mode', 'shift') === 'hourly',
+    hourlyRoundBlock: hourlyRoundBlockFrom(getSetting),   // theo giờ: làm tròn XUỐNG giờ làm từng cặp vào/ra theo khối phút (0 = không)
     // Kiểu chấm công của TỪNG nhân viên (đặt riêng ở hồ sơ, không đặt thì theo cài đặt chung) — nạp 1 lần cho cả mẻ
     isHourly: (() => {
       const g = getSetting('attendance_mode', 'shift') === 'hourly';
@@ -123,7 +131,12 @@ export function computeDayMetrics(ctx, shift, workDate, inIso, outIso, pairs = n
       // Theo giờ + theo cặp mà chỉ ghép được 1 cặp nhưng còn lượt lẻ (VD vào 1 · ra 1 · vào 2 chưa ra): chỉ tính cặp đủ
       // (ra 1 − vào 1), KHÔNG tính tới lượt vào 2. 1 cặp trùng đúng đầu–cuối thì vẫn ra − vào như cũ.
       const oddPair = opts.hourly && pairs && pairs.length === 1 && (pairs[0][0] !== inIso || pairs[0][1] !== outIso);
-      const wm = ((pairs && pairs.length >= 2) || oddPair) ? sumPairsMinutes(pairs)
+      const usePairs = (pairs && pairs.length >= 2) || oddPair;
+      // Bật "làm tròn giờ làm theo khối" (thefifty 27/11/2026, Anh chọn THEO CẶP): mỗi cặp vào/ra (FILO = 1 cặp đầu → cuối)
+      // bỏ giây, làm tròn XUỐNG theo khối rồi mới cộng — giống Excel ROUNDDOWN(MOD(ra-vào,1)*48,0)/2 với khối 30 phút.
+      const hb = opts.hourly ? (ctx.hourlyRoundBlock || 0) : 0;
+      const wm = hb ? sumPairsMinutes(usePairs ? pairs : [[inIso, outIso]], hb)
+        : usePairs ? sumPairsMinutes(pairs)
         : Math.max(0, Math.round((new Date(outIso) - new Date(inIso)) / 60000));
       c = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, flags), ot_type: otType, day_status: 'lam_viec' };
     }

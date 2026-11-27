@@ -1058,9 +1058,14 @@ function dirMerge(inWin, dir, dupOpt) {
 }
 
 // Tổng phút của các cặp vào–ra (chế độ theo giờ, quy tắc "theo cặp")
-export function sumPairsMinutes(pairs) {
+// block > 0: mỗi cặp làm tròn XUỐNG theo khối phút rồi mới cộng (theo giờ + "làm tròn giờ làm theo khối")
+export function sumPairsMinutes(pairs, block = 0) {
   let m = 0;
-  for (const [a, b] of pairs || []) if (a && b) m += Math.max(0, mins(toMinute(a), toMinute(b)));
+  for (const [a, b] of pairs || []) {
+    if (!a || !b) continue;
+    const p = Math.max(0, mins(toMinute(a), toMinute(b)));
+    m += block > 0 ? Math.floor(p / block) * block : p;
+  }
   return m;
 }
 

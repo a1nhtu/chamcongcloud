@@ -479,21 +479,28 @@ async function hrPage(fn) {
  * Chỉ hiện khi radio "Theo giờ" đang được chọn. Trả { box, value(), sync() }. */
 // overnight: giá trị ô "Cho phép chấm qua đêm" ('1' = bật, mặc định tắt). anyHourly: công ty có NV đặt riêng kiểu theo giờ
 // → vẫn hiện khung này dù kiểu chung là theo ca.
-function hourlyRulePicker(name, current, hourlyRadio, radios, overnight = '0', anyHourly = false) {
+function hourlyRulePicker(name, current, hourlyRadio, radios, overnight = '0', anyHourly = false, roundBlock = '0') {
   const rFilo = el('input', { type: 'radio', name, value: 'filo', style: 'width:auto', ...(current !== 'pairs' ? { checked: '' } : {}) });
   const rPairs = el('input', { type: 'radio', name, value: 'pairs', style: 'width:auto', ...(current === 'pairs' ? { checked: '' } : {}) });
   const nightChk = el('input', { type: 'checkbox', style: 'width:auto', ...(overnight === '1' ? { checked: '' } : {}) });
+  // Làm tròn XUỐNG giờ làm từng cặp vào/ra theo khối phút (0 = không làm tròn, tính đúng từng phút)
+  const roundSel = el('select', { style: 'width:auto;margin-left:6px' },
+    ...[['0', 'Không làm tròn'], ['5', '5 phút'], ['10', '10 phút'], ['15', '15 phút'], ['30', '30 phút'], ['60', '1 giờ']]
+      .map(([v, t]) => el('option', { value: v, ...(String(roundBlock || '0') === v ? { selected: '' } : {}) }, t)));
   const sub = (radio, title, desc) => el('label', { style: 'display:flex;gap:8px;align-items:flex-start;padding:8px 10px;border:1px solid var(--line,#eee);border-radius:10px;cursor:pointer;background:var(--surface,#fff)' },
     radio, el('div', {}, el('b', { style: 'font-size:14px' }, title), el('div', { style: 'font-size:12.5px;color:var(--muted)' }, desc)));
   const box = el('div', { style: 'display:flex;flex-direction:column;gap:6px;margin:-2px 0 0 28px' },
     el('div', { style: 'font-size:12.5px;color:var(--muted)' }, 'Khi một ngày chấm nhiều lần, tính giờ làm theo:'),
     sub(rFilo, 'Đầu – cuối (FILO)', 'Từ lần chấm đầu đến lần chấm cuối trong ngày.'),
     sub(rPairs, 'Theo cặp vào / ra', 'Chấm 1–2 là một cặp, 3–4 là cặp tiếp…; giờ làm = tổng các cặp, thời gian ra ngoài bị trừ.'),
-    sub(nightChk, '🌙 Cho phép chấm qua đêm', 'Bỏ trống (mặc định): giờ làm chỉ tính trong ngày — quên chấm ra thì dòng đó để "thiếu ra", lượt chấm sáng hôm sau là giờ VÀO của hôm sau, không bị lấy làm giờ ra hôm trước. Tích khi có người làm vắt qua nửa đêm (VD 22:00 → 06:00): lượt chấm sáng hôm sau đóng phiên còn mở của hôm trước — ai quên chấm ra thì phải sửa giờ tay.'));
+    sub(nightChk, '🌙 Cho phép chấm qua đêm', 'Bỏ trống (mặc định): giờ làm chỉ tính trong ngày — quên chấm ra thì dòng đó để "thiếu ra", lượt chấm sáng hôm sau là giờ VÀO của hôm sau, không bị lấy làm giờ ra hôm trước. Tích khi có người làm vắt qua nửa đêm (VD 22:00 → 06:00): lượt chấm sáng hôm sau đóng phiên còn mở của hôm trước — ai quên chấm ra thì phải sửa giờ tay.'),
+    el('div', { style: 'padding:8px 10px;border:1px solid var(--line,#eee);border-radius:10px;background:var(--surface,#fff)' },
+      el('b', { style: 'font-size:14px' }, '✂️ Làm tròn giờ làm xuống theo khối'), roundSel,
+      el('div', { style: 'font-size:12.5px;color:var(--muted)' }, 'Mỗi cặp vào/ra làm tròn XUỐNG riêng rồi mới cộng (Đầu – cuối = 1 cặp). VD khối 30 phút: 08:00–12:14 = 4 giờ, 13:00–17:20 = 4 giờ → 8 giờ; đủ 4 giờ 30 phút mới thành 4,5 giờ. Đổi xong bấm Tính lại tháng cần tính.')));
   const sync = () => { box.style.display = hourlyRadio.checked || anyHourly ? 'flex' : 'none'; };
   for (const r of radios) r.addEventListener('change', sync);
   sync();
-  return { box, value: () => (rPairs.checked ? 'pairs' : 'filo'), overnight: () => nightChk.checked };
+  return { box, value: () => (rPairs.checked ? 'pairs' : 'filo'), overnight: () => nightChk.checked, roundBlock: () => roundSel.value };
 }
 
 /* ---------- Thiết lập lần đầu ---------- */

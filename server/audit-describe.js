@@ -52,7 +52,7 @@ const EMP_F = {
 };
 const SET_F = {
   company_name: ['Tên công ty'], company_address: ['Địa chỉ công ty'], weekend_days: ['Ngày cuối tuần', 'wd'], weekend_work_as_ot: ['Đi làm cuối tuần là tăng ca', 'yn'],
-  workunit_rounding: ['Làm tròn công (số lẻ)'], workunit_rounding_mode: ['Kiểu làm tròn công', 'rm'], ot_rounding: ['Làm tròn tăng ca (số lẻ)'],
+  hourly_round_block: ['Làm tròn giờ làm theo giờ (khối)', 'phút'], workunit_rounding: ['Làm tròn công (số lẻ)'], workunit_rounding_mode: ['Kiểu làm tròn công', 'rm'], ot_rounding: ['Làm tròn tăng ca (số lẻ)'],
   ot_rounding_mode: ['Kiểu làm tròn tăng ca', 'rm'], ot_rounding_type: ['Làm tròn tăng ca theo', 'rt'], ot_rounding_block: ['Khối phút tăng ca', 'phút'],
   ot_rate_weekday: ['Hệ số TC ngày thường'], ot_rate_weekend: ['Hệ số TC cuối tuần'], ot_rate_holiday: ['Hệ số TC ngày lễ'],
   pay_period_start_day: ['Ngày bắt đầu kỳ lương'], punch_dedup_min: ['Bỏ qua lần chấm trùng', 'phút'], attendance_mode: ['Kiểu chấm công chung', 'att'],

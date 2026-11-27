@@ -348,7 +348,7 @@ async function pageSettings() {
   // ----- Kiểu chấm công + Phạm vi chấm công -----
   const modeShift = el('input', { type: 'radio', name: 'att-mode', value: 'shift', style: 'width:auto', ...(s.attendance_mode !== 'hourly' ? { checked: '' } : {}) });
   const modeHourly = el('input', { type: 'radio', name: 'att-mode', value: 'hourly', style: 'width:auto', ...(s.attendance_mode === 'hourly' ? { checked: '' } : {}) });
-  const stRule = hourlyRulePicker('att-hrule', s.hourly_merge_rule, modeHourly, [modeShift, modeHourly], s.hourly_overnight, !!s.any_hourly);
+  const stRule = hourlyRulePicker('att-hrule', s.hourly_merge_rule, modeHourly, [modeShift, modeHourly], s.hourly_overnight, !!s.any_hourly, s.hourly_round_block);
   const geoChk = el('input', { type: 'checkbox', id: 'st-geo', style: 'width:auto', ...(s.geofence_enforce === '1' ? { checked: '' } : {}) });
   const devChk = el('input', { type: 'checkbox', id: 'st-dev', style: 'width:auto', ...(s.device_enabled === '1' ? { checked: '' } : {}) });
   const phoneChk = el('input', { type: 'checkbox', id: 'st-phone', style: 'width:auto', ...(s.phone_enabled !== '0' ? { checked: '' } : {}) });
@@ -367,7 +367,7 @@ async function pageSettings() {
     const attendance_mode = document.querySelector('input[name=att-mode]:checked')?.value === 'hourly' ? 'hourly' : 'shift';
     const hourly_merge_rule = stRule.value();
     try {
-      const body = { attendance_mode, hourly_merge_rule, hourly_overnight: stRule.overnight(), geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
+      const body = { attendance_mode, hourly_merge_rule, hourly_overnight: stRule.overnight(), hourly_round_block: stRule.roundBlock(), geofence_enforce: geoChk.checked, device_lock_enabled: lockChk.checked, payroll_include_admin: inclAdminChk.checked, self_shift_enabled: selfChk.checked, self_shift_approve: apprChk.checked, punch_dedup_min: dedupI.value };
       if (isMaster() || s.device_enabled === '1') {   // máy TCP/IP + máy Union: admin cũng bật được (khi đã dùng máy chấm công)
         body.tcp_device_enabled = tcpDevChk.checked;
         body.union_device_enabled = unionDevChk.checked;

@@ -5,6 +5,7 @@ import { checkUpdate, startUpdate, updateStatus, currentVersion, updateConfig } 
 import { auditAllowed, periodLvRaw } from '../../virtual-att.js';
 import { cfg, MULTI } from '../../tenant.js';
 import { PROFILES, activeProfile, previewProfile, applyProfile, revertProfile } from '../../profiles.js';
+import { HOURLY_ROUND_BLOCKS, hourlyRoundBlockFrom } from '../../day-metrics.js';
 
 export function registerSettingsRoutes(r, { need, adminOnly }) {
   /* ----------------------------- CÀI ĐẶT ----------------------------- */
@@ -40,6 +41,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       ...attModeMix(),   // any_shift / any_hourly: công ty đang có NV chấm theo ca / theo giờ
       hourly_merge_rule: getSetting('hourly_merge_rule', 'filo'), // theo giờ: filo | pairs (nhiều lần vào/ra)
       hourly_overnight: getSetting('hourly_overnight', '0'),     // theo giờ: cho phiên chấm qua đêm (mặc định TẮT)
+      hourly_round_block: String(hourlyRoundBlockFrom(getSetting)),   // theo giờ: làm tròn xuống từng cặp theo khối phút (0 = không)
       device_enabled: getSetting('device_enabled', '0'),         // dùng máy chấm công
       tcp_device_enabled: getSetting('tcp_device_enabled', '0'), // dùng máy chấm công kết nối trực tiếp TCP/IP (cổng 4370)
       ai_device_enabled: getSetting('ai_device_enabled', '0'),   // dùng máy AI (máy tự nối về qua WebSocket)
@@ -165,6 +167,11 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
     if (b.attendance_mode != null) setSetting('attendance_mode', b.attendance_mode === 'hourly' ? 'hourly' : 'shift');
     if (b.hourly_merge_rule != null) setSetting('hourly_merge_rule', b.hourly_merge_rule === 'pairs' ? 'pairs' : 'filo');
     if (b.hourly_overnight != null) setSetting('hourly_overnight', b.hourly_overnight ? '1' : '0');
+    if (b.hourly_round_block != null) {
+      const v = parseInt(b.hourly_round_block, 10) || 0;
+      if (!HOURLY_ROUND_BLOCKS.includes(v)) return res.status(400).json({ error: 'Khối phút làm tròn giờ làm chỉ chọn 0, 5, 10, 15, 30 hoặc 60' });
+      setSetting('hourly_round_block', String(v));
+    }
     // Máy TCP/IP + máy Union: admin cũng bật/tắt được (vẫn cần tài khoản tổng bật "Dùng máy chấm công")
     if (b.tcp_device_enabled != null) setSetting('tcp_device_enabled', b.tcp_device_enabled ? '1' : '0');
     if (b.union_device_enabled != null) setSetting('union_device_enabled', b.union_device_enabled ? '1' : '0');

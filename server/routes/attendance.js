@@ -5,9 +5,9 @@ import { authRequired } from '../auth.js';
 import { inspectorGuard } from '../auth.js';
 import { savePhoto } from '../storage.js';
 import { vnDateStr, nowIso } from '../util.js';
-import { computeLate, computeCheckout, ruleWindow, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull } from '../attendance-calc.js';
+import { computeLate, computeCheckout, ruleWindow, isWeekendDay, vnWeekday, noShiftUnit, weekendToOt, roundOtParts, halfLeavePriv, singlePunchFull, presenceFull, sumPairsMinutes } from '../attendance-calc.js';
 import { notifyManagers, getVapid, saveSubscription } from '../push.js';
-import { otRoundingFrom, payrollCtx, computeDayMetrics, standardMinutesFrom } from '../day-metrics.js';
+import { otRoundingFrom, payrollCtx, computeDayMetrics, standardMinutesFrom, hourlyRoundBlockFrom } from '../day-metrics.js';
 import { otRegCapper, otLuncher } from '../ot-cap.js';
 import { privilegeFor, halfLeaveFor } from '../privilege.js';
 import { dayRules } from '../swap.js';
@@ -339,7 +339,9 @@ r.post('/check-out', (req, res) => {
     calc = computeCheckout(shift, row.check_in_at, at, wdate, f);
     if (f.half) calc.early_min = computeCheckout(shift, row.check_in_at, at, wdate, { ...f, priv: halfLeavePriv(shift, wdate, f.half, f.priv) }).early_min;
   } else {
-    const wm = Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
+    // Theo giờ + làm tròn giờ làm theo khối: phiên điện thoại là 1 cặp vào/ra → làm tròn xuống như computeDayMetrics
+    const hb = hourly ? hourlyRoundBlockFrom(getSetting) : 0;
+    const wm = hb ? sumPairsMinutes([[row.check_in_at, at]], hb) : Math.max(0, Math.round((new Date(at) - new Date(row.check_in_at)) / 60000));
     calc = { early_min: 0, ot_min: 0, work_minutes: wm, work_unit: noShiftUnit(wm, dayFlags(wdate, req.user.id)), ot_type: otTypeOf(wdate, req.user.id), day_status: 'lam_viec' };
   }
   // Ca "Có mặt là tính đủ công": đủ công của ca, không về sớm (ngày nghỉ đi làm tính tăng ca: tăng ca theo giờ thực)
