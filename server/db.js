@@ -36,6 +36,10 @@ export function openDb(path) {
   // → tính lại công / nhận lượt quẹt nhanh hơn nhiều lần. busy_timeout: luồng phụ (xuất báo cáo, tính lại) và luồng chính chờ nhau thay vì báo lỗi.
   d.exec('PRAGMA synchronous = NORMAL;');
   d.exec('PRAGMA busy_timeout = 15000;');
+  // BỘ NHỚ ĐỆM TRANG: mặc định SQLite chỉ 2 MB → công ty lớn (pretty 28/11/2026: 3.000 NV, hàng triệu lượt quẹt) mỗi lượt quẹt ghi vào
+  // 6 chỉ mục + tính lại công phải đọc lại trang từ ổ đĩa → 15 máy gửi bù vài ngày log làm máy chủ trả lời 13–25 giây.
+  // 64 MB (máy chủ nhiều công ty: 16 MB / công ty); bộ nhớ chỉ dùng tới đâu cấp tới đó.
+  d.exec(`PRAGMA cache_size = ${process.env.MULTI_TENANT === '1' ? -16384 : -65536};`);
   // NHỚ CÂU LỆNH ĐÃ SOẠN: mã gọi db.prepare(...) lại ở mỗi lần chạy (hàng triệu lần khi tính lại công / dựng báo cáo công ty đông người);
   // soạn 1 lần rồi dùng lại. Chỉ nhớ câu ngắn (câu có danh sách IN dài thay đổi liên tục thì soạn như cũ).
   // Bộ nhớ này gắn với TỪNG CSDL → máy chủ nhiều công ty không bao giờ dùng nhầm câu lệnh của công ty khác.
