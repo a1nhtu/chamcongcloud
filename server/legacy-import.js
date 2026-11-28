@@ -552,6 +552,11 @@ async function applyLegacyRun(data, opts = {}, prog = () => {}, shouldStop = () 
           const draft = cur.full_name === `NV ${e.pin}` || cur.full_name === `NV ${cur.device_pin}` || isJunkName(cur.full_name);   // NV nháp máy tự tạo / tên rác
           const fill = (col, val) => { if (val && val !== cur[col] && (o.overwrite || !cur[col])) set[col] = val; };
           if (e.name && e.name !== cur.full_name && (o.overwrite || draft || !cur.full_name)) set.full_name = e.name;
+          // MÃ NV (pretty 28/11/2026): NV máy tự tạo trước khi chuyển có mã = Số ID (6526) → lấy mã ở phần mềm cũ (AS6526).
+          // Mã người dùng tự đặt (khác Số ID) chỉ thay khi chọn ghi đè. Mã đã có NV khác dùng → giữ nguyên.
+          const autoCode = !cur.code || cur.code === e.pin || cur.code === cur.device_pin || draft;
+          if (e.code && e.code !== cur.code && (o.overwrite || autoCode)
+            && !db.prepare('SELECT 1 FROM employees WHERE code=? AND id<>?').get(e.code, cur.id)) set.code = e.code;
           fill('department', dept); fill('position', e.position); fill('phone', e.phone); fill('start_date', e.start_date);
           const keys = Object.keys(set);
           if (keys.length) {

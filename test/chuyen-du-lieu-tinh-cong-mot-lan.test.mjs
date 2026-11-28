@@ -113,3 +113,23 @@ test('v1.41.9 Tính tiếp công còn dở KHÔNG cần file (máy chủ khởi 
   assert.equal(L.legacyPendingCount(), 0);
   assert.equal((await L.resumeLegacyRebuild()).recomputed_emps, 0, 'không còn gì thì thôi');
 });
+
+test('Mã NV: NV máy tự tạo (mã = Số ID) → lấy mã On39 (AS6526); mã người dùng tự đặt giữ nguyên trừ khi ghi đè', async () => {
+  db.prepare("INSERT INTO employees(code, username, password_hash, full_name, device_pin, active) VALUES('6526','u6526','x','Nguyen Tai Tue','6526',1)").run();
+  db.prepare("INSERT INTO employees(code, username, password_hash, full_name, device_pin, active) VALUES('KT01','u6527','x','Le Thi K','6527',1)").run();
+  const ON39 = {
+    Company: [{ CompName: 'CTY MA' }],
+    RelationDept: [{ ID: 1, Description: 'CTY MA', RelationID: 0, DeptCode: 'root' }],
+    UserInfo: [
+      { UserEnrollNumber: 6526, UserFullCode: 'AS6526', UserFullName: 'Nguyễn Tài Tuệ', UserIDD: 1, UserBirthDay: '' },
+      { UserEnrollNumber: 6527, UserFullCode: 'AS6527', UserFullName: 'Lê Thị K', UserIDD: 1, UserBirthDay: '' },
+    ],
+    Machines: [], CheckInOut: [],
+  };
+  await L.applyLegacy(L.normalizeOn39(fake(ON39)), { punches: false });
+  const code = (pin) => db.prepare('SELECT code FROM employees WHERE device_pin=?').get(pin).code;
+  assert.equal(code('6526'), 'AS6526', 'mã máy đặt tạm = Số ID → thay bằng mã phần mềm cũ');
+  assert.equal(code('6527'), 'KT01', 'mã người dùng đã đặt → giữ');
+  await L.applyLegacy(L.normalizeOn39(fake(ON39)), { punches: false, overwrite: true });
+  assert.equal(code('6527'), 'AS6527', 'chọn ghi đè → lấy mã phần mềm cũ');
+});
