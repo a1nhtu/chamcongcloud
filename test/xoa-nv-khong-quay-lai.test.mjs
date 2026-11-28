@@ -135,6 +135,8 @@ test('NGƯỜI MỚI dùng lại Số ID đăng ký trên máy: nhận, tạo NV
   SN.forEach((s) => S.deleteDeviceUsers(s, PINS)); runAll(); purge();
   // đăng ký vân tay trên CN2: mẫu khác hẳn, máy gửi OPERLOG gồm cả dòng USER + FP
   machines.CN2.users.set('6', { name: 'Moi', tmp: NEW('6') });
+  // đăng ký NGAY trên máy (mốc khác 0, không còn đợt gửi lại) — đợt gửi lại thì không tạo NV (duyệt máy không tự tải NV)
+  db.prepare("UPDATE push_devices SET oper_stamp='99' WHERE serial='CN2'").run(); setSetting('oper_dump_at:CN2', '');
   post('CN2', 'OPERLOG', `OPLOG 6\t0\t${vn()}\t6\t0\t0\t0\nUSER PIN=6\tName=Moi\tPri=0\nFP PIN=6\tFID=0\tSize=200\tValid=1\tTMP=${NEW('6')}`, '100');
   assert.deepEqual(emps(), ['6']);
   assert.equal(db.prepare("SELECT full_name n FROM employees WHERE device_pin='6'").get().n, 'Moi');
@@ -194,6 +196,7 @@ test('xoá trên 1 máy, các máy khác vẫn còn người đó: NV còn, máy
 test('"Chỉ xóa trên phần mềm" không ghi nhớ gì: máy gửi lên vẫn nhận như cũ', () => {
   purge();
   assert.equal(db.prepare('SELECT COUNT(*) c FROM device_deleted_pins').get().c, 0);
+  db.prepare("UPDATE push_devices SET oper_stamp='99' WHERE serial='CN1'").run(); setSetting('oper_dump_at:CN1', '');
   post('CN1', 'OPERLOG', `USER PIN=6\tName=Ten6\tPri=0\nFP PIN=6\tFID=1\tSize=200\tValid=1\tTMP=${NEW('6')}`, '100');
   assert.deepEqual(emps(), ['6']);
 });

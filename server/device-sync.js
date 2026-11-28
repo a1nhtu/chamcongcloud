@@ -185,7 +185,9 @@ export function ingestUserData(serial, table, rawBody, track = null, opts = {}) 
     upsertDeviceUser(pin, name, card, passwd, pri);   // lưu để đồng bộ tên/thẻ/mật mã
     if (code) db.prepare('UPDATE device_users SET code=? WHERE pin=?').run(code, pin);
     upsertDeviceUserSerial(serial, pin, name, card, pri);  // ghi theo từng máy (đếm NV/thẻ + quyền trên máy đó)
-    const id = upsertEmployeeFromDevice(pin, name, force, code, { serial });
+    // Đợt máy GỬI LẠI cả danh sách (không phải vừa đăng ký trên máy, không phải bấm Tải NV) → chỉ ghi nhận người trên máy,
+    // KHÔNG tự tạo NV (duyệt máy không tự tải NV — Anh chốt 07/10 + 28/11/2026). NV đã có thì vẫn khớp / sửa tên tạm.
+    const id = upsertEmployeeFromDevice(pin, name, force, code, { serial, ...(track && track.realtime === false && !force ? { create: false } : {}) });
     if (id) seen.add(pin);
     if (id && track && (!pu || (!track.newOnly && ((name && name !== pu.name) || (card && card !== pu.card)
       || (passwd && passwd !== pu.passwd) || (pri != null && pri !== pu.privilege))))) track.changed.add(pin);
@@ -403,6 +405,19 @@ export function queryDeviceUsers(serial) {
 const OPER_DUMP_KEY = 'oper_dump_at:';   // giờ khối cuối của đợt gửi lại đang diễn ra ('' = không có đợt nào)
 export const OPER_DUMP_GAP_MS = 3 * 60000;
 const operStampOf = (serial) => String(db.prepare('SELECT oper_stamp FROM push_devices WHERE serial=?').get(serial)?.oper_stamp ?? '').trim();
+// DUYỆT MÁY LẦN ĐẦU: chỉ nhận dữ liệu phát sinh TỪ LÚC BẤM DUYỆT (Anh chốt 28/11/2026, khách pretty: duyệt 15 máy → máy gửi lại cả
+// danh sách người + toàn bộ lượt chấm cũ → tự ra NV, tự tải dữ liệu dù chưa bấm gì; dữ liệu cũ lấy bằng Chuyển từ phần mềm cũ /
+// nút Tải NV / Tải dữ liệu theo ngày). Mốc 9999 (như lúc chờ duyệt) → máy chỉ gửi lượt quẹt + đăng ký MỚI.
+// Duyệt lại máy đã từng chạy (tạm dừng rồi bật lại) thì giữ mốc cũ → máy gửi bù phần trong lúc tạm dừng.
+// Máy đời cũ lờ mốc mà vẫn gửi lại cả danh sách ngay sau khi duyệt → coi như đợt gửi lại (operRealtime = false): không tạo NV,
+// không báo nghi trùng.
+export function startFromApproval(serial) {
+  const d = db.prepare('SELECT att_stamp, oper_stamp FROM push_devices WHERE serial=?').get(serial);
+  if (!d || !['', '0'].includes(String(d.att_stamp ?? '').trim()) || !['', '0'].includes(String(d.oper_stamp ?? '').trim())) return false;
+  db.prepare("UPDATE push_devices SET att_stamp='9999', oper_stamp='9999' WHERE serial=?").run(serial);
+  setSetting(OPER_DUMP_KEY + serial, new Date().toISOString());
+  return true;
+}
 // Gọi khi nhận khối OPERLOG, TRƯỚC khi lưu mốc mới của khối đó và trước operRealtime
 export function noteOperDump(serial) {
   if (!serial) return;

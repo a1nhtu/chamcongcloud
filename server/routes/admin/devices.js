@@ -4,7 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import JSZip from 'jszip';
 import { db, getSetting } from '../../db.js';
-import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress, cmdQueue, cancelCmds, movePunchesToEmployee } from '../../device-sync.js';
+import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, startFromApproval, vnNowStr, cmdMark, cmdProgress, cmdQueue, cancelCmds, movePunchesToEmployee } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { normText } from '../../hr-import.js';
 import { installDomain, MULTI, ROOT, tenantKey } from '../../tenant.js';
@@ -237,6 +237,7 @@ export function registerDeviceRoutes(r, { need }) {
     // KHÔNG tự tải toàn bộ NV từ máy (máy có thể cả nghìn người → nặng). NV đăng ký trước khi nối phần mềm
     // sẽ được hỏi RIÊNG từng người khi họ quẹt mà chưa khớp (askUserFromDevice); cần tải hết thì bấm tay.
     const zkPush = (d.conn_type || 'push') === 'push';
+    if (becameActive && zkPush) try { startFromApproval(d.serial); } catch (e) { console.error('[device] mốc duyệt lỗi:', e.message); }
     if (becameActive && zkPush) { try { rebootDevice(d.serial); } catch (e) { console.error('[device] reboot sau duyệt lỗi:', e.message); } }
     res.json({ ok: true, synced, rebooting: becameActive && zkPush });
   });
