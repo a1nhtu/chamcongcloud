@@ -702,7 +702,7 @@ const SYMBOL_COLOR = { X: '#166534', T: '#b45309', P: '#1d4ed8', KL: '#475569', 
 // Nhóm báo cáo cho giao diện dạng thẻ: [nhóm, [ [type, icon, tên, mô tả] ... ]]
 const REPORT_GROUPS = [
   ['Bản ghi chấm công', [
-    ['attendance', '📋', 'Bản ghi chấm công', 'Tất cả lần chấm: giờ vào/ra, đi muộn, vị trí'],
+    ['attendance', '📋', 'Bản ghi chấm công', 'Tất cả lần chấm: ca làm việc, giờ vào/ra, đi muộn, tăng ca, vị trí + dòng tổng cộng'],
     ['firstlast', '🕐', 'Giờ vào & ra đầu/cuối', 'Giờ chấm sớm nhất và muộn nhất mỗi ngày'],
   ]],
   ['Chi tiết chấm công', [

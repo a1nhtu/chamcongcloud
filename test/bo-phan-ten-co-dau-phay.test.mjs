@@ -51,7 +51,7 @@ test('splitDeptList: tên không có dấu phẩy → y như split(",") cũ (k�
 });
 test('Báo cáo lọc theo bộ phận có dấu phẩy → ra đúng NV có giờ', async () => {
   const get = async (q) => (await fetch(`${base}/data?type=detaillist&from=2026-11-01&to=2026-11-05&mode=shift&${q}`, { headers: { Authorization: 'Bearer ' + tok } })).json();
-  const codes = (r) => [...new Set(r.rows.map((x) => x.code))].sort();
+  const codes = (r) => [...new Set(r.rows.filter((x) => !x._total).map((x) => x.code))].sort();   // bỏ dòng TỔNG CỘNG
   assert.deepEqual(codes(await get('depts=' + encodeURIComponent(LS))), ['LS1']);
   assert.deepEqual(codes(await get('depts=' + encodeURIComponent([LS, KT].join(',')))), ['KT1', 'LS1']);
   assert.deepEqual(codes(await get('depts=' + encodeURIComponent('Văn phòng'))), ['VP1']);

@@ -68,6 +68,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       break_ot_ui: getSetting('break_ot_ui', '0'),   // HIỆN ô cũ "Tính TĂNG CA TRƯA" (break_ot) trong form ca — mặc định TẮT cho đỡ rối (ca đang tích vẫn hiện, vẫn tính như cũ)
       emp_extra_info: getSetting('emp_extra_info', '0'),
       show_punch_device: getSetting('show_punch_device', '0'),   // HIỆN MÁY CHẤM cạnh giờ vào / ra (Tính công, Giờ nguồn, báo cáo Chi tiết) — mặc định TẮT; Đài PT-TH Hưng Yên 28/11/2026
+      report_ot_hours: getSetting('report_ot_hours', '1'),   // báo cáo: cột tăng ca tính theo GIỜ (mặc định) / PHÚT — Anh 28/11/2026
       emp_pin_is_code: getSetting('emp_pin_is_code', '0'),   // Số ID máy chấm công = MÃ NV (tự lấy khi thêm NV / nhập Excel) — mặc định TẮT; Hualida 28/11/2026 (máy Hikvision nhận Số ID dạng chữ)     // Thông tin thêm của NV — tab riêng trong form NV (mặc định TẮT, chỉ tài khoản tổng bật)
       pay_pro: req.forceVirt ? '0' : getSetting('pay_pro', '0'),
       ...(() => { const p = activeProfile(); return p ? { profile: p.id, profile_name: p.name, profile_reports: p.reports } : {}; })(),   // GÓI CÀI ĐẶT đang dùng (chưa áp gói → không có 3 trường này)   // TIỀN LƯƠNG NÂNG CAO (BH, thuế, thành phần lương…) — mặc định TẮT, chỉ tài khoản tổng bật
@@ -196,7 +197,7 @@ export function registerSettingsRoutes(r, { need, adminOnly }) {
       if (b.audit_enabled != null) setSetting('audit_enabled', b.audit_enabled ? '1' : '0');
       if (b.hr_enabled != null) setSetting('hr_enabled', b.hr_enabled ? '1' : '0');
       if (b.meal_enabled != null) setSetting('meal_enabled', b.meal_enabled ? '1' : '0');
-      for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head', 'meal_machine_signup', 'meal_ingredient', 'pay_pro', 'emp_extra_info', 'break_ot_ui', 'emp_pin_is_code', 'show_punch_device']) if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
+      for (const k of ['att_enabled', 'meal_self_order', 'meal_dish_choice', 'meal_dept_head', 'meal_machine_signup', 'meal_ingredient', 'pay_pro', 'emp_extra_info', 'break_ot_ui', 'emp_pin_is_code', 'show_punch_device', 'report_ot_hours']) if (b[k] != null) setSetting(k, b[k] ? '1' : '0');
     }
     // Hạn mức công ảo: người được xem công ảo mới chỉnh được
     if (auditAllowed(req.user)) {

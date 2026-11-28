@@ -16,7 +16,10 @@ const Q = '&from=2026-09-01&to=2026-09-07&mode=hourly';
 const get = async (path) => {
   const res = await fetch(base + path, { headers: { Authorization: 'Bearer ' + tok } });
   assert.equal(res.status, 200, path);
-  return (res.headers.get('content-type') || '').includes('json') ? res.json() : Buffer.from(await res.arrayBuffer());
+  if (!(res.headers.get('content-type') || '').includes('json')) return Buffer.from(await res.arrayBuffer());
+  const j = await res.json();   // dòng TỔNG CỘNG cuối bảng (28/11/2026) không phải 1 ngày của NV — bài thử này chỉ xét các dòng ngày
+  if (Array.isArray(j.rows)) j.rows = j.rows.filter((r) => !r._total);
+  return j;
 };
 const vn = (d, hm) => new Date(`${d}T${hm}:00+07:00`).toISOString();
 const dates = (rows, code) => rows.filter((r) => r.code === code).map((r) => r.date.slice(0, 2));

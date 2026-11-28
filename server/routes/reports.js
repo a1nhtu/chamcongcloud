@@ -566,7 +566,38 @@ function buildReport(type, from, to, filter) {
   if (!rep || !Array.isArray(rep.columns)) return rep;
   if (PAIR_COLS[type]) splitPairCols(rep, ...PAIR_COLS[type]);
   if (formHourly(filter) && type !== 'payroll' && !AUDIT3.includes(type)) rep.columns = rep.columns.filter((c) => !HOURLY_DROP.has(c.key));
+  if (TOTAL_TYPES.has(type)) addTotalRow(rep);
   return rep;
+}
+
+// TĂNG CA TRONG BÁO CÁO TÍNH THEO GIỜ hay PHÚT (công tắc report_ot_hours, Anh 28/11/2026 — khách Hualida): mặc định GIỜ.
+// Áp cho cột tăng ca trước đây để phút: Bản ghi chấm công, Chi tiết theo ngày. Tắt = phút như cũ.
+const otHours = () => getSetting('report_ot_hours', '1') !== '0';
+const otCol = () => (otHours() ? { key: 'ot', label: 'OT (giờ)', w: 9 } : { key: 'ot', label: 'OT (p)', w: 8 });
+const otVal = (min) => (otHours() ? round2((min || 0) / 60) : r1(min || 0));
+
+// DÒNG TỔNG CỘNG cuối các báo cáo danh sách từng ngày (Anh 28/11/2026): cộng mọi cột số (trễ, sớm, giờ, phút, tăng ca, công, số lần chấm…).
+// Cột giờ có số phút gốc (row._m[key]) thì cộng từ PHÚT rồi mới đổi ra giờ — không cộng số giờ đã làm tròn 2 số lẻ.
+const TOTAL_TYPES = new Set(['attendance', 'late', 'ot', 'firstlast', 'detail', 'detaillist', 'detailmulti']);
+const TOTAL_SKIP = new Set(['stt', 'missShift']);
+function addTotalRow(rep) {
+  const rows = rep.rows.filter((r) => !r._off);
+  if (!rows.length) return;
+  const labelKey = rep.columns.some((c) => c.key === 'name') ? 'name' : rep.columns.find((c) => !TOTAL_SKIP.has(c.key))?.key;
+  const tot = { _total: true };
+  for (const c of rep.columns) {
+    if (TOTAL_SKIP.has(c.key) || c.key === labelKey) continue;
+    let s = 0, m = 0, num = false, raw = true;
+    for (const r of rows) {
+      const v = r[c.key];
+      if (typeof v !== 'number') continue;
+      num = true; s += v;
+      if (r._m && typeof r._m[c.key] === 'number') m += r._m[c.key]; else raw = false;
+    }
+    if (num) tot[c.key] = raw ? round2(m / 60) : round2(s);
+  }
+  tot[labelKey] = 'TỔNG CỘNG';
+  rep.rows.push(tot);
 }
 
 // Báo cáo theo loại: mẫu riêng của công ty (cr + id) = báo cáo gốc của mẫu rồi áp cách trình bày (custom-reports.js); loại khác như cũ
@@ -994,7 +1025,7 @@ function buildReportRaw(type, from, to, filter) {
         { key: 'shift', label: 'Ca', w: 12 }, { key: 'inCa', label: 'Giờ vào ca', w: 10 }, { key: 'outCa', label: 'Giờ ra ca', w: 10 },
         { key: 'inReal', label: 'Vào thực', w: 9 }, { key: 'outReal', label: 'Ra thực', w: 9 },
         ...(devOf ? [{ key: 'devIn', label: 'Máy vào', w: 16 }, { key: 'devOut', label: 'Máy ra', w: 16 }] : []),
-        { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 }, { key: 'ot', label: 'OT (p)', w: 8 },
+        { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 }, otCol(),
         ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 9 }] : []),
         { key: 'cong', label: 'Công', w: 7 }, { key: 'status', label: 'Trạng thái', w: 13 },
         ...(ctx.missShift ? [MISS_COL] : []),
@@ -1008,8 +1039,8 @@ function buildReportRaw(type, from, to, filter) {
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         ...(devOf ? { devIn: devCell(c, 'in'), devOut: devCell(c, 'out') } : {}),
         _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
-        late: c.late_min || 0, early: c.early_min || 0, ot: r1(c.ot_min || 0), gio: round2((c.work_minutes || 0) / 60),
-        cong: round2(c.work_unit),
+        late: c.late_min || 0, early: c.early_min || 0, ot: otVal(c.ot_min), gio: round2((c.work_minutes || 0) / 60),
+        cong: round2(c.work_unit), _m: { gio: c.work_minutes || 0, ...(otHours() ? { ot: c.ot_min || 0 } : {}) },
         status: !c.check_out_at && c.day_status !== 'mot_lan' ? 'Thiếu ra' : HOURLY ? 'Đủ' : c.late_min > 0 ? 'Đi muộn' : c.early_min > 0 ? 'Về sớm' : 'Đủ công',
       }));
       return { title: `Chi tiết chấm công ${PERIOD}`, columns, rows };
@@ -1048,6 +1079,7 @@ function buildReportRaw(type, from, to, filter) {
             late: c ? (c.late_min || 0) : 0, early: c ? (c.early_min || 0) : 0,
             cong: c ? round2(c.work_unit) : 0, gio: c ? round2((c.work_minutes || 0) / 60) : 0,
             ot: c ? round2((c.ot_min || 0) / 60) : 0, gross,
+            _m: { gio: c ? c.work_minutes || 0 : 0, ot: c ? c.ot_min || 0 : 0 },
             ca: c ? (c.shift_name || 'HC') : (isLeave ? ctx.leaveDays.get(e.id + '|' + d).label : (symbolOf(ctx, e.id, d) || 'V')),
             ...(ctx.missShift ? { missShift: ctx.missShift(e.id, d) } : {}),
           });
@@ -1098,7 +1130,7 @@ function buildReportRaw(type, from, to, filter) {
       const columns = [
         { key: 'stt', label: 'STT', w: 6 }, { key: 'code', label: 'Mã nhân viên', w: 12 },
         { key: 'name', label: 'Tên nhân viên', w: 22 }, { key: 'dept', label: 'Phòng ban', w: 14 },
-        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 },
+        { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'shift', label: 'Ca làm việc', w: 14 },
       ];
       for (let i = 1; i <= PAIRS; i++) columns.push({ key: 'in' + i, label: 'Giờ vào ' + i, w: 9 }, { key: 'out' + i, label: 'Giờ ra ' + i, w: 9 });
       columns.push({ key: 'late', label: 'Trễ', w: 7 }, { key: 'early', label: 'Sớm', w: 7 }, { key: 'gio', label: 'Tổng giờ', w: 9 },
@@ -1119,7 +1151,7 @@ function buildReportRaw(type, from, to, filter) {
             continue;
           }
           stt++;
-          const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)] };
+          const row = { stt, code: e.code, name: e.full_name, dept: e.department || '', date: fmtDMY(d), wd: WD[vnWeekday(d)], shift: c ? c.shift_name || '' : '' };
           const io = c ? ioAll(e.id, d, c) : null;
           const ts = !io ? [] : io.pairs ? io.pairs.flat().filter(Boolean) : [c.check_in_at, c.check_out_at].filter(Boolean);
           for (let i = 0; i < PAIRS * 2; i++) row[(i % 2 ? 'out' : 'in') + (Math.floor(i / 2) + 1)] = ts[i] ? isoToVnHM(ts[i]) : '';
@@ -1129,6 +1161,7 @@ function buildReportRaw(type, from, to, filter) {
             ot: c ? round2((c.ot_min || 0) / 60) : 0,
             note: isLeave ? ctx.leaveDays.get(k).label : '',
             ...(ctx.missShift ? { missShift: ctx.missShift(e.id, d) } : {}),
+            _m: { gio: c ? c.work_minutes || 0 : 0, ot: c ? c.ot_min || 0 : 0 },
           });
           rows.push(row);
         }
@@ -1140,18 +1173,21 @@ function buildReportRaw(type, from, to, filter) {
     case 'attendance': {
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
-        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
+        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'shift', label: 'Ca làm việc', w: 14 },
+        { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'place', label: 'Nơi chấm', w: 14 }, { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 },
-        { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 }, { key: 'ot', label: 'OT (p)', w: 8 }, { key: 'cong', label: 'Công', w: 7 },
+        { key: 'gio', label: 'Tổng giờ', w: 9 }, { key: 'phut', label: 'Tổng phút', w: 9 }, otCol(), { key: 'cong', label: 'Công', w: 7 },
       ];
+      const OTH = otHours();
       const list = allDaysOn(filter) ? empDays(ctx, days) : sortedResults().map((c) => ({ c }));
       const rows = list.map(({ e, d, c }) => (!c ? offRow(e, d) : {
-        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
+        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
         _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         place: c.check_in_outside ? 'Ngoài VP' : 'Trong VP',
         late: c.late_min || 0, early: c.early_min || 0, gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0),
-        ot: r1(c.ot_min || 0), cong: round2(c.work_unit),
+        ot: otVal(c.ot_min), cong: round2(c.work_unit),
+        _m: { gio: c.work_minutes || 0, ...(OTH ? { ot: c.ot_min || 0 } : {}) },
       }));
       return { title: `Báo cáo chấm công ${PERIOD}`, columns, rows };
     }
@@ -1160,11 +1196,11 @@ function buildReportRaw(type, from, to, filter) {
     case 'late': {
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
-        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
+        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'shift', label: 'Ca làm việc', w: 14 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'late', label: 'Đi muộn (p)', w: 11 }, { key: 'early', label: 'Về sớm (p)', w: 11 },
       ];
       const rows = sortedResults().filter((c) => c.late_min > 0 || c.early_min > 0).map((c) => ({
-        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
+        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout, _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         late: c.late_min || 0, early: c.early_min || 0,
       }));
@@ -1182,18 +1218,19 @@ function buildReportRaw(type, from, to, filter) {
         const rows = sortedResults().filter((c) => c.work_minutes > 0).map((c) => ({
           date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
           inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout, _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
-          gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0),
+          gio: round2((c.work_minutes || 0) / 60), phut: Math.round(c.work_minutes || 0), _m: { gio: c.work_minutes || 0 },
         }));
         return { title: `Tổng giờ làm chi tiết ${PERIOD}`, columns, rows };
       }
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
-        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
+        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'shift', label: 'Ca làm việc', w: 14 }, { key: 'inReal', label: 'Giờ vào', w: 9 }, { key: 'outReal', label: 'Giờ ra', w: 9 },
         { key: 'otp', label: 'Tăng ca (p)', w: 11 }, { key: 'oth', label: 'Tăng ca (giờ)', w: 12 }, { key: 'loai', label: 'Loại OT', w: 14 },
         ...(ctx.hasTiers ? ['TC1', 'TC2', 'TC3', 'TC4'].map((l, i) => ({ key: 'tier' + i, label: l + ' (giờ)', w: 9 })) : []),
       ];
       const rows = sortedResults().filter((c) => c.ot_min > 0).map((c) => ({
-        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
+        date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
+        _m: { oth: c.ot_min || 0, ...Object.fromEntries((c._tiers || [0, 0, 0, 0]).map((m, i) => ['tier' + i, m || 0])) },
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout, _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         otp: r1(c.ot_min || 0), oth: round2((c.ot_min || 0) / 60), loai: OT_LABEL[c.ot_type] || '',
         ...Object.fromEntries((c._tiers || [0, 0, 0, 0]).map((m, i) => ['tier' + i, round2(m / 60)])),
@@ -1205,7 +1242,7 @@ function buildReportRaw(type, from, to, filter) {
     case 'firstlast': {
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 }, { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 },
-        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'first', label: 'Vào đầu', w: 9 }, { key: 'last', label: 'Ra cuối', w: 9 },
+        { key: 'dept', label: 'Bộ phận', w: 13 }, { key: 'shift', label: 'Ca làm việc', w: 14 }, { key: 'first', label: 'Vào đầu', w: 9 }, { key: 'last', label: 'Ra cuối', w: 9 },
         { key: 'punches', label: 'Số lần chấm', w: 11 }, { key: 'phut', label: 'Số phút', w: 9 }, { key: 'gio', label: 'Số giờ', w: 8 },
       ];
       // Số lần chấm: ưu tiên đếm từ máy (device_punches); NV chấm điện thoại thì đếm vào/ra
@@ -1218,9 +1255,9 @@ function buildReportRaw(type, from, to, filter) {
         const mins = c.check_in_at && c.check_out_at ? Math.round((new Date(c.check_out_at) - new Date(c.check_in_at)) / 60000) : 0;
         const punches = pcMap.get(c.employee_id + '|' + c.work_date) || ((c.check_in_at ? 1 : 0) + (c.check_out_at ? 1 : 0));
         return {
-          date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '',
+          date: fmtDMY(c.work_date), wd: WD[vnWeekday(c.work_date)], code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
           first: isoToVnHM(c.check_in_at), last: isoToVnHM(c.check_out_at),
-          punches, phut: mins, gio: round2(mins / 60),
+          punches, phut: mins, gio: round2(mins / 60), _m: { gio: mins },
         };
       });
       return { title: `Giờ vào đầu & ra cuối ${PERIOD}`, columns, rows };
@@ -2058,6 +2095,7 @@ function summarySheet(wb, columns, rows, { company, address, title, from, to, al
   if (!has('code') || !has('date') || !has('phut') || !rows.length) return;
   const agg = new Map();
   for (const r of rows) {
+    if (r._total) continue;   // dòng TỔNG CỘNG của sheet BaoCao không phải 1 người
     const k = String(r.code ?? '') + '|' + String(r.name ?? '');
     const g = agg.get(k) || agg.set(k, { code: r.code ?? '', name: r.name ?? '', dept: r.dept ?? '', days: new Set(), workDays: new Set(), min: 0 }).get(k);
     const m = +r.phut || 0;
@@ -2164,6 +2202,7 @@ async function writeReportXlsx(res, { title, columns, rows, from, to, company, a
   });
 
   const styles = new Map();   // 1 kiểu ô = 1 đối tượng dùng chung
+  const TOT_FILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF4FA' } }, TOT_FONT = { bold: true };
   for (const row of rows) {
     loopProg(PROG, ++pi, rows.length, 50, 92, 'Đang ghi dòng');
     const r2 = ws.addRow(columns.map((c) => row[c.key] ?? ''));
@@ -2177,9 +2216,10 @@ async function writeReportXlsx(res, { title, columns, rows, from, to, company, a
       if (row._off) fill = OFF_FILL;   // ngày không đi làm: tô xám nhạt
       if (wkRow) { fill = WK_CELL(row.wd); if (meta.key === 'wd') font = WK_FONT; }   // thứ 7 / chủ nhật: tô cả dòng (kể cả ngày không đi làm)
       if (meta.key === 'missShift' && cell.value) { fill = MISS_FILL; font = MISS_FONT; }   // công tắc nhiều ca bật: ô báo thiếu ca
+      if (row._total) { fill = TOT_FILL; font = TOT_FONT; }   // dòng TỔNG CỘNG cuối bảng
       const multi = typeof cell.value === 'string' && cell.value.includes('\n');
       if (multi) lines = Math.max(lines, cell.value.split('\n').length);
-      const k = `${fill ? fill.fgColor.argb : ''}|${font === WK_FONT ? 1 : font ? 2 : 0}|${col > 3 ? 1 : 0}|${multi ? 1 : 0}`;
+      const k = `${fill ? fill.fgColor.argb : ''}|${font === WK_FONT ? 1 : font === TOT_FONT ? 3 : font ? 2 : 0}|${col > 3 ? 1 : 0}|${multi ? 1 : 0}`;
       let st = styles.get(k);
       if (!st) {
         st = { border: allBorder };
