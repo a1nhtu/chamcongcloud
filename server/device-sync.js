@@ -1825,6 +1825,7 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
   let n = 0;
   const dedupMs = (parseInt(getSetting('punch_dedup_min', '15'), 10) || 0) * 60000;  // bỏ lần chấm trùng trong N phút
   const ins = db.prepare('INSERT OR IGNORE INTO device_punches(serial,pin,punch_at,work_date,status,verify,employee_id) VALUES(?,?,?,?,?,?,?)');
+  const empMemo = new Map();
   const remap = remapLoader(serial);   // Số ID nghi trùng (giữ lại) / đã chuyển sang Số ID mới ở máy này
   // Máy KHÔNG DÙNG TÍNH CÔNG (push_devices.no_att): lượt vẫn lưu nhưng không dựng lại công, không báo "chấm công thành công";
   // chống trùng chỉ so với lượt của các máy cùng loại (lượt máy này không xoá lượt chấm công thật và ngược lại).
@@ -1857,7 +1858,9 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
         for (const r of drop) db.prepare('DELETE FROM device_punches WHERE id=?').run(r.id);
       }
     }
-    const emp = findEmpByPin(pin);
+    // cùng khối, cùng Số ID chỉ tra NV 1 lần (chuyển dữ liệu cũ: lượt xếp theo Số ID → hàng trăm lượt liền nhau của 1 người)
+    if (!empMemo.has(pin)) empMemo.set(pin, findEmpByPin(pin));
+    const emp = empMemo.get(pin);
     const empId = emp?.id ?? null;
     let isNew = false;
     try { isNew = ins.run(serial, pin, punchIso, workDate, status, verify, empId).changes > 0; } catch {}

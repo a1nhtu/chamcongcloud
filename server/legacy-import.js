@@ -394,7 +394,21 @@ function addPending(pend, keys) {
     if (!r) pend[eid] = [d, d]; else { if (d < r[0]) r[0] = d; if (d > r[1]) r[1] = d; }
   }
 }
+// MỖI GIAO DỊCH TỐI ĐA ~BUDGET_MS rồi nhả luồng chính (setTimeout) → máy chủ vẫn trả lời máy chấm công + giao diện. Số dòng mỗi đợt
+// tự co giãn theo tốc độ thật của máy chủ (khách pretty 28/11/2026 chậm gấp ~30 lần máy thử: đợt 2.000 lượt giữ luồng 4–5 giây →
+// phần mềm "treo đơ", Cloudflare trả 502).
+const BUDGET_MS = 300;
+const breathe = () => new Promise((ok) => setTimeout(ok, 25));
+const fit = (size, ms, min, max) => Math.max(min, Math.min(max, Math.round(size * BUDGET_MS / Math.max(ms, 1))));
+// Bộ nhớ đệm CSDL lúc chuyển: mặc định 2 MB → CSDL khách lớn, mỗi lượt ghi vào 6 chỉ mục phải đọc lại trang từ ổ đĩa (nguyên nhân
+// chính máy khách chậm). Tăng tạm 200 MB, xong trả lại như cũ.
 export async function applyLegacy(data, opts = {}, prog = () => {}, shouldStop = () => false) {
+  const old = parseInt(db.prepare('PRAGMA cache_size').get()?.cache_size, 10) || -2000;
+  db.exec('PRAGMA cache_size = -200000');
+  try { return await applyLegacyRun(data, opts, prog, shouldStop); }
+  finally { try { db.exec(`PRAGMA cache_size = ${old}`); } catch {} }
+}
+async function applyLegacyRun(data, opts = {}, prog = () => {}, shouldStop = () => false) {
   const o = { depts: true, emps: true, punches: true, shifts: true, overwrite: false, from: '', to: '', ...opts };
   data = filterLegacy(data, o.skip_depts || [], !!o.skip_no_dept);
   const out = { depts_created: 0, emps_created: 0, emps_updated: 0, emps_linked: 0, punches_read: 0, punches_new: 0,
@@ -513,22 +527,26 @@ export async function applyLegacy(data, opts = {}, prog = () => {}, shouldStop =
     const before = db.prepare('SELECT COUNT(*) c FROM device_punches').get().c;
     const bySerial = new Map();
     for (const p of list) { if (!bySerial.has(p.serial)) bySerial.set(p.serial, []); bySerial.get(p.serial).push(p); }
-    const CHUNK = 2000, total = list.length;
-    let doneN = 0, chunkN = 0;
+    const total = list.length, t0 = Date.now();
+    let doneN = 0, chunkN = 0, size = 300;
     const noAsk = () => {};   // NV đã tạo ở bước 2; Số ID không có NV thì giữ lượt chấm chờ (không hỏi máy)
     // NHẬP HẾT lượt chấm trước, tính công MỘT lần ở bước 4 (dirty). Trước đây mỗi đợt 2.000 lượt tính lại ngay các ngày đó → cùng
     // 1 ngày của NV chấm nhiều máy bị dựng lại nhiều lần; 1,5 triệu lượt On39 chạy hàng giờ, máy chủ trả lời 13–27 giây (pretty 28/11/2026).
     for (const [serial, arr] of bySerial) {
       arr.sort((a, b) => (a.pin === b.pin ? (a.time < b.time ? -1 : a.time > b.time ? 1 : 0) : (+a.pin - +b.pin) || (a.pin < b.pin ? -1 : 1)));
-      for (let i = 0; i < arr.length; i += CHUNK) {
-        const part = arr.slice(i, i + CHUNK), got = new Set();
+      for (let i = 0; i < arr.length;) {
+        const part = arr.slice(i, i + size), got = new Set();
+        i += part.length;
+        const ts = Date.now();
         tx(() => ingestAttlog(serial, part.map((p) => `${p.pin}\t${p.time}\t${p.status}\t0`).join('\n'), { ask: noAsk, collect: got }));
+        size = fit(part.length, Date.now() - ts, 50, 5000);
         for (const k of got) dirty.add(k);
         addPending(pend, got);
         doneN += part.length;
         if (++chunkN % 10 === 0) setSetting(PENDING_KEY, JSON.stringify(pend));   // máy chủ tắt giữa chừng vẫn còn ghi nhớ
-        prog(20 + 60 * doneN / total, `Lượt chấm ${doneN.toLocaleString('vi')} / ${total.toLocaleString('vi')}`);
-        await tick();
+        const rate = Math.round(doneN / Math.max(1, (Date.now() - t0) / 1000));
+        prog(20 + 60 * doneN / total, `Lượt chấm ${doneN.toLocaleString('vi')} / ${total.toLocaleString('vi')} (${rate.toLocaleString('vi')} lượt/giây)`);
+        await breathe();
         if (shouldStop()) return stopNow({ punches_new: db.prepare('SELECT COUNT(*) c FROM device_punches').get().c - before });
       }
     }
@@ -555,13 +573,17 @@ export async function applyLegacy(data, opts = {}, prog = () => {}, shouldStop =
     const byEmp = new Map();
     for (const k of dirty) { const eid = k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); byEmp.get(eid).push(k); }
     const emps = [...byEmp.keys()];
-    let sinceTick = 0;
+    let days = 30;
     for (let i = 0; i < emps.length; i++) {
-      // từng NV theo thứ tự ngày, mỗi khối 90 ngày 1 giao dịch (NV 600 ngày gộp 1 lần từng giữ luồng chính ~2,8 giây)
+      // từng NV theo thứ tự ngày (ca đêm cần ngày trước dựng trước); mỗi giao dịch ~BUDGET_MS rồi nhả luồng
       const keys = byEmp.get(emps[i]).sort((a, b) => (a < b ? -1 : 1));
-      for (let k = 0; k < keys.length; k += 90) {
-        tx(() => rebuildDays(keys.slice(k, k + 90)));
-        if ((sinceTick += Math.min(90, keys.length - k)) >= 200) { sinceTick = 0; await tick(); }
+      for (let k = 0; k < keys.length;) {
+        const part = keys.slice(k, k + days);
+        k += part.length;
+        const ts = Date.now();
+        tx(() => rebuildDays(part));
+        days = fit(part.length, Date.now() - ts, 1, 120);
+        await breathe();
       }
       out.recomputed_emps++;
       if (i % 5 === 4 || i === emps.length - 1) {
