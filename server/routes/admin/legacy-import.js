@@ -7,6 +7,7 @@ import { readLegacy, summarize, applyLegacy, unpackUpload, legacyPendingCount, r
 import { existsSync, readFileSync } from 'node:fs';
 import { listDir, findLegacyFiles } from '../../legacy-files.js';
 import { tenantKey, MULTI } from '../../tenant.js';
+import { isMainThread } from 'node:worker_threads';
 
 const cache = new Map();   // token → { data, summary, at }
 const jobs = new Map();    // id → { state: run|done|err, pct, msg, result }
@@ -37,7 +38,9 @@ function startResume() {
   return id;
 }
 // Bản 1 công ty: máy chủ lên được 1 phút (máy chấm công nối lại xong) thì tự tính tiếp. Nhiều công ty: bấm nút trong hộp Chuyển dữ liệu.
-if (!MULTI && !process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== 'test') {
+// CHỈ luồng chính (v1.41.10): 2 luồng phụ đọc báo cáo (server/heavy-worker.js) cũng nạp file route này → pretty 28/11 17:11 cả 2 luồng
+// phụ cùng tự tính tiếp song song với luồng chính (CSDL chặn "database is locked" nên không hỏng gì).
+if (isMainThread && !MULTI && !process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== 'test') {
   setTimeout(() => { try { const id = startResume(); if (id) console.log('[legacy] tự tính tiếp công còn dở, lượt', id); } catch (e) { console.error('[legacy resume]', e.message); } }, 60000).unref();
 }
 
