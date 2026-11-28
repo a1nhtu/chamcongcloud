@@ -1796,6 +1796,7 @@ let punchListener = null;
 export const setPunchListener = (fn) => { punchListener = typeof fn === 'function' ? fn : null; };
 
 // Nạp khối ATTLOG (nhiều dòng), mỗi dòng: PIN \t Time \t Status \t Verify \t WorkCode
+// opts.collect: Set nhận các 'empId|ngày' cần tính lại thay vì tính ngay (xem legacy-import.js).
 // opts.ask(serial, pin): gặp Số ID chưa khớp NV thì làm gì (mặc định: xếp lệnh ADMS hỏi máy ZKTeco thông tin người đó).
 // Trả số dòng hợp lệ đã nhận.
 export function ingestAttlog(serial, rawBody, opts = {}) {
@@ -1868,7 +1869,9 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
     const prev = new Date(date + 'T12:00:00Z'); prev.setUTCDate(prev.getUTCDate() - 1);
     toRebuild.add(eid + '|' + prev.toISOString().slice(0, 10));
   }
-  rebuildDays(toRebuild);
+  // opts.collect (Set): người gọi gom lại để tính công MỘT lần sau cùng (chuyển dữ liệu phần mềm cũ hàng triệu lượt)
+  if (opts.collect) for (const k of toRebuild) opts.collect.add(k);
+  else rebuildDays(toRebuild);
   if (notifyNow.size) {
     const dev = db.prepare('SELECT name FROM push_devices WHERE serial=?').get(serial);
     const where = dev && dev.name ? 'tại máy ' + dev.name : 'tại máy chấm công';

@@ -330,6 +330,12 @@ function legacyImportModal() {
   ];
   box.append(...step1);
   openModal('Chuyển dữ liệu từ Wise Eye On39 / V5.1 / Ronald Jack Pro', [box, status], [el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng')]);
+  // Đang có lượt chuyển chạy nền (đóng hộp rồi mở lại) → hiện luôn tiến độ + nút Dừng; lần trước bị dừng → nhắc chuyển lại để tính công
+  api('/admin/legacy/running').then((r) => {
+    if (r.job) return run(r.job);
+    if (r.pending_emps > 0) box.prepend(el('div', { class: 'panel', style: 'padding:8px 12px;margin:0 0 10px;border-color:#fcd34d;background:#fffbeb' },
+      `⚠ Lần chuyển trước bị dừng giữa chừng: ${r.pending_emps.toLocaleString('vi')} NV còn ngày chưa tính công. Chọn lại đúng file đó và bấm Chuyển — lượt đã có tự bỏ qua, phần mềm nhập tiếp phần còn lại rồi tính công.`));
+  }).catch(() => {});
 
   // Bước 2: XEM TRƯỚC + chọn phần cần chuyển
   function preview({ token, summary: s }) {
@@ -393,7 +399,14 @@ function legacyImportModal() {
     const pct = el('b', {}, '0%'), msg = el('div', { class: 'map-hint', style: 'margin:0' }, 'Bắt đầu…');
     box.innerHTML = '';
     box.append(el('div', { style: 'display:flex;justify-content:space-between;gap:10px' }, el('span', {}, 'Đang chuyển dữ liệu — đóng hộp này máy chủ vẫn chạy tiếp'), pct), bar, msg);
-    $('#modal .m-foot').replaceChildren(el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'));
+    // ⏹ Dừng: máy chủ dừng ở đợt kế tiếp; phần đã nhập giữ nguyên, ngày chưa tính công được ghi lại để lần chuyển sau tính bù
+    const stopBtn = el('button', { class: 'btn ghost', style: 'color:#b91c1c' }, '⏹ Dừng');
+    stopBtn.onclick = async () => {
+      if (!confirm('Dừng chuyển dữ liệu?\n\nPhần đã nhập giữ nguyên. Muốn nhập tiếp: chọn lại đúng file đó và bấm Chuyển — lượt đã có tự bỏ qua, phần mềm nhập phần còn lại rồi tính công.')) return;
+      stopBtn.disabled = true; stopBtn.textContent = 'Đang dừng…';
+      try { await api('/admin/legacy/job/' + job + '/stop', { method: 'POST', body: {} }); } catch (e) { stopBtn.disabled = false; stopBtn.textContent = '⏹ Dừng'; toast(e.message, 'err'); }
+    };
+    $('#modal .m-foot').replaceChildren(stopBtn, el('button', { class: 'btn ghost', onclick: closeModal }, 'Đóng'));
     const t0 = Date.now();
     const poll = async () => {
       let j;
@@ -401,8 +414,15 @@ function legacyImportModal() {
       bar.firstChild.style.width = j.pct + '%'; pct.textContent = j.pct + '%';
       msg.textContent = `${j.msg} · ${Math.round((Date.now() - t0) / 1000)} giây`;
       if (j.state === 'run') return setTimeout(poll, 700);
+      stopBtn.remove();
       if (j.state === 'err') { msg.textContent = '⚠ Lỗi: ' + j.msg; msg.style.color = '#b91c1c'; return; }
       const x = j.result;
+      if (x.stopped) {
+        box.append(el('div', { class: 'panel', style: 'padding:10px 14px;margin:12px 0 0;border-color:#fcd34d;background:#fffbeb' },
+          `⏹ Đã dừng. Đã nhập ${(x.punches_new || 0).toLocaleString('vi')} lượt chấm mới · ${x.emps_created} NV mới.`,
+          el('div', { class: 'map-hint', style: 'margin:4px 0 0' }, 'Muốn nhập tiếp: mở lại "Chuyển từ Wise Eye / Ronald Jack", chọn đúng file đó và bấm Chuyển — lượt đã có tự bỏ qua, phần mềm nhập phần còn lại rồi tính công các ngày chưa tính.')));
+        return toast('Đã dừng chuyển dữ liệu', 'ok');
+      }
       const line = `Đã chuyển từ ${x.label}: ${x.depts_created} bộ phận mới · ${x.emps_created} NV mới, ${x.emps_updated} NV cập nhật`
         + (x.emps_linked ? `, ${x.emps_linked} NV gắn Số ID` : '') + ` · ${x.punches_new.toLocaleString('vi')} lượt chấm mới / ${x.punches_read.toLocaleString('vi')} lượt đọc được`;
       const caLine = x.shifts_created || x.schedules_created || x.assign_created || x.temp_created || x.assign_skipped

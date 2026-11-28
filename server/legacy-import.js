@@ -10,8 +10,8 @@
 import { gunzip } from 'node:zlib';
 import { promisify } from 'node:util';
 import MDBReader from './vendor/mdb-reader.mjs';
-import { db } from './db.js';
-import { ingestAttlog, rebuildDay } from './device-sync.js';
+import { db, getSetting, setSetting } from './db.js';
+import { ingestAttlog, rebuildDays } from './device-sync.js';
 import { defaultPasswordHash } from './auth.js';
 import { cleanName, isJunkName } from './ten-nv.js';
 
@@ -379,8 +379,22 @@ function applyShifts(data, o, out) {
 
 // opts: { depts, emps, punches, shifts (true/false), overwrite (ghi đè thông tin NV / dòng gán ca đã có), from, to ('YYYY-MM-DD', rỗng = tất cả),
 //         skip_depts (key bộ phận không lấy), skip_no_dept (bỏ NV chưa có bộ phận) }
-// prog(%, chữ). Trả số liệu đã làm.
-export async function applyLegacy(data, opts = {}, prog = () => {}) {
+// prog(%, chữ). shouldStop(): true = người dùng bấm Dừng → dừng ở đợt kế tiếp, trả { ..., stopped: true }. Trả số liệu đã làm.
+//
+// NGÀY CHỜ TÍNH CÔNG (setting legacy_rebuild_pending = { empId: [ngày đầu, ngày cuối] }): lượt chấm nhập trước, công tính sau cùng
+// → bấm Dừng / máy chủ khởi động lại giữa chừng thì các ngày đã nhập chưa có công. Ghi lại khoảng ngày từng NV; lần chuyển sau
+// (lượt đã có tự bỏ qua nên không tự sinh ngày cần tính) tính bù các khoảng này rồi mới xoá.
+const PENDING_KEY = 'legacy_rebuild_pending';
+function loadPending() { try { return JSON.parse(getSetting(PENDING_KEY, '') || '{}') || {}; } catch { return {}; } }
+export const legacyPendingCount = () => Object.keys(loadPending()).length;
+function addPending(pend, keys) {
+  for (const k of keys) {
+    const [eid, d] = k.split('|');
+    const r = pend[eid];
+    if (!r) pend[eid] = [d, d]; else { if (d < r[0]) r[0] = d; if (d > r[1]) r[1] = d; }
+  }
+}
+export async function applyLegacy(data, opts = {}, prog = () => {}, shouldStop = () => false) {
   const o = { depts: true, emps: true, punches: true, shifts: true, overwrite: false, from: '', to: '', ...opts };
   data = filterLegacy(data, o.skip_depts || [], !!o.skip_no_dept);
   const out = { depts_created: 0, emps_created: 0, emps_updated: 0, emps_linked: 0, punches_read: 0, punches_new: 0,
@@ -412,6 +426,13 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
 
   // 2) NHÂN VIÊN — NV đã nghỉ ở phần mềm cũ: tạo đang hoạt động để nhận lượt chấm cũ (máy chỉ gắn lượt chấm cho NV đang làm), cuối cùng mới khoá
   const lockLater = [];
+  const pend = loadPending();   // khoảng ngày chờ tính (lần trước bị dừng + lần này), xem PENDING_KEY
+  // Dừng giữa chừng: vẫn khoá NV nghỉ việc đã tạo, ghi lại khoảng ngày chờ tính
+  const stopNow = (extra = {}) => {
+    if (lockLater.length) tx(() => { for (const id of lockLater) db.prepare('UPDATE employees SET active=0 WHERE id=?').run(id); });
+    setSetting(PENDING_KEY, Object.keys(pend).length ? JSON.stringify(pend) : '');
+    return { ...out, ...extra, stopped: true };
+  };
   if (o.emps && data.emps.length) {
     const pwHash = defaultPasswordHash();
     const hrCols = new Set(db.prepare('PRAGMA table_info(hr_profiles)').all().map((c) => c.name));
@@ -468,12 +489,14 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
       });
       prog(5 + 15 * Math.min(1, (i + CHUNK) / data.emps.length), `Nhân viên ${Math.min(i + CHUNK, data.emps.length)} / ${data.emps.length}`);
       await tick();
+      if (shouldStop()) return stopNow();
     }
   }
 
   // 2b) CA + LỊCH TRÌNH (Wise Eye) — làm TRƯỚC lượt chấm để công tính ngay theo đúng ca. NV được gán mà lượt chấm đã có sẵn
   //     (chuyển lần trước, máy đã gửi) thì lượt trùng không dựng lại ngày → tính lại riêng ở cuối.
   let regEmps = [];
+  const dirty = new Set();   // 'empId|ngày' cần tính công lại — gom suốt lúc nhập, tính 1 lần ở bước 4
   if (o.shifts && data.shifts?.length) {
     prog(20, 'Đang chép ca + lịch trình…');
     const touched = tx(() => applyShifts(data, o, out));
@@ -491,19 +514,26 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
     const bySerial = new Map();
     for (const p of list) { if (!bySerial.has(p.serial)) bySerial.set(p.serial, []); bySerial.get(p.serial).push(p); }
     const CHUNK = 2000, total = list.length;
-    let doneN = 0;
+    let doneN = 0, chunkN = 0;
     const noAsk = () => {};   // NV đã tạo ở bước 2; Số ID không có NV thì giữ lượt chấm chờ (không hỏi máy)
+    // NHẬP HẾT lượt chấm trước, tính công MỘT lần ở bước 4 (dirty). Trước đây mỗi đợt 2.000 lượt tính lại ngay các ngày đó → cùng
+    // 1 ngày của NV chấm nhiều máy bị dựng lại nhiều lần; 1,5 triệu lượt On39 chạy hàng giờ, máy chủ trả lời 13–27 giây (pretty 28/11/2026).
     for (const [serial, arr] of bySerial) {
       arr.sort((a, b) => (a.pin === b.pin ? (a.time < b.time ? -1 : a.time > b.time ? 1 : 0) : (+a.pin - +b.pin) || (a.pin < b.pin ? -1 : 1)));
       for (let i = 0; i < arr.length; i += CHUNK) {
-        const part = arr.slice(i, i + CHUNK);
-        tx(() => ingestAttlog(serial, part.map((p) => `${p.pin}\t${p.time}\t${p.status}\t0`).join('\n'), { ask: noAsk }));
+        const part = arr.slice(i, i + CHUNK), got = new Set();
+        tx(() => ingestAttlog(serial, part.map((p) => `${p.pin}\t${p.time}\t${p.status}\t0`).join('\n'), { ask: noAsk, collect: got }));
+        for (const k of got) dirty.add(k);
+        addPending(pend, got);
         doneN += part.length;
-        prog(20 + 80 * doneN / total, `Lượt chấm ${doneN.toLocaleString('vi')} / ${total.toLocaleString('vi')} (đang tính lại công)`);
+        if (++chunkN % 10 === 0) setSetting(PENDING_KEY, JSON.stringify(pend));   // máy chủ tắt giữa chừng vẫn còn ghi nhớ
+        prog(20 + 60 * doneN / total, `Lượt chấm ${doneN.toLocaleString('vi')} / ${total.toLocaleString('vi')}`);
         await tick();
+        if (shouldStop()) return stopNow({ punches_new: db.prepare('SELECT COUNT(*) c FROM device_punches').get().c - before });
       }
     }
     out.punches_new = db.prepare('SELECT COUNT(*) c FROM device_punches').get().c - before;
+    setSetting(PENDING_KEY, JSON.stringify(pend));
     // NV chấm ở NHIỀU máy: lượt nạp theo từng máy → lúc dựng ngày còn thiếu lượt của máy nạp sau; lịch ghép cặp theo thứ tự giờ
     // (L1) dây chuyền lệch sang các ngày sau (file On39 Data_on39_CaDem: 236 NV chấm 2 máy, có NV lệch pha cả tháng) → dựng lại ở bước 4
     const serials = new Map();
@@ -512,16 +542,36 @@ export async function applyLegacy(data, opts = {}, prog = () => {}) {
     const multi = [...serials].filter(([, s]) => s.size > 1).map(([pin]) => idOf.get(pin)?.id).filter(Boolean);
     regEmps = [...new Set([...regEmps, ...multi])];
   }
-  // 4) TÍNH LẠI theo thứ tự ngày (ca đêm lấy đúng giờ ra sáng hôm sau): NV vừa được gán ca mà lượt chấm có từ trước + NV chấm nhiều máy
+  // 4) TÍNH CÔNG MỘT LẦN, từng NV theo thứ tự ngày (ca đêm lấy đúng giờ ra sáng hôm sau): các ngày có lượt vừa nhập + mọi ngày
+  // của NV vừa được gán ca mà lượt chấm có từ trước + NV chấm nhiều máy. Mỗi NV 1 giao dịch, nhả luồng sau vài NV.
   if (regEmps.length) {
-    const dates = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE employee_id=? ORDER BY work_date');
-    for (let i = 0; i < regEmps.length; i++) {
-      const id = regEmps[i];
-      tx(() => { for (const { work_date } of dates.all(id)) rebuildDay(id, work_date); });
+    const dates = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE employee_id=?');
+    for (const id of regEmps) for (const { work_date } of dates.all(id)) dirty.add(id + '|' + work_date);
+  }
+  // khoảng ngày còn chờ tính từ lần chuyển trước bị Dừng / máy chủ khởi động lại giữa chừng
+  const inRange = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE employee_id=? AND work_date BETWEEN ? AND ?');
+  for (const [eid, r] of Object.entries(pend)) for (const { work_date } of inRange.all(+eid, r[0], r[1])) dirty.add(eid + '|' + work_date);
+  if (dirty.size) {
+    const byEmp = new Map();
+    for (const k of dirty) { const eid = k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); byEmp.get(eid).push(k); }
+    const emps = [...byEmp.keys()];
+    let sinceTick = 0;
+    for (let i = 0; i < emps.length; i++) {
+      // từng NV theo thứ tự ngày, mỗi khối 90 ngày 1 giao dịch (NV 600 ngày gộp 1 lần từng giữ luồng chính ~2,8 giây)
+      const keys = byEmp.get(emps[i]).sort((a, b) => (a < b ? -1 : 1));
+      for (let k = 0; k < keys.length; k += 90) {
+        tx(() => rebuildDays(keys.slice(k, k + 90)));
+        if ((sinceTick += Math.min(90, keys.length - k)) >= 200) { sinceTick = 0; await tick(); }
+      }
       out.recomputed_emps++;
-      if (i % 10 === 9 || i === regEmps.length - 1) { prog(99, `Dựng lại công theo thứ tự ngày: ${i + 1} / ${regEmps.length} NV`); await tick(); }
+      if (i % 5 === 4 || i === emps.length - 1) {
+        prog(80 + 20 * (i + 1) / emps.length, `Tính công: ${(i + 1).toLocaleString('vi')} / ${emps.length.toLocaleString('vi')} NV`);
+        await tick();
+        if (shouldStop()) return stopNow();   // khoảng ngày chờ tính vẫn giữ → lần chuyển sau tính tiếp
+      }
     }
   }
+  setSetting(PENDING_KEY, '');
   if (lockLater.length) tx(() => { for (const id of lockLater) db.prepare('UPDATE employees SET active=0 WHERE id=?').run(id); });
   prog(100, 'Xong');
   return out;

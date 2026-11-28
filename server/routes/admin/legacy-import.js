@@ -3,7 +3,7 @@
 // Bước 2: chọn phần cần chuyển + khoảng ngày → chạy NỀN (job), giao diện hỏi tiến độ tới khi xong.
 import express from 'express';
 import { randomBytes } from 'node:crypto';
-import { readLegacy, summarize, applyLegacy, unpackUpload } from '../../legacy-import.js';
+import { readLegacy, summarize, applyLegacy, unpackUpload, legacyPendingCount } from '../../legacy-import.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { listDir, findLegacyFiles } from '../../legacy-files.js';
 import { tenantKey, MULTI } from '../../tenant.js';
@@ -73,9 +73,12 @@ export function registerLegacyImportRoutes(r, { need }) {
     Object.defineProperty(j, 'tk', { value: tenantKey() });
     jobs.set(id, j);
     for (const [k, v] of jobs) if (v.state !== 'run' && Date.now() - v.at > TTL) jobs.delete(k);
-    busy = true;
-    applyLegacy(c.data, opts, (pct, msg) => { j.pct = Math.round(pct); j.msg = msg; })
-      .then((r2) => { j.state = 'done'; j.result = { ...r2, label: c.summary.label }; j.pct = 100; j.msg = 'Xong'; cache.delete(String(b.token)); })
+    busy = id;
+    applyLegacy(c.data, opts, (pct, msg) => { j.pct = Math.round(pct); j.msg = msg; }, () => !!j.stop)
+      .then((r2) => {
+        j.state = 'done'; j.result = { ...r2, label: c.summary.label };
+        if (r2.stopped) j.msg = 'Đã dừng'; else { j.pct = 100; j.msg = 'Xong'; cache.delete(String(b.token)); }
+      })
       .catch((e) => { j.state = 'err'; j.msg = e.message || String(e); console.error('[POST /admin/legacy/apply]', e); })
       .finally(() => { busy = false; j.at = Date.now(); });
     res.json({ ok: true, job: id });
@@ -85,5 +88,18 @@ export function registerLegacyImportRoutes(r, { need }) {
     const j = jobs.get(req.params.id);
     if (!j || j.tk !== tenantKey()) return res.status(404).json({ error: 'Không thấy tiến trình' });
     res.json(j);
+  });
+  // ⏹ DỪNG (Anh 28/11/2026: chuyển 1,5 triệu lượt On39 làm máy chủ khách chậm, muốn dừng mà không phải tắt phần mềm trên máy chủ).
+  // Dừng ở đợt kế tiếp (vài giây); phần đã nhập giữ nguyên, ngày chưa kịp tính công được ghi lại để lần chuyển sau tính bù.
+  r.post('/legacy/job/:id/stop', need('devices'), (req, res) => {
+    const j = jobs.get(req.params.id);
+    if (!j || j.tk !== tenantKey()) return res.status(404).json({ error: 'Không thấy tiến trình' });
+    if (j.state === 'run') { j.stop = true; j.msg = 'Đang dừng…'; }
+    res.json({ ok: true, state: j.state });
+  });
+  // Đang có lượt chuyển chạy nền (đóng hộp rồi mở lại vẫn thấy tiến độ + nút Dừng) · số NV còn ngày chờ tính công
+  r.get('/legacy/running', need('devices'), (req, res) => {
+    const j = busy && jobs.get(busy);
+    res.json({ job: j && j.state === 'run' && j.tk === tenantKey() ? busy : null, pending_emps: legacyPendingCount() });
   });
 }
