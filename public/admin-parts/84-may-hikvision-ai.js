@@ -333,8 +333,14 @@ function legacyImportModal() {
   // Đang có lượt chuyển chạy nền (đóng hộp rồi mở lại) → hiện luôn tiến độ + nút Dừng; lần trước bị dừng → nhắc chuyển lại để tính công
   api('/admin/legacy/running').then((r) => {
     if (r.job) return run(r.job);
-    if (r.pending_emps > 0) box.prepend(el('div', { class: 'panel', style: 'padding:8px 12px;margin:0 0 10px;border-color:#fcd34d;background:#fffbeb' },
-      `⚠ Lần chuyển trước bị dừng giữa chừng: ${r.pending_emps.toLocaleString('vi')} NV còn ngày chưa tính công. Chọn lại đúng file đó và bấm Chuyển — lượt đã có tự bỏ qua, phần mềm nhập tiếp phần còn lại rồi tính công.`));
+    if (r.pending_emps > 0) {
+      // Tính tiếp ngay phần công còn dở (không cần chọn lại file). Lượt chấm chưa nhập hết thì vẫn chọn lại file và bấm Chuyển.
+      const go = el('button', { class: 'btn', style: 'margin:6px 0 0' }, '▶ Tính tiếp công ngay');
+      go.onclick = async () => { go.disabled = true; try { const x = await api('/admin/legacy/resume', { method: 'POST', body: {} }); run(x.job); } catch (e) { go.disabled = false; toast(e.message, 'err'); } };
+      box.prepend(el('div', { class: 'panel', style: 'padding:8px 12px;margin:0 0 10px;border-color:#fcd34d;background:#fffbeb' },
+        `⚠ Lần chuyển trước dừng giữa chừng: ${r.pending_emps.toLocaleString('vi')} NV còn ngày chưa tính công. Bấm "Tính tiếp công ngay" (không cần chọn lại file). Nếu lượt chấm chưa nhập hết: chọn lại đúng file đó và bấm Chuyển — lượt đã có tự bỏ qua.`,
+        el('div', {}, go)));
+    }
   }).catch(() => {});
 
   // Bước 2: XEM TRƯỚC + chọn phần cần chuyển
@@ -417,6 +423,12 @@ function legacyImportModal() {
       stopBtn.remove();
       if (j.state === 'err') { msg.textContent = '⚠ Lỗi: ' + j.msg; msg.style.color = '#b91c1c'; return; }
       const x = j.result;
+      if (x.resumed) {
+        box.append(el('div', { class: 'panel', style: `padding:10px 14px;margin:12px 0 0;border-color:${x.stopped ? '#fcd34d' : '#86efac'};background:${x.stopped ? '#fffbeb' : '#f0fdf4'}` },
+          (x.stopped ? '⏹ Đã dừng. ' : '✅ Đã tính xong công còn dở. ') + `Đã tính công ${(x.recomputed_emps || 0).toLocaleString('vi')} NV.`
+          + (x.stopped ? ' Mở lại hộp này và bấm "Tính tiếp công ngay" để tính phần còn lại.' : ' Kiểm tra ở trang Tính công.')));
+        return toast(x.stopped ? 'Đã dừng' : 'Tính công xong', 'ok');
+      }
       if (x.stopped) {
         box.append(el('div', { class: 'panel', style: 'padding:10px 14px;margin:12px 0 0;border-color:#fcd34d;background:#fffbeb' },
           `⏹ Đã dừng. Đã nhập ${(x.punches_new || 0).toLocaleString('vi')} lượt chấm mới · ${x.emps_created} NV mới.`,

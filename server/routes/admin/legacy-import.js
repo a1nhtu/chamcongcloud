@@ -3,7 +3,7 @@
 // Bước 2: chọn phần cần chuyển + khoảng ngày → chạy NỀN (job), giao diện hỏi tiến độ tới khi xong.
 import express from 'express';
 import { randomBytes } from 'node:crypto';
-import { readLegacy, summarize, applyLegacy, unpackUpload, legacyPendingCount } from '../../legacy-import.js';
+import { readLegacy, summarize, applyLegacy, unpackUpload, legacyPendingCount, resumeLegacyRebuild } from '../../legacy-import.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { listDir, findLegacyFiles } from '../../legacy-files.js';
 import { tenantKey, MULTI } from '../../tenant.js';
@@ -21,7 +21,33 @@ function keep(data) {
   return { token, summary };
 }
 
+// TÍNH TIẾP CÔNG CÒN DỞ (v1.41.9 — pretty 28/11/2026: cập nhật / khởi động lại giữa lúc tính công 1.695 NV thì trước đây phải chọn lại
+// file .mdb). Chạy như 1 lượt chuyển (hộp Chuyển dữ liệu thấy tiến độ + nút Dừng). Trả mã lượt, hoặc null nếu không có gì / đang bận.
+function startResume() {
+  if (busy || !legacyPendingCount()) return null;
+  const id = randomBytes(6).toString('hex');
+  const j = { state: 'run', pct: 0, msg: 'Tính tiếp công còn dở…', result: null, at: Date.now() };
+  Object.defineProperty(j, 'tk', { value: tenantKey() });
+  jobs.set(id, j);
+  busy = id;
+  resumeLegacyRebuild((pct, msg) => { j.pct = Math.round(pct); j.msg = msg; }, () => !!j.stop)
+    .then((r2) => { j.state = 'done'; j.result = { ...r2, label: 'lần chuyển trước' }; if (r2.stopped) j.msg = 'Đã dừng'; else { j.pct = 100; j.msg = 'Xong'; } })
+    .catch((e) => { j.state = 'err'; j.msg = e.message || String(e); console.error('[legacy resume]', e); })
+    .finally(() => { busy = false; j.at = Date.now(); });
+  return id;
+}
+// Bản 1 công ty: máy chủ lên được 1 phút (máy chấm công nối lại xong) thì tự tính tiếp. Nhiều công ty: bấm nút trong hộp Chuyển dữ liệu.
+if (!MULTI && !process.env.NODE_TEST_CONTEXT && process.env.NODE_ENV !== 'test') {
+  setTimeout(() => { try { const id = startResume(); if (id) console.log('[legacy] tự tính tiếp công còn dở, lượt', id); } catch (e) { console.error('[legacy resume]', e.message); } }, 60000).unref();
+}
+
 export function registerLegacyImportRoutes(r, { need }) {
+  r.post('/legacy/resume', need('devices'), (req, res) => {
+    if (busy) return res.status(409).json({ error: 'Đang chuyển dữ liệu — chờ lượt trước xong' });
+    const id = startResume();
+    if (!id) return res.status(400).json({ error: 'Không còn ngày nào chờ tính công' });
+    res.json({ ok: true, job: id });
+  });
   // Tải file lên: thân yêu cầu = nội dung file; ?kind=on39|we51|rj (phần mềm đã chọn) &password=
   // Trình duyệt nén gzip trước khi gửi (file .mdb nhỏ đi 4–11 lần → mạng chậm / qua tên miền gửi nhanh hơn nhiều); file thô vẫn nhận như cũ.
   r.post('/legacy/parse-upload', need('devices'), express.raw({ type: () => true, limit: '1024mb' }), async (req, res) => {

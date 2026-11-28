@@ -402,11 +402,72 @@ const breathe = () => new Promise((ok) => setTimeout(ok, 25));
 const fit = (size, ms, min, max) => Math.max(min, Math.min(max, Math.round(size * BUDGET_MS / Math.max(ms, 1))));
 // Bộ nhớ đệm CSDL lúc chuyển: mặc định 2 MB → CSDL khách lớn, mỗi lượt ghi vào 6 chỉ mục phải đọc lại trang từ ổ đĩa (nguyên nhân
 // chính máy khách chậm). Tăng tạm 200 MB, xong trả lại như cũ.
-export async function applyLegacy(data, opts = {}, prog = () => {}, shouldStop = () => false) {
+// Ổ CỨNG CHẬM / ĐANG NGHẼN (pretty: 1 ổ HDD chung với SQL Server phần mềm khác, hàng đợi 169, mỗi lần đọc ghi 85–175 ms): mỗi lần
+// SQLite dồn nhật ký WAL vào file chính (checkpoint) phải chờ ổ đĩa ghi xong (fsync) → tính công 0,2 NV/giây. Lúc chuyển: không chờ
+// fsync (synchronous OFF), dồn thưa hơn (wal_autocheckpoint 20.000 trang); xong trả lại như cũ. Rủi ro chỉ khi MẤT ĐIỆN đúng lúc chuyển
+// (bản cài tự sao lưu trước mỗi lần cập nhật); phần mềm tắt / lỗi giữa chừng không ảnh hưởng.
+async function withFastDisk(fn) {
   const old = parseInt(db.prepare('PRAGMA cache_size').get()?.cache_size, 10) || -2000;
   db.exec('PRAGMA cache_size = -200000');
-  try { return await applyLegacyRun(data, opts, prog, shouldStop); }
-  finally { try { db.exec(`PRAGMA cache_size = ${old}`); } catch {} }
+  db.exec('PRAGMA synchronous = OFF');
+  db.exec('PRAGMA wal_autocheckpoint = 20000');
+  try { return await fn(); }
+  finally {
+    try { db.exec(`PRAGMA cache_size = ${old}`); } catch {}
+    try { db.exec('PRAGMA wal_autocheckpoint = 1000'); } catch {}
+    try { db.exec('PRAGMA synchronous = NORMAL'); } catch {}
+  }
+}
+export function applyLegacy(data, opts = {}, prog = () => {}, shouldStop = () => false) {
+  return withFastDisk(() => applyLegacyRun(data, opts, prog, shouldStop));
+}
+
+// Tính công các ngày trong dirty ('empId|ngày'): từng NV theo thứ tự ngày (ca đêm cần ngày trước dựng trước), mỗi giao dịch ~BUDGET_MS
+// rồi nhả luồng. NV tính xong thì bỏ khỏi pend (ghi lại mỗi 20 NV) → dừng / khởi động lại giữa chừng chỉ tính tiếp phần còn lại.
+// Trả true nếu bị dừng.
+async function rebuildDirty(dirty, pend, out, prog, shouldStop, base = 80, span = 20) {
+  const byEmp = new Map();
+  for (const k of dirty) { const eid = k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); byEmp.get(eid).push(k); }
+  const emps = [...byEmp.keys()];
+  let days = 30;
+  for (let i = 0; i < emps.length; i++) {
+    const keys = byEmp.get(emps[i]).sort((a, b) => (a < b ? -1 : 1));
+    for (let k = 0; k < keys.length;) {
+      const part = keys.slice(k, k + days);
+      k += part.length;
+      const ts = Date.now();
+      tx(() => rebuildDays(part));
+      days = fit(part.length, Date.now() - ts, 1, 120);
+      await breathe();
+    }
+    delete pend[emps[i]];
+    out.recomputed_emps++;
+    if (i % 20 === 19) setSetting(PENDING_KEY, Object.keys(pend).length ? JSON.stringify(pend) : '');
+    if (i % 5 === 4 || i === emps.length - 1) {
+      prog(base + span * (i + 1) / emps.length, `Tính công: ${(i + 1).toLocaleString('vi')} / ${emps.length.toLocaleString('vi')} NV`);
+      await tick();
+      if (shouldStop()) { setSetting(PENDING_KEY, Object.keys(pend).length ? JSON.stringify(pend) : ''); return true; }
+    }
+  }
+  return false;
+}
+const pendingDirty = (pend, dirty = new Set()) => {
+  const inRange = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE employee_id=? AND work_date BETWEEN ? AND ?');
+  for (const [eid, r] of Object.entries(pend)) for (const { work_date } of inRange.all(+eid, r[0], r[1])) dirty.add(eid + '|' + work_date);
+  return dirty;
+};
+// MÁY CHỦ KHỞI ĐỘNG LẠI (cập nhật / tắt máy) giữa lúc tính công sau khi chuyển: tự tính tiếp các ngày còn chờ, không cần chọn lại file.
+export function resumeLegacyRebuild(prog = () => {}, shouldStop = () => false) {
+  return withFastDisk(async () => {
+    const pend = loadPending(), out = { recomputed_emps: 0, resumed: true };
+    if (!Object.keys(pend).length) return out;
+    prog(1, 'Đang tìm ngày chờ tính công…');
+    const stopped = await rebuildDirty(pendingDirty(pend), pend, out, prog, shouldStop, 0, 100);
+    if (stopped) return { ...out, stopped: true };
+    setSetting(PENDING_KEY, '');
+    prog(100, 'Xong');
+    return out;
+  });
 }
 async function applyLegacyRun(data, opts = {}, prog = () => {}, shouldStop = () => false) {
   const o = { depts: true, emps: true, punches: true, shifts: true, overwrite: false, from: '', to: '', ...opts };
@@ -567,32 +628,11 @@ async function applyLegacyRun(data, opts = {}, prog = () => {}, shouldStop = () 
     for (const id of regEmps) for (const { work_date } of dates.all(id)) dirty.add(id + '|' + work_date);
   }
   // khoảng ngày còn chờ tính từ lần chuyển trước bị Dừng / máy chủ khởi động lại giữa chừng
-  const inRange = db.prepare('SELECT DISTINCT work_date FROM device_punches WHERE employee_id=? AND work_date BETWEEN ? AND ?');
-  for (const [eid, r] of Object.entries(pend)) for (const { work_date } of inRange.all(+eid, r[0], r[1])) dirty.add(eid + '|' + work_date);
-  if (dirty.size) {
-    const byEmp = new Map();
-    for (const k of dirty) { const eid = k.split('|')[0]; if (!byEmp.has(eid)) byEmp.set(eid, []); byEmp.get(eid).push(k); }
-    const emps = [...byEmp.keys()];
-    let days = 30;
-    for (let i = 0; i < emps.length; i++) {
-      // từng NV theo thứ tự ngày (ca đêm cần ngày trước dựng trước); mỗi giao dịch ~BUDGET_MS rồi nhả luồng
-      const keys = byEmp.get(emps[i]).sort((a, b) => (a < b ? -1 : 1));
-      for (let k = 0; k < keys.length;) {
-        const part = keys.slice(k, k + days);
-        k += part.length;
-        const ts = Date.now();
-        tx(() => rebuildDays(part));
-        days = fit(part.length, Date.now() - ts, 1, 120);
-        await breathe();
-      }
-      out.recomputed_emps++;
-      if (i % 5 === 4 || i === emps.length - 1) {
-        prog(80 + 20 * (i + 1) / emps.length, `Tính công: ${(i + 1).toLocaleString('vi')} / ${emps.length.toLocaleString('vi')} NV`);
-        await tick();
-        if (shouldStop()) return stopNow();   // khoảng ngày chờ tính vẫn giữ → lần chuyển sau tính tiếp
-      }
-    }
-  }
+  pendingDirty(pend, dirty);
+  // NV có ngày cần tính nhưng chưa nằm trong pend (NV vừa gán ca / chấm nhiều máy) → ghi vào để khởi động lại vẫn tính tiếp
+  addPending(pend, dirty);
+  setSetting(PENDING_KEY, JSON.stringify(pend));
+  if (dirty.size && await rebuildDirty(dirty, pend, out, prog, shouldStop)) return stopNow();   // NV chưa tính vẫn giữ trong pend
   setSetting(PENDING_KEY, '');
   if (lockLater.length) tx(() => { for (const id of lockLater) db.prepare('UPDATE employees SET active=0 WHERE id=?').run(id); });
   prog(100, 'Xong');

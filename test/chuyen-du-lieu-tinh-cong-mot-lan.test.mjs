@@ -83,3 +83,33 @@ test('⏹ Dừng giữa lúc nhập lượt chấm: phần đã nhập giữ ngu
   assert.ok(day()?.check_in_at && day()?.check_out_at, 'chuyển lại: lượt đã có bỏ qua nhưng ngày chờ vẫn được tính công');
   assert.equal(L.legacyPendingCount(), 0, 'xong thì xoá ghi nhớ');
 });
+
+test('v1.41.9 Tính tiếp công còn dở KHÔNG cần file (máy chủ khởi động lại giữa lúc tính) + trả lại synchronous / checkpoint như cũ', async () => {
+  const ON39 = {
+    Company: [{ CompName: 'CTY TIEP' }],
+    RelationDept: [{ ID: 1, Description: 'CTY TIEP', RelationID: 0, DeptCode: 'root' }],
+    UserInfo: [
+      { UserEnrollNumber: 91, UserFullCode: '00091', UserFullName: 'Pham Van D', UserIDD: 1, UserBirthDay: '' },
+      { UserEnrollNumber: 92, UserFullCode: '00092', UserFullName: 'Pham Van E', UserIDD: 1, UserBirthDay: '' },
+    ],
+    Machines: [{ MachineID: 1, MachineName: 'Cổng', SerialNumber: 'SN_T' }],
+    CheckInOut: [91, 92].flatMap((u) => [
+      { UserEnrollNumber: u, TimeStr: T('2025-09-02T07:58:00'), OriginType: 'I', MachineNo: 1 },
+      { UserEnrollNumber: u, TimeStr: T('2025-09-02T17:01:00'), OriginType: 'O', MachineNo: 1 },
+    ]),
+  };
+  const sync0 = db.prepare('PRAGMA synchronous').get().synchronous;
+  let calls = 0;
+  const r = await L.applyLegacy(L.normalizeOn39(fake(ON39)), {}, () => {}, () => ++calls >= 2);
+  assert.equal(r.stopped, true);
+  assert.equal(db.prepare('PRAGMA synchronous').get().synchronous, sync0, 'xong (kể cả dừng) trả lại synchronous');
+  assert.equal(db.prepare('PRAGMA wal_autocheckpoint').get().wal_autocheckpoint, 1000);
+  assert.ok(L.legacyPendingCount() >= 2);
+  const day = (pin) => db.prepare("SELECT a.check_out_at FROM attendance a JOIN employees e ON e.id=a.employee_id WHERE e.device_pin=? AND a.work_date='2025-09-02'").get(pin);
+  assert.ok(!day('91')?.check_out_at);
+  const r2 = await L.resumeLegacyRebuild();
+  assert.ok(r2.resumed && !r2.stopped && r2.recomputed_emps >= 2);
+  assert.ok(day('91')?.check_out_at && day('92')?.check_out_at, 'tính tiếp ra đủ vào – ra');
+  assert.equal(L.legacyPendingCount(), 0);
+  assert.equal((await L.resumeLegacyRebuild()).recomputed_emps, 0, 'không còn gì thì thôi');
+});
