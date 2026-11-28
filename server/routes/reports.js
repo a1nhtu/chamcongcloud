@@ -16,7 +16,7 @@ import { trackCell, TRACK_ROWS } from '../track6.js';
 import { CR_BASES, crId, getCustom, listCustom, applyTemplate } from '../custom-reports.js';
 import { currentTenant } from '../tenant.js';
 import { dataGen } from '../heavy.js';
-import { otherPunches, rawPunchDays, virtPunchDays } from '../lan-cham-khac.js';
+import { otherPunches, rawPunchDays, virtPunchDays, punchDeviceOn, punchDeviceOf } from '../lan-cham-khac.js';
 import { handMarker } from '../hand-mark.js';
 import { deptScopeGuard, scopeEmpSql } from '../dept-scope.js';
 
@@ -981,11 +981,19 @@ function buildReportRaw(type, from, to, filter) {
 
     /* --- Chi tiết chấm công (từng ngày có dữ liệu) --- */
     case 'detail': {
+      // công tắc "Hiện máy chấm" (show_punch_device, mặc định TẮT): thêm cột Máy vào / Máy ra sau Vào thực / Ra thực (công ảo: không)
+      const devOf = !ctx.virt && punchDeviceOn() ? punchDeviceOf(ctx.employees.map((e) => e.id), from, to) : null;
+      const devCell = (c, side) => {
+        const io = ioOf(c.employee_id, c.work_date, c), ph = !!(side === 'in' ? c.check_in_photo : c.check_out_photo);
+        if (io.pairs) return io.pairs.map((p) => devOf(c.employee_id, side === 'in' ? p[0] : p[1], ph)).join('\n');
+        return devOf(c.employee_id, side === 'in' ? c.check_in_at : c.check_out_at, ph);
+      };
       const columns = [
         { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 },
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 20 }, { key: 'dept', label: 'Bộ phận', w: 13 },
         { key: 'shift', label: 'Ca', w: 12 }, { key: 'inCa', label: 'Giờ vào ca', w: 10 }, { key: 'outCa', label: 'Giờ ra ca', w: 10 },
         { key: 'inReal', label: 'Vào thực', w: 9 }, { key: 'outReal', label: 'Ra thực', w: 9 },
+        ...(devOf ? [{ key: 'devIn', label: 'Máy vào', w: 16 }, { key: 'devOut', label: 'Máy ra', w: 16 }] : []),
         { key: 'late', label: 'Trễ (p)', w: 8 }, { key: 'early', label: 'Sớm (p)', w: 8 }, { key: 'ot', label: 'OT (p)', w: 8 },
         ...(HOURLY ? [{ key: 'gio', label: 'Tổng giờ', w: 9 }] : []),
         { key: 'cong', label: 'Công', w: 7 }, { key: 'status', label: 'Trạng thái', w: 13 },
@@ -998,6 +1006,7 @@ function buildReportRaw(type, from, to, filter) {
         code: c.code, name: c.full_name, dept: c.department || '', shift: c.shift_name || '',
         inCa: c.shift_start || '', outCa: c.shift_end || '',
         inReal: ioOf(c.employee_id, c.work_date, c).cin, outReal: ioOf(c.employee_id, c.work_date, c).cout,
+        ...(devOf ? { devIn: devCell(c, 'in'), devOut: devCell(c, 'out') } : {}),
         _io: pairsHM(ioOf(c.employee_id, c.work_date, c), c),
         late: c.late_min || 0, early: c.early_min || 0, ot: r1(c.ot_min || 0), gio: round2((c.work_minutes || 0) / 60),
         cong: round2(c.work_unit),
@@ -1061,20 +1070,21 @@ function buildReportRaw(type, from, to, filter) {
     case 'rawpunch': {
       const ids = ctx.employees.map((e) => e.id);
       const groups = ctx.virt ? virtPunchDays(ids, from, to, virtualOt(ids, from, to, !!filter.force, filter.virt)) : rawPunchDays(ids, from, to);
+      const dev = !ctx.virt && punchDeviceOn();   // công tắc "Hiện máy chấm": mỗi ô "08:01 · Máy cổng (máy 1)"; thêm tay ✎ / điện thoại 📱 giữ dấu riêng
       const byEmp = new Map();
       for (const g of groups) { if (!byEmp.has(g.eid)) byEmp.set(g.eid, []); byEmp.get(g.eid).push(g); }
       const N = Math.max(2, ...groups.map((g) => g.times.length));
       const columns = [
         { key: 'stt', label: 'STT', w: 6 }, { key: 'date', label: 'Ngày', w: 12 }, { key: 'wd', label: 'Thứ', w: 6 },
         { key: 'code', label: 'Mã NV', w: 10 }, { key: 'name', label: 'Họ tên', w: 22 }, { key: 'dept', label: 'Bộ phận', w: 16 },
-        ...Array.from({ length: N }, (_, i) => ({ key: 'l' + (i + 1), label: 'Lần ' + (i + 1), w: 8 })),
+        ...Array.from({ length: N }, (_, i) => ({ key: 'l' + (i + 1), label: 'Lần ' + (i + 1), w: dev ? 20 : 8 })),
         { key: 'nlan', label: 'Số lần', w: 8 },
       ];
       const rows = [];
       for (const e of ctx.employees) {   // xếp theo nhân viên (bộ phận, tên) rồi theo ngày
         for (const g of (byEmp.get(e.id) || []).sort((p, q) => (p.date < q.date ? -1 : 1))) {
           const row = { stt: rows.length + 1, date: fmtDMY(g.date), wd: WD[vnWeekday(g.date)], code: e.code, name: e.full_name, dept: e.department || '', nlan: g.times.length };
-          g.times.forEach((t, i) => { row['l' + (i + 1)] = t; });
+          g.times.forEach((t, i) => { row['l' + (i + 1)] = dev && g.srcs[i] && !/[✎📱]$/u.test(t) ? `${t} · ${g.srcs[i]}` : t; });
           rows.push(row);
         }
       }

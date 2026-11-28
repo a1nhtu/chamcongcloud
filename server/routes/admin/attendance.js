@@ -9,7 +9,7 @@ import { rulePairs, ruleWindow } from '../../attendance-calc.js';
 import { nowIso } from '../../util.js';
 import { notifyEmployee } from '../../push.js';
 import { virtualOt, applyVirtual, auditAllowed, virtLevel, locksIn } from '../../virtual-att.js';
-import { rawPunchDays, virtPunchDays } from '../../lan-cham-khac.js';
+import { rawPunchDays, virtPunchDays, punchDeviceOn, punchDeviceOf } from '../../lan-cham-khac.js';
 import { handMarker } from '../../hand-mark.js';
 
 const WDVN = { 1: 'T2', 2: 'T3', 3: 'T4', 4: 'T5', 5: 'T6', 6: 'T7', 7: 'CN' };
@@ -268,7 +268,7 @@ export function registerAttendanceRoutes(r, { need }) {
       // dựng nhóm dùng chung với file Excel của tab (server/lan-cham-khac.js); công ảo: giờ vào / ra ảo
       const groups = vmap ? virtPunchDays(empIds, from, to, vmap) : rawPunchDays(empIds, from, to);
       const rows = groups.map((g) => { const e = empById.get(g.eid); return e && { date: g.date, wd: WDVN[vnWd(g.date)], employee_id: g.eid, code: e.code, name: e.full_name, dept: e.department || '', times: g.times, srcs: g.srcs }; }).filter(Boolean);
-      return res.json({ mode, rows, ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
+      return res.json({ mode, rows, ...(!vmap && punchDeviceOn() ? { dev: 1 } : {}), ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
     }
 
     if (mode === 'summary') {
@@ -290,6 +290,8 @@ export function registerAttendanceRoutes(r, { need }) {
     const punches = vmap ? [] : db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM att_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to);
     const punchMap = new Map();
     for (const p of punches) { const k = p.employee_id + '|' + p.work_date; if (!punchMap.has(k)) punchMap.set(k, []); punchMap.get(k).push(vnHM(p.punch_at) + (String(p.serial).startsWith('TAY_') ? '✎' : String(p.serial).startsWith('DT_') ? '📱' : '')); }   // ✎ = lượt thêm tay
+    // công tắc "Hiện máy chấm" (show_punch_device, mặc định TẮT): tên máy đã quẹt đúng giờ vào / ra (công ảo: không hiện)
+    const devOf = !vmap && punchDeviceOn() ? punchDeviceOf(empIds, from, to) : null;
     const handSides = vmap ? () => ({ man_in: 0, man_out: 0 }) : handMarker();   // * cạnh đúng ô giờ sửa / thêm tay (server/hand-mark.js)
 
     const marks = vmap ? new Set() : new Set(db.prepare(`SELECT employee_id, work_date FROM att_edit_marks WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=?`).all(...empIds, from, to).map((m) => m.employee_id + '|' + m.work_date));
@@ -309,6 +311,7 @@ export function registerAttendanceRoutes(r, { need }) {
         ...capInfo(a),
         date: a.work_date, wd: WDVN[vnWd(a.work_date)], employee_id: a.employee_id, code: e.code, name: e.full_name, dept: e.department || '',
         shift: a.shift_name || '', in: vnHM(a.check_in_at), out: vnHM(a.check_out_at),
+        ...(devOf ? { in_dev: devOf(a.employee_id, a.check_in_at, !!a.check_in_photo), out_dev: devOf(a.employee_id, a.check_out_at, !!a.check_out_photo) } : {}),
         punches: vmap ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean) : (punchMap.get(key) || ((a.check_in_photo || a.check_out_photo) ? [vnHM(a.check_in_at), vnHM(a.check_out_at)].filter(Boolean).map((t) => t + '📱') : [])),   // công ảo: chỉ giờ vào · ra ảo; 📱 = chấm bằng điện thoại
         late: a.late_min || 0, early: a.early_min || 0, ot: a.ot_min || 0,
         cong: Math.round((a.work_unit || 0) * 100) / 100, mins: a.work_minutes || 0, manual: a.manual || marks.has(key) ? 1 : 0, leave: leaveOfRow(a, lv),
@@ -341,7 +344,7 @@ export function registerAttendanceRoutes(r, { need }) {
       }
     }
     rows.sort((a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    return res.json({ mode, rows, ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
+    return res.json({ mode, rows, ...(devOf ? { dev: 1 } : {}), ...(virt && !req.forceVirt ? { locks: locksIn(from, to).map((k) => k.month) } : {}) });
   });
 
   /* -------------------- SỬA / THÊM / XOÁ GIỜ CHẤM (bằng tay) -------------------- */

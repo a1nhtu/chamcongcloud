@@ -118,6 +118,8 @@ async function pageEditAtt() {
     const tb = el('tbody');
     // dấu * "giờ sửa / thêm bằng tay": nằm cạnh đúng giờ được thêm tay (man_in / man_out); sửa thẳng ô Vào / Ra hoặc không rõ giờ nào → cạnh giờ vào như cũ
     const star = () => el('span', { style: 'color:#e67e22;font-weight:800;margin-left:2px', title: 'Giờ sửa/thêm bằng tay' }, '*');
+    // công tắc "Hiện máy chấm" (show_punch_device): tên máy nhỏ dưới giờ — máy chủ chỉ gửi in_dev / out_dev khi bật
+    const devTag = (v) => (v ? el('div', { class: 'punch-dev', title: 'Chấm ở máy: ' + v }, v) : '');
     const starAt = (r, side) => {
       if (!r.manual || !markChkInput.checked) return '';
       if (r.man_in || r.man_out) return (side === 'in' ? r.man_in : r.man_out) ? star() : '';
@@ -129,8 +131,8 @@ async function pageEditAtt() {
         el('td', {}, r.wd),
         ...(showNV ? [el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || '—')] : []),
         el('td', {}, r.shift ? el('span', { class: 'pill' }, r.shift) : el('span', { class: 'muted' }, '—')),
-        inlineCell(r, 'in', [r.in || '—', starAt(r, 'in')]),
-        inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—'), starAt(r, 'out')]),
+        inlineCell(r, 'in', [r.in || '—', starAt(r, 'in'), devTag(r.in_dev)]),
+        inlineCell(r, 'out', [r.out || (r.in ? el('span', { class: 'pill muted' }, 'chưa ra') : '—'), starAt(r, 'out'), devTag(r.out_dev)]),
         ...(hrly ? [
           el('td', { style: 'text-align:center;font-weight:600' }, r.mins ? (Math.round(r.mins / 60 * 100) / 100) + ' giờ' : '—'),
           el('td', { style: 'text-align:center' }, r.mins ? (r.mins + ' phút') : '—'),
@@ -216,7 +218,9 @@ async function pageEditAtt() {
         el('td', {}, r.date.slice(8) + '/' + r.date.slice(5, 7)),
         el('td', {}, r.wd),
         ...(showNV ? [el('td', {}, r.code), el('td', {}, el('b', {}, r.name)), el('td', {}, r.dept || '—')] : []),
-        ...Array.from({ length: n }, (_, i) => el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums', ...(r.srcs[i] ? { title: r.srcs[i] } : {}) }, r.times[i] || '')),
+        ...Array.from({ length: n }, (_, i) => el('td', { style: 'text-align:center;font-variant-numeric:tabular-nums', ...(r.srcs[i] ? { title: r.srcs[i] } : {}) }, r.times[i] || '',
+          // công tắc "Hiện máy chấm": tên máy dưới từng lượt (thêm tay ✎ / điện thoại 📱 đã có dấu riêng)
+          d.dev && r.srcs[i] && !/[✎📱]$/u.test(r.times[i] || '') ? el('div', { class: 'punch-dev' }, r.srcs[i]) : '')),
         el('td', { style: 'text-align:center;font-weight:600' + (r.times.length % 2 ? ';color:#c0392b' : ''), title: r.times.length % 2 ? 'Số lần lẻ — có thể quên chấm 1 lượt' : '' }, String(r.times.length)));
       if (edit) { tr.className += ' att-inl'; tr.style.cursor = 'pointer'; tr.title = 'Bấm để xem / thêm / sửa / xoá từng lượt chấm ngày này'; tr.onclick = () => punchModal({ id: r.employee_id, name: r.name, code: r.code }, r.date, load); }
       return tr;
@@ -233,7 +237,7 @@ async function pageEditAtt() {
     wrap.append(
       ...[lockNote(d.locks)].filter(Boolean),
       el('div', { style: 'display:flex;gap:10px;align-items:flex-start;margin-bottom:10px' },
-        el('div', { class: 'map-hint', style: 'flex:1' }, 'Mọi lượt quẹt trong ngày theo thứ tự (chưa chia ca). ✎ = thêm tay · 📱 = chấm điện thoại · rê chuột vào giờ xem chấm ở máy nào · Số lần đỏ = số lẻ (có thể quên chấm 1 lượt).' + (edit ? ' Bấm vào dòng để xem / thêm / sửa / xoá từng lượt — công ngày đó tự tính lại.' : '')),
+        el('div', { class: 'map-hint', style: 'flex:1' }, 'Mọi lượt quẹt trong ngày theo thứ tự (chưa chia ca). ✎ = thêm tay · 📱 = chấm điện thoại · ' + (d.dev ? 'dòng chữ nhỏ dưới giờ = máy đã chấm' : 'rê chuột vào giờ xem chấm ở máy nào') + ' · Số lần đỏ = số lẻ (có thể quên chấm 1 lượt).' + (edit ? ' Bấm vào dòng để xem / thêm / sửa / xoá từng lượt — công ngày đó tự tính lại.' : '')),
         rows.length ? xlBtn : ''),
       floatHeadPanel(tbl, pager));
   };

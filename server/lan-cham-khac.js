@@ -3,12 +3,43 @@
 // nên các lượt này trước đây chỉ thấy ở tab "Giờ nguồn".
 // Mỗi lượt gắn vào dòng công CHỨA nó (giữa giờ vào và giờ ra, kể cả ca đêm qua nửa đêm); không dòng nào chứa thì gắn dòng GẦN NHẤT
 // cùng ngày. Lượt trùng PHÚT với giờ vào / ra (hoặc với lượt khác đã gắn) không tính lại. Chỉ để HIỂN THỊ, không đổi công.
-import { db } from './db.js';
+import { db, getSetting } from './db.js';
 import { applyVirtual } from './virtual-att.js';
 
 const vnHM = (iso) => { if (!iso) return ''; const t = new Date(new Date(iso).getTime() + 7 * 3600000); return String(t.getUTCHours()).padStart(2, '0') + ':' + String(t.getUTCMinutes()).padStart(2, '0'); };
 // ✎ = lượt thêm tay · 📱 = chấm điện thoại
 export const punchMark = (serial) => (String(serial).startsWith('TAY_') ? '✎' : String(serial).startsWith('DT_') ? '📱' : '');
+
+// Tên nguồn của 1 lượt quẹt theo serial: 'Thêm tay' · 'Điện thoại' · tên máy (full = kèm "(máy N)"); máy chưa đặt tên → serial
+export function punchSrcLabeler(full = false) {
+  const dn = new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
+  return (sr) => {
+    sr = String(sr || '');
+    if (sr.startsWith('TAY_')) return 'Thêm tay';
+    if (sr.startsWith('DT_')) return 'Điện thoại';
+    const d = dn.get(sr);
+    return d ? (d.name || sr) + (full && d.machine_number ? ` (máy ${d.machine_number})` : '') : sr;
+  };
+}
+
+// HIỆN MÁY CHẤM cạnh giờ vào / ra (công tắc show_punch_device, mặc định TẮT — Đài PT-TH Hưng Yên 28/11/2026: muốn thấy giờ đó
+// NV chấm ở máy nào). Tắt = mọi màn hình / báo cáo y như cũ. Chỉ để HIỂN THỊ, không đổi công.
+export const punchDeviceOn = () => getSetting('show_punch_device', '0') === '1';
+// → (employee_id, iso, phone) → tên máy đã quẹt đúng PHÚT đó ('' nếu không có lượt nào: giờ gõ tay / công ảo);
+// không thấy lượt mà phiên đó có ảnh chấm điện thoại (phone = true) → 'Điện thoại'. Đọc thêm 1 ngày 2 đầu cho ca đêm.
+export function punchDeviceOf(empIds, from, to) {
+  const at = new Map();
+  if (empIds && empIds.length) {
+    const ph = empIds.map(() => '?').join(',');
+    const lbl = punchSrcLabeler();
+    for (const p of db.prepare(`SELECT employee_id, punch_at, serial FROM att_punches WHERE employee_id IN (${ph}) AND work_date >= ? AND work_date <= ? ORDER BY punch_at`)
+      .all(...empIds, addDay(from, -1), addDay(to, 1))) {
+      const k = p.employee_id + '|' + minOf(p.punch_at);
+      if (!at.has(k)) at.set(k, lbl(p.serial));
+    }
+  }
+  return (eid, iso, phone = false) => (!iso ? '' : at.get(eid + '|' + minOf(iso)) || (phone ? 'Điện thoại' : ''));
+}
 
 // GIỜ NGUỒN (như On39 "Giờ nguồn", Anh 16/11/2026): mỗi NV mỗi ngày 1 nhóm, MỌI lượt quẹt theo thứ tự (không theo ca / quy tắc ghép).
 // Ngày chỉ chấm điện thoại (không có lượt máy) lấy giờ vào / ra của phiên chấm. Dùng chung cho tab "🕘 Giờ nguồn" và file Excel của nó.
@@ -18,8 +49,7 @@ export function rawPunchDays(empIds, from, to) {
   if (!empIds || !empIds.length) return [];
   const ph = empIds.map(() => '?').join(',');
   const put = (eid, d, t, src) => { const k = eid + '|' + d; if (!groups.has(k)) groups.set(k, { eid, date: d, times: [], srcs: [] }); const g = groups.get(k); g.times.push(t); g.srcs.push(src); };
-  const dn = new Map(db.prepare('SELECT serial, name, machine_number FROM push_devices').all().map((d) => [d.serial, d]));
-  const srcOf = (sr) => { sr = String(sr || ''); if (sr.startsWith('TAY_')) return 'Thêm tay'; if (sr.startsWith('DT_')) return 'Điện thoại'; const d = dn.get(sr); return d ? (d.name || sr) + (d.machine_number ? ` (máy ${d.machine_number})` : '') : sr; };
+  const srcOf = punchSrcLabeler(true);
   for (const p of db.prepare(`SELECT employee_id, work_date, punch_at, serial FROM att_punches WHERE employee_id IN (${ph}) AND work_date>=? AND work_date<=? ORDER BY punch_at`).all(...empIds, from, to))
     put(p.employee_id, p.work_date, vnHM(p.punch_at) + punchMark(p.serial), srcOf(p.serial));
   const has = new Set(groups.keys());
