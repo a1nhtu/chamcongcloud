@@ -5,6 +5,24 @@ const wdName = (d) => WD_VN[new Date(d + 'T12:00:00Z').getUTCDay()];
 let EDITATT_EMP = null;
 const shiftName = (id) => { const s = SHIFTS.find(x => x.id === id); return s ? s.name : null; };
 const minCell = (v) => (v && v > 0) ? String(v) : '—';
+// TÍNH LẠI CHẠY NỀN (v1.42.2): máy chủ tính theo từng nhóm NV, vẫn trả lời máy chấm công + người dùng khác; nút hiện tiến độ
+// "Đang tính 120 / 1.797 NV…". Qua tên miền không còn bị cắt ở 100 giây (trước báo "Có lỗi xảy ra" dù máy chủ vẫn đang tính).
+// Có lượt đang chạy (người khác vừa bấm) → theo dõi luôn lượt đó. Trả { total } khi xong; lỗi thì ném ra như api().
+async function recomputeBg(qs, btn) {
+  let r;
+  try { r = await api('/admin/recompute?' + (qs ? qs + '&' : '') + 'bg=1', { method: 'POST' }); }
+  catch (e) { if (e.status === 409 && e.data && e.data.job) r = { job: e.data.job }; else throw e; }
+  let fails = 0;
+  for (;;) {
+    await new Promise((ok) => setTimeout(ok, 1500));
+    let j;
+    try { j = await api('/admin/recompute/job/' + r.job); fails = 0; }
+    catch (e) { if (e.status === 404 || ++fails > 40) throw e; continue; }   // máy chủ bận ghi đĩa chốc lát → hỏi lại
+    if (btn) btn.textContent = `Đang tính ${j.done.toLocaleString('vi')} / ${j.total.toLocaleString('vi')} NV…`;
+    if (j.state === 'err') throw new Error(j.msg || 'Tính lại bị lỗi');
+    if (j.state === 'done') return j;
+  }
+}
 async function pageEditAtt() {
   setMain(head('Tính công'), loading());
   if (!SHIFTS.length) { try { await loadRefs(); } catch {} }
@@ -257,7 +275,7 @@ async function pageEditAtt() {
     else scopeTxt = 'CẢ CÔNG TY';
     if (!confirm(`Tính lại công từ ${fromI.value} đến ${toI.value} cho ${scopeTxt}?\nDò lại ca theo giờ vào/ra và tính lại Muộn/Sớm/OT/Công.`)) return;
     recalcBtn.disabled = true; recalcBtn.textContent = 'Đang tính…';
-    try { const rs = await api('/admin/recompute?' + scope(), { method: 'POST' }); toast(`Đã tính lại ${rs.updated} bản ghi`, 'ok'); load(); }
+    try { const rs = await recomputeBg(scope(), recalcBtn); toast(`Đã tính lại công ${rs.total.toLocaleString('vi')} nhân viên`, 'ok'); load(); }
     catch (e) { toast(e.message, 'err'); }
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại'; }
   };

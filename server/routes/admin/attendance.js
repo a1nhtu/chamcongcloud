@@ -2,7 +2,7 @@
 import { db, getSetting, adminAttWhere, EMP_IN_PERIOD, deptWithChildren, splitDeptList, hourlyNoOvernight } from '../../db.js';
 import { LEAVE_TYPES, customLeaveTypes, HALF_LABEL, isHourLeave, hoursLabel } from '../../leave-quota.js';
 import { leaveShiftSymOn, workedCell, joinLeaveSym } from '../../leave-shift-sym.js';
-import { resolveEffectiveShift, getShift } from '../../shift-resolver.js';
+import { resolveEffectiveShift, getShift, withResolverCache } from '../../shift-resolver.js';
 import { payrollCtx, computeDayMetrics } from '../../day-metrics.js';
 import { dayPairsFor, rebuildDays, rebuildDay } from '../../device-sync.js';
 import { rulePairs, ruleWindow } from '../../attendance-calc.js';
@@ -79,7 +79,62 @@ function computeManual(employeeId, workDate, inIso, outIso) {
 // Dùng chung cho nút "Tính lại" và những nơi vừa đổi ca của ngày đã có giờ chấm (duyệt nhân viên chọn ca…).
 // Phạm vi: ids (vài NV) > deptList (nhiều phòng ban, đã gồm bộ phận con) > dept (1 phòng ban) > cả công ty;
 // thời gian: from–to ('YYYY-MM-DD') > month ('YYYY-MM') > tất cả. Trả số dòng công đã tính lại.
-export function recomputeAttendance({ month = '', from = '', to = '', ids = [], deptList = [], dept = '' } = {}) {
+export function recomputeAttendance(opts = {}) { return withResolverCache(() => recomputeAttendanceRaw(opts)); }
+
+// Lượt quẹt chưa khớp NV (khai Số ID máy sau khi máy đã đẩy log) → gán lại trước khi ghép
+function matchOrphanPunches() {
+  for (const { pin } of db.prepare('SELECT DISTINCT pin FROM device_punches WHERE employee_id IS NULL').all()) {
+    const emp = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>'' AND active=1").get(pin)
+      || db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
+    if (emp) db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(emp.id, pin);
+  }
+}
+
+/* TÍNH LẠI CHẠY NỀN (v1.42.2 — pretty 28/11/2026: Tính lại cả công ty giữ luồng chính nhiều phút → máy chủ "treo đơ", qua tên miền
+ * quá 100 giây Cloudflare cắt → báo "Có lỗi xảy ra"). Cùng phạm vi như Tính lại thường nhưng chia theo NHÓM NHÂN VIÊN: mỗi nhóm gọi đúng
+ * recomputeAttendance({ …, ids: nhóm }) rồi nhả luồng 25 ms. Công của mỗi NV chỉ phụ thuộc lượt chấm + dòng công của chính NV đó → tính
+ * theo nhóm ra Y HỆT tính một lần. Cỡ nhóm tự co giãn để mỗi nhóm giữ luồng ~0,4 giây. */
+const rcJobs = new Map();   // mã → { state: run|done|err, done, total, updated, msg, at }
+let rcBusy = null;
+function recomputeScopeIds({ month = '', from = '', to = '', ids = [], deptList = [], dept = '' }) {
+  if (ids.length) return [...new Set(ids)];
+  const f = String(from || '').slice(0, 10), t = String(to || '').slice(0, 10);
+  const w = [], args = [];
+  if (/^\d{4}-\d{2}-\d{2}$/.test(f) && /^\d{4}-\d{2}-\d{2}$/.test(t)) { w.push('x.work_date>=? AND x.work_date<=?'); args.push(f, t); }
+  else if (month) { w.push('x.work_date LIKE ?'); args.push(month + '%'); }
+  let join = '';
+  if (deptList.length) { join = ' JOIN employees e ON e.id=x.employee_id'; w.push(`e.department IN (${deptList.map(() => '?').join(',')})`); args.push(...deptList); }
+  else if (dept) { join = ' JOIN employees e ON e.id=x.employee_id'; w.push('e.department=?'); args.push(dept); }
+  const where = w.length ? ' AND ' + w.join(' AND ') : '';
+  const sql = `SELECT DISTINCT x.employee_id id FROM attendance x${join} WHERE x.check_in_at IS NOT NULL${where}
+    UNION SELECT DISTINCT x.employee_id id FROM att_punches x${join} WHERE x.employee_id IS NOT NULL${where} ORDER BY 1`;
+  return db.prepare(sql).all(...args, ...args).map((r) => r.id);
+}
+export const recomputeJobStatus = (id) => rcJobs.get(id) || null;
+export function startRecomputeJob(opts) {
+  if (rcBusy && rcJobs.get(rcBusy)?.state === 'run') return { busy: rcBusy };
+  for (const [k, v] of rcJobs) if (v.state !== 'run' && Date.now() - v.at > 3600000) rcJobs.delete(k);
+  matchOrphanPunches();   // trước khi lấy danh sách NV: lượt vừa khớp NV cũng vào phạm vi
+  const list = recomputeScopeIds(opts);
+  const id = Math.random().toString(36).slice(2, 10);
+  const j = { state: 'run', done: 0, total: list.length, updated: 0, msg: '', at: Date.now() };
+  rcJobs.set(id, j); rcBusy = id;
+  (async () => {
+    let size = 5;
+    for (let i = 0; i < list.length;) {
+      const part = list.slice(i, i + size);
+      const t0 = Date.now();
+      j.updated += recomputeAttendance({ ...opts, ids: part });
+      i += part.length; j.done = i; j.at = Date.now();
+      const ms = Date.now() - t0;
+      size = Math.max(1, Math.min(200, Math.round(part.length * 400 / Math.max(ms, 1))));
+      await new Promise((ok) => setTimeout(ok, 25));
+    }
+  })().then(() => { j.state = 'done'; }, (e) => { j.state = 'err'; j.msg = e.message || String(e); console.error('[tính lại nền]', e); })
+    .finally(() => { j.at = Date.now(); if (rcBusy === id) rcBusy = null; });
+  return { job: id, total: list.length };
+}
+function recomputeAttendanceRaw({ month = '', from = '', to = '', ids = [], deptList = [], dept = '' } = {}) {
     // Đọc cấu hình + ngày lễ MỘT LẦN cho cả mẻ (thay vì query mỗi dòng)
     const ctx = payrollCtx(getSetting, db);
     const hourlyPairs = getSetting('hourly_merge_rule', 'filo') === 'pairs';
@@ -100,12 +155,7 @@ export function recomputeAttendance({ month = '', from = '', to = '', ids = [], 
     const dWhere = where.filter((w) => w !== 'a.check_in_at IS NOT NULL').map((w) => w.replace(/\ba\./g, 'p.'));
     const dArgs = args.slice();
     const dJoin = join.replace('e.id=a.employee_id', 'e.id=p.employee_id');
-    // Lượt quẹt chưa khớp NV (khai Số ID máy sau khi máy đã đẩy log) → gán lại trước khi ghép
-    for (const { pin } of db.prepare('SELECT DISTINCT pin FROM device_punches WHERE employee_id IS NULL').all()) {
-      const emp = db.prepare("SELECT id FROM employees WHERE device_pin=? AND device_pin<>'' AND active=1").get(pin)
-        || db.prepare('SELECT id FROM employees WHERE code=? AND active=1').get(pin);
-      if (emp) db.prepare('UPDATE device_punches SET employee_id=? WHERE pin=? AND employee_id IS NULL').run(emp.id, pin);
-    }
+    matchOrphanPunches();
     const devDays = db.prepare(`SELECT DISTINCT p.employee_id, p.work_date FROM att_punches p${dJoin} WHERE p.employee_id IS NOT NULL${dWhere.length ? ' AND ' + dWhere.join(' AND ') : ''}`)
       .all(...dArgs).map((r) => r.employee_id + '|' + r.work_date);
     const devSet = new Set(devDays);
@@ -211,8 +261,18 @@ export function registerAttendanceRoutes(r, { need }) {
     const dept = (req.query.dept || '').trim();
     const deptList = deptWithChildren(splitDeptList(req.query.depts || dept));   // gồm cả bộ phận con
     const ids = String(req.query.ids || '').split(',').map((s) => parseInt(s, 10)).filter(Boolean);
-    const n = recomputeAttendance({ month: (req.query.month || '').slice(0, 7), from: req.query.from, to: req.query.to, ids, deptList, dept });
+    const opts = { month: (req.query.month || '').slice(0, 7), from: req.query.from, to: req.query.to, ids, deptList, dept };
+    if (req.query.bg === '1') {   // chạy nền: trả mã lượt ngay, giao diện hỏi tiến độ ở /recompute/job/:id
+      const r2 = startRecomputeJob(opts);
+      return r2.busy ? res.status(409).json({ error: 'Đang tính lại lượt trước — chờ xong rồi bấm lại', job: r2.busy }) : res.json({ ok: true, ...r2 });
+    }
+    const n = recomputeAttendance(opts);
     res.json({ ok: true, updated: n });
+  });
+  r.get('/recompute/job/:id', need('recompute'), (req, res) => {
+    const j = rcJobs.get(req.params.id);
+    if (!j) return res.status(404).json({ error: 'Không thấy lượt tính lại (máy chủ vừa khởi động lại?) — bấm Tính lại lần nữa' });
+    res.json(j);
   });
 
   // LƯỚI CHẤM CÔNG theo KHOẢNG NGÀY + phạm vi (cả công ty / phòng ban / vài NV).

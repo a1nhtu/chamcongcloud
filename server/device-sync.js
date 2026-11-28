@@ -3,7 +3,7 @@
 import { createHash } from 'node:crypto';
 import { movingOut } from './move-flag.js';
 import { db, getSetting, setSetting, empHourly, hourlyNoOvernight, USER_TZ, nearestAllowedOffice } from './db.js';
-import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule } from './shift-resolver.js';
+import { resolveEffectiveShift, resolveDayShifts, ioParamsFor, effectiveMergeRule, withResolverCache } from './shift-resolver.js';
 import { mergeDayPunches, ruleWindow, punchPairs, pickShiftSet, pickDirShiftSet, openTailIn, rulePairs, ruleKnowsDir, ruleDir, dirOpenIn, fitWindows, seqPairUnits, pickSeqShifts, seqNightTail, seqDayRule } from './attendance-calc.js';
 import { payrollCtx, computeDayMetrics } from './day-metrics.js';
 import { syncOtRegDay, otLunchOn } from './ot-reg.js';
@@ -1561,7 +1561,7 @@ export function rebuildDays(keys) {
   const list = [...all].map((k) => k.split('|')).sort((a, b) => (+a[0] - +b[0]) || (a[1] < b[1] ? -1 : a[1] > b[1] ? 1 : 0));
   const outer = _batchCtx;
   if (!outer) _batchCtx = payrollCtx(getSetting, db);
-  try { for (const [eid, date] of list) rebuildDay(+eid, date); } finally { _batchCtx = outer; }
+  try { withResolverCache(() => { for (const [eid, date] of list) rebuildDay(+eid, date); }); } finally { _batchCtx = outer; }
   return list.length;
 }
 
@@ -1663,8 +1663,19 @@ function rebuildDayCore(employeeId, workDate) {
   // Ngưỡng ghép cặp: theo Lịch trình vào ra của NV (min / gap / max); chưa khai thì theo ô "Bỏ qua lần chấm trùng" ở Cài đặt
   const dup = ioParamsFor(employeeId, workDate) || pairDup();
   let nextCut = null;   // (lịch nhiều ca) ngày đã đủ vào – ra trong chính ngày → không lấy lượt sau mốc này (sáng hôm sau)
-  const punchesInWin = (winStart, winEnd) => db.prepare('SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at')
-    .all(employeeId, winStart.toISOString(), winEnd.toISOString()).filter((p) => (!usedTo || p.punch_at > usedTo) && (!nextCut || p.punch_at <= nextCut));
+  // Lượt quẹt trong khung [winStart, winEnd]. Mỗi ngày gọi nhiều lần (mỗi ca, mỗi cách chọn ca) → đọc MỘT lần các lượt từ đầu hôm trước
+  // tới hết 2 ngày sau rồi lọc trong bộ nhớ; khung vượt ra ngoài khoảng đó (hiếm) thì đọc thẳng như cũ. Cùng câu lệnh, cùng thứ tự.
+  const winSql = 'SELECT punch_at, serial, status FROM att_punches WHERE employee_id=? AND punch_at>=? AND punch_at<=? ORDER BY punch_at';
+  const preLo = new Date(Date.parse(workDate + 'T00:00:00+07:00') - 86400000).toISOString();
+  const preHi = new Date(Date.parse(workDate + 'T00:00:00+07:00') + 3 * 86400000 - 1).toISOString();
+  let pre = null;
+  const winRows = (a, b) => {
+    if (a < preLo || b > preHi) return db.prepare(winSql).all(employeeId, a, b);
+    if (!pre) pre = db.prepare(winSql).all(employeeId, preLo, preHi);
+    return pre.filter((p) => p.punch_at >= a && p.punch_at <= b).map((p) => ({ ...p }));
+  };
+  const punchesInWin = (winStart, winEnd) => winRows(winStart.toISOString(), winEnd.toISOString())
+    .filter((p) => (!usedTo || p.punch_at > usedTo) && (!nextCut || p.punch_at <= nextCut));
 
   const plan = hourly ? { off: false, shifts: [], mergeRule: null, isSchedule: false } : resolveDayShifts(employeeId, workDate);
   if (plan.off) return; // ngày nghỉ → không dựng

@@ -557,7 +557,7 @@ async function pageSettings() {
   recalcBtn.onclick = async () => {
     if (!confirm('Tính lại số công/OT cho toàn bộ bản ghi chấm công theo cấu hình hiện tại?')) return;
     recalcBtn.disabled = true; recalcBtn.textContent = 'Đang tính…';
-    try { const r = await api('/admin/recompute', { method: 'POST' }); toast(`Đã tính lại ${r.updated} bản ghi`, 'ok'); }
+    try { const r = await recomputeBg('', recalcBtn); toast(`Đã tính lại công ${r.total.toLocaleString('vi')} nhân viên`, 'ok'); }
     catch (e) { toast(e.message, 'err'); }
     finally { recalcBtn.disabled = false; recalcBtn.textContent = '↻ Tính lại công tất cả'; }
   };

@@ -4,8 +4,14 @@
 const VN = '+07:00';
 
 // Tạo Date (UTC instant) từ ngày làm việc VN + giờ 'HH:MM'
+// (đọc chuỗi ngày giờ rất tốn: nhớ mốc đã tính theo ngày + giờ — Tính lại cả công ty gọi hàng triệu lần với vài trăm cặp khác nhau)
+const _vnI = new Map();   // ngày → (giờ → mốc ms)
 function vnInstant(workDate, hhmm, addDays = 0) {
-  const d = new Date(`${workDate}T${hhmm}:00${VN}`);
+  let day = _vnI.get(workDate);
+  if (!day) { if (_vnI.size > 5000) _vnI.clear(); day = new Map(); _vnI.set(workDate, day); }
+  let ms = day.get(hhmm);
+  if (ms === undefined) { ms = new Date(`${workDate}T${hhmm}:00${VN}`).getTime(); day.set(hhmm, ms); }
+  const d = new Date(ms);
   if (addDays) d.setUTCDate(d.getUTCDate() + addDays);
   return d;
 }
@@ -36,7 +42,13 @@ export function shiftBounds(workDate, shift) {
 const mins = (a, b) => Math.round((b - a) / 60000);
 // Giờ chấm chỉ tính tới PHÚT (bỏ giây lẻ) — quẹt 08:05:40 là "08:05", khớp với giờ hiện trên báo cáo
 // (nếu để nguyên giây: 08:05:40 so với ca 08:00 làm tròn thành trễ 6 phút dù báo cáo ghi 08:05).
-const toMinute = (iso) => new Date(Math.floor(new Date(iso).getTime() / 60000) * 60000);
+const _toM = new Map();
+const toMinute = (iso) => {
+  if (typeof iso !== 'string') return new Date(Math.floor(new Date(iso).getTime() / 60000) * 60000);
+  let ms = _toM.get(iso);
+  if (ms === undefined) { ms = Math.floor(new Date(iso).getTime() / 60000) * 60000; if (_toM.size > 200000) _toM.clear(); _toM.set(iso, ms); }
+  return new Date(ms);
+};
 
 // Tính đi muộn (phút) khi VÀO ca.
 // Dung sai (late_grace_min) chỉ là NGƯỠNG: trễ trong ngưỡng → bỏ qua (0);
@@ -681,8 +693,10 @@ export function pickShiftSet(cands, punches, workDate, opts = {}) {
   const list = (cands || []).slice(0, 10).map((shift, idx) => ({ shift, idx, ...shiftBounds(workDate, shift), w: fitWindows(workDate, shift) }));
   const ps = [...(punches || [])].sort((a, b) => new Date(a.punch_at) - new Date(b.punch_at));
   if (!list.length || !ps.length) return [];
-  const t = (p) => toMinute(p.punch_at).getTime();
-  const vnDay = (p) => new Date(new Date(p.punch_at).getTime() + 7 * HH).toISOString().slice(0, 10);   // ngày (giờ VN) của lượt quẹt
+  // mỗi lượt tính giờ (phút) + ngày VN MỘT lần cho mọi tổ hợp ca (trước đây tính lại ở từng tổ hợp × từng ca)
+  const tMemo = new Map(), dMemo = new Map();
+  const t = (p) => { let v = tMemo.get(p); if (v === undefined) { v = toMinute(p.punch_at).getTime(); tMemo.set(p, v); } return v; };
+  const vnDay = (p) => { let v = dMemo.get(p); if (v === undefined) { v = new Date(new Date(p.punch_at).getTime() + 7 * HH).toISOString().slice(0, 10); dMemo.set(p, v); } return v; };   // ngày (giờ VN) của lượt quẹt
   const dayEnd = vnInstant(workDate, '00:00').getTime() + 24 * HH;   // nửa đêm cuối ngày làm việc
   let best = null;
   for (let mask = 1; mask < (1 << list.length); mask++) {

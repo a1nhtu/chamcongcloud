@@ -7,7 +7,23 @@ import { db } from './db.js';
 // theo TỪNG CSDL (db.js), không nhớ riêng ở đây để máy chủ nhiều công ty không dùng nhầm câu lệnh của công ty khác.
 const q = (sql) => db.prepare(sql);
 
-export const getShift = (id) => q('SELECT * FROM shifts WHERE id = ?').get(id);
+// NHỚ TẠM trong MỘT lần dựng công (rebuildDays / Tính lại — chạy liền một mạch, không nhường luồng): ca, lịch trình, phân ca,
+// phòng ban, lịch trình vào ra KHÔNG đổi giữa chừng nhưng trước đây mỗi ngày công tra lại hàng chục lần (pretty 28/11/2026:
+// 1/3 thời gian Tính lại là tra cấu hình). Ngoài withResolverCache thì không nhớ gì — kết quả y như cũ.
+let _memo = null;
+const memo = (key, fn) => {
+  if (!_memo) return fn();
+  if (_memo.has(key)) return _memo.get(key);
+  const v = fn(); _memo.set(key, v); return v;
+};
+// Chạy fn (ĐỒNG BỘ) với bộ nhớ tạm; lồng nhau thì dùng chung bộ nhớ của lớp ngoài.
+export function withResolverCache(fn) {
+  if (_memo) return fn();
+  _memo = new Map();
+  try { return fn(); } finally { _memo = null; }
+}
+
+export const getShift = (id) => memo('sh|' + id, () => q('SELECT * FROM shifts WHERE id = ?').get(id));
 const hhmm2min = (s) => { const [h, m] = String(s || '0:0').split(':').map(Number); return (h || 0) * 60 + (m || 0); };
 function checkinMinVN(iso) { const d = new Date(iso); const t = new Date(d.getTime() + 7 * 3600000); return t.getUTCHours() * 60 + t.getUTCMinutes(); }
 function inWindow(min, start, end) { return start <= end ? (min >= start && min <= end) : (min >= start || min <= end); }
@@ -17,8 +33,8 @@ const minDist = (a, b) => { const d = Math.abs(a - b) % 1440; return Math.min(d,
 
 // Các ca thuộc 1 lịch trình (đang hoạt động), theo thứ tự.
 export function scheduleShifts(scheduleId) {
-  return q(`SELECT s.* FROM work_schedule_shifts wss JOIN shifts s ON s.id = wss.shift_id
-    WHERE wss.work_schedule_id = ? AND s.active = 1 ORDER BY wss.sort_order`).all(scheduleId);
+  return memo('ss|' + scheduleId, () => q(`SELECT s.* FROM work_schedule_shifts wss JOIN shifts s ON s.id = wss.shift_id
+    WHERE wss.work_schedule_id = ? AND s.active = 1 ORDER BY wss.sort_order`).all(scheduleId));
 }
 
 // Khung VÀO / RA của 1 ca (phút trong ngày; inWindow tự xử lý ca đêm qua nửa đêm): dùng khung đã khai; chưa khai → khung mặc định
@@ -79,7 +95,8 @@ function lateNightAutoShift(workDate, checkInIso, checkOutIso) {
 }
 
 // Chuỗi phòng ban từ phòng của NV lên các cấp cha: [phòng, cha, ông…]
-function deptChain(name) {
+function deptChain(name) { return memo('dc|' + name, () => deptChainRaw(name)); }
+function deptChainRaw(name) {
   const out = [], seen = new Set();
   let cur = q('SELECT id, name, parent_id FROM departments WHERE name = ?').get(name);
   if (!cur) return name ? [name] : [];
@@ -92,8 +109,10 @@ function deptChain(name) {
 // Lịch trình gán cho PHÒNG BAN phủ ngày này: phòng của NV trước, rồi tới phòng cấp trên có bật "bao gồm cấp dưới",
 // cuối cùng là lịch "Tất cả phòng ban" (department = '*', áp cả NV chưa có phòng ban).
 export function deptShiftAssignment(employeeId, workDate) {
-  const e = q('SELECT department FROM employees WHERE id = ?').get(employeeId);
-  const dept = (e?.department || '').trim();
+  const dept = memo('ed|' + employeeId, () => (q('SELECT department FROM employees WHERE id = ?').get(employeeId)?.department || '').trim());
+  return memo('dsa|' + dept + '|' + workDate, () => deptAssignRaw(dept, workDate));
+}
+function deptAssignRaw(dept, workDate) {
   const chain = dept ? deptChain(dept) : [];
   for (let i = 0; i < chain.length; i++) {
     const r = q(`SELECT * FROM dept_shift_assignments
@@ -110,6 +129,9 @@ export function deptShiftAssignment(employeeId, workDate) {
 // Phân ca theo KHOẢNG NGÀY phủ ngày này — lịch RIÊNG của NV (shift_assignments, bản ghi mới nhất thắng);
 // NV không có lịch riêng thì theo lịch trình của PHÒNG BAN.
 export function rangedShiftAssignment(employeeId, workDate) {
+  return memo('rsa|' + employeeId + '|' + workDate, () => rangedRaw(employeeId, workDate));
+}
+function rangedRaw(employeeId, workDate) {
   const own = q(`SELECT * FROM shift_assignments
     WHERE employee_id = ? AND active = 1 AND from_date <= ?
       AND (to_date IS NULL OR to_date = '' OR to_date >= ?)
@@ -121,8 +143,8 @@ export function rangedShiftAssignment(employeeId, workDate) {
 }
 
 // ----- Lịch trình vào ra (cách xác định lượt VÀO / RA), khai báo riêng như Ronald Jack -----
-function ioSchedule(id) { return id ? (q('SELECT * FROM inout_schedules WHERE id = ? AND active = 1').get(id) || null) : null; }
-export function defaultIoSchedule() { return q('SELECT * FROM inout_schedules WHERE active = 1 AND is_default = 1 ORDER BY id LIMIT 1').get() || null; }
+function ioSchedule(id) { return id ? memo('io|' + id, () => q('SELECT * FROM inout_schedules WHERE id = ? AND active = 1').get(id) || null) : null; }
+export function defaultIoSchedule() { return memo('io0', () => q('SELECT * FROM inout_schedules WHERE active = 1 AND is_default = 1 ORDER BY id LIMIT 1').get() || null); }
 // Lịch trình vào ra đang áp cho 1 NV trong 1 ngày: của dòng gán (NV → phòng ban), không có thì lấy lịch trình mặc định.
 export function ioScheduleFor(employeeId, workDate) {
   const ra = rangedShiftAssignment(employeeId, workDate);
@@ -148,7 +170,7 @@ export function effectiveMergeRule(shift, override) {
 // Phân ca theo NGÀY có 2 lớp: ô nhập ở bảng Excel ('sheet', ưu tiên cao nhất) đè lên lịch trình tạm thời ('temp').
 // opts.ignoreSheet = bỏ qua lớp Excel → ca phần mềm tự tìm nếu không có ô Excel (để bảng Excel hiện lớp bên dưới).
 function dailyAssignments(employeeId, workDate, opts = {}) {
-  const rows = q('SELECT shift_id, is_off, source FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').all(employeeId, workDate);
+  const rows = memo('da|' + employeeId + '|' + workDate, () => q('SELECT shift_id, is_off, source FROM daily_shift_assignments WHERE employee_id = ? AND work_date = ?').all(employeeId, workDate));
   const temp = rows.filter((x) => x.source === 'temp');
   if (opts.ignoreSheet) return temp;
   return rows.length > temp.length ? rows.filter((x) => x.source !== 'temp') : temp;
@@ -179,6 +201,9 @@ export function scheduleSlot(unit, cycle, workDate, anchor) {
   return mod(Math.floor((monday(workDate) - monday(a)) / 7), n) * 7 + (wdOf(workDate) - 1);
 }
 export function schedDay(scheduleId, workDate, anchor) {
+  return memo('sd|' + scheduleId + '|' + workDate + '|' + (anchor || ''), () => schedDayRaw(scheduleId, workDate, anchor));
+}
+function schedDayRaw(scheduleId, workDate, anchor) {
   const ws = q('SELECT unit, cycle FROM work_schedules WHERE id = ?').get(scheduleId);
   const unit = ws?.unit || 'auto';
   if (unit === 'auto') return { pattern: false, off: false, shifts: scheduleShifts(scheduleId) };
@@ -192,9 +217,10 @@ export function schedDay(scheduleId, workDate, anchor) {
 // không có lịch trình riêng và cũng không có ca mặc định riêng (shift_id). Khách chưa chọn lịch trình mặc định nào → null = như cũ
 // (tự dò ca theo giờ chấm trên mọi ca có khai khung vào).
 export function defaultWorkScheduleId() {
-  return q('SELECT id FROM work_schedules WHERE active = 1 AND is_default = 1 ORDER BY id LIMIT 1').get()?.id || null;
+  return memo('ws0', () => q('SELECT id FROM work_schedules WHERE active = 1 AND is_default = 1 ORDER BY id LIMIT 1').get()?.id || null);
 }
 // Lịch trình áp cho NV khi không có phân ca nào: lịch trình riêng của NV → (chưa có cả ca riêng) lịch trình mặc định.
+const empShiftRow = (employeeId) => memo('es|' + employeeId, () => q('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId));
 function empScheduleId(emp) {
   if (!emp) return null;
   return emp.work_schedule_id || (emp.shift_id ? null : defaultWorkScheduleId());
@@ -220,7 +246,7 @@ export function resolveShift(employeeId, workDate, opts = {}) {
       if (sd.shifts.length) return { off: false, shift: null, source: 'schedule', scheduleName };
     }
   }
-  const emp = q('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
+  const emp = empShiftRow(employeeId);
   const wsId = empScheduleId(emp);
   if (wsId) {
     const sd = schedDay(wsId, workDate, null);
@@ -256,7 +282,7 @@ export function resolveEffectiveShift(employeeId, workDate, checkInIso, checkOut
       if (cands.length) { const s = autoDetectShift(checkInIso, cands, checkOutIso) || cands[0]; return { off: false, shift: s, source: 'schedule', mergeRule: effectiveMergeRule(s, override) }; }
     }
   }
-  const emp = q('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
+  const emp = empShiftRow(employeeId);
   const wsId = empScheduleId(emp);
   if (wsId) {
     const sd = schedDay(wsId, workDate, null);
@@ -296,7 +322,7 @@ export function resolveDayShifts(employeeId, workDate) {
       if (cands.length) return { off: false, shifts: cands, mergeRule: cands.length === 1 ? effectiveMergeRule(cands[0], override) : ((override && override !== 'default') ? override : null), source: 'schedule', isSchedule: true };
     }
   }
-  const emp = q('SELECT shift_id, work_schedule_id FROM employees WHERE id = ?').get(employeeId);
+  const emp = empShiftRow(employeeId);
   const wsId = empScheduleId(emp);
   if (wsId) {
     const sd = schedDay(wsId, workDate, null);
