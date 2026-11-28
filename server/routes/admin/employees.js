@@ -13,6 +13,11 @@ import { ADMIN_DEPT } from '../../seed.js';
 import { extraEnabled, extraXlHeads, extraXlRow, styleExtraCols, addFamilySheet, familyXlRows, readExtraXl, saveExtraXl, xlText } from './emp-extra.js';
 import { who as hrWho } from './hr.js';
 
+// Công tắc emp_pin_is_code (mặc định TẮT): Số ID máy chấm công = MÃ NV. NV chưa có Số ID mà để trống ô Số ID → lấy luôn mã NV,
+// khỏi khai thêm (Hualida 28/11/2026: máy Hikvision nhận Số ID dạng chữ như TB060123). Tắt = như cũ (để trống là chưa có Số ID).
+const pinIsCode = () => getSetting('emp_pin_is_code', '0') === '1';
+const pinOrCode = (pin, code) => String(pin || '').trim() || (pinIsCode() ? String(code || '').trim() : '');
+
 // Khai Số ID máy xong → gán lượt quẹt cũ "chưa khớp" của số đó cho NV + tính lại công (lỗi thì chỉ ghi log, không chặn lưu NV)
 function relinkSafe(empId, pin) {
   try { return relinkPunchesForPin(empId, pin); } catch (e) { console.error('[relink punches]', e.message); return 0; }
@@ -163,6 +168,7 @@ export function registerEmployeeRoutes(r, { need }) {
     const code0 = b.code.trim();
     if (db.prepare('SELECT 1 FROM employees WHERE code=?').get(code0))
       return res.status(400).json({ error: `Mã nhân viên "${code0}" đã tồn tại` });
+    b.device_pin = pinOrCode(b.device_pin, code0);
     const pin0 = (b.device_pin || '').trim();
     if (pin0 && db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>''").get(pin0))
       return res.status(400).json({ error: `Số ID máy chấm công "${pin0}" đã có nhân viên dùng` });
@@ -346,7 +352,7 @@ export function registerEmployeeRoutes(r, { need }) {
         const roleGuard = resolveImportRole(req.user, mapRole(roleTxt));
         const role = roleGuard.role;
         if (roleGuard.downgraded) errors.push(`Dòng ${r2}: bạn không có quyền cấp vai trò Admin — đã hạ xuống Nhân viên`);
-        const pin = cellStr(row, 7);
+        const pin = pinOrCode(cellStr(row, 7), code);
         const basic = cellNum(row, 8);
         const username = cellStr(row, 9) || code;
         const password = cellStr(row, 10) || '123456';
@@ -434,7 +440,7 @@ export function registerEmployeeRoutes(r, { need }) {
       let pinNew = false; // NV lần đầu có Số ID → đẩy cả xuống máy từng xoá Số ID đó
       // SỐ ID (device_pin): chỉ ĐẶT được khi đang TRỐNG (chưa có). Đã có rồi thì KHÓA, không đổi.
       if (b.device_pin !== undefined && !(emp.device_pin || '').trim()) {
-        const pin1 = (b.device_pin || '').trim();
+        const pin1 = pinOrCode(b.device_pin, b.code != null ? b.code : emp.code);
         if (pin1) {
           if (db.prepare("SELECT 1 FROM employees WHERE device_pin=? AND device_pin<>'' AND id<>?").get(pin1, emp.id))
             return res.status(400).json({ error: `Số ID máy chấm công "${pin1}" đã có nhân viên dùng` });

@@ -591,8 +591,15 @@ function empModal(e) {
   const pinInput = input('e-device_pin', { placeholder: 'VD: 1 (số ID trên máy)', value: e?.device_pin || '',
     ...(pinLocked ? { readonly: '', style: 'background:#f2f0ee;color:#777;cursor:not-allowed' } : {}) });
   f.device_pin = pinInput;
+  // Công tắc "Số ID = Mã NV" (emp_pin_is_code, mặc định TẮT): ô Số ID tự lấy theo Mã NV, không phải gõ (máy chủ cũng tự lấy khi để trống)
+  const pinIsCode = !pinLocked && SETTINGS.emp_pin_is_code === '1';
+  if (pinIsCode) {
+    Object.assign(pinInput, { readOnly: true, placeholder: 'Tự lấy theo Mã NV' });
+    pinInput.style.cssText += ';background:#f2f0ee;color:#555;cursor:not-allowed';
+  }   // ô Mã NV tạo sau → nối Số ID theo Mã NV ngay dưới codeRow
   const pinHint = pinLocked
     ? (e.from_device ? 'Lấy từ máy chấm công — không sửa được.' : 'Đã có số ID — không sửa được.')
+    : pinIsCode ? 'Số ID trên máy chấm công = Mã NV (tự điền, không cần khai). Sau khi lưu sẽ khóa.'
     : (e ? 'Nhân viên này chưa có số ID. Nhập rồi bấm Lưu — sau khi lưu sẽ khóa.'
          : 'Nhập số ID trùng với số ID trên máy. Sau khi tạo sẽ không sửa được.');
   const pinField = el('div', {}, el('label', {}, 'Số ID máy chấm công' + (pinLocked ? ' 🔒' : '')),
@@ -637,6 +644,7 @@ function empModal(e) {
     canPush ? devWrap : '') : null;
 
   const codeRow = el('div', { class: 'two-col' }, field('Mã NV *', mk('code', 'VD: NV002', e?.code)), field('Họ tên *', mk('full_name', 'Nguyễn Văn A', e?.full_name)));
+  if (pinIsCode) { const syncPin = () => { pinInput.value = f.code.value.trim(); }; syncPin(); f.code.addEventListener('input', syncPin); }
   // ----- Các mục ít dùng: gom vào khung THU GỌN (mặc định gọn, có dòng tóm tắt) -----
   const attSel = el('select', { id: 'e-attmode' }, ...['', 'shift', 'hourly'].map((v) => el('option', { value: v, ...((e?.att_mode || '') === v ? { selected: '' } : {}) },
     v === '' ? `Theo cài đặt chung (hiện là: ${SETTINGS.attendance_mode === 'hourly' ? 'theo giờ' : 'theo ca'})` : ATT_MODE_LABEL[v])));
