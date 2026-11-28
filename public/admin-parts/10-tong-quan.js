@@ -114,11 +114,12 @@ function rowPunches(r) {
   const ps = r.punches_hm || [];
   if (ps.length > 2) {
     const pp = r.punch_photos || [], pg = r.punch_geos || [];
-    return ps.map((t, i) => ({ label: (i % 2 ? 'Ra ' : 'Vào ') + (Math.floor(i / 2) + 1), t, photo: pp[i] || null, geo: pg[i] || null }));
+    const pd = r.punch_devs || [];
+    return ps.map((t, i) => ({ label: (i % 2 ? 'Ra ' : 'Vào ') + (Math.floor(i / 2) + 1), t, photo: pp[i] || null, geo: pg[i] || null, dev: pd[i] || '' }));
   }
   const out = [];
-  if (r.check_in_hm) out.push({ label: 'Vào', t: r.check_in_hm, photo: null, geo: r.in_geo || null });
-  if (r.check_out_hm) out.push({ label: 'Ra', t: r.check_out_hm, photo: null, geo: r.out_geo || null });
+  if (r.check_in_hm) out.push({ label: 'Vào', t: r.check_in_hm, photo: null, geo: r.in_geo || null, dev: r.in_dev || '' });
+  if (r.check_out_hm) out.push({ label: 'Ra', t: r.check_out_hm, photo: null, geo: r.out_geo || null, dev: r.out_dev || '' });
   return out;
 }
 // np: số cặp vào/ra đang hiện trên bảng (NV chấm hơn 2 lần trong ngày → thêm cột Vào 2 · Ra 2 …)
@@ -151,7 +152,9 @@ function rowToday(r, np = 1) {
   // cặp i = [lượt vào, lượt ra]; dòng 1–2 lần chấm: Vào = giờ vào, Ra = giờ ra (quên chấm vào thì chỉ có giờ ra)
   const pairs = multi ? Array.from({ length: Math.ceil(list.length / 2) }, (_, i) => [list[2 * i], list[2 * i + 1]])
     : [[list.find(p => p.label === 'Vào'), list.find(p => p.label === 'Ra')]];
-  const cell = (p, star) => el('td', {}, el('div', { style: 'white-space:nowrap' }, punchTime(p.t, p.photo), star || ''), geoBlock(p.geo, p.t));
+  // công tắc "Hiện máy chấm" bật → tên máy chữ nhỏ ngay dưới giờ (trống khi tắt: máy chủ không gửi in_dev / out_dev / punch_devs)
+  const devTag = (v) => (v ? el('div', { class: 'punch-dev', title: 'Chấm ở máy: ' + v }, v) : null);
+  const cell = (p, star) => el('td', {}, el('div', { style: 'white-space:nowrap' }, punchTime(p.t, p.photo), star || ''), devTag(p.dev), geoBlock(p.geo, p.t));
   const inCell = (p, star) => (p ? cell(p, star) : el('td', {}, '—'));
   const outCell = (p, star) => (p ? cell(p, star) : el('td', {}, el('span', { class: 'pill muted' }, 'chưa ra')));
   // ảnh đã hiện cạnh giờ thì cột Ảnh vào / Ảnh ra không hiện lặp lại

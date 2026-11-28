@@ -112,3 +112,31 @@ test('BẬT: báo cáo Chi tiết chấm công có cột Máy vào / Máy ra; Ex
     assert.equal(d04.l1, '08:00📱');   // điện thoại giữ dấu 📱, không thêm chữ
   } finally { setSetting('show_punch_device', '0'); }
 });
+
+test('TỔNG QUAN (/api/reports/attendance?date=): tắt không có tên máy; bật ghi máy dưới giờ vào / ra, nhiều lượt có punch_devs', async () => {
+  // 07/11: quẹt 4 lần ở 2 máy → Vào 1 · Ra 1 · Vào 2 · Ra 2
+  db.prepare('INSERT INTO attendance(employee_id, work_date, check_in_at, check_out_at, work_unit, work_minutes) VALUES (?,?,?,?,1,480)')
+    .run(E, '2026-11-07', iso('07', '08:00:00'), iso('07', '17:30:00'));
+  const pu = db.prepare('INSERT INTO device_punches(serial, pin, punch_at, work_date, status, verify, employee_id) VALUES (?,?,?,?,0,1,?)');
+  [['08:00:00', 'SNCONG'], ['11:30:00', 'SNTANG3'], ['13:00:00', 'SNTANG3'], ['17:30:00', 'SNCONG']].forEach(([t, s]) => pu.run(s, String(E), iso('07', t), '2026-11-07', E));
+  const off = await get('/api/reports/attendance?month=2026-11&date=2026-11-02');
+  assert.equal(off.dev, undefined);
+  assert.ok(off.rows.every((x) => !('in_dev' in x) && !('out_dev' in x) && !('punch_devs' in x)));
+  setSetting('show_punch_device', '1');
+  try {
+    const d02 = await get('/api/reports/attendance?month=2026-11&date=2026-11-02');
+    assert.equal(d02.dev, 1);
+    const r = d02.rows.find((x) => x.employee_id === E);
+    assert.deepEqual([r.in_dev, r.out_dev], ['Cổng chính', 'Tầng 3']);
+    const strip = (rs) => rs.map(({ in_dev, out_dev, punch_devs, ...x }) => x);   // eslint-disable-line no-unused-vars
+    assert.deepEqual(strip(d02.rows), strip(off.rows));   // ngoài tên máy, mọi trường giữ nguyên
+    const d04 = (await get('/api/reports/attendance?month=2026-11&date=2026-11-04')).rows.find((x) => x.employee_id === E);
+    assert.equal(d04.in_dev, 'Điện thoại');
+    const d07 = (await get('/api/reports/attendance?month=2026-11&date=2026-11-07')).rows.find((x) => x.employee_id === E);
+    assert.deepEqual(d07.punches_hm, ['08:00', '11:30', '13:00', '17:30']);
+    assert.deepEqual(d07.punch_devs, ['Cổng chính', 'Tầng 3', 'Tầng 3', 'Cổng chính']);
+    // xem cả tháng (không ?date=) → không gửi tên máy
+    const m = await get('/api/reports/attendance?month=2026-11');
+    assert.equal(m.dev, undefined);
+  } finally { setSetting('show_punch_device', '0'); }
+});

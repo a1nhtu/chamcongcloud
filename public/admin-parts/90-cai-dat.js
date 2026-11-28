@@ -225,7 +225,7 @@ function displayPanel(s) {
         + 'Ca nào đang tích sẵn ô cũ thì vẫn hiện và vẫn tính như trước, dù công tắc tắt.'),
       row(c.pic, '🔢 Số ID máy chấm công = Mã nhân viên', 'Mặc định TẮT. Bật: thêm nhân viên (trên form hoặc nhập Excel) không phải khai Số ID — Số ID tự lấy đúng bằng Mã NV (VD mã TB060123 → Số ID TB060123) rồi đẩy xuống máy như thường. '
         + 'NV đã có Số ID giữ nguyên. Chỉ bật khi máy nhận Số ID dạng chữ (Hikvision); máy ZKTeco chỉ nhận số — mã NV phải là số.'),
-      row(c.dev, '🖐️ Hiện máy chấm cạnh giờ vào / ra', 'Mặc định TẮT — công ty khác không bị ảnh hưởng. Bật: Tính công → Chi tiết ghi tên máy dưới giờ Vào / Ra (chấm điện thoại ghi "Điện thoại"), tab Giờ nguồn ghi tên máy dưới từng lượt quẹt; '
+      row(c.dev, '🖐️ Hiện máy chấm cạnh giờ vào / ra', 'Mặc định TẮT — công ty khác không bị ảnh hưởng. Bật: Tổng quan và Tính công → Chi tiết ghi tên máy dưới giờ Vào / Ra (chấm điện thoại ghi "Điện thoại"), tab Giờ nguồn ghi tên máy dưới từng lượt quẹt; '
         + 'báo cáo "Chi tiết chấm công" và file Excel của Giờ nguồn có thêm tên máy. Tên máy lấy ở mục Máy chấm công (máy chưa đặt tên thì hiện số serial). Chỉ để xem — công không đổi.'),
       el('div', {}, save)));
   return box;

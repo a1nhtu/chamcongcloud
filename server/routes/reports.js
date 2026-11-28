@@ -1976,14 +1976,22 @@ r.get('/attendance', (req, res) => {
     return null;
   };
   const hand = handMarker();   // * cạnh đúng ô giờ sửa / thêm tay
+  // Công tắc "Hiện máy chấm" (Anh 28/11/2026, Đài PT-TH Hưng Yên: muốn xem ở TỔNG QUAN): tên máy dưới từng giờ vào / ra.
+  // Tắt / công ảo / xem cả tháng → không có trường mới. Giờ có ảnh chấm điện thoại mà không có lượt máy → 'Điện thoại'.
+  const devOf = day && !req.forceVirt && punchDeviceOn() ? punchDeviceOf([...new Set(raw.map((a) => a.employee_id))], day, day) : null;
+  const devFields = (a, ts) => {
+    if (!devOf) return {};
+    return { in_dev: devOf(a.employee_id, a.check_in_at, !!a.check_in_photo), out_dev: devOf(a.employee_id, a.check_out_at, !!a.check_out_photo),
+      ...(ts ? { punch_devs: ts.map((t) => devOf(a.employee_id, t)) } : {}) };
+  };
   const rows = raw.map((a) => {
     const ts = dayTs(a);
     const man = a.manual || marks.has(a.employee_id + '|' + a.work_date) ? 1 : 0;   // (*) cả ngày sửa lượt chấm
     return { ...a, manual: man, ...(man ? hand(a) : { man_in: 0, man_out: 0 }),
       check_in_hm: isoToVnHM(a.check_in_at), check_out_hm: isoToVnHM(a.check_out_at), punches_hm: ts ? ts.map(isoToVnHM) : undefined, punch_photos: punchPhotos(a, ts),
-      in_geo: geoAt(a, a.check_in_at), out_geo: geoAt(a, a.check_out_at), punch_geos: ts ? ts.map((t) => geoAt(a, t)) : undefined };
+      in_geo: geoAt(a, a.check_in_at), out_geo: geoAt(a, a.check_out_at), punch_geos: ts ? ts.map((t) => geoAt(a, t)) : undefined, ...devFields(a, ts) };
   });
-  res.json({ month, rows });
+  res.json({ month, rows, ...(devOf ? { dev: 1 } : {}) });
 });
 
 // Danh sách phòng ban (cho filter) = danh mục Bộ phận đã khai (master) GỘP phòng ban đang gán ở NV
