@@ -167,6 +167,9 @@ function pointToolModal(domain) {
 // Hikvision nhận ra theo MAC; dòng IP TRÙNG (máy ZK trả lời rồi im, MAC Hikvision) vẫn hiện vì đó là máy chấm công đang bị trùng IP.
 function lanOtherBrand(x) { return !!x.hik && !x.conflict; }
 // Máy trỏ được bằng nút "Trỏ tất cả": đọc được qua SDK, chưa trỏ về đây, không cần mật khẩu kết nối (máy có Comm Key thì trỏ từng máy)
+// Máy đã trỏ đúng tên miền + đang bật HTTPS mà KHÔNG về phần mềm (chưa từng về / mất kết nối): máy đời cũ (firmware Ver 8.0.4…)
+// không bắt tay được chứng chỉ ECDSA của Cloudflare → trỏ lại bằng HTTP (tắt HTTPS, cổng 80). Khách pretty 28/11/2026: 8/15 máy.
+function lanHttpTargets(rows) { return rows.filter((x) => !x.no_sdk && !x.error && x.points_here && x.svr_ssl === '1' && (!x.known || x.known.offline)); }
 function lanPointAllTargets(rows) { return rows.filter((x) => !x.no_sdk && !x.error && !x.points_here && !/^(NEEDKEY|WRONGKEY|CONNECT)/.test(String(x.code || ''))); }
 function lanScanModal() {
   const box = el('div', {}, loading());
@@ -186,17 +189,17 @@ function lanScanModal() {
   const svrText = (x) => x.error ? '' : x.svr_fun !== '1' ? 'Chưa bật Cloud Server'
     : x.svr_mode === '1' ? 'Tên miền: ' + (x.svr_url || '(trống)') + (x.svr_port ? ' · cổng ' + x.svr_port : '') + (x.svr_ssl === '1' ? ' · HTTPS' : x.svr_ssl === '0' ? ' · HTTPS tắt' : '') : 'Theo IP' + (x.svr_url ? ': ' + x.svr_url : '') + (x.svr_port ? ' · cổng ' + x.svr_port : '');
   // silent = gọi từ "Trỏ tất cả": đã hỏi xác nhận một lần cho cả lô, không hỏi lại / không toast từng máy; trả true khi trỏ được
-  const point = async (x, r, cell, silent = false) => {
+  const point = async (x, r, cell, silent = false, http = false) => {
     let key = '';
     // máy báo cần mật khẩu kết nối (bắt tay ZK) / SDK không vào được bằng mật mã 0 → hỏi Comm Key
     if (!silent && /^(NEEDKEY|WRONGKEY|CONNECT)/.test(String(x.code || ''))) {
       key = prompt(`${x.code === 'NEEDKEY' ? `Máy ${x.ip} có đặt mật khẩu kết nối` : `Máy ${x.ip} không cho kết nối — có thể máy đặt mật khẩu kết nối`} (Menu → Comm → PC Connection → Comm Key).\nNhập mật khẩu:`, '');
       if (key == null) return false;
     }
-    if (!silent && !confirm(`Trỏ máy ${x.model || ''} ${x.serial || x.ip} về ${r.domain}?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Nếu máy đang gửi dữ liệu cho phần mềm khác thì sẽ chuyển sang gửi về phần mềm này.\nMáy đang tắt DHCP (IP tĩnh) thì phần mềm bật DHCP để máy tự xin IP từ modem — IP máy có thể đổi.`)) return false;
+    if (!silent && !confirm(`Trỏ máy ${x.model || ''} ${x.serial || x.ip} về ${r.domain}${http ? ' bằng HTTP (tắt HTTPS, cổng 80 — máy đời cũ)' : ''}?\n\nMáy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Nếu máy đang gửi dữ liệu cho phần mềm khác thì sẽ chuyển sang gửi về phần mềm này.\nMáy đang tắt DHCP (IP tĩnh) thì phần mềm bật DHCP để máy tự xin IP từ modem — IP máy có thể đổi.`)) return false;
     cell.innerHTML = ''; cell.append(el('span', { class: 'muted' }, 'Đang ghi vào máy…'));
     try {
-      const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key, udp: !!x.udp } });
+      const o = await api('/admin/devices/lan-point', { method: 'POST', body: { ip: x.ip, port: x.port, key, udp: !!x.udp, ...(http ? { http: true } : {}) } });
       changed = true;
       cell.innerHTML = ''; cell.append(el('span', { class: 'pill ok' }, '✓ Đã trỏ — máy đang khởi động lại'));
       // kết quả bật DHCP (server/zk/zk-tcp.ps1 set-svr): bật cả cổng dây LAN lẫn Wi-Fi, khoá nào máy có
@@ -218,16 +221,17 @@ function lanScanModal() {
     }
   };
   // Trỏ tất cả: hỏi xác nhận MỘT lần, ghi lần lượt từng máy (không ghi song song — mỗi máy một lệnh SDK + khởi động lại)
-  const pointAll = async (r, cells, btn) => {
-    const list = lanPointAllTargets(r.rows).filter((x) => !(hideOther && lanOtherBrand(x)));
+  // http = trỏ lại bằng HTTP các máy đã trỏ mà không về (lanHttpTargets)
+  const pointAll = async (r, cells, btn, http = false) => {
+    const list = (http ? lanHttpTargets(r.rows) : lanPointAllTargets(r.rows)).filter((x) => !(hideOther && lanOtherBrand(x)));
     if (!list.length || bulk) return;
     const keyed = r.rows.filter((x) => !x.points_here && /^(NEEDKEY|WRONGKEY|CONNECT)/.test(String(x.code || ''))).length;
-    if (!confirm(`Trỏ ${list.length} máy về ${r.domain}?\n\n${list.map((x) => `• ${x.model || 'Máy chấm công'} ${x.serial || ''} — IP ${x.ip}`).join('\n')}\n\nTừng máy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Máy đang gửi dữ liệu cho phần mềm khác sẽ chuyển sang gửi về phần mềm này. Máy đang tắt DHCP (IP tĩnh) thì phần mềm bật DHCP — IP máy có thể đổi.${keyed ? `\n\n${keyed} máy cần mật khẩu kết nối không nằm trong lô này — trỏ từng máy.` : ''}`)) return;
+    if (!confirm(`Trỏ ${list.length} máy về ${r.domain}${http ? ' bằng HTTP (tắt HTTPS, cổng 80) — máy đời cũ trỏ HTTPS xong không về' : ''}?\n\n${list.map((x) => `• ${x.model || 'Máy chấm công'} ${x.serial || ''} — IP ${x.ip}`).join('\n')}\n\nTừng máy sẽ KHỞI ĐỘNG LẠI (khoảng 1 phút). Máy đang gửi dữ liệu cho phần mềm khác sẽ chuyển sang gửi về phần mềm này. Máy đang tắt DHCP (IP tĩnh) thì phần mềm bật DHCP — IP máy có thể đổi.${keyed ? `\n\n${keyed} máy cần mật khẩu kết nối không nằm trong lô này — trỏ từng máy.` : ''}`)) return;
     bulk = true; btn.disabled = true;
     let ok = 0, n = 0;
     for (const x of list) {
       n++; btn.textContent = `Đang trỏ ${n}/${list.length}…`;
-      if (await point(x, r, cells.get(x), true)) ok++;
+      if (await point(x, r, cells.get(x), true, http)) ok++;
     }
     bulk = false; btn.textContent = `✓ Đã trỏ ${ok}/${list.length} máy`;
     toast(ok === list.length ? `Đã trỏ ${ok} máy về ${r.domain}. Khoảng 1 phút sau máy hiện ở danh sách (Chờ duyệt).`
@@ -250,8 +254,10 @@ function lanScanModal() {
     const targets = r.domain ? lanPointAllTargets(rows) : [];
     const allBtn = btnSm(`➜ Trỏ tất cả (${targets.length} máy)`, () => pointAll(r, cells, allBtn));
     if (!targets.length) allBtn.disabled = true;
+    const httpList = r.domain ? lanHttpTargets(rows) : [];
+    const httpBtn = httpList.length ? btnSm(`↻ Trỏ lại bằng HTTP ${httpList.length} máy chưa về`, () => pointAll(r, cells, httpBtn, true), 'ghost') : '';
     if (r.rows.length) box.append(el('div', { style: 'display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 8px' },
-      r.domain ? allBtn : '',
+      r.domain ? allBtn : '', httpBtn,
       el('label', { style: 'display:flex;gap:6px;align-items:center;font-size:13px;cursor:pointer;margin:0;width:auto' }, hideC,
         'Ẩn thiết bị hãng khác (camera / Hikvision)' + (hidden ? ` — ${hideOther ? 'đang ẩn' : 'có'} ${hidden}` : ''))));
     if (!rows.length && r.rows.length) return box.append(warn(`Chỉ thấy ${hidden} thiết bị hãng khác (camera / Hikvision) — đã ẩn. Bỏ tích "Ẩn thiết bị hãng khác" để xem.`));
@@ -271,6 +277,7 @@ function lanScanModal() {
       else if (x.points_here && offline) act.append(warn('Máy trỏ đúng tên miền nhưng mấy phút nay không về phần mềm. Bấm "Trỏ lại" để ghi lại cài đặt.'));
       if (r.domain && !x.points_here) act.append(btnSm('➜ Trỏ về phần mềm này', () => point(x, r, act)));
       else if (r.domain && x.points_here && (!x.known || mismatch || offline)) act.append(' ', btnSm('Trỏ lại', () => point(x, r, act), 'ghost'));
+      if (r.domain && lanHttpTargets([x]).length) act.append(' ', btnSm('Trỏ lại bằng HTTP (máy đời cũ)', () => point(x, r, act, false, true), 'ghost'));
       const mono = (t) => el('div', { class: 'muted', style: 'font-size:12px;font-family:monospace' }, t);
       // thấy máy qua cổng 8818 / MAC 00:17 nhưng không kết nối SDK được (4370 đóng, 8818 không nhận) → chỉ báo, cài Cloud Server tay trên máy
       const seen = x.no_sdk && [(x.ports || []).length ? 'cổng ' + x.ports.join(', ') : '', x.mac ? 'MAC ' + x.mac : ''].filter(Boolean).join(' · ');

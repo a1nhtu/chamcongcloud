@@ -912,6 +912,9 @@ function migrateColumns() {
   add('push_device_commands', 'idx',      'INTEGER');
   add('push_device_commands', 'mkind',    "TEXT DEFAULT ''");   // 'user' | 'bio' | 'photo' (mirror khi ack OK)
   add('push_device_commands', 'resend',   'INTEGER DEFAULT 0'); // số lần đã gửi lại lệnh tải log máy không báo nhận
+  // Lệnh CHỜ GỬI theo (máy, nội dung): queueCmd kiểm trùng trước khi xếp. Không có chỉ mục này mỗi lần xếp phải quét hết
+  // lệnh đang chờ của máy → đồng bộ nhóm 15 máy × 3.000 NV (khách pretty 28/11/2026) chậm theo bình phương, máy chủ treo cứng.
+  try { db.exec('CREATE INDEX IF NOT EXISTS idx_cmd_pending_content ON push_device_commands(serial, content) WHERE trans_time IS NULL AND response_at IS NULL'); } catch {}
   // Index khớp NV theo Số ID máy
   try { db.exec('CREATE INDEX IF NOT EXISTS idx_emp_device_pin ON employees(device_pin)'); } catch {}
 

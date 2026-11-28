@@ -273,8 +273,18 @@ try {
       [void]$z.SetSysOption($m, 'ICLOCKSVRURL', $From)
       # Máy CÓ mục HTTPS (IISSupportSSL đọc được) → bật lên, phòng ai đó đã tắt; cổng chưa phải cổng HTTPS của Cloudflare → 443
       # (bật SSL mà cổng 80 thì máy nói HTTPS vào cổng HTTP, không về được). Máy không có mục này → giữ như cũ (HTTP).
+      # $Opt có 'http' (nút "Trỏ lại bằng HTTP"): máy đời cũ (firmware Ver 8.0.4…) có mục HTTPS nhưng không bắt tay được chứng chỉ
+      # ECDSA của Cloudflare → bật HTTPS là máy im luôn (khách pretty 28/11/2026, 8/15 máy). Tắt HTTPS + cổng 80.
+      $opts = @("$Opt" -split ',' | ForEach-Object { $_.Trim() })
       $s = ''
-      if ($z.GetSysOption($m, 'IISSupportSSL', [ref]$s)) {
+      if (($opts -contains 'http') -and $z.GetSysOption($m, 'IISSupportSSL', [ref]$s)) {
+        [void]$z.SetSysOption($m, 'IISSupportSSL', '0')
+        $s = ''; [void]$z.GetSysOption($m, 'IISSupportSSL', [ref]$s)
+        Out "I`tsvr_ssl`t$(Clean $s)"
+        $To = '80'
+      } elseif ($opts -contains 'http') {
+        $To = '80'
+      } elseif ($z.GetSysOption($m, 'IISSupportSSL', [ref]$s)) {
         [void]$z.SetSysOption($m, 'IISSupportSSL', '1')
         $s = ''; [void]$z.GetSysOption($m, 'IISSupportSSL', [ref]$s)
         if ((Clean $s) -eq '1') {
@@ -289,11 +299,11 @@ try {
       if ((Clean $s) -ne $From) { $z.Disconnect(); Fail 'SETSVR' "Máy không nhận cài đặt máy chủ (đọc lại được: '$(Clean $s)'). Đặt tay trên máy: Menu → Comm → Cloud Server." }
       Out "I`tsvr_url`t$(Clean $s)"
       $s = ''; if ($z.GetSysOption($m, 'IclockSvrPort', [ref]$s)) { Out "I`tsvr_port`t$(Clean $s)" }
-      # $Opt = 'dhcp': bật DHCP nếu đang tắt — máy IP tĩnh hay thiếu Gateway / DNS nên không gọi được tên miền.
+      # $Opt có 'dhcp': bật DHCP nếu đang tắt — máy IP tĩnh hay thiếu Gateway / DNS nên không gọi được tên miền.
       # Bật CẢ HAI cổng, khoá nào máy có (đọc được) thì bật khoá đó: DHCP (dây LAN) + WirelessDHCP (Wi-Fi, tên khoá hãng ZKTeco
       # xác nhận 02/11/2026). Không đoán máy đang nối cổng nào bằng IP: khi cổng dây bật DHCP, IPAddress có firmware còn giữ IP
       # tĩnh cũ → đoán nhầm (Anh chốt 02/11). Cổng không dùng mà bật DHCP thì không ảnh hưởng, đổi cổng sau này máy vẫn tự về.
-      if ($Opt -eq 'dhcp') {
+      if ($opts -contains 'dhcp') {
         foreach ($p in @(@('lan', 'DHCP'), @('wifi', 'WirelessDHCP'))) {
           $d = ''
           if (-not $z.GetSysOption($m, $p[1], [ref]$d)) { continue }   # máy không có cổng / khoá này

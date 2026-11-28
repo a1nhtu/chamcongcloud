@@ -146,6 +146,8 @@ test('NGƯỜI MỚI dùng lại Số ID đăng ký trên máy: nhận, tạo NV
 
 test('người mới chỉ có thẻ/tên, chưa có vân tay: thẻ khác hoặc tên khác lúc vừa đăng ký là người mới', () => {
   SN.forEach((s) => S.deleteDeviceUsers(s, PINS)); runAll(); purge();
+  // máy đã gửi xong đợt dữ liệu cũ từ lâu (mốc khác 0, không còn đợt gửi lại) → mỗi khối OPERLOG là thao tác vừa làm trên máy
+  db.prepare("UPDATE push_devices SET oper_stamp='99' WHERE serial='CN2'").run(); setSetting('oper_dump_at:CN2', '');
   post('CN2', 'OPERLOG', 'USER PIN=6\tName=Ten6\tPri=0\tCard=777', '100');     // cùng tên nhưng thẻ khác
   assert.deepEqual(emps(), ['6']);
   post('CN2', 'OPERLOG', 'USER PIN=11\tName=Nguoi Khac\tPri=0', '101');        // vừa đăng ký, tên khác

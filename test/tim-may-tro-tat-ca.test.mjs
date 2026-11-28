@@ -38,6 +38,6 @@ test('giao diện: ô Ẩn hãng khác mặc định tích (nhớ theo trình du
   assert.match(src, /Ẩn thiết bị hãng khác/);
   assert.match(src, /Trỏ tất cả \(\$\{targets\.length\} máy\)/);
   // ghi tuần tự (await trong vòng for), gọi point ở chế độ im lặng — không hỏi confirm từng máy
-  assert.match(src, /for \(const x of list\) \{[\s\S]*?await point\(x, r, cells\.get\(x\), true\)/);
+  assert.match(src, /for \(const x of list\) \{[\s\S]*?await point\(x, r, cells\.get\(x\), true, http\)/);
   assert.match(src, /if \(!silent && !confirm\(/);
 });

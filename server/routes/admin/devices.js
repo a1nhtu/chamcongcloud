@@ -7,7 +7,7 @@ import { db, getSetting } from '../../db.js';
 import { deviceOnline, rebuildDay, resyncNow, importUsbAttlog, importUsbUsers, deviceUserList, clearDeviceLog, clearDeviceAll, deleteDeviceUsers, forgetDeviceUsers, clearDeletedMarks, clearDeviceAdmins, openDoor, queryDeviceUsers, queryDeviceAttlog, syncFillDevice, relearnDevice, rebootDevice, queryDeviceClock, vnNowStr, cmdMark, cmdProgress, cmdQueue, cancelCmds, movePunchesToEmployee } from '../../device-sync.js';
 import { sendCaughtError } from '../../util.js';
 import { normText } from '../../hr-import.js';
-import { installDomain, MULTI, ROOT } from '../../tenant.js';
+import { installDomain, MULTI, ROOT, tenantKey } from '../../tenant.js';
 import { verifyDeviceKey } from '../../license.js';
 import { hasPerm } from '../../auth.js';
 import { tcpEnabled, tcpProbe, tcpInfo, saveInfo, tcpUsers, tcpPushUsers, tcpLogs, zkRun, zkDeleteUsers, queuePendingDelete, startJob, getJob, autoMinutes, autoCycle, AUTO_CHOICES,
@@ -22,6 +22,8 @@ import { HIK_MAX_PIN, hikEnabled, hikInfo, saveHikInfo, hikUsers, hikLogs, hikPu
   hikAutoMinutes, hikFirstFrom, hikAutoCycle, HIK_AUTO_CHOICES, hikSetupPush, hikKnock } from '../../hik-isapi.js';
 import { hikSyncGroup } from '../../hik-sync.js';
 import { unionEnabled, unionPort, unionStatus, unionOnline, unionInfo, unionUsers, unionLogs, unionSimple, unionDeleteUsers, unionClearUsers, syncUnion } from '../../union.js';
+// gộp lượt đồng bộ nhóm khi đặt nhóm nhiều máy liền nhau (requestGroupFill)
+const GROUP_FILL_MS = 10000, groupFillAt = new Map(), groupFillPending = new Map();
 
 // Máy đã có key hợp lệ (đúng serial) chưa?
 function deviceKeyOk(dev) {
@@ -170,6 +172,28 @@ export function registerDeviceRoutes(r, { need }) {
     for (const sn of serials) if (known.get(sn)) cancelled += cancelCmds(sn, upTo);
     res.json({ ok: true, cancelled });
   });
+  // Đồng bộ cả nhóm khi đặt nhóm / duyệt máy. Đặt nhóm cho NHIỀU máy liền nhau (khách pretty 28/11/2026: 15 máy) trước đây mỗi lần
+  // lưu lại đổ đầy CẢ nhóm → 15 lượt × 15 máy, máy chủ đứng hàng phút, hàng nghìn lệnh. Giờ: lần đầu chạy ngay (như cũ); lần lưu
+  // tiếp theo của cùng nhóm trong GROUP_FILL_MS thì gộp lại, chạy 1 lượt sau GROUP_FILL_MS kể từ lần lưu cuối.
+  const fillGroup = (group) => {
+    let n = 0;
+    try {
+      // đồng bộ trong từng HÃNG (mẫu vân tay / khuôn mặt khác chuẩn nhau): máy ZKTeco với ZKTeco, máy AI với máy AI
+      const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1 AND conn_type IN ('push','tcp')").all(group).map((r) => r.serial);
+      if (groupSerials.length >= 2) { for (const s of groupSerials) syncFillDevice(s); n = groupSerials.length; }
+      const aiSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1 AND conn_type='ai'").all(group).map((r) => r.serial);
+      if (aiSerials.length >= 2) { for (const s of aiSerials) { aiFillDevice(s); aiPoke(s); } n += aiSerials.length; }
+    } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
+    return n;
+  };
+  const requestGroupFill = (group) => {
+    const k = tenantKey() + '|' + group, now = Date.now();
+    const pend = groupFillPending.get(k);
+    if (!pend && now - (groupFillAt.get(k) || 0) > GROUP_FILL_MS) { groupFillAt.set(k, now); return fillGroup(group); }
+    if (pend) clearTimeout(pend);
+    groupFillPending.set(k, setTimeout(() => { groupFillPending.delete(k); groupFillAt.set(k, Date.now()); fillGroup(group); }, GROUP_FILL_MS));
+    return db.prepare("SELECT COUNT(*) c FROM push_devices WHERE sync_group=? AND active=1").get(group).c;
+  };
   r.put('/devices/:id', need('devices'), (req, res) => {
     const b = req.body || {};
     const d = db.prepare('SELECT * FROM push_devices WHERE id=?').get(req.params.id);
@@ -205,15 +229,7 @@ export function registerDeviceRoutes(r, { need }) {
     //  - Vừa DUYỆT máy (active 0→1) mà máy đã có nhóm → máy mới tự nhận vân tay/mặt/thẻ/mật mã/NV của nhóm.
     let synced = 0;
     const becameActive = b.active != null && !!b.active && !d.active;
-    if (newGroup && (b.sync_group !== undefined || becameActive)) {
-      try {
-        // đồng bộ trong từng HÃNG (mẫu vân tay / khuôn mặt khác chuẩn nhau): máy ZKTeco với ZKTeco, máy AI với máy AI
-        const groupSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1 AND conn_type IN ('push','tcp')").all(newGroup).map((r) => r.serial);
-        if (groupSerials.length >= 2) { for (const s of groupSerials) syncFillDevice(s); synced = groupSerials.length; }
-        const aiSerials = db.prepare("SELECT serial FROM push_devices WHERE sync_group=? AND active=1 AND conn_type='ai'").all(newGroup).map((r) => r.serial);
-        if (aiSerials.length >= 2) { for (const s of aiSerials) { aiFillDevice(s); aiPoke(s); } synced += aiSerials.length; }
-      } catch (e) { console.error('[device] auto-sync lỗi:', e.message); }
-    }
+    if (newGroup && (b.sync_group !== undefined || becameActive)) synced = requestGroupFill(newGroup);
     // Máy AI vừa duyệt / tạm dừng → ngắt kết nối để máy đăng ký lại, nhận kết quả mới ngay
     if (d.conn_type === 'ai' && b.active != null && !!b.active !== !!d.active) aiKick(d.serial);
     // Vừa DUYỆT máy: lúc còn chờ duyệt máy chỉ nhận cấu hình tối thiểu → ra lệnh khởi động lại để máy
@@ -521,7 +537,8 @@ export function registerDeviceRoutes(r, { need }) {
       // Bật DHCP (máy IP tĩnh hay thiếu Gateway / DNS → không gọi được tên miền). KHÔNG bật khi phần mềm đang kết nối máy này
       // theo IP (máy TCP/IP): DHCP đổi IP máy → mất kết nối TCP/IP.
       const tcpDev = db.prepare("SELECT name FROM push_devices WHERE conn_type='tcp' AND tcp_ip=?").get(c.tcp_ip);
-      const info = await zkCareful(c, (cc) => tcpSetServer(cc, domain, before.svr_port, { dhcp: req.body?.dhcp !== false && !tcpDev }));
+      // http: true = nút "Trỏ lại bằng HTTP" (máy đời cũ trỏ HTTPS xong không về)
+      const info = await zkCareful(c, (cc) => tcpSetServer(cc, domain, before.svr_port, { dhcp: req.body?.dhcp !== false && !tcpDev, http: req.body?.http === true }));
       if (tcpDev && req.body?.dhcp !== false) info.dhcp_skip = 'tcp';
       res.json({ ok: true, domain, serial: before.serial || '', before, info });
     } catch (e) { res.status(400).json({ error: e.message, code: e.code || '' }); }

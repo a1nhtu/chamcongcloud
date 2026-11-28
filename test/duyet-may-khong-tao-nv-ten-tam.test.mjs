@@ -22,6 +22,9 @@ const queryData = (sn, tablename, body) => { const r = resObj(); H.handleQueryDa
 const emp = (pin) => db.prepare('SELECT full_name FROM employees WHERE device_pin=?').get(pin)?.full_name;
 const empCount = () => db.prepare("SELECT COUNT(*) c FROM employees WHERE device_pin<>''").get().c;
 const pending = (sn) => db.prepare('SELECT content FROM push_device_commands WHERE serial=? AND trans_time IS NULL ORDER BY id').all(sn).map((r) => r.content);
+// Giờ VN "YYYY-MM-DD HH:MM:SS" cách bây giờ `minAgo` phút — chỉ lượt quẹt VỪA chấm mới khiến phần mềm hỏi tên (v1.41.4:
+// máy gửi bù lượt cũ hàng loạt không được kéo theo hàng nghìn lệnh hỏi tên)
+const vnAgo = (minAgo = 0) => new Date(Date.now() + 7 * 3600e3 - minAgo * 60000).toISOString().slice(0, 19).replace('T', ' ');
 const drain = (sn) => { const out = []; for (let i = 0; i < 50; i++) { const c = getreq(sn); if (c === 'OK') break; out.push(c); } return out; };
 const fpLines = (pins) => pins.map((p) => `fingertmp pin=${p}\tfingerid=6\tsize=8\tvalid=1\ttemplate=QUJDRA${p}==`).join('\n');
 const faceLines = (pins) => pins.map((p) => `biodata pin=${p}\tno=0\tindex=0\tvalid=1\tduress=0\ttype=9\tmajorver=5\tminorver=8\tformat=0\ttmp=RkFDRQ${p}==`).join('\n');
@@ -67,7 +70,10 @@ test('máy khuôn mặt 1 máy, KHÔNG nhóm: duyệt xong máy tự gửi lên 
   post('SN_1MAY', 'BIOPHOTO', pins.map(photo).join('\n'), '9999');
   assert.equal(pins.filter((p) => emp(p)).length, 0, 'trước bản 1.37.2: 7 NV "NV 11…NV 17"');
   // giờ chấm của 7 người về (lượt mới hoặc máy gửi bù) → không khớp NV → hỏi máy tên từng người
+  // lượt CŨ máy gửi bù (đã qua 15 phút) → không hỏi tên (máy đổ lại lượt cũ hàng loạt từng kéo theo hàng nghìn lệnh)
   post('SN_1MAY', 'ATTLOG', pins.map((p) => `${p}\t2026-11-20 07:5${p.slice(1)}:00\t0\t15\t0`).join('\n'));
+  assert.deepEqual(pending('SN_1MAY').filter((c) => /^DATA QUERY USERINFO/.test(c)), [], 'lượt cũ gửi bù không hỏi tên');
+  post('SN_1MAY', 'ATTLOG', pins.map((p, i) => `${p}\t${vnAgo(i + 1)}\t0\t15\t0`).join('\n'));
   const asks = pending('SN_1MAY');
   assert.equal(asks.filter((c) => /^DATA QUERY USERINFO PIN=/.test(c)).length, 7);
   drain('SN_1MAY');
@@ -76,7 +82,7 @@ test('máy khuôn mặt 1 máy, KHÔNG nhóm: duyệt xong máy tự gửi lên 
 });
 
 test('NV quẹt mà chưa khớp → hỏi máy đúng người đó → NV về với TÊN THẬT; máy trả vân tay trước tên thì tên tạm được thay', () => {
-  post('SN_SEOUL', 'ATTLOG', '3\t2026-11-20 08:01:00\t0\t1\t0');
+  post('SN_SEOUL', 'ATTLOG', `3\t${vnAgo(2)}\t0\t1\t0`);
   assert.deepEqual(pending('SN_SEOUL'), ['DATA QUERY USERINFO PIN=3', 'DATA QUERY FINGERTMP PIN=3']);
   drain('SN_SEOUL');
   queryData('SN_SEOUL', 'user', 'user uid=3\tcardno=\tpin=3\tpassword=\tgroup=1\tname=Nguyen Thi Lan\tprivilege=0');
@@ -85,7 +91,7 @@ test('NV quẹt mà chưa khớp → hỏi máy đúng người đó → NV về
   assert.equal(p.full_name, 'Nguyen Thi Lan', 'lượt quẹt có trước được gán cho NV vừa tạo');
 
   // máy trả lời vân tay TRƯỚC tên (người vừa được hỏi): vẫn tạo NV như trước để không mất công, tên thật về sau thay tên tạm
-  post('SN_SEOUL', 'ATTLOG', '5\t2026-11-20 08:03:00\t0\t1\t0');
+  post('SN_SEOUL', 'ATTLOG', `5\t${vnAgo(1)}\t0\t1\t0`);
   drain('SN_SEOUL');
   queryData('SN_SEOUL', 'fingertmp', fpLines(['5']));
   assert.equal(emp('5'), 'NV 5');

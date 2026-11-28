@@ -4,7 +4,7 @@
 import { Router, text } from 'express';
 import { db, getSetting } from '../db.js';
 import { guardIncoming } from '../pin-guard.js';
-import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd, askDraftNames, pollDelay } from '../device-sync.js';
+import { ingestAttlog, ingestUserData, storeTemplates, storeUserPhotos, storeDeviceOplogs, syncPinsToGroup, syncFillDevice, nextCommand, ackCommand, storeClockResult, queryDeviceAttlog, resendLostAttlogQueries, queueCmd, askDraftNames, pollDelay, noteOperDump, operRealtime } from '../device-sync.js';
 import { vnDateStr } from '../util.js';
 
 const r = Router();
@@ -148,6 +148,8 @@ function ingestUserTables(sn, table, body, stamp, newOnly = false) {
     if (enabled() && isActive(sn)) {
       const track = { changed: new Set(), newOnly };
       try {
+        // mốc OPERLOG đang 0 → bắt đầu đợt máy gửi lại toàn bộ (xem noteOperDump) — ghi TRƯỚC khi kiểm trùng / lưu
+        if (table === 'OPERLOG') noteOperDump(sn);
         // Cảnh báo trùng Số ID (nếu bật): kiểm TRƯỚC khi lưu để người lạ không đè dữ liệu / không bị đồng bộ đi
         try { guardIncoming(sn, table, body); } catch (e) { console.error('[pin-guard] kiểm trùng lỗi:', e.message); }
         if (table === 'OPERLOG') {
@@ -158,7 +160,8 @@ function ingestUserTables(sn, table, body, stamp, newOnly = false) {
           const photoLines = lines.filter((l) => /^(USERPIC|BIOPHOTO)\b/i.test(l));
           const oplogLines = lines.filter((l) => /^OPLOG\b/i.test(l));   // nhật ký thao tác trên máy
           // Đăng ký ngay trên máy (mốc đã có) — khác lúc máy gửi lại cả danh sách vì mốc về 0
-          track.realtime = !['', '0'].includes(String(db.prepare('SELECT oper_stamp FROM push_devices WHERE serial=?').get(sn)?.oper_stamp ?? '').trim());
+          // (cả đợt máy gửi lại sau khi mốc về 0 — nhiều khối liên tiếp — đều KHÔNG phải đăng ký ngay: operRealtime)
+          track.realtime = operRealtime(sn);
           // Số ID có dòng người dùng (kèm tên) ngay trong khối này → mẫu đi trước không cần hỏi máy tên người đó
           track.userPins = new Set(userLines.map((l) => ((/\bPIN=([^\t]*)/i.exec(l) || [])[1] || '').trim()).filter(Boolean));
           // dòng BIODATA (vân tay 10 / khuôn mặt) lưu đúng loại, không gộp vào vân tay ZKFinger 9 như dòng FP

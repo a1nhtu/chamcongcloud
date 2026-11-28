@@ -12,7 +12,7 @@
 import { db, getSetting } from './db.js';
 import {
   queueCmd, buildUserCommand, buildBioCommand, buildPhotoCommand, createDraftEmployee, upsertEmployeeFromDevice,
-  relinkPunchesForPin, rebuildDays, syncPinsToGroup, syncFillDevice, clearDeletedMarks,
+  relinkPunchesForPin, rebuildDays, syncPinsToGroup, syncFillDevice, clearDeletedMarks, operRealtime,
 } from './device-sync.js';
 
 export const guardOn = () => getSetting('device_pin_guard', '1') === '1';
@@ -183,8 +183,9 @@ export function guardIncoming(serial, table, body, opts = {}) {
   if (!guardOn() || !serial) return 0;
   const dev = db.prepare('SELECT serial, oper_stamp, pin_range FROM push_devices WHERE serial=?').get(serial);
   if (!dev) return 0;
+  // đợt máy gửi lại toàn bộ sau khi mốc về 0 (nhiều khối) không phải đăng ký ngay trên máy — operRealtime
   const realtime = opts.realtime != null ? !!opts.realtime
-    : String(table || '').toUpperCase() === 'OPERLOG' && !['', '0'].includes(String(dev.oper_stamp || '').trim());
+    : String(table || '').toUpperCase() === 'OPERLOG' && operRealtime(serial);
   const { info, enrolled, deleted } = parseBody(table, body, opts.maxPin || 20);
   for (const pin of enrolled.keys()) if (!info.has(pin)) info.set(pin, {});
   let n = 0;

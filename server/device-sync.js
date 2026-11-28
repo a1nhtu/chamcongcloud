@@ -393,6 +393,30 @@ export function queryDeviceUsers(serial) {
   setSetting(PULL_KEY + serial, new Date().toISOString());
   return gen;
 }
+// ĐỢT GỬI LẠI TOÀN BỘ nhật ký thao tác (OPERLOG): mốc của máy về 0 (vừa duyệt / máy mới / tải lại) → máy gửi lại cả danh sách
+// người + mẫu + nhật ký CŨ thành NHIỀU khối liên tiếp. Trước đây chỉ khối ĐẦU được coi là "gửi lại" (mốc còn 0); từ khối thứ 2 mốc
+// đã có số nên bị coi như ĐĂNG KÝ NGAY trên máy → (1) hỏi máy từng người (DATA QUERY USERINFO/FINGERTMP PIN=…) = tự tải NV,
+// (2) báo "Số ID nghi trùng" cho người đã có ở máy khác (khách pretty 28/11/2026: 15 máy, vài trăm lệnh hỏi + 22 cảnh báo nhầm,
+// chưa hề bấm Tải NV, chưa đặt nhóm). Giờ: mốc về 0 lúc nhận OPERLOG → bắt đầu đợt; khối OPERLOG tiếp theo tới trong
+// OPER_DUMP_GAP_MS sau khối trước vẫn là đợt gửi lại (máy gửi dồn từng khối liền nhau); ngưng lâu hơn thế = đợt đã xong,
+// khối sau đó mới là thao tác vừa làm trên máy.
+const OPER_DUMP_KEY = 'oper_dump_at:';   // giờ khối cuối của đợt gửi lại đang diễn ra ('' = không có đợt nào)
+export const OPER_DUMP_GAP_MS = 3 * 60000;
+const operStampOf = (serial) => String(db.prepare('SELECT oper_stamp FROM push_devices WHERE serial=?').get(serial)?.oper_stamp ?? '').trim();
+// Gọi khi nhận khối OPERLOG, TRƯỚC khi lưu mốc mới của khối đó và trước operRealtime
+export function noteOperDump(serial) {
+  if (!serial) return;
+  const now = new Date().toISOString();
+  if (['', '0'].includes(operStampOf(serial))) return setSetting(OPER_DUMP_KEY + serial, now);
+  const last = Date.parse(getSetting(OPER_DUMP_KEY + serial, '') || '');
+  if (isNaN(last)) return;
+  setSetting(OPER_DUMP_KEY + serial, Date.now() - last < OPER_DUMP_GAP_MS ? now : '');
+}
+// Khối OPERLOG này là thao tác VỪA làm trên máy (không phải đợt máy gửi lại toàn bộ)?
+export function operRealtime(serial) {
+  if (!serial || ['', '0'].includes(operStampOf(serial))) return false;
+  return !getSetting(OPER_DUMP_KEY + serial, '');
+}
 // Vừa bấm "Tải nhân viên từ máy" (trong 2 giờ) → NV máy gửi lên được tạo dù tắt tự tạo NV
 const PULL_KEY = 'device_pull_at:';
 export function pullRequested(serial) {
@@ -801,7 +825,13 @@ export function syncPinsToGroup(sourceSerial, pins) {
 
 // Khi 1 máy kết nối: kéo template hiện có của nó về (DATA QUERY) + đẩy những gì nhóm đã có mà máy này thiếu.
 // force=true: ĐẨY LẠI TOÀN BỘ template của nhóm (bỏ qua kiểm tra "đã có") — dùng khi đồng bộ lỗi.
+// Gói cả đợt xếp lệnh vào 1 giao dịch: hàng chục nghìn INSERT mà mỗi cái ghi đĩa riêng thì máy chủ đứng hình hàng phút.
 export function syncFillDevice(serial, force = false) {
+  db.exec('SAVEPOINT fill');   // SAVEPOINT: gọi được cả khi đang nằm trong giao dịch khác
+  try { const r = syncFillDeviceTx(serial, force); db.exec('RELEASE fill'); return r; }
+  catch (e) { db.exec('ROLLBACK TO fill'); db.exec('RELEASE fill'); throw e; }
+}
+function syncFillDeviceTx(serial, force) {
   const dev = db.prepare(`SELECT sync_group FROM push_devices WHERE serial=? AND ${ZK_TYPES}`).get(serial);
   if (!dev || !dev.sync_group) return;
   // 1) kéo template hiện có trên máy này về server (học dữ liệu sẵn có) — chỉ để đồng bộ, KHÔNG tạo NV (bioDraftRule)
@@ -1821,7 +1851,10 @@ export function ingestAttlog(serial, rawBody, opts = {}) {
       const prevN = notifyNow.get(empId);
       if (!prevN || prevN.d < d) notifyNow.set(empId, { d, timeStr });
     }
-    if (!empId && !pin.includes('#')) ask(serial, pin);   // Số ID lạ → hỏi máy thông tin người này để tự tạo NV
+    // Số ID lạ → hỏi máy thông tin người này để tự tạo NV — CHỈ với lượt VỪA quẹt (≤ 15 phút). Lượt cũ máy gửi lại sau khi
+    // duyệt / nối lại không hỏi: trước đây mỗi người từng quẹt trên máy đều bị hỏi → duyệt máy = tự tải hết NV (pretty 28/11/2026).
+    // Máy kiểu khác (opts.ask riêng: Hikvision, Union…) giữ như cũ.
+    if (!empId && !pin.includes('#') && (opts.ask || Math.abs(Date.now() - d.getTime()) <= 15 * 60000)) ask(serial, pin);
     n++;
     if (empId && !noAtt) touched.add(empId + '|' + workDate);
   }
